@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { LivechatAgentStatus, LivechatInquiry, LivechatRoomInfo, Message, Room, ServerEvent, Subscription, User, UserStatus } from '@shared/index';
 
-export type Me = User & { permissions: string[]; requirePasswordChange?: boolean };
+export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean };
 
 interface RoomMessages {
   list: Message[];

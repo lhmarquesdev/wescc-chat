@@ -263,7 +263,7 @@ function Security() {
                 onClick={() =>
                   api
                     .post('users.2fa.verifyTotp', { code })
-                    .then((r) => (setCodes(r.codes), setSetup(null), setCode(''), useStore.getState().setMe({ ...me, twoFactorEnabled: true })))
+                    .then((r) => (setCodes(r.codes), setSetup(null), setCode(''), useStore.getState().setMe({ ...me, twoFactorEnabled: true, require2faSetup: false })))
                     .catch(fail)
                 }
               >

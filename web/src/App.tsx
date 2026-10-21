@@ -60,12 +60,12 @@ function Protected() {
   if (state === 'anon' || (state === 'ready' && !me)) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   if (state === 'loading' || !me) return <div className="fullscreen-center"><Spinner /></div>;
   if (me.requirePasswordChange) return <ChangePasswordPage onDone={() => void startSession()} />;
-  if ((me as any).require2faSetup && !location.pathname.startsWith('/account/security')) {
+  if (me.require2faSetup && !location.pathname.startsWith('/account/security')) {
     return (
       <div className="fullscreen-center">
         <div className="card narrow">
           <h2>Autenticação em dois fatores obrigatória</h2>
-          <p>Seu papel exige 2FA. Configure um aplicativo autenticador para continuar.</p>
+          <p>O administrador exige autenticação em dois fatores. Configure um aplicativo autenticador para continuar.</p>
           <button className="btn primary" onClick={() => navigate('/account/security')}>
             Configurar agora
           </button>

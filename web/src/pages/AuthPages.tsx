@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { api, ApiError, errorMessage, setCredentials } from '../lib/api';
+import { api, ApiError, errorMessage } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
-import { login, startSession } from '../lib/session';
+import { login, loginWithSaml } from '../lib/session';
 import { useSetting } from '../lib/store';
 import { Field } from '../components/ui';
 
@@ -23,6 +23,8 @@ function AuthShell({ children }: { children: React.ReactNode }) {
   );
 }
 
+const safeNext = (v: string | null) => (v && v.startsWith('/') && !v.startsWith('//') ? v : '/home');
+
 export function LoginPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -37,14 +39,14 @@ export function LoginPage() {
   const samlLabel = useSetting<string>('SAML_Button_Label');
   const ldap = useSetting<boolean>('LDAP_Enable');
 
-  // Retorno do SSO (SAML) com credenciais na URL.
+  // Retorno do SSO (SAML): credencial de uso único na URL, trocada por uma sessão.
   useEffect(() => {
-    const token = params.get('samlToken');
-    const uid = params.get('uid');
-    if (token && uid) {
-      setCredentials({ userId: uid, authToken: token });
-      void startSession().then(() => navigate('/home', { replace: true }));
-    }
+    const credential = params.get('saml');
+    if (!credential) return;
+    setBusy(true);
+    loginWithSaml(credential)
+      .then(() => navigate(safeNext(params.get('next')), { replace: true }))
+      .catch((err) => (setError(errorMessage(err)), setBusy(false), navigate('/login', { replace: true })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -54,7 +56,7 @@ export function LoginPage() {
     setError('');
     try {
       await login(user, password, needCode ? code : undefined);
-      navigate(params.get('next') || '/home', { replace: true });
+      navigate(safeNext(params.get('next')), { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.errorType === 'totp-required') setNeedCode(true);
       else setError(errorMessage(err));
@@ -85,7 +87,7 @@ export function LoginPage() {
           {needCode ? 'Verificar' : 'Entrar'}
         </button>
         {saml && (
-          <a className="btn block" href="/saml/login">
+          <a className="btn block" href={`/saml/login?redirect=${encodeURIComponent(safeNext(params.get('next')))}`}>
             🔐 {samlLabel}
           </a>
         )}

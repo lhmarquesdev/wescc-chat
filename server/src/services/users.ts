@@ -340,7 +340,8 @@ export async function updateUser(
     sets.push(`email = $${params.push(data.email)}`, `email_verified = ${opts.asAdmin && data.verified ? 'true' : 'false'}`);
   }
   if (data.password) {
-    if (!opts.asAdmin) {
+    // Na troca obrigatória (logo após entrar com a senha provisória) a senha atual não é pedida de novo.
+    if (!opts.asAdmin && !(self && u.require_password_change)) {
       if (!getSetting('Accounts_AllowPasswordChange')) throw forbidden('Alteração de senha desativada.');
       if (u.password_hash && !(await verifyPassword(opts.currentPassword ?? '', u.password_hash))) throw badRequest('error-invalid-password', 'Senha atual incorreta.');
     }

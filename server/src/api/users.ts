@@ -35,7 +35,13 @@ import { b, bool, paging, q, route, str, strArray } from './http';
 async function meResponse(userId: string) {
   const u = await getUserById(userId);
   const roles = await getUserRoles(userId);
-  return { ...mapUser(u, { full: true }), permissions: permissionsForRoles(roles), requirePasswordChange: u.require_password_change };
+  // 2FA obrigatório vale para contas locais; quem entra por LDAP/SAML segue a política do provedor.
+  // Exigido para todos pela configuração ou por algum papel marcado como "exige 2FA".
+  let require2faSetup = !!getSetting('Accounts_TwoFactorAuthentication_Enabled') && u.auth_source === 'local' && u.type !== 'bot' && !u.totp_enabled;
+  if (require2faSetup && !getSetting('Accounts_TwoFactorAuthentication_Enforce')) {
+    require2faSetup = !!(await one('SELECT 1 FROM roles WHERE id = ANY($1) AND mandatory_2fa', [roles]));
+  }
+  return { ...mapUser(u, { full: true }), permissions: permissionsForRoles(roles), requirePasswordChange: u.require_password_change, require2faSetup };
 }
 
 export async function resolveUserParam(params: Record<string, any>) {
@@ -54,6 +60,16 @@ export function usersRoutes(app: FastifyInstance) {
       const r = await resolveToken(undefined, body.resume);
       if (!r) throw new (await import('../lib/errors')).ApiError(401, 'error-unauthorized', 'Sessão expirada.');
       return { status: 'success', data: { userId: r.user.id, authToken: body.resume, me: await meResponse(r.user.id) } };
+    }
+    if (body.saml) {
+      // Troca a credencial de uso único do /saml/acs por uma sessão.
+      const { consumeSamlCredential } = await import('../saml/saml');
+      const { createSession } = await import('../services/users');
+      const u = getSetting('SAML_Enable') ? await consumeSamlCredential(str(body.credentialToken, 'credentialToken')) : null;
+      if (!u || !u.active) throw new (await import('../lib/errors')).ApiError(401, 'error-unauthorized', 'Login SSO expirado. Tente novamente.');
+      const s = await createSession(u.id, { userAgent: req.headers['user-agent'], ip: req.ip });
+      await audit({ id: u.id, username: u.username, ip: req.ip }, 'auth.login', { sessionId: s.sessionId, method: 'saml' });
+      return { status: 'success', data: { userId: u.id, authToken: s.authToken, me: await meResponse(u.id) } };
     }
     const user = str(body.user ?? body.username ?? body.email, 'user');
     const password = str(body.password, 'password');

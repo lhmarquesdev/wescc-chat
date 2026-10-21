@@ -140,6 +140,12 @@ add('SAML', 'Mapping', 'SAML_Username_Attribute', 'string', 'username', { label:
 add('SAML', 'Mapping', 'SAML_Email_Attribute', 'string', 'email', { label: 'Atributo do e-mail' });
 add('SAML', 'Mapping', 'SAML_Name_Attribute', 'string', 'cn', { label: 'Atributo do nome' });
 add('SAML', 'Mapping', 'SAML_Role_Attribute', 'string', '', { label: 'Atributo dos papéis' });
+add('SAML', 'Mapping', 'SAML_Role_Mapping', 'code', '{}', { label: 'Mapa valor do atributo → papéis (JSON). Vazio usa os nomes dos papéis' });
+add('SAML', 'Provider', 'SAML_Want_Assertions_Signed', 'boolean', true, { label: 'Exigir asserções assinadas' });
+add('SAML', 'Provider', 'SAML_Want_Response_Signed', 'boolean', false, { label: 'Exigir resposta assinada' });
+add('SAML', 'Provider', 'SAML_Logout_Url', 'string', '', { label: 'URL de logout do IdP (opcional)' });
+add('SAML', 'Mapping', 'SAML_Allow_New_Users', 'boolean', true, { label: 'Criar usuários no primeiro login' });
+add('SAML', 'Mapping', 'SAML_Merge_By_Email', 'boolean', false, { label: 'Vincular a usuário local com o mesmo e-mail' });
 
 // ---------- Segurança / API ----------
 add('Security', 'Rate Limiter', 'API_Enable_Rate_Limiter', 'boolean', true, { label: 'Limite de requisições na API' });

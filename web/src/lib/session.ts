@@ -69,6 +69,13 @@ export async function login(user: string, password: string, code?: string) {
   return startSession();
 }
 
+// Troca a credencial de uso único devolvida pelo /saml/acs por uma sessão.
+export async function loginWithSaml(credentialToken: string) {
+  const r = await api.post('login', { saml: true, credentialToken });
+  setCredentials({ userId: r.data.userId, authToken: r.data.authToken });
+  return startSession();
+}
+
 export async function logout() {
   await api.post('logout').catch(() => {});
   endSession();
