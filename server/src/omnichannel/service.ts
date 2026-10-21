@@ -1,6 +1,6 @@
-import type { LivechatInquiry, LivechatRoomInfo } from '@shared/index';
+import type { Attachment, LivechatInquiry, LivechatRoomInfo, MessageFile } from '@shared/index';
 import { many, one, query } from '../db/pool';
-import { badRequest, forbidden, notFound } from '../lib/errors';
+import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId, randomToken } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from '../services/audit';
@@ -12,6 +12,7 @@ import { dispatchNotifications } from '../services/notifications';
 import { hasPermission } from '../services/permissions';
 import { addUserToRoom, getRoom, notifySubscription, removeUserFromRoom } from '../services/rooms';
 import { getSetting } from '../services/settings';
+import { discardFile, fileAttachment, registerFile, type StoredFile } from '../services/uploads';
 import { actorOf, type Ctx } from '../services/users';
 
 // Núcleo do omnichannel: visitantes, salas de atendimento, roteamento e fila.
@@ -387,6 +388,12 @@ export function mapVisitor(v: any) {
   };
 }
 
+// Resposta para o próprio visitante (endpoints sem login): sem IP, navegador nem a última conversa.
+export function mapVisitorPublic(v: any) {
+  const { ip: _ip, userAgent: _ua, lastChat: _lc, ...rest } = mapVisitor(v);
+  return rest;
+}
+
 async function validateCustomFields(scope: 'visitor' | 'room', data: Record<string, unknown> = {}) {
   const fields = await many('SELECT * FROM livechat_custom_fields WHERE scope = $1', [scope]);
   const out: Record<string, unknown> = {};
@@ -434,17 +441,8 @@ export async function registerVisitor(input: { token: string; name?: string; ema
     );
     return row;
   }
-  // Reaproveita o contato pelo e-mail, como o Rocket.Chat faz.
-  if (email) {
-    const byEmail = await one('SELECT * FROM livechat_visitors WHERE lower(email) = lower($1)', [email]);
-    if (byEmail) {
-      return one(
-        `UPDATE livechat_visitors SET token = $2, name = coalesce(NULLIF($3, ''), name), department_id = coalesce($4, department_id), custom_fields = custom_fields || $5, updated_at = now()
-         WHERE id = $1 RETURNING *`,
-        [byEmail.id, token, input.name?.trim() ?? '', department, JSON.stringify(customFields)],
-      );
-    }
-  }
+  // Token novo é sempre um contato novo, mesmo com um e-mail já conhecido: quem só sabe o e-mail de alguém
+  // não pode assumir o contato (e o histórico e os arquivos dele).
   const seq = (await one(`SELECT count(*)::int + 1 AS n FROM livechat_visitors`)).n;
   return one(
     `INSERT INTO livechat_visitors (id, token, username, name, email, phone, department_id, custom_fields, ip, user_agent)
@@ -480,20 +478,38 @@ export async function getOrCreateVisitorRoom(visitor: any, opts: { rid?: string;
 
 // ---------- Mensagens do visitante ----------
 
-export async function sendVisitorMessage(visitor: any, rid: string, text: string, clientId?: string) {
+async function visitorOpenRoom(visitor: any, rid: string) {
   const lr = await one('SELECT * FROM livechat_rooms WHERE room_id = $1 AND visitor_id = $2', [rid, visitor.id]);
   if (!lr) throw notFound('error-room-not-found', 'Conversa não encontrada.');
   if (lr.status === 'closed') throw badRequest('error-room-closed', 'Conversa encerrada.');
+  return lr;
+}
+
+function visitorText(text: unknown) {
   const msg = String(text ?? '').trim();
   const limit = getSetting<number>('Livechat_enable_message_character_limit') || getSetting<number>('Message_MaxAllowedSize');
-  if (!msg) throw badRequest('error-invalid-message', 'Mensagem vazia.');
   if (msg.length > limit) throw badRequest('error-message-size-exceeded', `A mensagem excede ${limit} caracteres.`);
+  return msg;
+}
+
+export async function sendVisitorMessage(visitor: any, rid: string, text: string, clientId?: string) {
+  const lr = await visitorOpenRoom(visitor, rid);
+  const msg = visitorText(text);
+  if (!msg) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  return insertVisitorMessage(visitor, lr, { msg, clientId });
+}
+
+async function insertVisitorMessage(visitor: any, lr: any, input: { msg: string; clientId?: string; attachments?: Attachment[]; files?: MessageFile[] }) {
+  const rid = lr.room_id;
+  const { msg, clientId, files = [] } = input;
   const id = clientId && /^[A-Za-z0-9]{10,24}$/.test(clientId) && !(await one('SELECT 1 FROM messages WHERE id = $1', [clientId])) ? clientId : newId();
   const row = await one(
-    `INSERT INTO messages (id, room_id, user_id, username, user_name, msg, extra, unread) VALUES ($1,$2,NULL,$3,$4,$5,$6,$7) RETURNING *`,
-    [id, rid, visitor.username, visitor.name, msg, JSON.stringify({ visitorId: visitor.id, token: undefined }), !!lr.agent_id],
+    `INSERT INTO messages (id, room_id, user_id, username, user_name, msg, attachments, files, extra, unread) VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [id, rid, visitor.username, visitor.name, msg, JSON.stringify(input.attachments ?? []), JSON.stringify(files), JSON.stringify({ visitorId: visitor.id, token: undefined }), !!lr.agent_id],
   );
-  const lastMessage = { _id: id, msg: msg.slice(0, 200), u: { _id: visitor.id, username: visitor.username, name: visitor.name }, ts: row.created_at };
+  if (files.length) await query('UPDATE files SET message_id = $1 WHERE id = ANY($2)', [id, files.map((f) => f._id)]);
+  const preview = msg || (files.length ? `📎 ${files[0].name}` : '');
+  const lastMessage = { _id: id, msg: preview.slice(0, 200), u: { _id: visitor.id, username: visitor.username, name: visitor.name }, ts: row.created_at };
   await query(`UPDATE rooms SET msgs = msgs + 1, last_message = $2, lm = $3, updated_at = now() WHERE id = $1`, [rid, JSON.stringify(lastMessage), row.created_at]);
   await query(`UPDATE livechat_rooms SET last_visitor_msg = now() WHERE room_id = $1`, [rid]);
   const message = withExtra(row);
@@ -512,6 +528,61 @@ export async function sendVisitorMessage(visitor: any, rid: string, text: string
     void routeRoom(rid, { announce: true }).catch(() => {});
   }
   return message;
+}
+
+// ---------- Arquivos do visitante ----------
+
+export function visitorUploadsEnabled() {
+  return !!getSetting<boolean>('Livechat_fileupload_enabled') && !!getSetting<boolean>('FileUpload_Enabled');
+}
+
+// Envios por minuto (o envio é público: qualquer um vira visitante), por visitante e por IP.
+const UPLOADS_PER_MIN = { visitor: 10, ip: 30 };
+const recentUploads = new Map<string, number[]>();
+export const resetUploadSlots = () => recentUploads.clear();
+
+function takeUploadSlot(key: string, max: number) {
+  const now = Date.now();
+  const list = (recentUploads.get(key) ?? []).filter((t) => t > now - 60_000);
+  if (list.length >= max) throw new ApiError(429, 'error-too-many-requests', 'Muitos arquivos em pouco tempo. Aguarde um minuto e tente de novo.');
+  list.push(now);
+  recentUploads.set(key, list);
+  if (recentUploads.size > 10_000) for (const [k, v] of recentUploads) if (!v.some((t) => t > now - 60_000)) recentUploads.delete(k);
+}
+
+// Espaço total dos arquivos do visitante (0 = sem limite).
+async function assertVisitorQuota(visitor: any, adding = 0) {
+  const quota = getSetting<number>('Livechat_fileupload_max_total_size');
+  if (!(quota > 0)) return;
+  const used = Number((await one('SELECT coalesce(sum(size), 0) AS n FROM files WHERE visitor_id = $1', [visitor.id])).n);
+  if (adding ? used + adding > quota : used >= quota) {
+    throw new ApiError(413, 'error-file-quota-exceeded', 'O limite de espaço para arquivos desta conversa foi atingido.');
+  }
+}
+
+// Checagens feitas antes de ler o arquivo e repetidas depois (a conversa pode ter sido encerrada no meio do envio).
+export async function assertVisitorCanUpload(visitor: any, rid: string, ip?: string) {
+  if (!visitorUploadsEnabled()) throw new ApiError(403, 'error-file-upload-disabled', 'O envio de arquivos está desativado.');
+  const lr = await visitorOpenRoom(visitor, rid);
+  await assertVisitorQuota(visitor);
+  if (ip !== undefined) {
+    takeUploadSlot(`v:${visitor.id}`, UPLOADS_PER_MIN.visitor);
+    takeUploadSlot(`ip:${ip}`, UPLOADS_PER_MIN.ip);
+  }
+  return lr;
+}
+
+export async function sendVisitorFile(visitor: any, rid: string, file: StoredFile, fields: { msg?: string; description?: string }) {
+  try {
+    const lr = await assertVisitorCanUpload(visitor, rid);
+    await assertVisitorQuota(visitor, file.size);
+    const msg = visitorText(fields.msg);
+    const f = await registerFile(file, rid, { visitorId: visitor.id });
+    return await insertVisitorMessage(visitor, lr, { msg, files: [f], attachments: [fileAttachment(file, String(fields.description ?? '').trim().slice(0, 1000))] });
+  } catch (e) {
+    await discardFile(file);
+    throw e;
+  }
 }
 
 export async function visitorHistory(visitor: any, rid: string, opts: { limit: number; before?: string }) {

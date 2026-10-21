@@ -214,6 +214,8 @@ add('Omnichannel', 'Widget', 'Livechat_registration_form_message', 'string', 'An
 add('Omnichannel', 'Widget', 'Livechat_conversation_finished_message', 'string', 'Conversa encerrada. Obrigado pelo contato!', { public: true, label: 'Mensagem de conversa encerrada' });
 add('Omnichannel', 'Widget', 'Livechat_enable_satisfaction_survey', 'boolean', true, { public: true, label: 'Pesquisa de satisfação ao encerrar' });
 add('Omnichannel', 'Widget', 'Livechat_allowed_domains', 'string', '', { label: 'Domínios onde o widget pode ser embutido (vírgula, vazio = todos)' });
+add('Omnichannel', 'File Upload', 'Livechat_fileupload_enabled', 'boolean', true, { public: true, label: 'Visitantes podem enviar arquivos' });
+add('Omnichannel', 'File Upload', 'Livechat_fileupload_max_total_size', 'int', 209715200, { label: 'Espaço máximo para arquivos por visitante, em bytes (0 = sem limite)' });
 
 // ---------- Integrações ----------
 add('Integrations', 'General', 'Integrations_Enabled', 'boolean', true, { label: 'Ativar integrações (webhooks)' });

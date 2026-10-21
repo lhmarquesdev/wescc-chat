@@ -30,14 +30,16 @@ import {
   updateUser,
   verifyAndEnableTotp,
 } from '../services/users';
-import { b, bool, paging, q, route, str, strArray } from './http';
+import { b, bool, paging, parseCookies, q, route, str, strArray } from './http';
 
 async function meResponse(userId: string) {
   const u = await getUserById(userId);
   const roles = await getUserRoles(userId);
-  // 2FA obrigatório vale para contas locais; quem entra por LDAP/SAML segue a política do provedor.
+  // 2FA obrigatório vale para quem entra com senha local (inclusive contas vinculadas a SAML/OAuth que mantêm a senha);
+  // quem só entra pelo provedor (LDAP, SAML, OAuth) segue a política dele.
   // Exigido para todos pela configuração ou por algum papel marcado como "exige 2FA".
-  let require2faSetup = !!getSetting('Accounts_TwoFactorAuthentication_Enabled') && u.auth_source === 'local' && u.type !== 'bot' && !u.totp_enabled;
+  const passwordLogin = u.auth_source === 'local' || (u.auth_source !== 'ldap' && !!u.password_hash);
+  let require2faSetup = !!getSetting('Accounts_TwoFactorAuthentication_Enabled') && passwordLogin && u.type !== 'bot' && !u.totp_enabled;
   if (require2faSetup && !getSetting('Accounts_TwoFactorAuthentication_Enforce')) {
     require2faSetup = !!(await one('SELECT 1 FROM roles WHERE id = ANY($1) AND mandatory_2fa', [roles]));
   }
@@ -52,7 +54,7 @@ export async function resolveUserParam(params: Record<string, any>) {
 
 export function usersRoutes(app: FastifyInstance) {
   // ---------- Autenticação ----------
-  route(app, 'POST', 'login', { auth: false }, async (req) => {
+  route(app, 'POST', 'login', { auth: false }, async (req, reply) => {
     const body = b(req);
     if (body.resume) {
       // Login com token existente (reconexão).
@@ -61,14 +63,19 @@ export function usersRoutes(app: FastifyInstance) {
       if (!r) throw new (await import('../lib/errors')).ApiError(401, 'error-unauthorized', 'Sessão expirada.');
       return { status: 'success', data: { userId: r.user.id, authToken: body.resume, me: await meResponse(r.user.id) } };
     }
-    if (body.saml) {
-      // Troca a credencial de uso único do /saml/acs por uma sessão.
-      const { consumeSamlCredential } = await import('../saml/saml');
+    if (body.saml || body.oauth) {
+      // Troca a credencial de uso único do /saml/acs ou do /oauth/:id/callback por uma sessão.
+      const method = body.saml ? 'saml' : 'oauth';
+      const { clearSsoBrowserCookie, consumeSsoCredential, SSO_BROWSER_COOKIE } = await import('../services/sso');
       const { createSession } = await import('../services/users');
-      const u = getSetting('SAML_Enable') ? await consumeSamlCredential(str(body.credentialToken, 'credentialToken')) : null;
+      const enabled = method === 'oauth' || getSetting('SAML_Enable');
+      // Sem o cookie entregue no fim do fluxo, a credencial não vale (outro navegador).
+      const nonce = parseCookies(req.headers.cookie)[SSO_BROWSER_COOKIE];
+      reply.header('set-cookie', clearSsoBrowserCookie());
+      const u = enabled ? await consumeSsoCredential(str(body.credentialToken, 'credentialToken'), method, nonce) : null;
       if (!u || !u.active) throw new (await import('../lib/errors')).ApiError(401, 'error-unauthorized', 'Login SSO expirado. Tente novamente.');
       const s = await createSession(u.id, { userAgent: req.headers['user-agent'], ip: req.ip });
-      await audit({ id: u.id, username: u.username, ip: req.ip }, 'auth.login', { sessionId: s.sessionId, method: 'saml' });
+      await audit({ id: u.id, username: u.username, ip: req.ip }, 'auth.login', { sessionId: s.sessionId, method });
       return { status: 'success', data: { userId: u.id, authToken: s.authToken, me: await meResponse(u.id) } };
     }
     const user = str(body.user ?? body.username ?? body.email, 'user');

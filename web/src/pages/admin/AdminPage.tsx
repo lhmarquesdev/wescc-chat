@@ -9,6 +9,7 @@ import { AdminEngagement } from './AdminEngagement';
 import { AdminAudit } from './AdminAudit';
 import { AdminDevices, AdminEmoji, AdminInvites, AdminModeration } from './AdminMisc';
 import { AdminIntegrations } from './AdminIntegrations';
+import { AdminOAuth } from './AdminOAuth';
 import { AdminOmnichannel } from './AdminOmnichannel';
 
 export function AdminPage() {
@@ -23,6 +24,7 @@ export function AdminPage() {
     { id: 'audit', label: '🔎 Auditoria', perm: ['can-audit', 'can-audit-log'] },
     { id: 'moderation', label: '🚩 Moderação', perm: ['view-moderation-console'] },
     { id: 'integrations', label: '🔌 Integrações', perm: ['manage-integrations', 'manage-own-integrations'] },
+    { id: 'oauth', label: '🔑 OAuth', perm: ['manage-oauth-apps'] },
     { id: 'omnichannel', label: '🎧 Omnichannel', perm: ['view-livechat-manager'] },
     { id: 'emoji', label: '😀 Emojis', perm: ['manage-emoji'] },
     { id: 'invites', label: '🔗 Convites', perm: ['view-room-administration'] },
@@ -46,6 +48,7 @@ export function AdminPage() {
         {section === 'audit' && <AdminAudit />}
         {section === 'moderation' && <AdminModeration />}
         {section === 'integrations' && <AdminIntegrations />}
+        {section === 'oauth' && <AdminOAuth />}
         {section === 'omnichannel' && <AdminOmnichannel />}
         {section === 'emoji' && <AdminEmoji />}
         {section === 'invites' && <AdminInvites />}

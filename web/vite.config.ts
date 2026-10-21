@@ -18,6 +18,7 @@ export default defineConfig({
       '/livechat': target,
       '/hooks': target,
       '/saml': target,
+      '/oauth': target,
     },
   },
   build: { outDir: 'dist', sourcemap: false },

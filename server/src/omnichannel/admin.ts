@@ -4,6 +4,7 @@ import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from '../services/audit';
 import { hasPermission } from '../services/permissions';
+import { removeFiles } from '../services/uploads';
 import { actorOf, type Ctx } from '../services/users';
 import { departmentScope, getAgentStatus, getLivechatRoom, isBusinessHourOpen, mapVisitor, processQueue, setAgentStatus } from './service';
 
@@ -684,10 +685,14 @@ export async function removeContact(ctx: Ctx, id: string) {
   await need(ctx, 'remove-livechat-contact');
   const open = await one(`SELECT 1 FROM livechat_rooms WHERE visitor_id = $1 AND status <> 'closed'`, [id]);
   if (open) throw badRequest('error-contact-has-open-rooms', 'Encerre as conversas abertas antes de remover o contato.');
-  await tx(async (c) => {
+  const stored = await tx(async (c) => {
+    const files = await c.query('SELECT storage_path FROM files WHERE room_id IN (SELECT room_id FROM livechat_rooms WHERE visitor_id = $1)', [id]);
     await c.query('DELETE FROM rooms WHERE id IN (SELECT room_id FROM livechat_rooms WHERE visitor_id = $1)', [id]);
     await c.query('DELETE FROM livechat_visitors WHERE id = $1', [id]);
+    return files.rows;
   });
+  // Os registros saem em cascata com as salas; os arquivos no disco, aqui.
+  await removeFiles(stored);
   await audit(actorOf(ctx), 'livechat.contact.removed', { visitorId: id });
 }
 

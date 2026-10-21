@@ -19,6 +19,7 @@ export function mapUser(r: any, opts: { full?: boolean } = {}): User {
     u.emailVerified = r.email_verified;
     u.statusDefault = r.status_default;
     u.authSource = r.auth_source;
+    if (r.auth_source === 'oauth' && r.external_id) u.authProvider = String(r.external_id).split(':')[0];
     u.twoFactorEnabled = r.totp_enabled;
     u.preferences = r.preferences;
     u.lastLogin = r.last_login;

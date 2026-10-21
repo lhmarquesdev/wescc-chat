@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { api, ApiError, errorMessage } from '../lib/api';
+import type { OAuthProviderPublic } from '@shared/index';
+import { api, ApiError, errorMessage, getCredentials } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
-import { login, loginWithSaml } from '../lib/session';
+import { login, loginWithOAuth, loginWithSaml } from '../lib/session';
 import { useSetting } from '../lib/store';
-import { Field } from '../components/ui';
+import { confirmAction, Field } from '../components/ui';
 
 function AuthShell({ children }: { children: React.ReactNode }) {
   const site = useSetting<string>('Site_Name');
@@ -23,7 +24,7 @@ function AuthShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-const safeNext = (v: string | null) => (v && v.startsWith('/') && !v.startsWith('//') ? v : '/home');
+const safeNext = (v: string | null) => (v && v.startsWith('/') && !v.startsWith('//') && !/[\\\x00-\x1f]/.test(v) ? v : '/home');
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -38,14 +39,29 @@ export function LoginPage() {
   const saml = useSetting<boolean>('SAML_Enable');
   const samlLabel = useSetting<string>('SAML_Button_Label');
   const ldap = useSetting<boolean>('LDAP_Enable');
+  const [providers, setProviders] = useState<OAuthProviderPublic[]>([]);
+  const next = safeNext(params.get('next'));
 
-  // Retorno do SSO (SAML): credencial de uso único na URL, trocada por uma sessão.
   useEffect(() => {
-    const credential = params.get('saml');
-    if (!credential) return;
+    void api
+      .get('oauth-providers.public')
+      .then((r) => setProviders(r.providers))
+      .catch(() => {});
+  }, []);
+
+  // Retorno do SSO (SAML ou OAuth): credencial de uso único na URL, trocada por uma sessão.
+  useEffect(() => {
+    const saml = params.get('saml');
+    const oauth = params.get('oauth');
+    if (!saml && !oauth) return;
+    // Já há uma sessão neste navegador: só troca de conta se a pessoa confirmar.
+    if (getCredentials() && !confirmAction('Você já está conectado neste navegador. Entrar com a conta do login que acabou de fazer?')) {
+      navigate(next, { replace: true });
+      return;
+    }
     setBusy(true);
-    loginWithSaml(credential)
-      .then(() => navigate(safeNext(params.get('next')), { replace: true }))
+    (saml ? loginWithSaml(saml) : loginWithOAuth(oauth!))
+      .then(() => navigate(next, { replace: true }))
       .catch((err) => (setError(errorMessage(err)), setBusy(false), navigate('/login', { replace: true })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -56,7 +72,7 @@ export function LoginPage() {
     setError('');
     try {
       await login(user, password, needCode ? code : undefined);
-      navigate(safeNext(params.get('next')), { replace: true });
+      navigate(next, { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.errorType === 'totp-required') setNeedCode(true);
       else setError(errorMessage(err));
@@ -86,10 +102,27 @@ export function LoginPage() {
         <button type="submit" className="btn primary block" disabled={busy || !user || !password}>
           {needCode ? 'Verificar' : 'Entrar'}
         </button>
-        {saml && (
-          <a className="btn block" href={`/saml/login?redirect=${encodeURIComponent(safeNext(params.get('next')))}`}>
-            🔐 {samlLabel}
-          </a>
+        {!needCode && (saml || providers.length > 0) && (
+          <>
+            <div className="auth-sep">
+              <span>ou</span>
+            </div>
+            {saml && (
+              <a className="btn block sso-btn" href={`/saml/login?redirect=${encodeURIComponent(next)}`}>
+                🔐 {samlLabel}
+              </a>
+            )}
+            {providers.map((p) => (
+              <a
+                key={p._id}
+                className="btn block sso-btn"
+                style={{ background: p.buttonColor, color: p.buttonTextColor }}
+                href={`/oauth/${encodeURIComponent(p._id)}/login?redirect=${encodeURIComponent(next)}`}
+              >
+                {p.label || 'Entrar'}
+              </a>
+            ))}
+          </>
         )}
         {registration === 'Public' && (
           <div className="auth-alt">

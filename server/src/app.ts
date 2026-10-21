@@ -24,13 +24,15 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   });
 
   await app.register(cors, { origin: true, credentials: true });
-  await app.register(multipart, { limits: { fileSize: 1024 * 1024 * 1024, files: 1 } });
+  // Campos de texto limitados em todas as rotas multipart (o padrão do busboy é 1 MB por campo, sem limite de quantidade).
+  await app.register(multipart, { limits: { fileSize: 1024 * 1024 * 1024, files: 1, fields: 20, parts: 21, fieldSize: 64 * 1024 } });
   await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
   await app.register(rateLimit, {
     global: true,
     max: () => (getSetting('API_Enable_Rate_Limiter') ? getSetting<number>('API_Enable_Rate_Limiter_Limit_Calls_Default') : 1_000_000),
     timeWindow: 60_000,
-    keyGenerator: (req) => (req.headers['x-user-id'] as string) || req.ip,
+    // Usuário autenticado (o hook de autenticação roda antes) ou IP; nunca o cabeçalho x-user-id sem token.
+    keyGenerator: (req) => req.ctx?.userId || req.ip,
     allowList: (req) => !req.url.startsWith('/api/'),
     errorResponseBuilder: (_req, ctx) => ({ statusCode: 429, success: false, error: `Limite de requisições excedido. Tente novamente em ${Math.ceil(ctx.ttl / 1000)}s.`, errorType: 'error-too-many-requests' }),
   });
@@ -53,6 +55,8 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   integrationsRoutes(app);
   const { samlRoutes } = await import('./saml/saml');
   samlRoutes(app);
+  const { oauthRoutes } = await import('./oauth/api');
+  oauthRoutes(app);
 
   app.get('/health', async () => ({ ok: true }));
 

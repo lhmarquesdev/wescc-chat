@@ -53,6 +53,15 @@ async function postAcs(SAMLResponse: string, RelayState = '/home') {
   return fetch(urlOf('/saml/acs'), { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ SAMLResponse, RelayState }) });
 }
 
+// Troca a credencial com o cookie que o /saml/acs entregou ao navegador.
+async function redeem(credentialToken: string, cookie?: string) {
+  const r = await fetch(urlOf('/api/v1/login'), { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify({ saml: true, credentialToken }) });
+  return (await r.json()) as any;
+}
+
+const ssoCookie = (res: Response) => (res.headers.getSetCookie().find((c) => c.startsWith('wescc_sso=')) ?? '').split(';')[0];
+const credentialOf = (res: Response) => new URL(res.headers.get('location')!, 'http://x').searchParams.get('saml')!;
+
 async function startLogin() {
   const r = await fetch(urlOf('/saml/login?redirect=/channel/geral'), { redirect: 'manual' });
   expect(r.status).toBe(302);
@@ -111,8 +120,9 @@ describe('SAML', () => {
     expect(loc.pathname).toBe('/login');
     expect(loc.searchParams.get('next')).toBe('/channel/geral');
     const credentialToken = loc.searchParams.get('saml')!;
+    expect(res.headers.get('set-cookie')).toContain('Path=/api/v1/login');
 
-    const login = await api('POST', 'login', { saml: true, credentialToken });
+    const login = await redeem(credentialToken, ssoCookie(res));
     expect(login.status).toBe('success');
     expect(login.data.me.username).toBe('ana');
     expect(login.data.me.name).toBe('Ana Souza');
@@ -121,8 +131,28 @@ describe('SAML', () => {
     expect(JSON.stringify(me)).toContain('ana@empresa.com');
 
     // A credencial é de uso único.
-    const again = await api('POST', 'login', { saml: true, credentialToken });
+    const again = await redeem(credentialToken, ssoCookie(res));
     expect(again.success).toBe(false);
+  });
+
+  it('a credencial só vale no navegador que recebeu a resposta do IdP', async () => {
+    const res = await postAcs(samlResponse({ nameID: 'ana@empresa.com', attrs: { uid: 'ana', mail: 'ana@empresa.com' }, acs }));
+    expect((await redeem(credentialOf(res))).success).toBe(false);
+    const res2 = await postAcs(samlResponse({ nameID: 'ana@empresa.com', attrs: { uid: 'ana', mail: 'ana@empresa.com' }, acs }));
+    expect((await redeem(credentialOf(res2), 'wescc_sso=' + 'x'.repeat(32))).success).toBe(false);
+  });
+
+  it('vínculo por e-mail só com o e-mail da conta existente confirmado', async () => {
+    await api('POST', 'settings', { settings: { SAML_Merge_By_Email: true } }, A);
+    const u = await api('POST', 'users.create', { username: 'lia', name: 'Lia', email: 'lia@empresa.com', password: 'senha-forte-1' }, A);
+    const refused = await postAcs(samlResponse({ nameID: 'lia-idp', attrs: { uid: 'lia.saml', mail: 'lia@empresa.com' }, acs }));
+    expect(refused.status).toBe(409);
+    expect((await pool.query(`SELECT auth_source FROM users WHERE id = $1`, [u.user._id])).rows[0].auth_source).toBe('local');
+    await api('POST', 'users.update', { userId: u.user._id, data: { verified: true } }, A);
+    const res = await postAcs(samlResponse({ nameID: 'lia-idp', attrs: { uid: 'lia.saml', mail: 'lia@empresa.com' }, acs }));
+    expect(res.status).toBe(302);
+    expect((await redeem(credentialOf(res), ssoCookie(res))).data.userId).toBe(u.user._id);
+    await api('POST', 'settings', { settings: { SAML_Merge_By_Email: false } }, A);
   });
 
   it('a mesma resposta não pode ser reutilizada (InResponseTo já consumido)', async () => {

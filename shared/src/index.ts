@@ -24,6 +24,7 @@ export interface User {
   bio?: string;
   avatarETag?: string | null;
   authSource?: 'local' | 'ldap' | 'saml' | 'oauth';
+  authProvider?: string; // provedor OAuth da conta (authSource 'oauth')
   twoFactorEnabled?: boolean;
   preferences?: UserPreferences;
   createdAt: string;
@@ -235,6 +236,82 @@ export interface DeviceSession {
 }
 
 // ---------- Tempo real ----------
+
+// ---------- Login OAuth / OpenID Connect ----------
+
+export type OAuthProviderType = 'google' | 'github' | 'gitlab' | 'microsoft' | 'custom';
+
+// Caminhos (com pontos, ex.: "data.user.id") dos campos na resposta de identidade.
+export interface OAuthFieldMap {
+  id: string;
+  username: string;
+  email: string;
+  name: string;
+  avatar: string;
+  emailVerified: string;
+}
+
+export type OAuthMapping = Record<string, string | string[]>;
+
+export interface OAuthProvider {
+  _id: string;
+  type: OAuthProviderType;
+  enabled: boolean;
+  label: string;
+  buttonColor: string;
+  buttonTextColor: string;
+  clientId: string;
+  clientSecretSet: boolean; // o segredo nunca sai do servidor
+  serverUrl: string;
+  tenant: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  identityUrl: string;
+  scope: string;
+  tokenAuth: 'post' | 'basic';
+  tokenSentVia: 'header' | 'query';
+  accessTokenParam: string;
+  identityPath: string;
+  fieldMap: Partial<OAuthFieldMap>;
+  loginStyle: 'redirect';
+  mergeUsers: boolean;
+  blockNewUsers: boolean;
+  rolesClaim: string;
+  syncRoles: boolean;
+  mergeRoles: boolean;
+  roleMapping: OAuthMapping;
+  groupsClaim: string;
+  mapChannels: boolean;
+  channelMapping: OAuthMapping;
+  sort: number;
+  callbackUrl: string;
+  effective: { authorizeUrl: string; tokenUrl: string; identityUrl: string; scope: string; fieldMap: OAuthFieldMap };
+  _createdAt: string;
+  _updatedAt: string;
+}
+
+export interface OAuthProviderPublic {
+  _id: string;
+  label: string;
+  buttonColor: string;
+  buttonTextColor: string;
+}
+
+export interface OAuthPreset {
+  type: OAuthProviderType;
+  name: string;
+  description: string;
+  label: string;
+  buttonColor: string;
+  buttonTextColor: string;
+  scope: string;
+  fieldMap: OAuthFieldMap;
+  rolesClaim: string;
+  groupsClaim: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  identityUrl: string;
+}
 
 export type ServerEvent =
   | { type: 'connected'; userId: string; sessionId: string }

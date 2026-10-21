@@ -39,7 +39,8 @@ export async function migrate(log: (m: string) => void = console.log) {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+// Só como script (tsx src/db/migrate.ts); no bundle do esbuild import.meta.url é o dist/index.js.
+if (process.argv[1] && path.basename(process.argv[1]).startsWith('migrate.') && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   migrate()
     .then(() => pool.end())
     .catch((e) => {

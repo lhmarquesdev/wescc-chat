@@ -8,6 +8,7 @@ import { newId } from '../lib/ids';
 import { bus, type Conn } from '../realtime/bus';
 import { hasPermission } from '../services/permissions';
 import { getSetting } from '../services/settings';
+import { mediaTypeList, readUpload } from '../services/uploads';
 import * as A from './admin';
 import * as S from './service';
 import { widgetHtml, widgetLoaderJs } from './widget';
@@ -32,7 +33,7 @@ export function omnichannelRoutes(app: FastifyInstance) {
 
   route(app, 'GET', 'livechat/config', { auth: false }, async (req) => {
     const enabled = getSetting<boolean>('Livechat_enabled');
-    const token = q(req).token;
+    const token = visitorToken(req);
     const departmentId = q(req).department || undefined;
     const visitor = token ? await S.getVisitorByToken(token) : null;
     const open = visitor ? await S.openRoomOf(visitor.id) : null;
@@ -51,6 +52,10 @@ export function omnichannelRoutes(app: FastifyInstance) {
           transcript: getSetting('Livechat_enable_transcript'),
           survey: getSetting('Livechat_enable_satisfaction_survey'),
           limitTextLength: getSetting<number>('Livechat_enable_message_character_limit') || getSetting<number>('Message_MaxAllowedSize'),
+          fileUpload: S.visitorUploadsEnabled(),
+          fileUploadMaxSize: getSetting<number>('FileUpload_MaxFileSize'),
+          fileUploadAcceptedTypes: mediaTypeList('FileUpload_MediaTypeWhiteList'),
+          fileUploadBlockedTypes: mediaTypeList('FileUpload_MediaTypeBlackList'),
         },
         theme: { title: getSetting('Livechat_title'), color: getSetting('Livechat_title_color'), offlineTitle: getSetting('Livechat_offline_title') },
         messages: {
@@ -74,13 +79,13 @@ export function omnichannelRoutes(app: FastifyInstance) {
     ensureEnabled();
     const v = b(req).visitor ?? {};
     const row = await S.registerVisitor(v, { ip: req.ip, userAgent: String(req.headers['user-agent'] ?? '') });
-    return { visitor: S.mapVisitor(row) };
+    return { visitor: S.mapVisitorPublic(row) };
   });
 
   route(app, 'GET', 'livechat/visitor/:token', { auth: false }, async (req) => {
     const v = await S.getVisitorByToken(P(req).token);
     if (!v) throw notFound('error-invalid-token', 'Visitante não encontrado.');
-    return { visitor: S.mapVisitor(v) };
+    return { visitor: S.mapVisitorPublic(v) };
   });
 
   route(app, 'GET', 'livechat/room', { auth: false }, async (req) => {
@@ -98,6 +103,17 @@ export function omnichannelRoutes(app: FastifyInstance) {
     if (!rid) rid = (await S.getOrCreateVisitorRoom(v, { departmentId: body.department })).rid;
     const message = await S.sendVisitorMessage(v, rid!, String(body.msg ?? ''), body._id);
     return { message };
+  });
+
+  // Arquivo do visitante: multipart com "file" e, opcionalmente, "msg" e "description".
+  route(app, 'POST', 'livechat/upload/:rid', { auth: false }, async (req) => {
+    ensureEnabled();
+    const v = await requireVisitor(req);
+    const rid = P(req).rid;
+    await S.assertVisitorCanUpload(v, rid, req.ip);
+    const { file, fields } = await readUpload(req);
+    if (!file) throw badRequest('error-invalid-params', 'Nenhum arquivo enviado.');
+    return { message: await S.sendVisitorFile(v, rid, file, fields) };
   });
 
   route(app, 'GET', 'livechat/messages.history/:rid', { auth: false }, async (req) => {

@@ -1,17 +1,16 @@
 import { SAML, ValidateInResponseTo, type CacheProvider, type Profile } from '@node-saml/node-saml';
 import type { FastifyInstance } from 'fastify';
-import { many, one, query } from '../db/pool';
+import { many, one } from '../db/pool';
 import { ApiError } from '../lib/errors';
-import { randomToken, sha256 } from '../lib/ids';
 import { audit } from '../services/audit';
 import { getSetting } from '../services/settings';
+import { issueSsoCredential, safeRedirect, siteUrl, ssoErrorPage as errorPage, ssoLoginUrl } from '../services/sso';
 
 // Login único via SAML 2.0 (SP-initiated): /saml/login redireciona ao IdP, /saml/acs recebe a
-// resposta, cria ou atualiza o usuário e devolve ao cliente web uma credencial de uso único,
-// trocada por uma sessão em POST /api/v1/login { saml: true, credentialToken }.
+// resposta, cria ou atualiza o usuário e devolve ao cliente web uma credencial de uso único
+// (services/sso.ts), trocada por uma sessão em POST /api/v1/login { saml: true, credentialToken }.
 
 const REQUEST_TTL_MIN = 10;
-const CREDENTIAL_TTL_SEC = 60;
 
 // IDs dos pedidos guardados no Postgres, para a resposta poder chegar a qualquer instância.
 const pgCache: CacheProvider = {
@@ -29,10 +28,6 @@ const pgCache: CacheProvider = {
     return r?.value ?? null;
   },
 };
-
-function siteUrl() {
-  return String(getSetting('Site_Url') || 'http://localhost:3000').replace(/\/+$/, '');
-}
 
 export function samlClient() {
   const cert = String(getSetting('SAML_IdP_Cert') ?? '').trim();
@@ -95,7 +90,13 @@ export async function upsertFromProfile(profile: Profile) {
   const name = attr(profile, getSetting<string>('SAML_Name_Attribute')) ?? username;
 
   let user = await one(`SELECT * FROM users WHERE auth_source = 'saml' AND external_id = $1`, [externalId]);
-  if (!user && email && getSetting('SAML_Merge_By_Email')) user = await one('SELECT * FROM users WHERE lower(email) = lower($1)', [email]);
+  if (!user && email && getSetting('SAML_Merge_By_Email')) {
+    user = await one('SELECT * FROM users WHERE lower(email) = lower($1)', [email]);
+    // Só vincula a contas com o e-mail confirmado (um cadastro com o e-mail de outra pessoa não "captura" o login dela).
+    if (user && !user.email_verified) {
+      throw new ApiError(409, 'error-saml-email-not-verified', 'A conta existente com este e-mail não tem o e-mail confirmado. Peça ao administrador para confirmá-lo antes de vincular.');
+    }
+  }
   if (!user) {
     if (!getSetting('SAML_Allow_New_Users')) throw new ApiError(403, 'error-saml-no-user', 'Usuário não cadastrado. Fale com o administrador.');
     const taken = await one('SELECT 1 FROM users WHERE lower(username) = lower($1)', [username]);
@@ -113,31 +114,6 @@ export async function upsertFromProfile(profile: Profile) {
     user = await one('UPDATE users SET roles = $2 WHERE id = $1 RETURNING *', [user.id, next]);
   }
   return user;
-}
-
-async function issueCredential(userId: string) {
-  const token = randomToken();
-  await query(`DELETE FROM saml_credentials WHERE expires_at < now()`);
-  await query(`INSERT INTO saml_credentials (token_hash, user_id, expires_at) VALUES ($1,$2, now() + make_interval(secs => $3))`, [sha256(token), userId, CREDENTIAL_TTL_SEC]);
-  return token;
-}
-
-// Usa (e apaga) a credencial de uso único gerada no /saml/acs.
-export async function consumeSamlCredential(token: string) {
-  const r = await one('DELETE FROM saml_credentials WHERE token_hash = $1 RETURNING user_id, expires_at', [sha256(String(token))]);
-  if (!r || new Date(r.expires_at).getTime() < Date.now()) return null;
-  return one('SELECT * FROM users WHERE id = $1', [r.user_id]);
-}
-
-// Só aceita voltar para caminhos internos.
-function safeRedirect(v: unknown) {
-  const s = String(v ?? '');
-  return s.startsWith('/') && !s.startsWith('//') && !s.startsWith('/\\') ? s : '/home';
-}
-
-function errorPage(message: string) {
-  const esc = message.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-  return `<!doctype html><meta charset="utf-8"><title>Falha no login</title><body style="font-family:sans-serif;max-width:520px;margin:60px auto"><h2>Não foi possível entrar com SSO</h2><p>${esc}</p><p><a href="/login">Voltar</a></p></body>`;
 }
 
 export function samlRoutes(app: FastifyInstance) {
@@ -162,10 +138,9 @@ export function samlRoutes(app: FastifyInstance) {
       if (!profile) throw new ApiError(400, 'error-saml-invalid', 'Resposta SAML sem perfil.');
       const user = await upsertFromProfile(profile);
       if (!user.active) throw new ApiError(403, 'error-user-inactive', 'Usuário desativado.');
-      const token = await issueCredential(user.id);
+      const { token, cookie } = await issueSsoCredential(user.id, 'saml');
       await audit({ id: user.id, username: user.username, ip: req.ip }, 'auth.saml.assertion', { nameID: profile.nameID, issuer: profile.issuer });
-      const redirect = safeRedirect(body.RelayState);
-      return reply.redirect(`/login?saml=${encodeURIComponent(token)}&next=${encodeURIComponent(redirect)}`);
+      return reply.header('set-cookie', cookie).header('cache-control', 'no-store').redirect(ssoLoginUrl('saml', token, safeRedirect(body.RelayState)));
     } catch (e: any) {
       await audit({ ip: req.ip, username: 'saml' }, 'auth.saml.failed', { error: String(e?.message ?? e).slice(0, 300) });
       return reply.code(e instanceof ApiError ? e.statusCode : 401).type('text/html').send(errorPage(e instanceof ApiError ? e.message : 'A resposta do provedor de identidade não pôde ser validada.'));

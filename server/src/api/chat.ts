@@ -25,7 +25,7 @@ import {
 } from '../services/messages';
 import { getReadReceipts } from '../services/reads';
 import { getRoomByName, loadRoomForUser, resolveRoom } from '../services/rooms';
-import { getFileForUser, listRoomFiles, saveUpload } from '../services/uploads';
+import { assertCanUpload, getFileForUser, getFileForVisitor, inlineMimeType, listRoomFiles, readUpload, safeMimeType, saveUpload } from '../services/uploads';
 import { b, bool, paging, q, route, str } from './http';
 
 export function chatRoutes(app: FastifyInstance) {
@@ -193,46 +193,38 @@ export function chatRoutes(app: FastifyInstance) {
   // ---------- Upload ----------
   const uploadHandler = async (req: any, _rep: any, ctx: any) => {
     const rid = req.params.rid;
-    const fields: Record<string, string> = {};
-    let result: any = null;
-    for await (const part of req.parts()) {
-      if (part.type === 'file') {
-        if (result) {
-          part.file.resume();
-          continue;
-        }
-        result = await saveUpload(ctx, rid, { stream: part.file, filename: part.filename, mimetype: part.mimetype }, fields);
-      } else {
-        fields[part.fieldname] = String(part.value ?? '');
-      }
-    }
-    if (!result) throw badRequest('error-invalid-params', 'Nenhum arquivo enviado.');
-    // Campos enviados depois do arquivo (msg/description) atualizam a mensagem.
-    if ((fields.msg || fields.description) && !result.msg) {
-      const { one: one2 } = await import('../db/pool');
-      const row = await one2(
-        `UPDATE messages SET msg = $2, attachments = jsonb_set(attachments, '{0,description}', to_jsonb($3::text)) WHERE id = $1 RETURNING *`,
-        [result._id, fields.msg ?? '', fields.description ?? ''],
-      );
-      const { withExtra } = await import('../services/messages');
-      const { bus } = await import('../realtime/bus');
-      result = withExtra(row);
-      bus.publish({ room: rid }, { type: 'message', action: 'updated', message: result });
-    }
-    return { message: result };
+    await assertCanUpload(ctx, rid);
+    const { file, fields } = await readUpload(req);
+    if (!file) throw badRequest('error-invalid-params', 'Nenhum arquivo enviado.');
+    return { message: await saveUpload(ctx, rid, file, fields) };
   };
   route(app, 'POST', 'rooms.upload/:rid', {}, uploadHandler);
   route(app, 'POST', 'rooms.media/:rid', {}, uploadHandler);
 
+  // O widget do livechat baixa com o cabeçalho x-visitor-token (nunca na URL).
+  const fileForRequest = async (req: any) => {
+    const visitorToken = String(req.headers['x-visitor-token'] ?? '');
+    if (!visitorToken) return getFileForUser(req.ctx, req.params.id);
+    try {
+      return await getFileForVisitor(visitorToken, req.params.id);
+    } catch (e) {
+      if (!req.ctx) throw e;
+      return getFileForUser(req.ctx, req.params.id);
+    }
+  };
   app.get('/file-upload/:id/*', async (req: any, reply) => {
-    const f = await getFileForUser(req.ctx, req.params.id);
-    const inline = /^(image|video|audio)\//.test(f.type) || f.type === 'application/pdf';
+    const f = await fileForRequest(req);
+    // Tipo revalidado também aqui (arquivos antigos podem ter um tipo como "image/png,text/html").
+    const type = safeMimeType(f.type);
+    const inline = inlineMimeType(type);
     const download = q(req).download !== undefined;
-    reply.header('Content-Type', f.type);
+    reply.header('Content-Type', type);
     reply.header('Content-Length', f.size);
     reply.header('Cache-Control', 'private, max-age=31536000');
     reply.header('X-Content-Type-Options', 'nosniff');
-    reply.header('Content-Security-Policy', "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'");
+    // sandbox impede formulários, scripts e navegação; o visualizador de PDF do navegador não funciona com ele.
+    const csp = "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'";
+    reply.header('Content-Security-Policy', type === 'application/pdf' ? csp : `${csp}; sandbox`);
     reply.header('Content-Disposition', `${inline && !download ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.name)}`);
     return reply.send(fs.createReadStream(f.absPath));
   });

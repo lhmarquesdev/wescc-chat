@@ -8,6 +8,8 @@ import { Field, Modal, Pager, Spinner, Toggle, UserAvatar, useAsync } from '../.
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
 
+const AUTH_LABEL: Record<string, string> = { local: 'Local', ldap: 'LDAP', saml: 'SAML' };
+
 export function AdminUsers() {
   const [params, setParams] = useSearchParams();
   const [filter, setFilter] = useState('');
@@ -73,7 +75,7 @@ export function AdminUsers() {
                     </span>
                   ))}
                 </td>
-                <td>{u.authSource}</td>
+                <td>{u.authSource === 'oauth' ? <span className="pill accent nowrap">OAuth{u.authProvider ? ` · ${u.authProvider}` : ''}</span> : (AUTH_LABEL[u.authSource] ?? u.authSource)}</td>
                 <td>{u.active ? '✅ ativo' : '⛔ desativado'}</td>
                 <td className="muted">{formatDateTime(u.lastLogin)}</td>
               </tr>

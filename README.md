@@ -69,3 +69,22 @@ Ative o Omnichannel em Administração › Configurações e cole no seu site:
 ```
 
 O código pronto aparece em Administração › Omnichannel › Instalação.
+
+Visitantes podem enviar arquivos pelo 📎, arrastando para a conversa ou colando imagens. Isso segue as regras de
+Administração › Configurações › Upload de arquivos (tamanho máximo e tipos) e pode ser desligado em
+Omnichannel › File Upload (`Livechat_fileupload_enabled`). O widget baixa os arquivos com o cabeçalho `x-visitor-token`,
+e cada visitante só tem acesso aos arquivos das próprias conversas.
+
+## Login com OAuth / OpenID Connect
+
+Em Administração › OAuth cadastre provedores Google, GitHub (inclusive Enterprise), GitLab (inclusive próprio),
+Microsoft Entra ID ou qualquer servidor OAuth 2.0 / OpenID Connect (Keycloak, Authentik, Okta...). Cada provedor ativo
+vira um botão na tela de login.
+
+- Cadastre no provedor a URL de callback mostrada na tela: `URL do site/oauth/<id>/callback` (a URL do site fica em
+  Configurações › Geral).
+- O fluxo usa authorization code com PKCE (S256) e `state` de uso único ligado ao navegador; o client secret nunca é
+  devolvido pela API.
+- Contas existentes só são vinculadas pelo e-mail quando a opção estiver ligada e o provedor confirmar o e-mail.
+- Papéis e canais podem ser sincronizados a cada login a partir de um claim (ex.: `groups`, `roles`, `realm_access.roles`),
+  com mapa JSON valor → papéis/canais; `admin` só é concedido por mapeamento explícito.
