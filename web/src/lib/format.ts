@@ -115,9 +115,23 @@ export function systemText(m: Message & Record<string, any>): string {
     case 'livechat-started':
       return 'Atendimento iniciado';
     case 'livechat-close':
+      if (!m.u._id || m.closer === 'visitor' || m.closer === 'system') return `Atendimento encerrado${m.msg ? `: ${m.msg}` : ''}`;
       return `${u} encerrou o atendimento${m.msg ? `: ${m.msg}` : ''}`;
-    case 'livechat_transfer_history':
-      return `Atendimento transferido: ${m.msg}`;
+    case 'livechat_transfer_history': {
+      const d = m.transferData ?? {};
+      const by = d.transferredBy?.username ?? u;
+      const note = d.comment ? ` — "${d.comment}"` : '';
+      if (d.scope === 'agent') return `${by} transferiu o atendimento para ${d.transferredTo?.name || d.transferredTo?.username}${note}`;
+      if (d.scope === 'department') return `${by} transferiu o atendimento para o departamento ${d.nextDepartment?.name}${note}`;
+      if (d.scope === 'queue') return `${by} devolveu o atendimento para a fila`;
+      return `Atendimento transferido${note}`;
+    }
+    case 'livechat_queue':
+      return m.msg;
+    case 'omnichannel_placed_chat_on_hold':
+      return `${u} colocou o atendimento em espera`;
+    case 'omnichannel_on_hold_chat_resumed':
+      return m.u._id ? `${u} retomou o atendimento` : 'O visitante retomou o atendimento';
     case 'livechat_navigation_history':
       return `Visitante navegou para ${m.msg}`;
     default:

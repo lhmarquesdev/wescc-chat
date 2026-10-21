@@ -7,6 +7,7 @@ import { logout } from '../lib/session';
 import { usePermission, useSetting, useStore } from '../lib/store';
 import { CreateModal, type CreateKind } from './CreateModal';
 import { Avatar, Menu, StatusDot, UserAvatar } from './ui';
+import { AgentStatusToggle } from '../pages/omnichannel/OmnichannelPage';
 
 function SidebarItem({ s }: { s: Subscription }) {
   const typing = useStore((st) => Object.keys(st.typing[s.rid] ?? {}).length > 0);
@@ -38,6 +39,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [filter, setFilter] = useState('');
   const [create, setCreate] = useState<CreateKind | null>(null);
   const [onlyUnread, setOnlyUnread] = useState(false);
+  const queueCount = useStore((st) => Object.keys(st.queue).length);
   const navigate = useNavigate();
 
   const groups = useMemo(() => {
@@ -122,6 +124,14 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </Menu>
         </div>
       </div>
+      {omni && isAgent && (
+        <div className="side-omni">
+          <AgentStatusToggle />
+          <button className="btn small" title="Fila de atendimento" onClick={() => (navigate('/omnichannel/queue'), onNavigate?.())}>
+            🎧 Fila {queueCount > 0 && <span className="badge mention">{queueCount}</span>}
+          </button>
+        </div>
+      )}
       <div className="side-search">
         <input placeholder="Buscar salas (Ctrl+K)" value={filter} onChange={(e) => setFilter(e.target.value)} id="sidebar-filter" />
         <button className={`icon-btn ${onlyUnread ? 'on' : ''}`} title="Somente não lidas" onClick={() => setOnlyUnread(!onlyUnread)}>

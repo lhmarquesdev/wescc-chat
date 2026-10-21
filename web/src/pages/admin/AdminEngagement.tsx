@@ -5,7 +5,7 @@ import { Spinner, Tabs, useAsync } from '../../components/ui';
 const WEEKDAYS = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 const TYPE_LABEL: Record<string, string> = { c: 'Canais públicos', p: 'Grupos privados', d: 'Mensagens diretas', l: 'Atendimentos' };
 
-function Bars({ data, height = 140, label }: { data: { x: string; y: number }[]; height?: number; label?: (d: { x: string; y: number }) => string }) {
+export function Bars({ data, height = 140, label }: { data: { x: string; y: number }[]; height?: number; label?: (d: { x: string; y: number }) => string }) {
   const max = Math.max(1, ...data.map((d) => d.y));
   const w = 100 / Math.max(1, data.length);
   return (

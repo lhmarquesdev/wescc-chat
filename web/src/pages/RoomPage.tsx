@@ -7,6 +7,7 @@ import { realtime } from '../lib/realtime';
 import { renderMarkdown } from '../lib/markdown';
 import { useSetting, useStore } from '../lib/store';
 import { Composer } from '../components/Composer';
+import { LIVECHAT_STATUS, LivechatActions } from '../components/LivechatPanel';
 import { CreateModal } from '../components/CreateModal';
 import { MessageList } from '../components/MessageList';
 import { RoomPanel, type PanelId } from '../components/RoomPanels';
@@ -14,20 +15,22 @@ import { ThreadPanel } from '../components/ThreadPanel';
 import { UserCard } from '../components/UserCard';
 import { Avatar, Menu, Spinner, StatusDot } from '../components/ui';
 
+const notLive = (r: Room) => r.t !== 'l';
 const PANELS: { id: PanelId; icon: string; label: string; when?: (r: Room) => boolean }[] = [
-  { id: 'info', icon: 'ℹ️', label: 'Informações' },
+  { id: 'livechat', icon: '🎧', label: 'Atendimento', when: (r) => r.t === 'l' },
+  { id: 'info', icon: 'ℹ️', label: 'Informações', when: notLive },
   { id: 'threads', icon: '💬', label: 'Threads' },
-  { id: 'discussions', icon: '🗨', label: 'Discussões', when: (r) => !r.prid },
+  { id: 'discussions', icon: '🗨', label: 'Discussões', when: (r) => !r.prid && notLive(r) },
   { id: 'team', icon: '👥', label: 'Canais do time', when: (r) => !!r.teamMain },
-  { id: 'members', icon: '🧑‍🤝‍🧑', label: 'Membros', when: (r) => r.t !== 'd' || (r.uids?.length ?? 0) > 2 },
+  { id: 'members', icon: '🧑‍🤝‍🧑', label: 'Membros', when: (r) => notLive(r) && (r.t !== 'd' || (r.uids?.length ?? 0) > 2) },
   { id: 'search', icon: '🔍', label: 'Buscar mensagens' },
   { id: 'files', icon: '📁', label: 'Arquivos' },
   { id: 'pinned', icon: '📌', label: 'Fixadas' },
   { id: 'starred', icon: '⭐', label: 'Favoritas' },
   { id: 'mentions', icon: '@', label: 'Menções' },
   { id: 'notifications', icon: '🔔', label: 'Notificações' },
-  { id: 'invite', icon: '🔗', label: 'Link de convite', when: (r) => r.t !== 'd' },
-  { id: 'prune', icon: '🧹', label: 'Limpar histórico', when: (r) => r.t !== 'd' },
+  { id: 'invite', icon: '🔗', label: 'Link de convite', when: (r) => r.t !== 'd' && notLive(r) },
+  { id: 'prune', icon: '🧹', label: 'Limpar histórico', when: (r) => r.t !== 'd' && notLive(r) },
 ];
 
 function TypingIndicator({ id }: { id: string }) {
@@ -45,6 +48,18 @@ function TypingIndicator({ id }: { id: string }) {
     <div className="typing">
       <strong>{names.slice(0, 3).join(', ')}</strong> {names.length === 1 ? 'está digitando' : 'estão digitando'}…
     </div>
+  );
+}
+
+function LivechatJoinBar({ rid }: { rid: string }) {
+  const room = useStore((s) => s.livechatRooms[rid]);
+  if (!room) return <span>Conversa de atendimento.</span>;
+  if (room.status === 'closed') return <span>Esta conversa foi encerrada {room.closedAt ? `em ${new Date(room.closedAt).toLocaleString('pt-BR')}` : ''}.</span>;
+  return (
+    <span>
+      {LIVECHAT_STATUS[room.status]}
+      {room.servedBy ? ` com @${room.servedBy.username}` : ''}. Você está acompanhando como supervisor.
+    </span>
   );
 }
 
@@ -190,6 +205,7 @@ export function RoomPage() {
             </div>
           </div>
           <div className="room-actions">
+            {room.t === 'l' && <LivechatActions rid={rid} onPanel={() => setPanel(panel === 'livechat' ? null : 'livechat')} />}
             {sub && (
               <button className="icon-btn" title={sub.f ? 'Remover dos favoritos' : 'Favoritar'} onClick={() => api.post('rooms.favorite', { roomId: rid, favorite: !sub.f })}>
                 {sub.f ? '★' : '☆'}
@@ -245,6 +261,7 @@ export function RoomPage() {
             quoting={quoting}
             setQuoting={setQuoting}
             onEditLast={editLast}
+            canned={room.t === 'l' ? { contactName: room.fname ?? '', agentName: me.name } : undefined}
           />
         ) : (
           <div className="join-bar">
@@ -255,6 +272,8 @@ export function RoomPage() {
                   Entrar no canal
                 </button>
               </>
+            ) : room.t === 'l' ? (
+              <LivechatJoinBar rid={rid} />
             ) : (
               <span>Você não participa desta sala.</span>
             )}

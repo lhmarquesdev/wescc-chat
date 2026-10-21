@@ -5,12 +5,14 @@ import { api, errorMessage } from '../lib/api';
 import { formatBytes, formatDateTime, formatRelative, roomIcon, roomPath } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
 import { canWithRoles, useStore } from '../lib/store';
+import { LivechatInfoPanel } from './LivechatPanel';
 import { UserPicker, type PickedUser } from './Pickers';
 import { Avatar, Empty, Field, Spinner, Toggle, UserAvatar, useAsync } from './ui';
 
-export type PanelId = 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune';
+export type PanelId = 'livechat' | 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune';
 
 const TITLES: Record<PanelId, string> = {
+  livechat: 'Atendimento',
   info: 'Informações da sala',
   threads: 'Threads',
   discussions: 'Discussões',
@@ -49,6 +51,7 @@ export function RoomPanel(p: Props) {
         </button>
       </div>
       <div className="panel-body">
+        {p.id === 'livechat' && <LivechatInfoPanel rid={p.room._id} />}
         {p.id === 'info' && <InfoPanel {...p} />}
         {p.id === 'threads' && <ThreadsPanel {...p} />}
         {p.id === 'discussions' && <DiscussionsPanel {...p} />}

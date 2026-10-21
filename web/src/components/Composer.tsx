@@ -31,6 +31,7 @@ export function Composer({
   quoting,
   setQuoting,
   onEditLast,
+  canned,
 }: {
   rid: string;
   tmid?: string;
@@ -42,6 +43,8 @@ export function Composer({
   quoting: Message | null;
   setQuoting: (m: Message | null) => void;
   onEditLast?: () => void;
+  // Atendimento: respostas prontas com "!atalho" e variáveis do contato/agente.
+  canned?: { contactName: string; contactEmail?: string; agentName: string };
 }) {
   const me = useStore((s) => s.me)!;
   const sendOnEnter = me.preferences?.sendOnEnter !== false;
@@ -96,6 +99,7 @@ export function Composer({
   };
 
   const reqSeq = useRef(0);
+  const cannedRef = useRef<any[] | null>(null);
   const computeSuggestions = useCallback(
     async (value: string, caret: number) => {
       // Respostas antigas do servidor não podem reabrir a lista depois do envio.
@@ -104,6 +108,32 @@ export function Composer({
         if (my === reqSeq.current) setSugs(list);
       };
       const before = value.slice(0, caret);
+      const cm = canned ? before.match(/(?:^|\s)!([\w-]*)$/) : null;
+      if (cm) {
+        cannedRef.current ??= (await api.get('canned-responses.get').catch(() => ({ responses: [] }))).responses;
+        const term = cm[1].toLowerCase();
+        const fill = (t: string) =>
+          t
+            .replace(/\{\{\s*contact\.name\s*\}\}/g, canned!.contactName)
+            .replace(/\{\{\s*contact\.email\s*\}\}/g, canned!.contactEmail ?? '')
+            .replace(/\{\{\s*agent\.name\s*\}\}/g, canned!.agentName);
+        put(
+          (cannedRef.current ?? [])
+            .filter((c: any) => c.shortcut.toLowerCase().startsWith(term) || (term.length > 1 && c.text.toLowerCase().includes(term)))
+            .slice(0, 10)
+            .map((c: any) => ({
+              key: c._id,
+              label: (
+                <>
+                  <strong>!{c.shortcut}</strong> <span className="muted">{c.text.slice(0, 80)}</span>
+                </>
+              ),
+              insert: fill(c.text),
+            })),
+        );
+        setSel(0);
+        return;
+      }
       const m = before.match(/(?:^|\s)([@#:])([^\s@#:]*)$/) ?? (before.match(/^\/([a-z0-9-]*)$/i) ? ([before, '/', before.slice(1)] as unknown as RegExpMatchArray) : null);
       if (!m) return put([]);
       const [, trig, term] = m;
@@ -137,7 +167,7 @@ export function Composer({
       }
       setSel(0);
     },
-    [rid],
+    [rid, canned],
   );
 
   const applySuggestion = (s: Suggestion) => {
@@ -145,7 +175,7 @@ export function Composer({
     const caret = el.selectionStart;
     const before = text.slice(0, caret);
     const after = text.slice(caret);
-    const start = before.search(/(?:[@#:]|^\/)[^\s@#:]*$/);
+    const start = before.search(/(?:[@#:]|^\/)[^\s@#:]*$|(?:^|(?<=\s))![\w-]*$/);
     const next = before.slice(0, start) + s.insert + after;
     setText(next);
     saveDraft(next);

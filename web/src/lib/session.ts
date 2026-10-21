@@ -24,18 +24,32 @@ export async function loadCustomEmoji() {
   if (r) setCustomEmoji(r.emojis.update);
 }
 
+export async function loadLivechat() {
+  const st = useStore.getState();
+  const me = st.me;
+  if (!me || !st.settings.Livechat_enabled) return;
+  if (!me.roles.some((r) => ['livechat-agent', 'livechat-manager', 'livechat-monitor', 'admin'].includes(r))) return;
+  const [q, status] = await Promise.all([api.get('livechat/inquiries.queuedForUser').catch(() => null), me.roles.includes('livechat-agent') ? api.get('livechat/agent.status').catch(() => null) : null]);
+  useStore.setState({
+    queue: q ? Object.fromEntries(q.inquiries.map((i: any) => [i.rid, i])) : {},
+    agentStatus: status?.status ?? null,
+  });
+}
+
 let started = false;
 
 export async function startSession() {
   const me = (await api.get('me')) as Me;
   useStore.getState().setMe(me);
   await Promise.all([loadSubscriptions(), loadCustomEmoji(), loadPermissionMap()]);
+  void loadLivechat();
   if (!started) {
     started = true;
     realtime.start(() => {
       // Ao reconectar, recarrega o que pode ter mudado.
       void loadSubscriptions();
       void api.get('me').then((m) => useStore.getState().setMe(m));
+      void loadLivechat();
     });
     realtime.on((ev) => {
       if (ev.type === 'notification') showNotification(ev);
