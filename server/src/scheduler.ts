@@ -1,18 +1,24 @@
 import cron from 'node-cron';
-import { query } from './db/pool';
+import { pool, query } from './db/pool';
 import { bus } from './realtime/bus';
 import { cleanupStaleConnections } from './realtime/ws';
 import { runRetention } from './services/retention';
 import { getSetting } from './services/settings';
 
 // Tarefas periódicas. Cada tarefa usa um advisory lock para rodar em uma só instância.
-async function withLock(key: number, fn: () => Promise<unknown>) {
-  const r = await query('SELECT pg_try_advisory_lock($1) AS ok', [key]);
-  if (!r.rows[0].ok) return;
+export async function withLock(key: number, fn: () => Promise<unknown>) {
+  // O advisory lock é da conexão: trava e destrava precisam usar o mesmo cliente.
+  const client = await pool.connect();
   try {
-    await fn();
+    const r = await client.query('SELECT pg_try_advisory_lock($1) AS ok', [key]);
+    if (!r.rows[0].ok) return;
+    try {
+      await fn();
+    } finally {
+      await client.query('SELECT pg_advisory_unlock($1)', [key]);
+    }
   } finally {
-    await query('SELECT pg_advisory_unlock($1)', [key]);
+    client.release();
   }
 }
 
@@ -32,6 +38,14 @@ export function startScheduler(log: (m: string) => void) {
       }).catch((e) => log(`limpeza falhou: ${e.message}`));
     }),
   );
+
+  // Omnichannel: fila, chats abandonados, espera e tempo máximo na fila.
+  const omni = setInterval(() => {
+    void withLock(727104, async () => {
+      const { runOmnichannelTimers } = await import('./omnichannel/service');
+      await runOmnichannelTimers();
+    }).catch((e) => log(`omnichannel falhou: ${e.message}`));
+  }, 30_000);
 
   let retentionExpr = '';
   let retentionTask: { stop(): void } | null = null;
@@ -70,6 +84,7 @@ export function startScheduler(log: (m: string) => void) {
 
   return () => {
     clearInterval(heartbeat);
+    clearInterval(omni);
     clearInterval(re);
     for (const t of tasks) t.stop();
     retentionTask?.stop();

@@ -143,7 +143,7 @@ export const DEFAULT_PERMISSIONS: [string, string, string[]][] = [
   ['manage-retention-policy', 'retention', [A]],
   // Omnichannel
   ['view-livechat-manager', 'omnichannel', [A, 'livechat-manager']],
-  ['view-livechat-rooms', 'omnichannel', [A, 'livechat-manager', 'livechat-monitor', 'livechat-agent']],
+  ['view-livechat-rooms', 'omnichannel', [A, 'livechat-manager', 'livechat-monitor']],
   ['view-l-room', 'omnichannel', [A, 'livechat-manager', 'livechat-monitor', 'livechat-agent']],
   ['close-livechat-room', 'omnichannel', [A, 'livechat-manager', 'livechat-agent']],
   ['transfer-livechat-guest', 'omnichannel', [A, 'livechat-manager', 'livechat-agent']],
@@ -161,6 +161,13 @@ export const DEFAULT_PERMISSIONS: [string, string, string[]][] = [
   ['view-livechat-queue', 'omnichannel', [A, 'livechat-manager', 'livechat-agent']],
   ['take-livechat-room', 'omnichannel', [A, 'livechat-manager', 'livechat-agent']],
   ['on-hold-livechat-room', 'omnichannel', [A, 'livechat-manager', 'livechat-agent']],
+  ['manage-livechat-monitors', 'omnichannel', [A, 'livechat-manager']],
+  ['manage-livechat-custom-fields', 'omnichannel', [A, 'livechat-manager']],
+  ['manage-livechat-triggers', 'omnichannel', [A, 'livechat-manager']],
+  ['view-livechat-contacts', 'omnichannel', [A, 'livechat-manager', 'livechat-monitor', 'livechat-agent']],
+  ['edit-livechat-contact', 'omnichannel', [A, 'livechat-manager', 'livechat-agent']],
+  ['remove-livechat-contact', 'omnichannel', [A, 'livechat-manager']],
+  ['view-livechat-offline-messages', 'omnichannel', [A, 'livechat-manager']],
 ];
 
 let permCache = new Map<string, Set<string>>();

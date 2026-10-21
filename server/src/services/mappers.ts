@@ -92,7 +92,7 @@ export function mapMessage(r: any): Message {
     _id: r.id,
     rid: r.room_id,
     msg: r.msg,
-    u: { _id: r.user_id, username: r.username, name: r.user_name },
+    u: { _id: r.user_id ?? r.extra?.visitorId ?? null, username: r.username, name: r.user_name },
     t: r.t,
     ts: r.created_at,
     _updatedAt: r.updated_at,

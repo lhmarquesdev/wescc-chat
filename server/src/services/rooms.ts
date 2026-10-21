@@ -46,7 +46,10 @@ export async function canAccessRoom(userId: string, room: any): Promise<boolean>
     }
     return hasPermission(userId, 'view-c-room');
   }
-  if (room.t === 'l') return hasPermission(userId, 'view-livechat-rooms');
+  if (room.t === 'l') {
+    const { canViewLivechatRoom } = await import('../omnichannel/service');
+    return canViewLivechatRoom(userId, room.id);
+  }
   return false;
 }
 
