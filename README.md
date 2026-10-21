@@ -10,7 +10,9 @@ Chat interno completo: canais, mensagens diretas, threads, discussões, times, o
 ## Rodando em desenvolvimento
 
 ```bash
-# 1. Banco
+# 1. Banco: com Docker
+docker compose up -d
+#    ou num PostgreSQL já instalado
 createuser chat -P            # senha: chat
 createdb chat -O chat
 
@@ -24,6 +26,8 @@ npm run build -w web
 cd server
 ADMIN_PASSWORD=troque-esta-senha npm run dev
 ```
+
+No Windows (PowerShell), defina a variável antes: `$env:ADMIN_PASSWORD="troque-esta-senha"; npm run dev`.
 
 Abra http://localhost:3000 e entre com `admin` e a senha definida.
 

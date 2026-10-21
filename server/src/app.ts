@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
@@ -56,7 +57,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   app.get('/health', async () => ({ ok: true }));
 
   // Cliente web (build do Vite), com fallback para o index.html (SPA).
-  const webDist = config.webDist ?? path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../web/dist');
+  const webDist = config.webDist ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
   if (fs.existsSync(path.join(webDist, 'index.html'))) {
     await app.register(fastifyStatic, { root: webDist, wildcard: false, index: false });
     // Relê o index.html quando o build muda (o nome dos assets muda a cada build).
