@@ -4,6 +4,7 @@ import { config } from '../config';
 // Datas sempre como string ISO para o JSON das respostas.
 pg.types.setTypeParser(1184, (v) => new Date(v).toISOString()); // timestamptz
 pg.types.setTypeParser(20, (v) => Number(v)); // bigint
+pg.types.setTypeParser(1082, (v) => v); // date: mantém AAAA-MM-DD, sem fuso
 
 export let pool = new pg.Pool({ connectionString: config.databaseUrl, max: 20 });
 

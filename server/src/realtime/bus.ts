@@ -178,9 +178,10 @@ class Bus {
   leaveRoom(userId: string, rid: string) {
     this.internal({ type: '_leave', userId, rid });
   }
-  publishSettings(settings: { _id: string; value: unknown }[]) {
-    this.forward({ i: { type: '_settings', settings } });
-    this.publish({ all: true }, { type: 'settings.changed', settings });
+  // Todas as alterações vão para o cache das outras instâncias; só as públicas chegam aos clientes.
+  publishSettings(settings: { _id: string; value: unknown }[], publicSettings: { _id: string; value: unknown }[]) {
+    void this.forward({ i: { type: '_settings', settings } });
+    if (publicSettings.length) this.publish({ all: true }, { type: 'settings.changed', settings: publicSettings });
   }
   permissionsChanged() {
     this.internal({ type: '_permissions' });

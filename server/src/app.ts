@@ -59,12 +59,19 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   const webDist = config.webDist ?? path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../web/dist');
   if (fs.existsSync(path.join(webDist, 'index.html'))) {
     await app.register(fastifyStatic, { root: webDist, wildcard: false, index: false });
-    const indexHtml = fs.readFileSync(path.join(webDist, 'index.html'));
+    // Relê o index.html quando o build muda (o nome dos assets muda a cada build).
+    const indexPath = path.join(webDist, 'index.html');
+    let cached = { mtime: 0, html: Buffer.alloc(0) };
+    const indexHtml = () => {
+      const mtime = fs.statSync(indexPath).mtimeMs;
+      if (mtime !== cached.mtime) cached = { mtime, html: fs.readFileSync(indexPath) };
+      return cached.html;
+    };
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api/')) {
         const file = path.join(webDist, decodeURIComponent(req.url.split('?')[0]));
         if (file.startsWith(webDist) && fs.existsSync(file) && fs.statSync(file).isFile()) return reply.sendFile(path.relative(webDist, file));
-        return reply.type('text/html').send(indexHtml);
+        return reply.type('text/html').header('cache-control', 'no-cache').send(indexHtml());
       }
       return reply.status(404).send({ success: false, error: 'Não encontrado.', errorType: 'error-not-found' });
     });

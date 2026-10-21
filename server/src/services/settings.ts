@@ -215,6 +215,7 @@ export async function updateSettings(values: Record<string, unknown>) {
   for (const [id, raw] of Object.entries(values)) {
     const def = defs.get(id);
     if (!def) continue;
+    if (def.type === 'password' && raw === '********') continue;
     const value = coerce(def, raw);
     await query(
       `INSERT INTO settings (id, value, updated_at) VALUES ($1, $2, now())
@@ -225,7 +226,10 @@ export async function updateSettings(values: Record<string, unknown>) {
     changed.push({ _id: id, value });
   }
   if (changed.length) {
-    bus.publishSettings(changed);
+    bus.publishSettings(
+      changed,
+      changed.filter((c) => defs.get(c._id)?.public && defs.get(c._id)?.type !== 'password'),
+    );
   }
   return changed;
 }

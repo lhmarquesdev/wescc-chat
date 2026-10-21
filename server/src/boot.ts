@@ -18,6 +18,7 @@ export async function boot(log: (m: string) => void = console.log) {
     bus.origin,
     JSON.stringify({ pid: process.pid, host: (await import('node:os')).hostname(), port: config.port }),
   ]);
-  await ensureAdmin(config.adminUsername, config.adminPassword, config.adminEmail, log);
+  // O canal padrão vem antes do admin para que ele já entre no canal ao ser criado.
   await ensureDefaultChannel();
+  await ensureAdmin(config.adminUsername, config.adminPassword, config.adminEmail, log);
 }
