@@ -109,3 +109,5 @@ export function connectWs(auth: Auth) {
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export const urlOf = (path: string) => `${baseUrl}${path}`;

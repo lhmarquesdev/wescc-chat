@@ -99,6 +99,7 @@ async function request<T = any>(method: string, path: string, data?: Params | Fo
 export const api = {
   get: <T = any>(path: string, params?: Params) => request<T>('GET', path, params),
   post: <T = any>(path: string, body?: Params | FormData) => request<T>('POST', path, body ?? {}),
+  put: <T = any>(path: string, body?: Params) => request<T>('PUT', path, body ?? {}),
   del: <T = any>(path: string) => request<T>('DELETE', path),
 };
 

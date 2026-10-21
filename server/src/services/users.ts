@@ -96,6 +96,8 @@ export async function createUser(input: CreateUserInput, actor?: Actor) {
     await joinDefaultChannels(id);
   }
   if (actor) await audit(actor, 'user.created', { userId: id, username: input.username }, { roles: row.roles });
+  const { emit } = await import('./hooks');
+  emit('user.created', { user: { _id: id, username: row.username, name: row.name, email: row.email } });
   return row;
 }
 

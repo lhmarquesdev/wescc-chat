@@ -160,17 +160,61 @@ add('Omnichannel', 'Routing', 'Livechat_Routing_Method', 'select', 'Auto_Selecti
   public: true,
   label: 'Método de roteamento',
   values: [
-    { key: 'Auto_Selection', label: 'Seleção automática (menos ocupado)' },
-    { key: 'Load_Balancing', label: 'Balanceamento de carga' },
-    { key: 'Load_Rotation', label: 'Rodízio' },
-    { key: 'Manual_Selection', label: 'Fila manual' },
+    { key: 'Auto_Selection', label: 'Seleção automática (próximo agente)' },
+    { key: 'Load_Balancing', label: 'Balanceamento de carga (menos chats abertos)' },
+    { key: 'Load_Rotation', label: 'Rodízio (quem recebeu há mais tempo)' },
+    { key: 'Manual_Selection', label: 'Fila manual (agentes pegam da fila)' },
+    { key: 'External', label: 'Serviço externo' },
   ],
 });
-add('Omnichannel', 'Routing', 'Livechat_maximum_chats_per_agent', 'int', 0, { label: 'Máximo de chats por agente (0 = ilimitado)' });
-add('Omnichannel', 'Routing', 'Livechat_auto_close_abandoned_rooms', 'int', 0, { label: 'Fechar chats abandonados após N segundos (0 = nunca)' });
+add('Omnichannel', 'Routing', 'Livechat_External_Queue_URL', 'string', '', { label: 'URL do serviço externo de roteamento' });
+add('Omnichannel', 'Routing', 'Livechat_External_Queue_Token', 'password', '', { label: 'Token do serviço externo' });
+add('Omnichannel', 'Routing', 'Livechat_maximum_chats_per_agent', 'int', 0, { label: 'Máximo de chats simultâneos por agente (0 = ilimitado)' });
+add('Omnichannel', 'Routing', 'Livechat_accept_chats_with_no_agents', 'boolean', false, { label: 'Aceitar chats sem agentes online (ficam na fila)' });
+add('Omnichannel', 'Routing', 'Livechat_assign_new_conversation_to_bot', 'boolean', false, { label: 'Atribuir novas conversas a agentes bot primeiro' });
+add('Omnichannel', 'Routing', 'Omnichannel_calculate_dispatch_service_queue_statistics', 'boolean', true, { label: 'Informar posição na fila ao visitante' });
+add('Omnichannel', 'Queue', 'Livechat_waiting_queue', 'boolean', true, { label: 'Ativar fila de espera' });
+add('Omnichannel', 'Queue', 'Livechat_waiting_queue_message', 'string', 'Todos os atendentes estão ocupados. Você é o número {position} da fila.', { public: true, label: 'Mensagem da fila ({position})' });
+add('Omnichannel', 'Queue', 'Livechat_max_queue_wait_time', 'int', 0, { label: 'Tempo máximo na fila em minutos (0 = sem limite)' });
+add('Omnichannel', 'Sessions', 'Livechat_auto_close_abandoned_rooms', 'int', 0, { label: 'Fechar chats abandonados pelo visitante após N segundos (0 = nunca)' });
+add('Omnichannel', 'Sessions', 'Livechat_abandoned_rooms_closed_custom_message', 'string', 'Chat encerrado por inatividade.', { label: 'Mensagem ao fechar por inatividade' });
+add('Omnichannel', 'Sessions', 'Livechat_auto_close_on_hold_chats_timeout', 'int', 0, { label: 'Fechar chats em espera após N segundos (0 = nunca)' });
+add('Omnichannel', 'Sessions', 'Livechat_allow_manual_on_hold', 'boolean', true, { label: 'Agentes podem colocar chats em espera' });
+add('Omnichannel', 'Sessions', 'Livechat_request_comment_when_closing_conversation', 'boolean', false, { public: true, label: 'Exigir comentário ao encerrar' });
+add('Omnichannel', 'Sessions', 'Livechat_enable_transcript', 'boolean', true, { public: true, label: 'Permitir transcrição por e-mail' });
+add('Omnichannel', 'Sessions', 'Livechat_transcript_message', 'string', 'Deseja receber a transcrição desta conversa por e-mail?', { public: true, label: 'Texto da transcrição' });
+add('Omnichannel', 'Sessions', 'Livechat_show_agent_info', 'boolean', true, { public: true, label: 'Mostrar dados do agente ao visitante' });
+add('Omnichannel', 'Sessions', 'Livechat_show_agent_email', 'boolean', false, { public: true, label: 'Mostrar e-mail do agente' });
+add('Omnichannel', 'Sessions', 'Livechat_enable_message_character_limit', 'int', 0, { public: true, label: 'Limite de caracteres das mensagens do visitante (0 = padrão)' });
+add('Omnichannel', 'Business Hours', 'Livechat_enable_business_hours', 'boolean', false, { public: true, label: 'Respeitar horário de atendimento' });
+add('Omnichannel', 'Business Hours', 'Livechat_business_hour_type', 'select', 'Single', {
+  label: 'Tipo de horário',
+  values: [
+    { key: 'Single', label: 'Único para todos' },
+    { key: 'Multiple', label: 'Por departamento' },
+  ],
+});
 add('Omnichannel', 'Widget', 'Livechat_title', 'string', 'Fale conosco', { public: true, label: 'Título do widget' });
 add('Omnichannel', 'Widget', 'Livechat_title_color', 'string', '#1d74f5', { public: true, label: 'Cor do widget' });
+add('Omnichannel', 'Widget', 'Livechat_offline_title', 'string', 'Deixe uma mensagem', { public: true, label: 'Título offline' });
 add('Omnichannel', 'Widget', 'Livechat_offline_message', 'string', 'Estamos offline. Deixe sua mensagem.', { public: true, label: 'Mensagem offline' });
+add('Omnichannel', 'Widget', 'Livechat_offline_success_message', 'string', 'Obrigado! Responderemos em breve.', { public: true, label: 'Mensagem após enviar o formulário offline' });
+add('Omnichannel', 'Widget', 'Livechat_display_offline_form', 'boolean', true, { public: true, label: 'Exibir formulário offline' });
+add('Omnichannel', 'Widget', 'Livechat_offline_email', 'string', '', { label: 'E-mail que recebe as mensagens offline' });
+add('Omnichannel', 'Widget', 'Livechat_registration_form', 'boolean', true, { public: true, label: 'Formulário de identificação antes do chat' });
+add('Omnichannel', 'Widget', 'Livechat_name_field_registration_form', 'boolean', true, { public: true, label: 'Pedir nome' });
+add('Omnichannel', 'Widget', 'Livechat_email_field_registration_form', 'boolean', true, { public: true, label: 'Pedir e-mail' });
+add('Omnichannel', 'Widget', 'Livechat_registration_form_message', 'string', 'Antes de começar, conte quem é você.', { public: true, label: 'Texto do formulário' });
+add('Omnichannel', 'Widget', 'Livechat_conversation_finished_message', 'string', 'Conversa encerrada. Obrigado pelo contato!', { public: true, label: 'Mensagem de conversa encerrada' });
+add('Omnichannel', 'Widget', 'Livechat_enable_satisfaction_survey', 'boolean', true, { public: true, label: 'Pesquisa de satisfação ao encerrar' });
+add('Omnichannel', 'Widget', 'Livechat_allowed_domains', 'string', '', { label: 'Domínios onde o widget pode ser embutido (vírgula, vazio = todos)' });
+
+// ---------- Integrações ----------
+add('Integrations', 'General', 'Integrations_Enabled', 'boolean', true, { label: 'Ativar integrações (webhooks)' });
+add('Integrations', 'Scripts', 'Integrations_Scripts_Enabled', 'boolean', false, {
+  label: 'Permitir scripts nas integrações (código JavaScript escrito por administradores)',
+});
+add('Integrations', 'Outgoing', 'Integrations_Outgoing_Timeout', 'int', 10, { label: 'Tempo limite das chamadas de saída (segundos)' });
 
 const cache = new Map<string, unknown>();
 

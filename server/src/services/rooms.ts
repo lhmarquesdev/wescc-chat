@@ -9,6 +9,7 @@ import { sendSystemMessage } from './messages';
 import { hasPermission, rolesHavePermission, getUserRoles } from './permissions';
 import { getSetting } from './settings';
 import { actorOf, getUserById, type Ctx } from './users';
+import { emit } from './hooks';
 
 const ROOM_NAME_RE = /^[0-9a-zA-ZÀ-ſ._-]{1,64}$/;
 
@@ -181,6 +182,7 @@ export async function addUserToRoom(
   };
   if (opts.db) setImmediate(() => void after().catch(() => {}));
   else await after();
+  emit('room.joined', { room, user: { _id: user.id, username: user.username } });
   return sub;
 }
 
@@ -200,6 +202,7 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
     if (opts.by && opts.by.id !== userId) await sendSystemMessage(rid, 'ru', opts.by, user.username);
     else await sendSystemMessage(rid, 'ul', { id: user.id, username: user.username }, user.username);
   }
+  if (user) emit('room.left', { room, user: { _id: user.id, username: user.username } });
 }
 
 export async function joinDefaultChannels(userId: string) {
@@ -294,6 +297,7 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
   if (ctx) await audit(actorOf(ctx), 'room.created', { rid: id, name: input.name, t: input.type });
   const room = await getRoom(id);
   if (room.t === 'c') bus.publish({ all: true }, { type: 'room', action: 'inserted', room: mapRoom(room) });
+  emit('room.created', { room, owner: owner ? { _id: owner.id, username: owner.username } : null });
   return room;
 }
 
@@ -495,6 +499,7 @@ export async function setArchived(ctx: Ctx, rid: string, archived: boolean) {
   await sendSystemMessage(rid, archived ? 'room-archived' : 'room-unarchived', { id: ctx.userId, username: ctx.username }, '');
   await audit(actorOf(ctx), archived ? 'room.archived' : 'room.unarchived', { rid, name: room.name });
   await notifyRoomUpdated(rid);
+  if (archived) emit('room.archived', { room, by: { _id: ctx.userId, username: ctx.username } });
 }
 
 export async function deleteRoom(ctx: Ctx, rid: string) {

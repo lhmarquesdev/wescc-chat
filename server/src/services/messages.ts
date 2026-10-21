@@ -11,6 +11,7 @@ import { canAccessRoom, getRoom, getSubscriptionRow, loadRoomForUser, notifyRoom
 import { getSetting } from './settings';
 import { recordActivity } from './stats';
 import { actorOf, type Ctx } from './users';
+import { emit } from './hooks';
 
 const MENTION_RE = /(?:^|[\s(>"'])@([0-9a-zA-Z._-]+)/g;
 const CHANNEL_RE = /(?:^|[\s(])#([0-9a-zA-ZÀ-ſ._-]+)/g;
@@ -113,7 +114,8 @@ export async function canPostInRoom(ctx: Ctx, room: any) {
   return roles;
 }
 
-export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipCommands?: boolean } = {}) {
+// trusted: mensagens de integrações, que podem definir apelido e avatar próprios.
+export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipCommands?: boolean; trusted?: boolean } = {}) {
   const room = await getRoom(input.rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   const roles = (await canPostInRoom(ctx, room)) ?? (await getUserRoles(ctx.userId, room.id));
@@ -128,7 +130,7 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
     if (handled !== false) return handled;
   }
 
-  if ((input.alias || input.avatar) && !rolesHavePermission(roles, 'message-impersonate')) throw forbidden('Sem permissão para personificar.');
+  if ((input.alias || input.avatar) && !opts.trusted && !rolesHavePermission(roles, 'message-impersonate')) throw forbidden('Sem permissão para personificar.');
 
   let tmid: string | null = input.tmid ?? null;
   let parent: any = null;
@@ -218,6 +220,8 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
   await markReadInternal(ctx.userId, room.id);
   if (room.t === 'c' || room.t === 'p') await notifyRoomUpdated(room.id);
   else bus.publish({ room: room.id }, { type: 'room', action: 'updated', room: (await import('./mappers')).mapRoom(await getRoom(room.id)) });
+  emit('message.sent', { room, message, user: { _id: ctx.userId, username: ctx.username, name: me?.name } });
+  if (input.files?.length) emit('file.uploaded', { room, message, file: input.files[0], user: { _id: ctx.userId, username: ctx.username } });
   return message;
 }
 
@@ -300,6 +304,7 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   if (!own) await audit(actorOf(ctx), 'message.edited', { rid: m.room_id, msgId: m.id, author: m.username });
   const message = withExtra(row);
   bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message });
+  emit('message.updated', { room, message });
   return message;
 }
 
