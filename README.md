@@ -100,6 +100,21 @@ Para funcionar:
 
 Contas LDAP e contas que só entram por SAML/OAuth seguem o provedor e não recebem o link.
 
+## App instalável e notificações push
+
+O cliente web é um PWA: no Chrome ou no Edge use "Instalar app" na barra de endereço; no celular, "Adicionar à tela
+inicial" (no iPhone, as notificações só funcionam com o app adicionado à tela inicial).
+
+Com a permissão de notificações dada, o navegador se inscreve para push e recebe menções e DMs mesmo com o chat
+fechado. O push só é enviado para quem não está com o chat aberto em nenhum lugar, e cada pessoa pode desligá-lo por
+dispositivo em Minha conta › Preferências.
+
+- As chaves VAPID são geradas no primeiro boot e ficam nas configurações (Segurança › Push), onde o push também pode
+  ser desligado ou ter o conteúdo oculto.
+- O servidor precisa de acesso de saída aos serviços de push dos navegadores (Google, Mozilla, Apple, Microsoft), e
+  o site precisa estar em HTTPS (ou em `localhost`).
+- A inscrição é apagada junto com a sessão: ao sair, o dispositivo deixa de receber.
+
 ## Segurança
 
 - Troca de senha obrigatória e 2FA obrigatório (geral ou por papel) são cobrados pelo servidor: até a pendência ser

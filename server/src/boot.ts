@@ -10,6 +10,8 @@ import { ensureAdmin } from './services/users';
 export async function boot(log: (m: string) => void = console.log) {
   await migrate(log);
   await loadSettings();
+  const { ensureVapidKeys } = await import('./services/push');
+  await ensureVapidKeys();
   await seedPermissions();
   await loadPermissions();
   bus.onSettings((s) => s.forEach((x) => setSettingCache(x._id, x.value)));

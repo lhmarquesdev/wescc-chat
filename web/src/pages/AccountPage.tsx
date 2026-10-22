@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
 import { formatDateTime } from '../lib/format';
+import { disablePushHere, enablePushHere, pushEnabledHere, pushSupported, syncPushSubscription } from '../lib/push';
 import { endSession, startSession } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
 import { Avatar, Field, Spinner, Toggle, useAsync } from '../components/ui';
@@ -164,12 +165,34 @@ function Preferences() {
       <Toggle checked={p.notificationSound !== false} onChange={(v) => save({ notificationSound: v })} label="Som de notificação" />
       <Toggle checked={p.sendOnEnter !== false} onChange={(v) => save({ sendOnEnter: v })} label="Enter envia (Shift+Enter quebra linha)" />
       {'Notification' in window && Notification.permission !== 'granted' && (
-        <button className="btn" onClick={() => Notification.requestPermission()}>
+        <button className="btn" onClick={() => Notification.requestPermission().then((r) => r === 'granted' && syncPushSubscription())}>
           Permitir notificações do navegador
         </button>
       )}
+      <PushToggle />
     </div>
   );
+}
+
+// Push neste navegador: chega mesmo com o chat fechado (no celular, com o app instalado na tela inicial).
+function PushToggle() {
+  const enabled = useSetting<boolean>('Push_enable');
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    void pushEnabledHere().then(setOn);
+  }, []);
+  if (!enabled || !pushSupported() || on === null) return null;
+  const change = async (v: boolean) => {
+    if (v) {
+      const ok2 = await enablePushHere();
+      setOn(ok2);
+      if (!ok2) fail(new Error('Não foi possível ativar. Confira se as notificações deste site estão permitidas no navegador.'));
+    } else {
+      await disablePushHere();
+      setOn(false);
+    }
+  };
+  return <Toggle checked={on} onChange={(v) => void change(v)} label="Notificações push neste dispositivo (mesmo com o chat fechado)" />;
 }
 
 export function applyTheme(theme: string) {

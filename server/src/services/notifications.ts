@@ -27,6 +27,9 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
   const hidePush = getSetting<boolean>('Push_Privacy_Hide_Content');
   const text = row.msg || (row.files?.length ? `📎 ${row.files[0].name}` : '');
   const emailEnabled = getSetting<boolean>('Email_Notifications_Enabled');
+  const pushTargets: string[] = [];
+  const title = isDM ? (room.uids.length > 2 ? `${ctx.username} em ${roomName}` : ctx.username) : `#${roomName}`;
+  const body = hidePush ? 'Você tem uma nova mensagem' : `${isDM ? '' : `${ctx.username}: `}${text}`.slice(0, 300);
 
   for (const m of members) {
     const prefs = m.notifications ?? {};
@@ -39,16 +42,9 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
     if (notify) {
       bus.publish(
         { user: m.user_id },
-        {
-          type: 'notification',
-          rid: room.id,
-          title: isDM ? (room.uids.length > 2 ? `${ctx.username} em ${roomName}` : ctx.username) : `#${roomName}`,
-          text: hidePush ? 'Você tem uma nova mensagem' : `${isDM ? '' : `${ctx.username}: `}${text}`.slice(0, 300),
-          messageId: row.id,
-          sender: { _id: ctx.userId, username: ctx.username },
-          tmid: row.tmid,
-        },
+        { type: 'notification', rid: room.id, title, text: body, messageId: row.id, sender: { _id: ctx.userId, username: ctx.username }, tmid: row.tmid },
       );
+      pushTargets.push(m.user_id);
     }
     // E-mail para quem está offline e foi mencionado (ou recebeu DM).
     const emailPref = prefs.email && prefs.email !== 'default' ? prefs.email : m.preferences?.emailNotificationMode ?? 'mentions';
@@ -60,6 +56,18 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
         subject: `[${site}] ${isDM ? `Mensagem direta de ${ctx.username}` : `Você foi mencionado em #${roomName}`}`,
         text: `${ctx.username}: ${hidePush ? '(conteúdo oculto)' : text}\n\nAbrir: ${url}`,
       });
+    }
+  }
+
+  // Push só para quem não está com o chat aberto em nenhum lugar (quem está recebe a notificação pelo WebSocket).
+  if (pushTargets.length && getSetting('Push_enable')) {
+    const online = new Set((await many('SELECT DISTINCT user_id FROM presence_connections WHERE user_id = ANY($1)', [pushTargets])).map((r) => r.user_id));
+    const offline = pushTargets.filter((id) => !online.has(id));
+    if (offline.length) {
+      const { sendPush } = await import('./push');
+      const base = isDM ? 'direct' : room.t === 'p' ? 'group' : room.t === 'l' ? 'live' : 'channel';
+      const path = `/${base}/${room.id}${row.tmid ? `/thread/${row.tmid}` : ''}`;
+      void sendPush(offline, { title, body, url: path, tag: room.id }).catch(() => {});
     }
   }
 }

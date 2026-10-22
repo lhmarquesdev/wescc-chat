@@ -125,6 +125,22 @@ export function usersRoutes(app: FastifyInstance) {
     return {};
   });
 
+  // ---------- Notificações push (Web Push) ----------
+  route(app, 'GET', 'push.info', {}, async (_req, _rep, ctx) => {
+    const { pushInfo } = await import('../services/push');
+    return pushInfo(ctx.userId);
+  });
+  route(app, 'POST', 'push.webSubscribe', {}, async (req, _rep, ctx) => {
+    const { saveSubscription } = await import('../services/push');
+    await saveSubscription(ctx.userId, ctx.sessionId, b(req).subscription, req.headers['user-agent']);
+    return {};
+  });
+  route(app, 'POST', 'push.webUnsubscribe', {}, async (req, _rep, ctx) => {
+    const { removeSubscription } = await import('../services/push');
+    await removeSubscription(ctx.userId, str(b(req).endpoint, 'endpoint', { max: 2048 }));
+    return {};
+  });
+
   // ---------- Sessões / dispositivos ----------
   route(app, 'GET', 'sessions.list', {}, async (req, _rep, ctx) => {
     const r = await listSessions({ userId: ctx.userId, ...paging(q(req)) });

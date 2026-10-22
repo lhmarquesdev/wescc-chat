@@ -1,5 +1,6 @@
 import { api, getCredentials, setCredentials, setUnauthorizedHandler } from './api';
 import { setCustomEmoji } from './emoji';
+import { syncPushSubscription, unsubscribeOnLogout } from './push';
 import { realtime } from './realtime';
 import { useStore, type Me } from './store';
 import { roomPath } from './format';
@@ -45,6 +46,7 @@ export async function startSession() {
   if (me.requirePasswordChange || me.require2faSetup) return me;
   await Promise.all([loadSubscriptions(), loadCustomEmoji(), loadPermissionMap()]);
   void loadLivechat();
+  void syncPushSubscription();
   if (!started) {
     started = true;
     realtime.start(() => {
@@ -87,6 +89,7 @@ export async function logout() {
 }
 
 export function endSession() {
+  void unsubscribeOnLogout();
   setCredentials(null);
   realtime.stop();
   started = false;
@@ -159,5 +162,7 @@ function showNotification(ev: { rid: string; title: string; text: string; messag
 }
 
 export function requestNotificationPermission() {
-  if ('Notification' in window && Notification.permission === 'default') void Notification.requestPermission();
+  if ('Notification' in window && Notification.permission === 'default') {
+    void Notification.requestPermission().then((p) => p === 'granted' && syncPushSubscription());
+  }
 }
