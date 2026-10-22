@@ -9,6 +9,7 @@ import { pool } from '../db/pool';
 // via LISTEN/NOTIFY do PostgreSQL, sem broker externo e sem limite de instâncias.
 
 export type Target =
+  | { conn: string }
   | { room: string }
   | { user: string }
   | { users: string[] }
@@ -128,6 +129,8 @@ class Bus {
   private deliverLocal(target: Target, ev: ServerEvent) {
     if ('all' in target) {
       for (const c of this.conns.values()) if (c.kind !== 'visitor') c.send(ev);
+    } else if ('conn' in target) {
+      this.conns.get(target.conn)?.send(ev);
     } else if ('user' in target) {
       for (const c of this.byUser.get(target.user) ?? []) c.send(ev);
     } else if ('users' in target) {

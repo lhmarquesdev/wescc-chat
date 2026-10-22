@@ -34,6 +34,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const connected = useStore((s) => s.connected);
   const siteName = useSetting<string>('Site_Name');
   const omni = useSetting<boolean>('Livechat_enabled');
+  const callsEnabled = useSetting<boolean>('Calls_Enabled');
   const isAgent = me.roles.includes('livechat-agent') || me.roles.includes('livechat-manager') || me.roles.includes('admin');
   const canAdmin = usePermission(['view-administration', 'view-user-administration', 'view-room-administration', 'access-permissions', 'view-statistics', 'can-audit', 'view-engagement-dashboard']);
   const [filter, setFilter] = useState('');
@@ -112,6 +113,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <button className="icon-btn" title="Diretório" onClick={() => navigate('/directory')}>
             🧭
           </button>
+          {callsEnabled && (
+            <button className="icon-btn" title="Chamadas" onClick={() => navigate('/calls')}>
+              📞
+            </button>
+          )}
           <Menu trigger={<button className="icon-btn" title="Criar">✎</button>}>
             {(close) => (
               <>

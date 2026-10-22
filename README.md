@@ -115,6 +115,18 @@ dispositivo em Minha conta › Preferências.
   o site precisa estar em HTTPS (ou em `localhost`).
 - A inscrição é apagada junto com a sessão: ao sair, o dispositivo deixa de receber.
 
+## Chamadas de voz e vídeo
+
+Em qualquer mensagem direta entre duas pessoas, os botões 📞 e 🎥 no topo da conversa ligam para a outra pessoa, que
+recebe o toque em todos os dispositivos com o chat aberto (e uma notificação push se estiver com o chat fechado). Dá
+para atender só com áudio, desligar o microfone ou a câmera, compartilhar a tela e ampliar a janela. Cada chamada fica
+registrada na conversa e no histórico em 📞 Chamadas, na barra lateral.
+
+- O áudio e o vídeo vão direto entre os navegadores (WebRTC); o servidor só repassa a sinalização e guarda o histórico.
+- Na mesma rede isso funciona sem configuração. Para chamadas entre redes diferentes (casa e escritório, 4G), configure
+  um servidor TURN (por exemplo o coturn) em Administração › Configurações › Videoconferência.
+- Fora de `localhost`, o navegador só libera câmera e microfone com o site em HTTPS.
+
 ## Segurança
 
 - Troca de senha obrigatória e 2FA obrigatório (geral ou por papel) são cobrados pelo servidor: até a pendência ser

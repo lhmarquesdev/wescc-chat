@@ -5,12 +5,14 @@ import { loadPublicSettings, logout, requestNotificationPermission, startSession
 import { useStore } from './lib/store';
 import { Sidebar } from './components/Sidebar';
 import { Spinner, Toasts } from './components/ui';
+import { CallOverlay } from './components/CallOverlay';
 import { ChangePasswordPage, ForgotPasswordPage, InvitePage, LoginPage, RegisterPage, ResetPasswordPage } from './pages/AuthPages';
 import { DirectoryPage, HomePage } from './pages/HomeDirectory';
 import { RoomPage } from './pages/RoomPage';
 import { AccountPage, applyTheme, TwoFactorCard } from './pages/AccountPage';
 import { AdminPage } from './pages/admin/AdminPage';
 import { OmnichannelPage } from './pages/omnichannel/OmnichannelPage';
+import { CallsPage } from './pages/CallsPage';
 
 function useCustomCss() {
   const css = useStore((s) => s.settings.Layout_Custom_CSS as string | undefined);
@@ -89,6 +91,7 @@ function Protected() {
         {!connected && <div className="offline-bar">Reconectando…</div>}
         <Outlet />
       </main>
+      <CallOverlay />
     </div>
   );
 }
@@ -124,6 +127,7 @@ function Shell() {
           {['channel', 'group', 'direct', 'live'].map((t) => (
             <Route key={t} path={`/${t}/:rid/*`} element={<RoomPage />} />
           ))}
+          <Route path="/calls" element={<CallsPage />} />
           <Route path="/account" element={<Navigate to="/account/profile" replace />} />
           <Route path="/account/:section" element={<AccountPage />} />
           <Route path="/admin" element={<Navigate to="/admin/info" replace />} />

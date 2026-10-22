@@ -5,6 +5,7 @@ import { api, errorMessage } from '../lib/api';
 import { roomDisplayName, roomIcon, roomPath, STATUS_LABEL } from '../lib/format';
 import { realtime } from '../lib/realtime';
 import { renderMarkdown } from '../lib/markdown';
+import { startCall } from '../lib/calls';
 import { useSetting, useStore } from '../lib/store';
 import { Composer } from '../components/Composer';
 import { LIVECHAT_STATUS, LivechatActions } from '../components/LivechatPanel';
@@ -81,6 +82,7 @@ export function RoomPage() {
   const panel = params.get('tab') as PanelId | null;
   const presence = useStore((s) => (room?.t === 'd' && sub && !sub.name.includes(',') ? s.presence[sub.name] : undefined));
   const threadsOn = useSetting<boolean>('Threads_enabled');
+  const callsEnabled = useSetting<boolean>('Calls_Enabled');
 
   const loadRoom = useCallback(async () => {
     try {
@@ -206,6 +208,16 @@ export function RoomPage() {
           </div>
           <div className="room-actions">
             {room.t === 'l' && <LivechatActions rid={rid} onPanel={() => setPanel(panel === 'livechat' ? null : 'livechat')} />}
+            {dmUser && callsEnabled && room.uids?.length === 2 && (
+              <>
+                <button className="icon-btn" title="Chamada de voz" onClick={() => void startCall(rid, 'audio')}>
+                  📞
+                </button>
+                <button className="icon-btn" title="Chamada de vídeo" onClick={() => void startCall(rid, 'video')}>
+                  🎥
+                </button>
+              </>
+            )}
             {sub && (
               <button className="icon-btn" title={sub.f ? 'Remover dos favoritos' : 'Favoritar'} onClick={() => api.post('rooms.favorite', { roomId: rid, favorite: !sub.f })}>
                 {sub.f ? '★' : '☆'}

@@ -59,6 +59,8 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   samlRoutes(app);
   const { oauthRoutes } = await import('./oauth/api');
   oauthRoutes(app);
+  const { callsRoutes } = await import('./api/calls');
+  callsRoutes(app);
 
   app.get('/health', async () => ({ ok: true }));
 

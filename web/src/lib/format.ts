@@ -48,6 +48,15 @@ export function formatRelative(iso?: string | null) {
   return new Date(iso).toLocaleDateString('pt-BR');
 }
 
+export function formatDuration(seconds: number) {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h) return `${h} h ${m} min`;
+  if (m) return `${m} min ${s % 60} s`;
+  return `${s} s`;
+}
+
 export function formatBytes(n?: number) {
   if (!n && n !== 0) return '';
   if (n < 1024) return `${n} B`;
@@ -132,6 +141,13 @@ export function systemText(m: Message & Record<string, any>): string {
       return `${u} colocou o atendimento em espera`;
     case 'omnichannel_on_hold_chat_resumed':
       return m.u._id ? `${u} retomou o atendimento` : 'O visitante retomou o atendimento';
+    case 'call_ended':
+      return `${m.call?.kind === 'video' ? '🎥 Chamada de vídeo' : '📞 Chamada de voz'} · ${formatDuration(m.call?.duration ?? 0)}`;
+    case 'call_missed': {
+      const what = m.call?.kind === 'video' ? 'Chamada de vídeo' : 'Chamada de voz';
+      const why: Record<string, string> = { missed: 'não atendida', declined: 'recusada', canceled: 'cancelada', busy: 'não atendida (ocupado)' };
+      return `📵 ${what} de ${u} ${why[m.call?.status] ?? 'não atendida'}`;
+    }
     case 'livechat_navigation_history':
       return `Visitante navegou para ${m.msg}`;
     default:

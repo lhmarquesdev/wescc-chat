@@ -45,6 +45,8 @@ export function startScheduler(log: (m: string) => void) {
     void withLock(727104, async () => {
       const { runOmnichannelTimers } = await import('./omnichannel/service');
       await runOmnichannelTimers();
+      const { sweepCalls } = await import('./services/calls');
+      await sweepCalls();
     }).catch((e) => log(`omnichannel falhou: ${e.message}`));
   }, 30_000);
 

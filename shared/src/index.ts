@@ -314,7 +314,7 @@ export interface OAuthPreset {
 }
 
 export type ServerEvent =
-  | { type: 'connected'; userId: string; sessionId: string }
+  | { type: 'connected'; userId: string; sessionId: string; connectionId: string }
   | { type: 'message'; action: 'inserted' | 'updated'; message: Message }
   | { type: 'message.deleted'; rid: string; _id: string; tmid?: string | null }
   | { type: 'messages.bulkDeleted'; rid: string; ids?: string[]; before?: string; filesOnly?: boolean }
@@ -331,7 +331,32 @@ export type ServerEvent =
   | { type: 'livechat.inquiry'; action: 'queued' | 'taken' | 'removed'; inquiry: LivechatInquiry }
   | { type: 'livechat.room'; room: LivechatRoomInfo }
   | { type: 'livechat.agentStatus'; status: LivechatAgentStatus }
+  | { type: 'call'; call: Call }
+  | { type: 'call.signal'; callId: string; data: CallSignal }
   | { type: 'pong' };
+
+// ---------- Chamadas (WebRTC em mensagens diretas) ----------
+
+export type CallKind = 'audio' | 'video';
+export type CallStatus = 'ringing' | 'ongoing' | 'ended' | 'missed' | 'declined' | 'canceled' | 'busy';
+
+export interface Call {
+  _id: string;
+  rid: string;
+  kind: CallKind;
+  status: CallStatus;
+  caller: UserRef;
+  callee: UserRef;
+  callerConnectionId: string;
+  calleeConnectionId: string | null;
+  createdAt: string;
+  answeredAt: string | null;
+  endedAt: string | null;
+  endedBy: string | null;
+  duration: number | null; // segundos
+}
+
+export type CallSignal = { sdp: { type: 'offer' | 'answer'; sdp: string } } | { candidate: Record<string, unknown> | null };
 
 // ---------- Omnichannel ----------
 
@@ -401,7 +426,8 @@ export type ClientEvent =
   | { type: 'typing'; rid: string; tmid?: string | null; typing: boolean }
   | { type: 'watch'; rid: string }
   | { type: 'unwatch'; rid: string }
-  | { type: 'status'; status: UserStatus };
+  | { type: 'status'; status: UserStatus }
+  | { type: 'call.signal'; callId: string; data: CallSignal };
 
 // Eventos do widget do visitante (WebSocket /livechat/websocket)
 export type VisitorClientEvent = { type: 'ping' } | { type: 'typing'; rid: string; typing: boolean };

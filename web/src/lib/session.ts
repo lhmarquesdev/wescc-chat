@@ -1,3 +1,4 @@
+import type { UserStatus } from '@shared/index';
 import { api, getCredentials, setCredentials, setUnauthorizedHandler } from './api';
 import { setCustomEmoji } from './emoji';
 import { syncPushSubscription, unsubscribeOnLogout } from './push';
@@ -39,12 +40,22 @@ export async function loadLivechat() {
 
 let started = false;
 
+// Quem já está online ao abrir o chat (depois disso, os eventos de presença mantêm o mapa em dia).
+async function loadPresence() {
+  const r = (await api.get('users.presence').catch(() => null)) as { users: { username: string; status: UserStatus; statusText?: string }[] } | null;
+  if (!r) return;
+  const presence: Record<string, { status: UserStatus; statusText?: string }> = {};
+  for (const u of r.users) presence[u.username] = { status: u.status, statusText: u.statusText };
+  useStore.setState({ presence });
+}
+
 export async function startSession() {
   const me = (await api.get('me')) as Me;
   useStore.getState().setMe(me);
   // Com troca de senha ou 2FA pendente o servidor só aceita as rotas para resolver isso: o resto fica para depois.
   if (me.requirePasswordChange || me.require2faSetup) return me;
   await Promise.all([loadSubscriptions(), loadCustomEmoji(), loadPermissionMap()]);
+  void loadPresence();
   void loadLivechat();
   void syncPushSubscription();
   if (!started) {
@@ -52,6 +63,7 @@ export async function startSession() {
     realtime.start(() => {
       // Ao reconectar, recarrega o que pode ter mudado.
       void loadSubscriptions();
+      void loadPresence();
       void api.get('me').then((m) => useStore.getState().setMe(m));
       void loadLivechat();
     });

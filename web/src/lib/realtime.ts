@@ -12,6 +12,8 @@ class Realtime {
   private pingTimer: number | null = null;
   private watched = new Set<string>();
   private onReconnect: (() => void) | null = null;
+  // Id desta conexão no servidor (as chamadas usam para a sinalização).
+  connectionId: string | null = null;
 
   start(onReconnect: () => void) {
     this.stopped = false;
@@ -38,6 +40,7 @@ class Realtime {
     ws.onmessage = (e) => {
       const ev = JSON.parse(e.data) as ServerEvent;
       if (ev.type === 'connected') {
+        this.connectionId = ev.connectionId;
         useStore.getState().setConnected(true);
         const wasRetry = this.retry > 0;
         this.retry = 0;
@@ -53,6 +56,7 @@ class Realtime {
       for (const l of this.listeners) l(ev);
     };
     ws.onclose = (e) => {
+      this.connectionId = null;
       useStore.getState().setConnected(false);
       if (this.stopped) return;
       if (e.code === 4001 || e.code === 4003) {

@@ -166,6 +166,12 @@ add('Security', 'Push', 'Push_VAPID_Public_Key', 'string', '', { public: true, l
 add('Security', 'Push', 'Push_VAPID_Private_Key', 'password', '', { label: 'Chave privada VAPID (gerada automaticamente)' });
 
 // ---------- Vídeo ----------
+add('VideoConf', 'Calls', 'Calls_Enabled', 'boolean', true, { public: true, label: 'Chamadas de voz e vídeo em mensagens diretas' });
+add('VideoConf', 'Calls', 'Calls_Ring_Timeout', 'int', 40, { public: true, label: 'Segundos tocando antes de virar chamada perdida' });
+add('VideoConf', 'Calls', 'Calls_STUN_Servers', 'string', 'stun:stun.l.google.com:19302', { label: 'Servidores STUN, separados por vírgula' });
+add('VideoConf', 'Calls', 'Calls_TURN_Server', 'string', '', { label: 'Servidor TURN (ex.: turn:turn.empresa.com.br:3478), para redes que bloqueiam conexão direta' });
+add('VideoConf', 'Calls', 'Calls_TURN_Username', 'string', '', { label: 'Usuário do TURN' });
+add('VideoConf', 'Calls', 'Calls_TURN_Password', 'password', '', { label: 'Senha do TURN' });
 add('VideoConf', 'Jitsi', 'VideoConf_Enabled', 'boolean', true, { public: true, label: 'Videoconferência' });
 add('VideoConf', 'Jitsi', 'VideoConf_Jitsi_Domain', 'string', 'meet.jit.si', { public: true, label: 'Domínio do Jitsi' });
 add('VideoConf', 'Jitsi', 'VideoConf_Jitsi_Prefix', 'string', 'wescc', { public: true, label: 'Prefixo das salas' });

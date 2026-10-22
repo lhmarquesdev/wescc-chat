@@ -73,7 +73,7 @@ export function registerWebsocket(app: FastifyInstance) {
       };
       bus.register(conn);
       await connectionOpened(conn);
-      send({ type: 'connected', userId: r.user.id, sessionId: r.sessionId });
+      send({ type: 'connected', userId: r.user.id, sessionId: r.sessionId, connectionId: conn.id });
       return true;
     };
 
@@ -116,6 +116,11 @@ export function registerWebsocket(app: FastifyInstance) {
           case 'status':
             if (['online', 'away', 'busy', 'offline'].includes(ev.status)) await setStatus(c.userId, ev.status as UserStatus);
             break;
+          case 'call.signal': {
+            const { relaySignal } = await import('../services/calls');
+            await relaySignal(c.id, c.userId, ev.callId, ev.data);
+            break;
+          }
           case 'idle': {
             // Ausência automática: só altera quem está "online" por padrão.
             if (idle === ev.idle) return;
@@ -138,8 +143,11 @@ export function registerWebsocket(app: FastifyInstance) {
     socket.on('close', () => {
       if (authTimer) clearTimeout(authTimer);
       if (conn) {
-        bus.unregister(conn);
-        void connectionClosed(conn).catch(() => {});
+        const closed = conn;
+        bus.unregister(closed);
+        void connectionClosed(closed)
+          .then(async () => (await import('../services/calls')).connectionClosed(closed.id))
+          .catch(() => {});
       }
     });
   });

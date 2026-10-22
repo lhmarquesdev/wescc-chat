@@ -2202,3 +2202,211 @@ blockquote {
 .side-omni .btn {
   flex: 1;
 }
+
+/* ---------- Chamadas ---------- */
+.call-incoming {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  max-width: calc(100vw - 32px);
+  animation: call-pulse 1.6s ease-in-out infinite;
+}
+@keyframes call-pulse {
+  50% {
+    box-shadow: 0 0 0 6px var(--primary-soft), var(--shadow);
+  }
+}
+.call-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.call-who strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.call-buttons {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.call-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(255, 255, 255, 0.14);
+  color: inherit;
+  font-size: 18px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.call-incoming .call-btn {
+  background: var(--bg-3);
+}
+.call-btn:hover {
+  filter: brightness(1.15);
+}
+.call-btn.accept {
+  background: #19a45b;
+  color: #fff;
+}
+.call-btn.hang {
+  background: var(--danger);
+  color: #fff;
+}
+.call-btn.off {
+  background: #fff;
+  color: #1f2329;
+}
+.call-btn.on {
+  background: var(--primary);
+  color: #fff;
+}
+.call-window {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1050;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: #111418;
+  color: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+}
+.call-window.big {
+  inset: 24px;
+  width: auto;
+  max-width: none;
+}
+.call-stage {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: #000;
+}
+.call-window.big .call-stage {
+  flex: 1;
+  aspect-ratio: auto;
+  min-height: 0;
+}
+.call-remote {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.call-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.call-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.call-local {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 30%;
+  max-width: 200px;
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  background: #222;
+  transform: scaleX(-1);
+}
+.call-local.screen {
+  transform: none;
+}
+.call-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.call-bar .muted {
+  color: rgba(255, 255, 255, 0.7);
+}
+@media (max-width: 600px) {
+  .call-window {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    max-width: none;
+  }
+  .call-window.big {
+    inset: 0;
+    border-radius: 0;
+  }
+  .call-bar {
+    flex-wrap: wrap;
+  }
+  .call-btn {
+    width: 40px;
+    height: 40px;
+  }
+}
+.call-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.call-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.call-list li:last-child {
+  border-bottom: 0;
+}
+.call-list-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background: none;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+.call-list li.missed strong {
+  color: var(--danger);
+}
+.call-list-actions {
+  display: flex;
+  gap: 4px;
+}
+@media (max-width: 600px) {
+  .call-list li > .muted.small {
+    display: none;
+  }
+}
