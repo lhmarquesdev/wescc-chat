@@ -25,6 +25,12 @@ async function main() {
   process.on('SIGTERM', shutdown);
 }
 
+// Uma promessa rejeitada sem tratamento (por exemplo, uma tarefa em segundo plano com o banco fora do ar)
+// é registrada em vez de derrubar o servidor inteiro.
+process.on('unhandledRejection', (e) => {
+  console.error('[processo] promessa rejeitada sem tratamento:', e);
+});
+
 main().catch((e) => {
   console.error(e);
   process.exit(1);

@@ -10,6 +10,7 @@ import { getSetting } from './services/settings';
 export async function withLock(key: number, fn: () => Promise<unknown>) {
   // O advisory lock é da conexão: trava e destrava precisam usar o mesmo cliente.
   const client = await pool.connect();
+  let failed: Error | undefined;
   try {
     const r = await client.query('SELECT pg_try_advisory_lock($1) AS ok', [key]);
     if (!r.rows[0].ok) return;
@@ -18,8 +19,12 @@ export async function withLock(key: number, fn: () => Promise<unknown>) {
     } finally {
       await client.query('SELECT pg_advisory_unlock($1)', [key]);
     }
+  } catch (e) {
+    failed = e as Error;
+    throw e;
   } finally {
-    client.release();
+    // Depois de um erro a conexão pode ter morrido (banco reiniciado) ou ficado com o lock: descarta em vez de devolver.
+    client.release(failed);
   }
 }
 
@@ -75,7 +80,7 @@ export function startScheduler(log: (m: string) => void) {
       ldapExpr = lexpr;
       if (lexpr && !cron.validate(lexpr)) log(`sincronização LDAP: expressão cron inválida "${lexpr}"; a sincronização automática está parada.`);
       // runScheduledLdapSync pega o lock sozinho (e fica quieto quando outra instância já está sincronizando).
-      else if (lexpr) ldapTask = cron.schedule(lexpr, () => void import('./ldap/ldap').then((m) => m.runScheduledLdapSync(log)));
+      else if (lexpr) ldapTask = cron.schedule(lexpr, () => void import('./ldap/ldap').then((m) => m.runScheduledLdapSync(log)).catch((e) => log(`sincronização LDAP falhou: ${e.message}`)));
     }
   };
   reschedule();

@@ -44,6 +44,8 @@ class Bus {
   private conns = new Map<string, Conn>();
   private byUser = new Map<string, Set<Conn>>();
   private listener: pg.Client | null = null;
+  private stopping = false;
+  private retry: NodeJS.Timeout | null = null;
   private hooks: { settings?: (s: { _id: string; value: unknown }[]) => void; permissions?: () => void } = {};
 
   onSettings(fn: (s: { _id: string; value: unknown }[]) => void) {
@@ -55,22 +57,54 @@ class Bus {
 
   async start() {
     if (this.listener) return;
+    this.stopping = false;
+    await this.listen();
+  }
+
+  private async listen() {
     const client = new pg.Client({ connectionString: config.databaseUrl });
-    await client.connect();
-    await client.query(`LISTEN ${CHANNEL}`);
+    // Sem ouvinte, um erro nesta conexão derrubaria o processo; o 'end' que vem depois cuida da reconexão.
+    client.on('error', () => {});
     client.on('notification', (n) => {
       if (!n.payload) return;
       void this.handleRemote(n.payload);
     });
-    client.on('error', () => {
-      // A reconexão é tratada por quem reinicia o processo; aqui só evitamos crash.
+    client.on('end', () => {
+      if (this.listener !== client) return;
+      this.listener = null;
+      if (!this.stopping) this.reconnect(1000);
     });
+    try {
+      await client.connect();
+      await client.query(`LISTEN ${CHANNEL}`);
+    } catch (e) {
+      await client.end().catch(() => {});
+      throw e;
+    }
     this.listener = client;
   }
 
+  // O banco caiu ou reiniciou: tenta de novo com espera crescente, até 30 s, sem derrubar o processo.
+  private reconnect(delay: number) {
+    if (this.retry || this.stopping) return;
+    this.retry = setTimeout(() => {
+      this.retry = null;
+      if (this.stopping) return;
+      this.listen().then(
+        () => console.error('[bus] LISTEN restabelecido'),
+        () => this.reconnect(Math.min(delay * 2, 30_000)),
+      );
+    }, delay);
+    this.retry.unref?.();
+  }
+
   async stop() {
-    await this.listener?.end().catch(() => {});
+    this.stopping = true;
+    if (this.retry) clearTimeout(this.retry);
+    this.retry = null;
+    const client = this.listener;
     this.listener = null;
+    await client?.end().catch(() => {});
   }
 
   private async handleRemote(payload: string) {
