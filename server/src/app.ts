@@ -42,7 +42,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   app.decorateRequest('ctx', null);
   app.decorateRequest('authUser', null);
   app.addHook('onRequest', async (req) => {
-    if (req.url.startsWith('/api/') || req.url.startsWith('/file-upload/') || req.url.startsWith('/avatar/')) await authenticate(req);
+    if (req.url.startsWith('/api/') || req.url.startsWith('/file-upload/') || req.url.startsWith('/avatar/') || req.url.startsWith('/sticker/')) await authenticate(req);
   });
   app.setErrorHandler(errorHandler);
 
@@ -65,6 +65,8 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   ldapRoutes(app);
   const { importRoutes } = await import('./importer/api');
   importRoutes(app);
+  const { stickersRoutes } = await import('./stickers/api');
+  stickersRoutes(app);
 
   app.get('/health', async () => ({ ok: true }));
 

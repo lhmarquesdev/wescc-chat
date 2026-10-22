@@ -1,5 +1,7 @@
 // Tipos compartilhados entre servidor e cliente web.
 
+import type { MessageSticker } from './stickers';
+
 export type UserStatus = 'online' | 'away' | 'busy' | 'offline';
 export type RoomType = 'c' | 'p' | 'd' | 'l';
 
@@ -42,6 +44,10 @@ export interface UserPreferences {
   sidebarGroupByType?: boolean;
   sidebarShowUnread?: boolean;
   hideReadReceipts?: boolean;
+  stickerAnimation?: 'system' | 'auto' | 'hover' | 'never'; // ausente ou 'system' = padrão da organização
+  stickerSuggestions?: boolean; // ausente = true
+  stickerTabSeen?: boolean; // já abriu a aba Figurinhas (some o ponto de novidade)
+  stickerHintSeen?: boolean; // já enviou uma figurinha pelo seletor (some a dica de Shift+clique)
   [key: string]: unknown;
 }
 
@@ -142,6 +148,7 @@ export interface Attachment {
   title?: string;
   title_link?: string;
   type?: string; // 'file' para arquivos enviados; sem tipo, anexo de integração (formato do Slack)
+  // type 'sticker' = imagem de reserva de uma figurinha (clientes novos usam message.sticker)
   image_url?: string;
   audio_url?: string;
   video_url?: string;
@@ -163,6 +170,10 @@ export interface Attachment {
   fields?: { title: string; value: string; short?: boolean }[];
   // arquivo de mensagem importada que ainda não foi baixado da origem
   pendingFileId?: string;
+  // novos campos (hoje só a figurinha preenche)
+  image_dimensions?: { width: number; height: number };
+  image_type?: string;
+  image_size?: number;
 }
 
 export interface MessageFile {
@@ -202,6 +213,7 @@ export interface Message {
   unread?: boolean; // read receipts: ainda não lida por todos
   ackRequired?: boolean; // o aviso pede "Ciente"
   ackCount?: number; // quantas pessoas confirmaram
+  sticker?: MessageSticker; // figurinha (messages.extra.sticker, montada pelo servidor)
   alias?: string;
   emoji?: string;
   avatar?: string;
@@ -367,6 +379,8 @@ export type ServerEvent =
   | { type: 'call'; call: Call }
   | { type: 'call.signal'; callId: string; data: CallSignal }
   | { type: 'import.progress'; operation: ImportProgress }
+  | { type: 'stickers.changed'; scope: 'org' | 'mine' }
+  | { type: 'sticker.removed'; fileId: string }
   | { type: 'pong' };
 
 // ---------- Importação de dados ----------

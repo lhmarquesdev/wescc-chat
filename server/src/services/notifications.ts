@@ -1,4 +1,5 @@
 import type { UserRef } from '@shared/index';
+import { messagePreviewText } from '@shared/stickers';
 import { many } from '../db/pool';
 import { bus } from '../realtime/bus';
 import { sendMail } from './mailer';
@@ -25,7 +26,7 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
   const isDM = room.t === 'd';
   const roomName = isDM ? ctx.username : room.fname || room.name || '';
   const hidePush = getSetting<boolean>('Push_Privacy_Hide_Content');
-  const text = row.msg || (row.files?.length ? `📎 ${row.files[0].name}` : '');
+  const text = messagePreviewText({ msg: row.msg, sticker: row.extra?.sticker, files: row.files });
   const emailEnabled = getSetting<boolean>('Email_Notifications_Enabled');
   const pushTargets: string[] = [];
   const title = isDM ? (room.uids.length > 2 ? `${ctx.username} em ${roomName}` : ctx.username) : `#${roomName}`;

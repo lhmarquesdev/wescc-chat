@@ -233,3 +233,70 @@ export async function deleteFilesWhere(rid: string, before: string, after: strin
     return rows;
   });
 }
+
+// Figurinhas: arquivos que não pertencem a uma sala. Mesmo diretório; o caminho relativo usa sempre "/",
+// para o banco servir em Windows e Linux.
+const STORED_REL_RE = /^(?:\d{4}\/\d{2}|quarantine)\/[A-Za-z0-9]{10,24}(?:\.poster)?$/;
+const FS_RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES', 'EMFILE', 'ENFILE']);
+const FS_RETRY_DELAYS = [100, 250, 500, 1000, 1500]; // cerca de 3,4 s no total
+
+// Antivírus e indexador do Windows seguram arquivos recém-gravados: tenta de novo antes de desistir.
+export async function withFsRetry<T>(op: () => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await op();
+    } catch (e: any) {
+      if (i >= FS_RETRY_DELAYS.length || !FS_RETRY_CODES.has(e?.code)) throw e;
+      await new Promise((r) => setTimeout(r, FS_RETRY_DELAYS[i]));
+    }
+  }
+}
+
+export function storedPath(rel: string): string {
+  if (!STORED_REL_RE.test(rel)) throw new Error(`caminho de arquivo inválido: ${rel}`);
+  return path.resolve(config.uploadDir, ...rel.split('/'));
+}
+
+// Caminho de um arquivo novo (AAAA/MM/<id>): quem precisa anotar o caminho antes de gravar usa este e writeStored.
+export function newStoredRel(id: string = newId(), now = new Date()): string {
+  return `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${id}`;
+}
+
+// Grava em .tmp e renomeia. Se o rename não passar, tenta tirar o .tmp; o das figurinhas fica também na lixeira.
+export async function writeStored(rel: string, buf: Uint8Array): Promise<void> {
+  const abs = storedPath(rel);
+  await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+  const tmp = `${abs}.tmp`;
+  await fs.promises.writeFile(tmp, buf, { flag: 'wx' });
+  try {
+    await withFsRetry(() => fs.promises.rename(tmp, abs));
+  } catch (e) {
+    await withFsRetry(() => fs.promises.rm(tmp, { force: true })).catch(() => {});
+    throw e;
+  }
+}
+
+export async function storeBuffer(buf: Uint8Array, id: string = newId()): Promise<string> {
+  const rel = newStoredRel(id);
+  await writeStored(rel, buf);
+  return rel;
+}
+
+// Apagar: "não existe" conta como feito.
+export async function deleteStored(rel: string): Promise<void> {
+  await withFsRetry(() => fs.promises.rm(storedPath(rel), { force: true }));
+}
+
+// Mover (quarentena). Em outro volume, ou se o rename não passar, copia e apaga.
+export async function moveStored(rel: string, toRel: string): Promise<void> {
+  const from = storedPath(rel);
+  const to = storedPath(toRel);
+  await fs.promises.mkdir(path.dirname(to), { recursive: true });
+  try {
+    await withFsRetry(() => fs.promises.rename(from, to));
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') throw e;
+    await withFsRetry(() => fs.promises.copyFile(from, to));
+    await withFsRetry(() => fs.promises.rm(from, { force: true }));
+  }
+}

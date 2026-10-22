@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import type { Setting, SettingType } from '@shared/index';
 import { many, query } from '../db/pool';
 import { bus } from '../realtime/bus';
+import { roleScope } from './permissions';
 
 // validate devolve o texto do erro (mostrado ao administrador) ou null quando o valor serve.
 type Def = Omit<Setting, '_id' | 'value'> & { default: unknown; validate?: (value: unknown) => string | null };
@@ -105,6 +106,47 @@ add('Message', 'Read Receipts', 'Message_Read_Receipt_Enabled', 'boolean', true,
 add('Message', 'Read Receipts', 'Message_Read_Receipt_Store_Users', 'boolean', true, { public: true, label: 'Guardar quem leu cada mensagem' });
 add('Message', 'Bad Words', 'Message_AllowBadWordsFilter', 'boolean', false, { label: 'Filtro de palavrões' });
 add('Message', 'Bad Words', 'Message_BadWordsFilterList', 'string', '', { label: 'Lista de palavras bloqueadas (vírgula)' });
+
+// ---------- Figurinhas ----------
+const intRange = (min: number, max: number) => (v: unknown) =>
+  Number.isInteger(Number(v)) && Number(v) >= min && Number(v) <= max ? null : `Use um número inteiro entre ${min} e ${max}.`;
+// Ids de papéis globais separados por vírgula (um erro de digitação não pode passar calado).
+const globalRoleList = (v: unknown) => {
+  for (const id of String(v ?? '').split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (roleScope(id) !== 'Users') return `Papel inexistente: ${id}. Use o id do papel, como aparece em Papéis e permissões.`;
+  }
+  return null;
+};
+add('Message', 'Stickers', 'Stickers_Enabled', 'boolean', true, { public: true, label: 'Figurinhas' });
+add('Message', 'Stickers', 'Stickers_Personal_Enabled', 'boolean', true, { public: true, label: 'Permitir figurinhas pessoais' });
+add('Message', 'Stickers', 'Stickers_Animated_Enabled', 'boolean', true, { public: true, label: 'Permitir figurinhas animadas' });
+add('Message', 'Stickers', 'Stickers_Animation_Default', 'select', 'hover', {
+  public: true,
+  label: 'Animação das figurinhas (padrão de quem não escolheu)',
+  values: [
+    { key: 'auto', label: 'Reproduzir automaticamente, por até 5 segundos' },
+    { key: 'hover', label: 'Só ao passar o mouse ou tocar' },
+    { key: 'never', label: 'Nunca (mostrar a imagem parada)' },
+  ],
+});
+add('Message', 'Stickers', 'Stickers_In_Notice_Rooms', 'boolean', false, { public: true, label: 'Permitir figurinhas em canais de avisos (só publicadores)' });
+add('Message', 'Stickers', 'Stickers_Max_Static_KB', 'int', 256, { public: true, label: 'Tamanho máximo da figurinha estática (KB)', validate: intRange(16, 1024) });
+add('Message', 'Stickers', 'Stickers_Max_Animated_KB', 'int', 1024, { public: true, label: 'Tamanho máximo da figurinha animada (KB)', validate: intRange(64, 4096) });
+add('Message', 'Stickers', 'Stickers_Max_Animated_Seconds', 'int', 10, { public: true, label: 'Duração máxima da animação (segundos)', validate: intRange(1, 30) });
+add('Message', 'Stickers', 'Stickers_Personal_Max_Packs', 'int', 5, { public: true, label: 'Pacotes pessoais por pessoa', validate: intRange(1, 50) });
+add('Message', 'Stickers', 'Stickers_Personal_Max_Per_Pack', 'int', 60, { public: true, label: 'Figurinhas por pacote pessoal', validate: intRange(1, 200) });
+add('Message', 'Stickers', 'Stickers_Org_Max_Per_Pack', 'int', 120, { public: true, label: 'Figurinhas por pacote da organização', validate: intRange(1, 500) });
+add('Message', 'Stickers', 'Stickers_Personal_Quota_MB', 'int', 20, { public: true, label: 'Espaço para figurinhas pessoais por pessoa (MB)', validate: intRange(1, 1024) });
+add('Message', 'Stickers', 'Stickers_Max_Favorites', 'int', 50, { public: true, label: 'Figurinhas favoritas por pessoa', validate: intRange(1, 500) });
+add('Message', 'Stickers', 'Stickers_Send_Blocked_Roles', 'string', '', {
+  public: true,
+  label: 'Papéis que não podem enviar figurinhas (ids separados por vírgula)',
+  validate: globalRoleList,
+});
+add('Message', 'Stickers', 'Stickers_Removed_Keep_Days', 'int', 30, {
+  label: 'Dias que a moderação guarda uma figurinha removida (0 = apagar na hora)',
+  validate: intRange(0, 365),
+});
 
 // ---------- Upload ----------
 add('FileUpload', 'General', 'FileUpload_Enabled', 'boolean', true, { public: true, label: 'Upload de arquivos' });

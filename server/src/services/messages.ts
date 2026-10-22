@@ -1,4 +1,5 @@
 import type { Attachment, MessageFile, UserRef } from '@shared/index';
+import { messagePreviewText, stickerPreviewText, type MessageSticker } from '@shared/stickers';
 import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
@@ -53,7 +54,7 @@ async function parseMentions(msg: string, room: any) {
   return { mentions, channels };
 }
 
-function filterBadWords(msg: string) {
+export function filterBadWords(msg: string) {
   if (!getSetting('Message_AllowBadWordsFilter')) return msg;
   const words = String(getSetting('Message_BadWordsFilterList') ?? '')
     .split(',')
@@ -94,6 +95,7 @@ export interface SendInput {
   avatar?: string;
   customFields?: Record<string, unknown>;
   ackRequired?: boolean; // aviso que pede "Ciente"
+  sticker?: MessageSticker; // figurinha (só chat.sendSticker preenche, com opts.sticker)
 }
 
 export async function canPostInRoom(ctx: Ctx, room: any) {
@@ -148,7 +150,7 @@ async function quoteAttachment(ctx: Ctx, link: string): Promise<Attachment | nul
   if (!m || m.t === 'rm') return null;
   if (!(await canAccessRoom(ctx.userId, await getRoom(m.room_id)))) return null;
   const files = (m.files ?? []) as MessageFile[];
-  return { text: m.msg || (files[0] ? `📎 ${files[0].name}` : ''), author_name: m.username, ts: m.created_at, message_link: `?msg=${m.id}` };
+  return { text: messagePreviewText({ msg: m.msg, sticker: m.extra?.sticker, files }, { withName: false }), author_name: m.username, ts: m.created_at, message_link: `?msg=${m.id}` };
 }
 
 export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Attachment[]> {
@@ -189,7 +191,8 @@ export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Atta
 
 // trusted: mensagens de integrações, que podem definir apelido e avatar próprios.
 // internalAttachments: anexos montados pelo próprio servidor (upload de arquivo).
-export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipCommands?: boolean; trusted?: boolean; internalAttachments?: boolean } = {}) {
+export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipCommands?: boolean; trusted?: boolean; internalAttachments?: boolean; sticker?: boolean } = {}) {
+  const sticker = opts.sticker ? input.sticker : undefined; // só o servidor monta figurinhas
   const room = await getRoom(input.rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   const roles = (await canPostInRoom(ctx, room)) ?? (await getUserRoles(ctx.userId, room.id));
@@ -197,7 +200,8 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
   const max = getSetting<number>('Message_MaxAllowedSize');
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
   const attachments = opts.internalAttachments ? (input.attachments ?? []) : await sanitizeAttachments(ctx, input.attachments);
-  if (!msg && !attachments.length && !input.files?.length) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  if (!msg && !attachments.length && !input.files?.length && !sticker) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  if (sticker && (msg || input.ackRequired)) throw badRequest('error-invalid-message', 'Figurinha não leva texto nem pede “Ciente”.');
   if (input.ackRequired && (!room.notice || !room.notice_ack || input.tmid)) {
     throw badRequest('error-ack-not-allowed', 'Só avisos de um canal de avisos com “Ciente” ativado podem pedir confirmação.');
   }
@@ -233,14 +237,16 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
   if (mentionAll && maxAll > 0 && room.users_count > maxAll) throw forbidden(`@all não é permitido em salas com mais de ${maxAll} membros.`);
 
   const me = await one('SELECT name FROM users WHERE id = $1', [ctx.userId]);
-  const id = input._id && /^[A-Za-z0-9]{10,24}$/.test(input._id) && !(await getMessageRow(input._id)) ? input._id : newId();
+  // Figurinha: sendSticker já conferiu o _id; um conflito volta como erro de chave para o envio idempotente, nunca como cópia.
+  const id = input._id && /^[A-Za-z0-9]{10,24}$/.test(input._id) && (sticker || !(await getMessageRow(input._id))) ? input._id : newId();
   const receipts = getSetting<boolean>('Message_Read_Receipt_Enabled');
   const extra: Record<string, unknown> = {};
   if (input.tshow && tmid) extra.tshow = true;
   if (input.customFields) extra.customFields = input.customFields;
+  if (sticker) extra.sticker = sticker;
   const row = await one(
-    `INSERT INTO messages (id, room_id, user_id, username, user_name, msg, tmid, mentions, channels, attachments, files, alias, emoji, avatar, extra, unread, ack_required)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+    `INSERT INTO messages (id, room_id, user_id, username, user_name, msg, tmid, mentions, channels, attachments, files, alias, emoji, avatar, extra, unread, ack_required, sticker_file_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
     [
       id,
       room.id,
@@ -259,6 +265,7 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
       JSON.stringify(extra),
       receipts && room.users_count > 1,
       !!input.ackRequired,
+      sticker?.fileId ?? null,
     ],
   );
   if (input.files?.length) {
@@ -266,7 +273,7 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
   }
 
   // Atualiza a sala
-  const preview = msg || (input.files?.length ? `📎 ${input.files[0].name}` : '');
+  const preview = messagePreviewText({ msg, sticker, files: input.files });
   const lastMessage = { _id: id, msg: truncate(preview, 200), u: { _id: ctx.userId, username: ctx.username, name: me?.name }, ts: row.created_at };
   if (!tmid || input.tshow) {
     await query(`UPDATE rooms SET msgs = msgs + 1, last_message = $2, lm = $3, updated_at = now() WHERE id = $1`, [room.id, JSON.stringify(lastMessage), row.created_at]);
@@ -356,6 +363,7 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   const m = await getMessageRow(msgId);
   if (!m || (rid && m.room_id !== rid)) throw notFound('error-message-not-found', 'Mensagem não encontrada.');
   if (m.t) throw badRequest('error-action-not-allowed', 'Mensagens de sistema não podem ser editadas.');
+  if (m.extra?.sticker) throw badRequest('error-sticker-not-editable', 'Figurinhas não podem ser editadas.');
   const roles = await getUserRoles(ctx.userId, m.room_id);
   const canEditAny = rolesHavePermission(roles, 'edit-message');
   const own = m.user_id === ctx.userId;
@@ -410,7 +418,8 @@ export async function removeMessageRow(m: any) {
   if (m.tcount > 0) {
     // Raiz de thread com respostas: mantém o lugar como "mensagem removida", sem o pedido de "Ciente" nem as confirmações.
     const row = await one(
-      `UPDATE messages SET msg = '', t = 'rm', attachments = '[]', files = '[]', reactions = '{}', ack_required = false, ack_count = 0, updated_at = now()
+      `UPDATE messages SET msg = '', t = 'rm', attachments = '[]', files = '[]', reactions = '{}', ack_required = false, ack_count = 0,
+         extra = extra - 'sticker', sticker_file_id = NULL, updated_at = now()
        WHERE id = $1 RETURNING *`,
       [m.id],
     );
@@ -432,7 +441,7 @@ export async function removeMessageRow(m: any) {
   const room = await getRoom(m.room_id);
   if (room?.last_message?._id === m.id) {
     const last = await one(`SELECT * FROM messages WHERE room_id = $1 AND t IS NULL AND (tmid IS NULL OR extra->>'tshow' = 'true') ORDER BY created_at DESC LIMIT 1`, [m.room_id]);
-    const lm = last ? { _id: last.id, msg: truncate(last.msg, 200), u: { _id: last.user_id, username: last.username, name: last.user_name }, ts: last.created_at } : null;
+    const lm = last ? { _id: last.id, msg: truncate(last.msg || (last.extra?.sticker ? stickerPreviewText(last.extra.sticker) : ''), 200), u: { _id: last.user_id, username: last.username, name: last.user_name }, ts: last.created_at } : null;
     await query('UPDATE rooms SET last_message = $2, updated_at = now() WHERE id = $1', [m.room_id, lm ? JSON.stringify(lm) : null]);
     await notifyRoomUpdated(m.room_id);
   }
@@ -516,7 +525,7 @@ export async function setPinned(ctx: Ctx, msgId: string, pinned: boolean) {
   bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
   if (pinned) {
     await sendSystemMessage(m.room_id, 'message_pinned', { id: ctx.userId, username: ctx.username }, '', {
-      attachments: [{ text: m.msg, author_name: m.username, ts: m.created_at, message_link: `/msg/${m.id}` }],
+      attachments: [{ text: m.msg || (m.extra?.sticker ? stickerPreviewText(m.extra.sticker, { withName: false }) : ''), author_name: m.username, ts: m.created_at, message_link: `/msg/${m.id}` }],
       pinnedMessageId: m.id,
     });
   }

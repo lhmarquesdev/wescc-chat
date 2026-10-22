@@ -264,13 +264,13 @@ export function adminRoutes(app: FastifyInstance) {
   });
   route(app, 'GET', 'moderation.userReports', { permissions: ['view-moderation-console'] }, async (req) => {
     const rows = await many(
-      `SELECT r.*, m.msg, m.created_at AS msg_ts, rep.username AS reporter, ro.name AS room_name FROM moderation_reports r
+      `SELECT r.*, m.msg, m.extra->'sticker' AS sticker, m.created_at AS msg_ts, rep.username AS reporter, ro.name AS room_name FROM moderation_reports r
        LEFT JOIN messages m ON m.id = r.message_id LEFT JOIN users rep ON rep.id = r.reporter_id LEFT JOIN rooms ro ON ro.id = r.room_id
        WHERE r.reported_user_id = $1 AND NOT r.resolved ORDER BY r.created_at DESC`,
       [str(q(req).userId, 'userId')],
     );
     return {
-      reports: rows.map((r) => ({ _id: r.id, messageId: r.message_id, msg: r.msg, roomName: r.room_name, reporter: r.reporter, description: r.description, ts: r.created_at })),
+      reports: rows.map((r) => ({ _id: r.id, messageId: r.message_id, msg: r.msg, sticker: r.sticker ?? null, roomName: r.room_name, reporter: r.reporter, description: r.description, ts: r.created_at })),
     };
   });
   route(app, 'POST', 'moderation.dismissReports', { permissions: ['manage-moderation-actions'] }, async (req, _rep, ctx) => {

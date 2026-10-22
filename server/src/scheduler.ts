@@ -1,3 +1,7 @@
+// Chaves de advisory lock (pg_try_advisory_lock): uma por tarefa, nunca repetida. Quem criar tarefa nova anota aqui.
+//   727001 migrações · 727101 limpeza (a cada minuto) · 727102 retenção · 727103 LDAP · 727104 omnichannel
+//   727105 importação · 727110 chamadas em grupo · 727111 figurinhas (limpeza diária)
+//   727120–727124 integrações Jira/Teams
 import cron from 'node-cron';
 import { pool, query } from './db/pool';
 import { recoverInterrupted } from './importer/operations';
@@ -57,6 +61,16 @@ export function startScheduler(log: (m: string) => void) {
     }).catch((e) => log(`omnichannel falhou: ${e.message}`));
   }, 30_000);
 
+  // Figurinhas: lixeira de arquivos, quarentena vencida e arquivos sem uso há 7 dias.
+  const runStickersGc = () =>
+    void withLock(727111, async () => {
+      const { gcStickerFiles } = await import('./stickers/moderation');
+      const r = await gcStickerFiles();
+      if (r.stuck) log(`figurinhas: ${r.stuck} arquivo(s) não saem do disco há mais de 3 dias (veja a tabela sticker_trash)`);
+    }).catch((e) => log(`limpeza de figurinhas falhou: ${e.message}`));
+  tasks.push(cron.schedule('30 3 * * *', runStickersGc));
+  const stickersBoot = setTimeout(runStickersGc, 60_000); // termina o que um desligamento deixou na lixeira
+
   let retentionExpr = '';
   let retentionTask: { stop(): void } | null = null;
   let ldapExpr = '';
@@ -90,6 +104,7 @@ export function startScheduler(log: (m: string) => void) {
     clearInterval(heartbeat);
     clearInterval(omni);
     clearInterval(re);
+    clearTimeout(stickersBoot);
     for (const t of tasks) t.stop();
     retentionTask?.stop();
     ldapTask?.stop();

@@ -56,7 +56,13 @@ export async function pruneMessages(rid: string, o: PruneOptions): Promise<numbe
   );
   await query(
     `UPDATE rooms SET last_message = (
-       SELECT jsonb_build_object('_id', id, 'msg', left(msg, 200), 'u', jsonb_build_object('_id', user_id, 'username', username, 'name', user_name), 'ts', created_at)
+       SELECT jsonb_build_object('_id', id, 'msg', left(CASE
+         WHEN msg <> '' THEN msg
+         WHEN extra->'sticker'->>'removed' = 'true' THEN 'Figurinha removida'
+         WHEN extra ? 'sticker' THEN concat_ws(' ', nullif(extra->'sticker'->'emojis'->>0, ''), 'Figurinha' ||
+           CASE WHEN coalesce(nullif(extra->'sticker'->>'name', ''), 'Figurinha') = 'Figurinha' THEN ''
+                ELSE ' “' || (extra->'sticker'->>'name') || '”' END)
+         ELSE msg END, 200), 'u', jsonb_build_object('_id', user_id, 'username', username, 'name', user_name), 'ts', created_at)
        FROM messages WHERE room_id = $1 AND t IS NULL AND tmid IS NULL ORDER BY created_at DESC LIMIT 1), updated_at = now()
      WHERE id = $1`,
     [rid],

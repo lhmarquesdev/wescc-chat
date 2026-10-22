@@ -49,6 +49,7 @@ export const DEFAULT_PERMISSIONS: [string, string, string[]][] = [
   ['manage-email-inbox', 'admin', [A]],
   ['view-moderation-console', 'admin', [A]],
   ['manage-moderation-actions', 'admin', [A]],
+  ['manage-sticker-packs', 'admin', [A]],
   // Usuários
   ['view-user-administration', 'users', [A]],
   ['view-full-other-user-info', 'users', [A]],
@@ -125,6 +126,7 @@ export const DEFAULT_PERMISSIONS: [string, string, string[]][] = [
   ['message-impersonate', 'messages', [B, 'app']],
   ['send-many-messages', 'messages', [A, B, 'app']],
   ['view-message-read-receipts', 'messages', [A, O, M, U]],
+  ['create-personal-stickers', 'messages', [A, U]],
   // Teams
   ['create-team', 'teams', [A, U]],
   ['delete-team', 'teams', [A, O]],
@@ -294,4 +296,9 @@ export function mapRole(r: any): Role {
 
 export function roleScope(role: string) {
   return roleScopes.get(role);
+}
+
+// Figurinhas: "Visível para" de um pacote só aceita papéis que existem (globais, por padrão).
+export function roleExists(role: string, scope: Role['scope'] = 'Users'): boolean {
+  return roleScopes.get(role) === scope;
 }
