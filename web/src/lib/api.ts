@@ -117,11 +117,12 @@ export const api = {
   del: <T = any>(path: string) => request<T>('DELETE', path),
 };
 
-// Upload com progresso (XMLHttpRequest).
-export function uploadFile(rid: string, file: File, fields: Record<string, string>, onProgress?: (p: number) => void) {
-  return new Promise<any>((resolve, reject) => {
+// Upload com progresso (XMLHttpRequest). Os campos vão antes do arquivo: o servidor lê o multipart em ordem.
+export function uploadTo<T = any>(path: string, file: File, fields: Record<string, string>, onProgress?: (p: number) => void, signal?: AbortSignal) {
+  return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) return reject(new ApiError(0, 'aborted', 'Envio cancelado.'));
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `/api/v1/rooms.upload/${rid}`);
+    xhr.open('POST', `/api/v1/${path}`);
     if (creds) {
       xhr.setRequestHeader('X-User-Id', creds.userId);
       xhr.setRequestHeader('X-Auth-Token', creds.authToken);
@@ -135,14 +136,20 @@ export function uploadFile(rid: string, file: File, fields: Record<string, strin
         // ignora
       }
       if (xhr.status >= 200 && xhr.status < 300 && json.success !== false) resolve(json);
-      else reject(new ApiError(xhr.status, json.errorType ?? 'error', json.error ?? 'Falha no upload'));
+      else reject(new ApiError(xhr.status, json.errorType ?? 'error', json.error ?? (xhr.status === 413 ? 'O arquivo é grande demais para o servidor.' : 'Falha no upload'), json.details));
     };
     xhr.onerror = () => reject(new ApiError(0, 'network', 'Falha de rede no upload'));
+    xhr.onabort = () => reject(new ApiError(0, 'aborted', 'Envio cancelado.'));
+    signal?.addEventListener('abort', () => xhr.abort(), { once: true });
     const fd = new FormData();
     for (const [k, v] of Object.entries(fields)) if (v) fd.append(k, v);
     fd.append('file', file, file.name);
     xhr.send(fd);
   });
+}
+
+export function uploadFile(rid: string, file: File, fields: Record<string, string>, onProgress?: (p: number) => void) {
+  return uploadTo(`rooms.upload/${rid}`, file, fields, onProgress);
 }
 
 export function errorMessage(e: unknown) {

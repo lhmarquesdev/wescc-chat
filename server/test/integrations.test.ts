@@ -48,6 +48,48 @@ describe('integrações', () => {
     expect(m.attachments[0].title).toBe('Pipeline');
   });
 
+  it('webhook de entrada mantém pretext, autor, miniatura e rodapé dos anexos e não monta citação', async () => {
+    const r = await api('POST', 'integrations.create', { type: 'webhook-incoming', name: 'GitHub', username: 'admin', channel: '#geral' }, A);
+    const geral = await api('GET', 'channels.info', { roomName: 'geral' }, A);
+    const secreta = await api('POST', 'chat.postMessage', { channel: '#geral', text: 'texto que não deve ser citado' }, A);
+    const rich = {
+      pretext: 'Novo PR',
+      author_name: 'octo',
+      author_link: 'https://github.com/octo',
+      author_icon: 'https://github.com/octo.png',
+      thumb_url: 'https://github.com/thumb.png',
+      footer: 'GitHub',
+      title: 'PR #1',
+      title_link: 'https://github.com/x/y/pull/1',
+      text: 'corpo',
+      color: 'good',
+      fields: [{ title: 'Revisor', value: '@bia', short: true }],
+    };
+    const res = await fetch(urlOf(`/hooks/${r.integration._id}/${r.integration.token}`), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: 'hook com anexos ricos',
+        attachments: [
+          rich,
+          { message_link: `?msg=${secreta.message._id}`, text: 'só texto' },
+          { title: 'links ruins', author_link: 'javascript:alert(1)', thumb_url: 'data:image/png;base64,AAAA', footer: 7 },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const hist = await api('GET', 'channels.history', { roomId: geral.channel._id }, A);
+    const m = hist.messages.find((x: any) => x.msg === 'hook com anexos ricos');
+    expect(m.attachments).toHaveLength(3);
+    expect(m.attachments[0]).toMatchObject(rich);
+    // A citação é montada pelo servidor a partir da mensagem; vinda de um webhook, o link é ignorado.
+    expect(m.attachments[1].message_link).toBeUndefined();
+    expect(m.attachments[1].text).toBe('só texto');
+    expect(m.attachments[1].author_name).toBeUndefined();
+    // As mesmas regras do chat.postMessage: só URLs http(s) ou do servidor, e texto curto.
+    expect(m.attachments[2]).toEqual({ title: 'links ruins', footer: '7' });
+  });
+
   it('formato do Slack (payload em form-urlencoded) também funciona', async () => {
     const r = await api('POST', 'integrations.create', { type: 'webhook-incoming', name: 'Slack', username: 'admin', channel: '#geral' }, A);
     const res = await fetch(urlOf(`/hooks/${r.integration._id}/${r.integration.token}`), {

@@ -33,7 +33,7 @@ export function inlineMimeType(type: string) {
 }
 
 // Regras de tipo comuns a usuários e visitantes do livechat.
-function typeAllowed(type: string) {
+export function typeAllowed(type: string) {
   const match = (pattern: string) => (pattern.endsWith('/*') ? type.startsWith(pattern.slice(0, -1)) : type === pattern);
   if (mediaTypeList('FileUpload_MediaTypeBlackList').some(match)) return false;
   const white = mediaTypeList('FileUpload_MediaTypeWhiteList');

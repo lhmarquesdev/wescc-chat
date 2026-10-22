@@ -2,6 +2,7 @@ import type { Attachment, MessageFile, UserRef } from '@shared/index';
 import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
+import { trimEndChars, truncate } from '../lib/text';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
 import { mapMessage } from './mappers';
@@ -13,8 +14,8 @@ import { recordActivity } from './stats';
 import { actorOf, type Ctx } from './users';
 import { emit } from './hooks';
 
-const MENTION_RE = /(?:^|[\s(>"'])@([0-9a-zA-Z._-]+)/g;
-const CHANNEL_RE = /(?:^|[\s(])#([0-9a-zA-ZÀ-ſ._-]+)/g;
+export const MENTION_RE = /(?:^|[\s(>"'])@([0-9a-zA-Z._-]+)/g;
+export const CHANNEL_RE = /(?:^|[\s(])#([0-9a-zA-ZÀ-ſ._-]+)/g;
 
 export async function getMessageRow(id: string) {
   return one('SELECT * FROM messages WHERE id = $1', [id]);
@@ -22,7 +23,7 @@ export async function getMessageRow(id: string) {
 
 async function parseMentions(msg: string, room: any) {
   const names = new Set<string>();
-  for (const m of msg.matchAll(MENTION_RE)) names.add(m[1].replace(/[.]+$/, ''));
+  for (const m of msg.matchAll(MENTION_RE)) names.add(trimEndChars(m[1], '.'));
   const mentions: UserRef[] = [];
   const special: string[] = [];
   const lookup: string[] = [];
@@ -116,8 +117,8 @@ export async function canPostInRoom(ctx: Ctx, room: any) {
 
 // ---------- Anexos enviados pelo cliente ----------
 
-const safeUrl = (v: unknown) => (typeof v === 'string' && v.length <= 2048 && (/^https?:\/\//i.test(v) || /^\/(?!\/)/.test(v)) ? v : undefined);
-const text = (v: unknown, max: number) => (typeof v === 'string' || typeof v === 'number' ? String(v).slice(0, max) : undefined);
+export const safeUrl = (v: unknown) => (typeof v === 'string' && v.length <= 2048 && (/^https?:\/\//i.test(v) || /^\/(?!\/)/.test(v)) ? v : undefined);
+const text = (v: unknown, max: number) => (typeof v === 'string' || typeof v === 'number' ? truncate(String(v), max) : undefined);
 
 function quotedMessageId(link: string) {
   return /[?&]msg=([A-Za-z0-9]{10,24})/.exec(link)?.[1] ?? /\/msg\/([A-Za-z0-9]{10,24})/.exec(link)?.[1] ?? null;
@@ -153,11 +154,16 @@ export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Atta
       video_url: safeUrl(a.video_url),
       description: text(a.description, 5000),
       text: text(a.text, 5000),
+      pretext: text(a.pretext, 5000),
       author_name: text(a.author_name, 200),
+      author_link: safeUrl(a.author_link),
+      author_icon: safeUrl(a.author_icon),
+      thumb_url: safeUrl(a.thumb_url),
+      footer: text(a.footer, 5000),
       color: text(a.color, 30),
       size: typeof a.size === 'number' ? a.size : undefined,
       format: text(a.format, 20),
-      fields: Array.isArray(a.fields) ? a.fields.slice(0, 20).map((f: any) => ({ title: String(f?.title ?? '').slice(0, 200), value: String(f?.value ?? '').slice(0, 2000), short: !!f?.short })) : undefined,
+      fields: Array.isArray(a.fields) ? a.fields.slice(0, 20).map((f: any) => ({ title: truncate(String(f?.title ?? ''), 200), value: truncate(String(f?.value ?? ''), 2000), short: !!f?.short })) : undefined,
     };
     for (const k of Object.keys(clean)) if (clean[k] === undefined) delete clean[k];
     if (Object.keys(clean).length) out.push(clean as Attachment);
@@ -241,7 +247,7 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
 
   // Atualiza a sala
   const preview = msg || (input.files?.length ? `📎 ${input.files[0].name}` : '');
-  const lastMessage = { _id: id, msg: preview.slice(0, 200), u: { _id: ctx.userId, username: ctx.username, name: me?.name }, ts: row.created_at };
+  const lastMessage = { _id: id, msg: truncate(preview, 200), u: { _id: ctx.userId, username: ctx.username, name: me?.name }, ts: row.created_at };
   if (!tmid || input.tshow) {
     await query(`UPDATE rooms SET msgs = msgs + 1, last_message = $2, lm = $3, updated_at = now() WHERE id = $1`, [room.id, JSON.stringify(lastMessage), row.created_at]);
   } else {
@@ -352,7 +358,7 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
     [m.id, msg, JSON.stringify(mentions), JSON.stringify(channels), JSON.stringify({ _id: ctx.userId, username: ctx.username })],
   );
   if (room.last_message?._id === m.id) {
-    await query(`UPDATE rooms SET last_message = jsonb_set(last_message, '{msg}', to_jsonb($2::text)) WHERE id = $1`, [room.id, msg.slice(0, 200)]);
+    await query(`UPDATE rooms SET last_message = jsonb_set(last_message, '{msg}', to_jsonb($2::text)) WHERE id = $1`, [room.id, truncate(msg, 200)]);
   }
   if (!own) await audit(actorOf(ctx), 'message.edited', { rid: m.room_id, msgId: m.id, author: m.username });
   const message = withExtra(row);
@@ -374,7 +380,7 @@ export async function deleteMessage(ctx: Ctx, msgId: string, opts: { asAdmin?: b
       throw forbidden('O tempo para apagar esta mensagem expirou.');
   }
   await removeMessageRow(m);
-  if (!own) await audit(actorOf(ctx), 'message.deleted', { rid: m.room_id, msgId: m.id, author: m.username }, { msg: m.msg.slice(0, 500) });
+  if (!own) await audit(actorOf(ctx), 'message.deleted', { rid: m.room_id, msgId: m.id, author: m.username }, { msg: truncate(m.msg, 500) });
 }
 
 export async function removeMessageRow(m: any) {
@@ -403,7 +409,7 @@ export async function removeMessageRow(m: any) {
   const room = await getRoom(m.room_id);
   if (room?.last_message?._id === m.id) {
     const last = await one(`SELECT * FROM messages WHERE room_id = $1 AND t IS NULL AND (tmid IS NULL OR extra->>'tshow' = 'true') ORDER BY created_at DESC LIMIT 1`, [m.room_id]);
-    const lm = last ? { _id: last.id, msg: last.msg.slice(0, 200), u: { _id: last.user_id, username: last.username, name: last.user_name }, ts: last.created_at } : null;
+    const lm = last ? { _id: last.id, msg: truncate(last.msg, 200), u: { _id: last.user_id, username: last.username, name: last.user_name }, ts: last.created_at } : null;
     await query('UPDATE rooms SET last_message = $2, updated_at = now() WHERE id = $1', [m.room_id, lm ? JSON.stringify(lm) : null]);
     await notifyRoomUpdated(m.room_id);
   }

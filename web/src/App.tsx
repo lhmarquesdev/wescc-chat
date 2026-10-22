@@ -132,6 +132,8 @@ function Shell() {
           <Route path="/account/:section" element={<AccountPage />} />
           <Route path="/admin" element={<Navigate to="/admin/info" replace />} />
           <Route path="/admin/:section" element={<AdminPage />} />
+          <Route path="/admin/:section/:view" element={<AdminPage />} />
+          <Route path="/admin/:section/:view/:param" element={<AdminPage />} />
           <Route path="/omnichannel" element={<Navigate to="/omnichannel/queue" replace />} />
           <Route path="/omnichannel/:section" element={<OmnichannelPage />} />
           <Route path="*" element={<Navigate to="/home" replace />} />

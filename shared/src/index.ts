@@ -130,7 +130,7 @@ export interface Reaction {
 export interface Attachment {
   title?: string;
   title_link?: string;
-  type?: string; // 'file'
+  type?: string; // 'file' para arquivos enviados; sem tipo, anexo de integração (formato do Slack)
   image_url?: string;
   audio_url?: string;
   video_url?: string;
@@ -142,6 +142,16 @@ export interface Attachment {
   text?: string;
   author_name?: string;
   ts?: string;
+  // anexos de integrações e mensagens importadas do Slack
+  pretext?: string;
+  color?: string;
+  author_link?: string;
+  author_icon?: string;
+  thumb_url?: string;
+  footer?: string;
+  fields?: { title: string; value: string; short?: boolean }[];
+  // arquivo de mensagem importada que ainda não foi baixado da origem
+  pendingFileId?: string;
 }
 
 export interface MessageFile {
@@ -333,7 +343,21 @@ export type ServerEvent =
   | { type: 'livechat.agentStatus'; status: LivechatAgentStatus }
   | { type: 'call'; call: Call }
   | { type: 'call.signal'; callId: string; data: CallSignal }
+  | { type: 'import.progress'; operation: ImportProgress }
   | { type: 'pong' };
+
+// ---------- Importação de dados ----------
+
+export interface ImportProgress {
+  _id: string;
+  importerKey: string;
+  status: string;
+  valid: boolean;
+  count: { users: number; channels: number; messages: number; contacts: number; total: number; completed: number; error: number; skipped: number };
+  rate?: number;
+  messagesstatus?: string | null;
+  error?: string | null;
+}
 
 // ---------- Chamadas (WebRTC em mensagens diretas) ----------
 

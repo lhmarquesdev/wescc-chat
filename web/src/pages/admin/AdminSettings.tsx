@@ -20,6 +20,7 @@ const GROUP_LABEL: Record<string, string> = {
   VideoConf: 'Videoconferência',
   Omnichannel: 'Omnichannel',
   Integrations: 'Integrações',
+  Import: 'Importação',
 };
 
 export function AdminSettings() {

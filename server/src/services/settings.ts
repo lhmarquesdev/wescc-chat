@@ -176,6 +176,10 @@ add('VideoConf', 'Jitsi', 'VideoConf_Enabled', 'boolean', true, { public: true, 
 add('VideoConf', 'Jitsi', 'VideoConf_Jitsi_Domain', 'string', 'meet.jit.si', { public: true, label: 'Domínio do Jitsi' });
 add('VideoConf', 'Jitsi', 'VideoConf_Jitsi_Prefix', 'string', 'wescc', { public: true, label: 'Prefixo das salas' });
 
+// ---------- Importação ----------
+add('Import', 'General', 'Import_MaxFileSize', 'int', 1073741824, { label: 'Tamanho máximo do arquivo de importação (bytes)' });
+add('Import', 'General', 'Import_Pending_Files_Concurrency', 'int', 3, { label: 'Downloads simultâneos de arquivos pendentes' });
+
 // ---------- Omnichannel ----------
 add('Omnichannel', 'General', 'Livechat_enabled', 'boolean', false, { public: true, label: 'Ativar Omnichannel' });
 add('Omnichannel', 'Routing', 'Livechat_Routing_Method', 'select', 'Auto_Selection', {

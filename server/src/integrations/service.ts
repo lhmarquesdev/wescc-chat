@@ -322,16 +322,14 @@ async function postAs(row: any, content: PostContent, defaultChannels: string[],
   if (!user) throw badRequest('error-invalid-user', 'Usuário da integração inválido ou desativado.');
   const targets = content.roomId ? [content.roomId] : content.channel ? normalizeChannels(content.channel) : defaultChannels;
   const ctx: Ctx = { userId: user.id, username: user.username, sessionId: '' };
+  // Campos, URLs e tamanhos dos anexos ficam com sanitizeAttachments (em sendMessage), como no chat.postMessage: uma
+  // lista própria aqui perdia pretext, author_link, author_icon, thumb_url e footer. Só a citação (message_link) sai:
+  // quem chama o webhook não é o usuário da integração e não deve copiar mensagens das salas que ele lê.
   const attachments = Array.isArray(content.attachments)
-    ? content.attachments.slice(0, 20).map((a) => ({
-        text: a.text ? String(a.text) : undefined,
-        title: a.title ? String(a.title) : undefined,
-        title_link: typeof a.title_link === 'string' && /^https?:\/\//.test(a.title_link) ? a.title_link : undefined,
-        image_url: typeof a.image_url === 'string' && /^https?:\/\//.test(a.image_url) ? a.image_url : undefined,
-        color: a.color ? String(a.color) : undefined,
-        author_name: a.author_name ? String(a.author_name) : undefined,
-        fields: Array.isArray(a.fields) ? a.fields.slice(0, 20).map((f: any) => ({ title: String(f.title ?? ''), value: String(f.value ?? ''), short: !!f.short })) : undefined,
-      }))
+    ? content.attachments
+        .slice(0, 20)
+        .filter((a) => a && typeof a === 'object' && !Array.isArray(a))
+        .map((a) => ({ ...a, message_link: undefined }))
     : undefined;
   const text = String(content.text ?? content.msg ?? '');
   const out = [];

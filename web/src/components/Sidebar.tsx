@@ -36,7 +36,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const omni = useSetting<boolean>('Livechat_enabled');
   const callsEnabled = useSetting<boolean>('Calls_Enabled');
   const isAgent = me.roles.includes('livechat-agent') || me.roles.includes('livechat-manager') || me.roles.includes('admin');
-  const canAdmin = usePermission(['view-administration', 'view-user-administration', 'view-room-administration', 'access-permissions', 'view-statistics', 'can-audit', 'view-engagement-dashboard']);
+  const canAdmin = usePermission(['view-administration', 'view-user-administration', 'view-room-administration', 'access-permissions', 'view-statistics', 'can-audit', 'view-engagement-dashboard', 'run-import', 'view-import-operations']);
+  const canStats = usePermission('view-statistics');
+  const canImport = usePermission(['run-import', 'view-import-operations']);
+  // Quem só cuida de importações cai direto nelas, não em Informações (que exige view-statistics).
+  const adminHome = !canStats && canImport ? '/admin/import' : '/admin/info';
   const [filter, setFilter] = useState('');
   const [create, setCreate] = useState<CreateKind | null>(null);
   const [onlyUnread, setOnlyUnread] = useState(false);
@@ -95,7 +99,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               ))}
               <hr />
               <button onClick={() => (navigate('/account/profile'), close())}>👤 Minha conta</button>
-              {canAdmin && <button onClick={() => (navigate('/admin/info'), close())}>⚙️ Administração</button>}
+              {canAdmin && <button onClick={() => (navigate(adminHome), close())}>⚙️ Administração</button>}
               {omni && isAgent && <button onClick={() => (navigate('/omnichannel/queue'), close())}>🎧 Omnichannel</button>}
               <hr />
               <button onClick={() => logout().then(() => (location.href = '/login'))}>↩ Sair</button>

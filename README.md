@@ -43,6 +43,8 @@ Para desenvolver o front com recarga automática, rode `npm run dev -w web` em o
 | `UPLOAD_DIR` | `./uploads` | Pasta dos arquivos enviados |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_EMAIL` | `admin` / — / `admin@localhost` | Admin criado no primeiro boot |
 | `DISABLE_CRON` | — | `1` desliga as tarefas agendadas nesta instância |
+| `IMPORT_SERVER_DIR` | — | Pasta do servidor de onde a importação pode ler arquivos pelo caminho |
+| `IMPORT_ALLOWED_HOSTS` | — | `host:porta` internos liberados para downloads da importação, separados por vírgula |
 
 Várias instâncias podem rodar contra o mesmo banco: o tempo real entre elas usa LISTEN/NOTIFY do PostgreSQL e as tarefas agendadas usam advisory locks.
 
@@ -126,6 +128,31 @@ registrada na conversa e no histórico em 📞 Chamadas, na barra lateral.
 - Na mesma rede isso funciona sem configuração. Para chamadas entre redes diferentes (casa e escritório, 4G), configure
   um servidor TURN (por exemplo o coturn) em Administração › Configurações › Videoconferência.
 - Fora de `localhost`, o navegador só libera câmera e microfone com o site em HTTPS.
+
+## Importação de dados
+
+Em Administração › Importação dá para trazer dados de outros sistemas, como no Rocket.Chat:
+
+- **Slack**: o .zip de "Importar/exportar dados" do Slack, com usuários, canais, grupos privados, mensagens diretas,
+  threads, reações, mensagens fixadas e anexos de integrações. O canal geral do Slack entra no canal padrão daqui.
+- **CSV**: um .zip com `users.csv`, `channels.csv`, uma pasta por canal com as mensagens e `directmessages/`.
+  A tela de nova importação mostra o formato completo.
+- **Usuários do Slack**: o .csv de "Exportar lista de membros" (admins, bots e contas desativadas são respeitados).
+- **Contatos do omnichannel**: um .csv com `name`, `emails`, `phones`, `manager` e `id`.
+- **API**: `import.new`, `import.addUsers` e `import.run`, para sistemas que mandam os dados direto. As senhas seguem
+  a mesma política das contas e são guardadas só como hash; cada chamada de `import.addUsers` aceita até 500 usuários
+  com senha.
+
+O arquivo pode ser enviado pelo navegador, baixado de uma URL ou lido de uma pasta do servidor (`IMPORT_SERVER_DIR`).
+Antes de importar aparece a lista de usuários, canais e contatos para escolher o que entra. Importar de novo o mesmo
+arquivo não duplica nada. Os arquivos das mensagens e as fotos de perfil do Slack ficam na origem até serem baixados
+pelos botões "Baixar arquivos pendentes" e "Baixar fotos pendentes". A importação nunca muda a senha, o e-mail ou o
+nome de usuário de contas que já existem, e só acrescenta papéis que existem aqui. O papel de administrador só vai para
+contas criadas pela importação, e só quando quem importa tem a permissão `assign-admin-role`. Avisos da conversão
+(papel ignorado, nome de usuário ou de sala trocado por já existir) aparecem com os erros, nos detalhes da importação.
+
+Os downloads (URL, arquivos e fotos pendentes) recusam endereços da rede interna. Para liberar um servidor interno,
+inclua `host:porta` em `IMPORT_ALLOWED_HOSTS`.
 
 ## Segurança
 

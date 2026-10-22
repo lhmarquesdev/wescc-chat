@@ -38,6 +38,7 @@ export const DEFAULT_PERMISSIONS: [string, string, string[]][] = [
   ['manage-selected-settings', 'admin', [A]],
   ['view-logs', 'admin', [A]],
   ['run-import', 'admin', [A]],
+  ['view-import-operations', 'admin', [A]],
   ['manage-emoji', 'admin', [A]],
   ['manage-integrations', 'admin', [A]],
   ['manage-own-integrations', 'admin', [A]],

@@ -1,6 +1,7 @@
 import { config } from './config';
 import { migrate } from './db/migrate';
 import { query } from './db/pool';
+import { recoverInterrupted } from './importer/operations';
 import { bus } from './realtime/bus';
 import { loadPermissions, seedPermissions } from './services/permissions';
 import { ensureDefaultChannel } from './services/rooms';
@@ -20,6 +21,8 @@ export async function boot(log: (m: string) => void = console.log) {
     bus.origin,
     JSON.stringify({ pid: process.pid, host: (await import('node:os')).hostname(), port: config.port }),
   ]);
+  // Importações que estavam rodando em uma instância que parou.
+  await recoverInterrupted();
   // O canal padrão vem antes do admin para que ele já entre no canal ao ser criado.
   await ensureDefaultChannel();
   await ensureAdmin(config.adminUsername, config.adminPassword, config.adminEmail, log);

@@ -18,11 +18,13 @@
     "@fastify/static": "^10.1.6",
     "@fastify/websocket": "^11.3.4",
     "@node-saml/node-saml": "^5.1.0",
+    "csv-parse": "^7.0.3",
     "fastify": "^5.12.7",
     "ldapts": "^9.2.0",
     "node-cron": "^4.6.0",
     "nodemailer": "^10.1.7",
     "pg": "^8.23.1",
+    "yauzl": "^3.4.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -30,11 +32,14 @@
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.2",
+    "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
     "esbuild": "^0.25.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5",
     "ws": "^8.22.0",
-    "xml-crypto": "^6.4.0"
+    "xml-crypto": "^6.4.0",
+    "yazl": "^3.3.1"
   }
 }

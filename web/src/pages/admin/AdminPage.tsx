@@ -11,6 +11,7 @@ import { AdminDevices, AdminEmoji, AdminInvites, AdminModeration } from './Admin
 import { AdminIntegrations } from './AdminIntegrations';
 import { AdminOAuth } from './AdminOAuth';
 import { AdminOmnichannel } from './AdminOmnichannel';
+import { AdminImport } from './import';
 
 export function AdminPage() {
   const { section = 'info' } = useParams();
@@ -28,6 +29,7 @@ export function AdminPage() {
     { id: 'omnichannel', label: '🎧 Omnichannel', perm: ['view-livechat-manager'] },
     { id: 'emoji', label: '😀 Emojis', perm: ['manage-emoji'] },
     { id: 'invites', label: '🔗 Convites', perm: ['view-room-administration'] },
+    { id: 'import', label: '📥 Importação', perm: ['run-import', 'view-import-operations'] },
     { id: 'settings', label: '⚙️ Configurações', perm: ['view-privileged-setting'] },
   ];
   return (
@@ -52,6 +54,7 @@ export function AdminPage() {
         {section === 'omnichannel' && <AdminOmnichannel />}
         {section === 'emoji' && <AdminEmoji />}
         {section === 'invites' && <AdminInvites />}
+        {section === 'import' && <AdminImport />}
         {section === 'settings' && <AdminSettings />}
       </div>
     </div>

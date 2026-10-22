@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { pool, query } from './db/pool';
+import { recoverInterrupted } from './importer/operations';
 import { bus } from './realtime/bus';
 import { cleanupStaleConnections } from './realtime/ws';
 import { runRetention } from './services/retention';
@@ -32,6 +33,7 @@ export function startScheduler(log: (m: string) => void) {
     cron.schedule('* * * * *', () => {
       void withLock(727101, async () => {
         await cleanupStaleConnections();
+        await recoverInterrupted();
         await query(`DELETE FROM instances WHERE last_seen < now() - interval '1 day'`);
         await query(`DELETE FROM realtime_spill WHERE created_at < now() - interval '5 minutes'`);
         await query(`DELETE FROM sessions WHERE expires_at < now()`);

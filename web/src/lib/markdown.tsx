@@ -14,10 +14,15 @@ interface Opts {
   onUserClick?: (username: string) => void;
 }
 
+// Cada alternativa, quando falha, só percorre texto onde ela mesma não pode começar de novo, então a busca é linear:
+// uma linha cheia de '[' não trava a tela de quem abre a sala. O rótulo do link não aceita '['; o endereço aceita '[' e
+// ']' (?ids[]=1, filter[x]=y, [::1]), menos um '[' que abre outro "[texto](", e é aí que a tentativa que falhou para.
+const MD_LINK = '\\[[^\\[\\]\\n]+\\]\\((?:https?:\\/\\/|\\/)(?:[^)\\s\\[]|\\[(?![^\\[\\]\\n]*\\]\\())+\\)';
+
 const INLINE = new RegExp(
   [
     '(`[^`\\n]+`)', // 1 código
-    '(\\[[^\\]\\n]+\\]\\((?:https?:\\/\\/|\\/)[^)\\s]+\\))', // 2 link markdown
+    `(${MD_LINK})`, // 2 link markdown
     '((?:https?:\\/\\/|www\\.)[^\\s<]+[^\\s<.,;:!?)\\]\'"])', // 3 url
     '(\\*\\*[^*\\n]+\\*\\*|\\*[^*\\s][^*\\n]*\\*)', // 4 negrito
     '(__[^_\\n]+__|(?<![\\w])_[^_\\s][^_\\n]*_(?![\\w]))', // 5 itálico
@@ -32,6 +37,13 @@ const INLINE = new RegExp(
 function safeUrl(url: string) {
   const u = url.startsWith('www.') ? `https://${url}` : url;
   return /^(https?:\/\/|\/)/i.test(u) ? u : '#';
+}
+
+// Tira os pontos do fim sem regex: /[.]+$/ recomeça em cada ponto e fica quadrático em "@....a".
+function trimDots(s: string) {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === '.') end--;
+  return s.slice(0, end);
 }
 
 function inline(text: string, o: Opts, keyBase: string): ReactNode[] {
@@ -67,16 +79,18 @@ function inline(text: string, o: Opts, keyBase: string): ReactNode[] {
       const inner = strike.startsWith('~~') ? strike.slice(2, -2) : strike.slice(1, -1);
       out.push(<del key={k}>{inline(inner, o, k)}</del>);
     } else if (mention) {
-      const name = mention.slice(1).replace(/[.]+$/, '');
+      const name = trimDots(mention.slice(1));
       const known = name === 'all' || name === 'here' || o.mentions?.some((x) => x.username.toLowerCase() === name.toLowerCase());
       if (!known) out.push(mention);
       else {
         const cls = name === o.me ? 'mention me' : name === 'all' || name === 'here' ? 'mention group' : 'mention';
         out.push(
           <span key={k} className={cls} onClick={() => name !== 'all' && name !== 'here' && o.onUserClick?.(name)}>
-            {mention}
+            @{name}
           </span>,
         );
+        // O ponto final da frase fica fora do destaque da menção.
+        if (mention.length > name.length + 1) out.push(mention.slice(name.length + 1));
       }
     } else if (channel) {
       const name = channel.slice(1);
@@ -100,28 +114,33 @@ function inline(text: string, o: Opts, keyBase: string): ReactNode[] {
   return out;
 }
 
-function lines(text: string, o: Opts, keyBase: string): ReactNode[] {
+// Citação dentro de citação vai até este nível; dali em diante o '>' fica como texto. lines() chama a si mesma a cada
+// nível, e uma mensagem com milhares de '>' estourava a pilha e desmontava o app.
+const MAX_QUOTE_DEPTH = 10;
+
+function lines(text: string, o: Opts, keyBase: string, depth = 0): ReactNode[] {
   const out: ReactNode[] = [];
   const ls = text.split('\n');
   let quote: string[] = [];
   const flushQuote = (k: string) => {
     if (!quote.length) return;
-    out.push(<blockquote key={k}>{lines(quote.join('\n'), o, k)}</blockquote>);
+    out.push(<blockquote key={k}>{lines(quote.join('\n'), o, k, depth + 1)}</blockquote>);
     quote = [];
   };
   ls.forEach((line, i) => {
     const k = `${keyBase}-l${i}`;
-    if (/^>\s?/.test(line)) {
+    if (depth < MAX_QUOTE_DEPTH && /^>\s?/.test(line)) {
       quote.push(line.replace(/^>\s?/, ''));
       return;
     }
     flushQuote(`${k}q`);
-    const h = line.match(/^(#{1,4})\s+(.+)$/);
+    // \s+ seguido de \S (classes disjuntas): sem isso "#" + muitos espaços + "a\u2028" volta atrás de forma quadrática.
+    const h = line.match(/^(#{1,4})\s+(\S.*)$/);
     if (h) {
       out.push(<div key={k} className={`md-h md-h${h[1].length}`}>{inline(h[2], o, k)}</div>);
       return;
     }
-    const li = line.match(/^\s*[-*•]\s+(.+)$/);
+    const li = line.match(/^\s*[-*•]\s+(\S.*)$/);
     if (li) {
       out.push(<div key={k} className="md-li">• {inline(li[1], o, k)}</div>);
       return;

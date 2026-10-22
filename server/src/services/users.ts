@@ -22,7 +22,7 @@ export interface Ctx {
 export const actorOf = (c: Ctx): Actor => ({ id: c.userId, username: c.username, ip: c.ip });
 
 const USERNAME_RE = /^[0-9a-zA-Z._-]{2,40}$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)*$/;
+export const EMAIL_RE = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)*$/;
 
 export function validateUsername(username: string) {
   if (!USERNAME_RE.test(username)) throw badRequest('error-invalid-username', 'Nome de usuário inválido (2-40 caracteres: letras, números, ponto, hífen, sublinhado).');
@@ -350,6 +350,27 @@ export async function requestPasswordReset(email: string, ip?: string) {
   // Envio em segundo plano, para o tempo de resposta não indicar se a conta existe.
   void sendMail({ to: u.email, subject: `[${site}] Redefinição de senha`, text, html });
   await audit({ id: u.id, username: u.username, ip }, 'user.password.reset.requested', { userId: u.id });
+}
+
+// Contas criadas pela importação: o mesmo link de "Esqueci minha senha", mas sem o limite de um pedido a cada
+// 2 minutos e com prazo maior, porque a pessoa pode demorar a ver o convite.
+const SETUP_TTL_MIN = 3 * 24 * 60;
+
+export async function sendPasswordSetupEmail(userId: string) {
+  // O link usa a tela de redefinição, que não funciona com ela desativada.
+  if (!getSetting('Accounts_PasswordReset')) return false;
+  const u = await getUserById(userId);
+  if (!u?.email || !canResetPassword(u)) return false;
+  const token = randomToken();
+  await query('DELETE FROM password_resets WHERE user_id = $1', [u.id]);
+  await query(`INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES ($1, $2, now() + make_interval(mins => $3))`, [sha256(token), u.id, SETUP_TTL_MIN]);
+  const { siteUrl } = await import('./sso');
+  const { sendMail } = await import('./mailer');
+  const site = getSetting<string>('Site_Name');
+  const link = `${siteUrl()}/reset-password#token=${token}`;
+  const text = `Olá, ${u.name || u.username}.\n\nSua conta no ${site} foi criada com o nome de usuário "${u.username}". Para definir a sua senha, abra o link abaixo em até 3 dias:\n\n${link}\n\nDepois desse prazo, use "Esqueci minha senha" na tela de login.`;
+  const html = `<p>Olá, ${escapeHtml(u.name || u.username)}.</p><p>Sua conta no ${escapeHtml(site)} foi criada com o nome de usuário <b>${escapeHtml(u.username)}</b>. Para definir a sua senha, clique no botão abaixo em até 3 dias:</p><p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#1d74f5;color:#fff;border-radius:6px;text-decoration:none">Definir senha</a></p><p style="color:#6c727a">Depois desse prazo, use "Esqueci minha senha" na tela de login.</p>`;
+  return sendMail({ to: u.email, subject: `Defina sua senha no ${site}`, text, html });
 }
 
 export async function resetPasswordWithToken(token: string, password: string, ip?: string) {
