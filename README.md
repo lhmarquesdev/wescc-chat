@@ -89,6 +89,17 @@ vira um botão na tela de login.
 - Papéis e canais podem ser sincronizados a cada login a partir de um claim (ex.: `groups`, `roles`, `realm_access.roles`),
   com mapa JSON valor → papéis/canais; `admin` só é concedido por mapeamento explícito.
 
+## Esqueci minha senha
+
+A tela de login tem o link "Esqueci minha senha" (`Accounts_PasswordReset`). O chat envia por e-mail um link válido por
+1 hora, que só funciona uma vez; ao redefinir, todas as sessões da conta são encerradas e o 2FA continua sendo pedido.
+Para funcionar:
+
+- configure o SMTP em Administração › Configurações › Email;
+- confira a URL do site em Configurações › Geral (ou a variável `SITE_URL`), que é usada no link.
+
+Contas LDAP e contas que só entram por SAML/OAuth seguem o provedor e não recebem o link.
+
 ## Segurança
 
 - Troca de senha obrigatória e 2FA obrigatório (geral ou por papel) são cobrados pelo servidor: até a pendência ser

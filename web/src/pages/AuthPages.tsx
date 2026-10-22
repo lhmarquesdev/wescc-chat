@@ -39,6 +39,7 @@ export function LoginPage() {
   const saml = useSetting<boolean>('SAML_Enable');
   const samlLabel = useSetting<string>('SAML_Button_Label');
   const ldap = useSetting<boolean>('LDAP_Enable');
+  const passwordReset = useSetting<boolean>('Accounts_PasswordReset');
   const [providers, setProviders] = useState<OAuthProviderPublic[]>([]);
   const next = safeNext(params.get('next'));
 
@@ -124,11 +125,118 @@ export function LoginPage() {
             ))}
           </>
         )}
+        {!needCode && passwordReset && (
+          <div className="auth-alt">
+            <Link to="/forgot-password">Esqueci minha senha</Link>
+          </div>
+        )}
         {registration === 'Public' && (
           <div className="auth-alt">
             Não tem conta? <Link to="/register">Cadastre-se</Link>
           </div>
         )}
+      </form>
+    </AuthShell>
+  );
+}
+
+export function ForgotPasswordPage() {
+  const [email, setEmail] = useState('');
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await api.post('users.forgotPassword', { email: email.trim() });
+      setSent(true);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (sent)
+    return (
+      <AuthShell>
+        <p>Se houver uma conta com o e-mail {email.trim()}, você vai receber em instantes um link para criar uma senha nova. O link vale por 1 hora.</p>
+        <Link to="/login">Voltar ao login</Link>
+      </AuthShell>
+    );
+  return (
+    <AuthShell>
+      <form onSubmit={submit} className="form">
+        <p>Digite o e-mail da sua conta para receber um link de redefinição de senha.</p>
+        <Field label="E-mail">
+          <input autoFocus type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </Field>
+        {error && <div className="form-error">{error}</div>}
+        <button className="btn primary block" disabled={busy || !email.trim()}>
+          Enviar link
+        </button>
+        <div className="auth-alt">
+          <Link to="/login">Voltar ao login</Link>
+        </div>
+      </form>
+    </AuthShell>
+  );
+}
+
+// Aberta pelo link do e-mail: /reset-password#token=...
+export function ResetPasswordPage() {
+  const [token] = useState(() => new URLSearchParams(location.hash.slice(1)).get('token') ?? '');
+  const [p1, setP1] = useState('');
+  const [p2, setP2] = useState('');
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
+  const minLen = useSetting<number>('Accounts_Password_Policy_MinLength');
+  // Tira o token da barra de endereço (histórico e capturas de tela).
+  useEffect(() => {
+    if (location.hash) history.replaceState(null, '', location.pathname);
+  }, []);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (p1 !== p2) return setError('As senhas não conferem.');
+    try {
+      await api.post('users.resetPassword', { token, password: p1 });
+      setDone(true);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+  if (!token)
+    return (
+      <AuthShell>
+        <p>Link inválido. Peça um novo em "Esqueci minha senha".</p>
+        <Link to="/forgot-password">Esqueci minha senha</Link>
+      </AuthShell>
+    );
+  if (done)
+    return (
+      <AuthShell>
+        <p>Senha redefinida. Por segurança, todas as sessões abertas foram encerradas.</p>
+        <Link className="btn primary block" to="/login">
+          Entrar
+        </Link>
+      </AuthShell>
+    );
+  return (
+    <AuthShell>
+      <form onSubmit={submit} className="form">
+        <p>Crie uma senha nova para a sua conta.</p>
+        <Field label="Nova senha" hint={`Mínimo de ${minLen} caracteres.`}>
+          <input autoFocus type="password" autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} />
+        </Field>
+        <Field label="Confirmar nova senha">
+          <input type="password" autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} />
+        </Field>
+        {error && <div className="form-error">{error}</div>}
+        <button className="btn primary block" disabled={!p1}>
+          Salvar senha
+        </button>
       </form>
     </AuthShell>
   );

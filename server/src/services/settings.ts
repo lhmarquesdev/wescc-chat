@@ -13,7 +13,7 @@ function add(group: string, section: string, id: string, type: SettingType, def:
 
 // ---------- Geral ----------
 add('General', 'Workspace', 'Site_Name', 'string', 'Wescc Chat', { public: true, label: 'Nome do workspace' });
-add('General', 'Workspace', 'Site_Url', 'string', 'http://localhost:3000', { public: true, label: 'URL do site' });
+add('General', 'Workspace', 'Site_Url', 'string', process.env.SITE_URL ?? 'http://localhost:3000', { public: true, label: 'URL do site' });
 add('General', 'Workspace', 'Language', 'string', 'pt-BR', { public: true, label: 'Idioma padrão' });
 add('General', 'Workspace', 'Default_Channels', 'string', 'geral', { label: 'Canais padrão (separados por vírgula)' });
 add('Layout', 'Home', 'Layout_Home_Title', 'string', 'Início', { public: true, label: 'Título da página inicial' });
@@ -38,6 +38,7 @@ add('Accounts', 'Profile', 'Accounts_AllowUserProfileChange', 'boolean', true, {
 add('Accounts', 'Profile', 'Accounts_AllowUsernameChange', 'boolean', true, { public: true, label: 'Permitir alterar nome de usuário' });
 add('Accounts', 'Profile', 'Accounts_AllowEmailChange', 'boolean', true, { public: true, label: 'Permitir alterar e-mail' });
 add('Accounts', 'Profile', 'Accounts_AllowPasswordChange', 'boolean', true, { public: true, label: 'Permitir alterar senha' });
+add('Accounts', 'Password', 'Accounts_PasswordReset', 'boolean', true, { public: true, label: 'Permitir redefinir a senha por e-mail ("Esqueci minha senha")' });
 add('Accounts', 'Profile', 'Accounts_AllowUserAvatarChange', 'boolean', true, { public: true, label: 'Permitir alterar avatar' });
 add('Accounts', 'Profile', 'Accounts_AvatarBlockUnauthenticatedAccess', 'boolean', true, { label: 'Avatares só para usuários logados' });
 add('Accounts', 'Profile', 'Accounts_AllowDeleteOwnAccount', 'boolean', false, { public: true, label: 'Permitir excluir a própria conta' });

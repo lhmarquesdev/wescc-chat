@@ -21,6 +21,8 @@ import {
   needs2faSetup,
   registerUser,
   removePersonalToken,
+  requestPasswordReset,
+  resetPasswordWithToken,
   resetAvatar,
   revokeAllSessions,
   revokeSession,
@@ -99,6 +101,17 @@ export function usersRoutes(app: FastifyInstance) {
       req.ip,
     );
     return { user: mapUser(row) };
+  });
+
+  // ---------- Esqueci minha senha ----------
+  route(app, 'POST', 'users.forgotPassword', { auth: false }, async (req) => {
+    await requestPasswordReset(str(b(req).email, 'email', { max: 320 }), req.ip);
+    return {};
+  });
+  route(app, 'POST', 'users.resetPassword', { auth: false }, async (req) => {
+    const body = b(req);
+    await resetPasswordWithToken(str(body.token, 'token', { max: 200 }), str(body.password, 'password', { max: 1000 }), req.ip);
+    return {};
   });
 
   // ---------- 2FA ----------

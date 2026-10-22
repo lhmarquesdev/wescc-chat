@@ -321,6 +321,65 @@ export async function revokeAllSessions(userId: string, exceptSessionId?: string
   return rows.length;
 }
 
+// ---------- Redefinição de senha por e-mail ----------
+
+const RESET_TTL_MIN = 60;
+
+const escapeHtml = (v: string) => v.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+// Só contas que entram com senha do próprio chat (LDAP e contas só de SAML/OAuth seguem o provedor).
+const canResetPassword = (u: any) => u.active && u.type !== 'bot' && (u.auth_source === 'local' || (u.auth_source !== 'ldap' && !!u.password_hash));
+
+// Sempre responde do mesmo jeito, exista ou não a conta, para não revelar quem tem cadastro.
+export async function requestPasswordReset(email: string, ip?: string) {
+  if (!getSetting('Accounts_PasswordReset')) throw forbidden('A redefinição de senha está desativada.');
+  const u = await one('SELECT * FROM users WHERE lower(email) = lower($1)', [email.trim()]);
+  if (!u || !canResetPassword(u)) return;
+  // Um pedido a cada 2 minutos por conta; só o link mais recente vale.
+  if (await one(`SELECT 1 FROM password_resets WHERE user_id = $1 AND created_at > now() - interval '2 minutes'`, [u.id])) return;
+  const token = randomToken();
+  await query('DELETE FROM password_resets WHERE user_id = $1', [u.id]);
+  await query(`INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES ($1, $2, now() + make_interval(mins => $3))`, [sha256(token), u.id, RESET_TTL_MIN]);
+  const { siteUrl } = await import('./sso');
+  const { sendMail } = await import('./mailer');
+  const site = getSetting<string>('Site_Name');
+  // O token vai no fragmento (#): não chega ao servidor nem aos logs de acesso.
+  const link = `${siteUrl()}/reset-password#token=${token}`;
+  const text = `Olá, ${u.name || u.username}.\n\nRecebemos um pedido para redefinir a sua senha no ${site}. Para criar uma senha nova, abra o link abaixo em até ${RESET_TTL_MIN} minutos:\n\n${link}\n\nSe não foi você, ignore este e-mail: a senha atual continua valendo.`;
+  const html = `<p>Olá, ${escapeHtml(u.name || u.username)}.</p><p>Recebemos um pedido para redefinir a sua senha no ${escapeHtml(site)}. Para criar uma senha nova, clique no botão abaixo em até ${RESET_TTL_MIN} minutos:</p><p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#1d74f5;color:#fff;border-radius:6px;text-decoration:none">Redefinir senha</a></p><p style="color:#6c727a">Se não foi você, ignore este e-mail: a senha atual continua valendo.</p>`;
+  // Envio em segundo plano, para o tempo de resposta não indicar se a conta existe.
+  void sendMail({ to: u.email, subject: `[${site}] Redefinição de senha`, text, html });
+  await audit({ id: u.id, username: u.username, ip }, 'user.password.reset.requested', { userId: u.id });
+}
+
+export async function resetPasswordWithToken(token: string, password: string, ip?: string) {
+  if (!getSetting('Accounts_PasswordReset')) throw forbidden('A redefinição de senha está desativada.');
+  const invalid = () => badRequest('error-invalid-token', 'Link inválido ou expirado. Peça um novo em "Esqueci minha senha".');
+  const pending = await one('SELECT * FROM password_resets WHERE token_hash = $1 AND expires_at > now()', [sha256(token)]);
+  if (!pending) throw invalid();
+  // A política de senha é conferida antes de gastar o link, para a pessoa poder tentar outra senha.
+  validatePassword(password);
+  const used = await one('DELETE FROM password_resets WHERE token_hash = $1 AND expires_at > now() RETURNING user_id', [sha256(token)]);
+  if (!used) throw invalid();
+  const u = await getUserById(used.user_id);
+  if (!u || !canResetPassword(u)) throw invalid();
+  await query('UPDATE users SET password_hash = $2, require_password_change = false, updated_at = now() WHERE id = $1', [u.id, await hashPassword(password)]);
+  await query('DELETE FROM password_resets WHERE user_id = $1', [u.id]);
+  await query('DELETE FROM login_attempts WHERE key = $1', [loginKey(`id:${u.id}`)]);
+  // Quem estava com a senha antiga (inclusive um invasor) sai de todos os dispositivos.
+  await revokeAllSessions(u.id);
+  await audit({ id: u.id, username: u.username, ip }, 'user.password.reset', { userId: u.id });
+  if (u.email) {
+    const { sendMail } = await import('./mailer');
+    const site = getSetting<string>('Site_Name');
+    void sendMail({
+      to: u.email,
+      subject: `[${site}] Sua senha foi alterada`,
+      text: `Olá, ${u.name || u.username}.\n\nA senha da sua conta no ${site} acabou de ser redefinida e todas as sessões foram encerradas. Se não foi você, fale com o administrador imediatamente.`,
+    });
+  }
+}
+
 // ---------- 2FA ----------
 
 // Papéis marcados como "exige 2FA" (cache curto; roles.update limpa o cache desta instância).

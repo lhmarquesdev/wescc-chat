@@ -5,7 +5,7 @@ import { loadPublicSettings, logout, requestNotificationPermission, startSession
 import { useStore } from './lib/store';
 import { Sidebar } from './components/Sidebar';
 import { Spinner, Toasts } from './components/ui';
-import { ChangePasswordPage, InvitePage, LoginPage, RegisterPage } from './pages/AuthPages';
+import { ChangePasswordPage, ForgotPasswordPage, InvitePage, LoginPage, RegisterPage, ResetPasswordPage } from './pages/AuthPages';
 import { DirectoryPage, HomePage } from './pages/HomeDirectory';
 import { RoomPage } from './pages/RoomPage';
 import { AccountPage, applyTheme, TwoFactorCard } from './pages/AccountPage';
@@ -113,6 +113,8 @@ function Shell() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/register/:secret" element={<RegisterPage />} />
         <Route path="/invite/:token" element={<InviteRoute />} />
         <Route element={<Protected />}>
