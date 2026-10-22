@@ -18,6 +18,7 @@ import {
   listSessions,
   login,
   logout,
+  needs2faSetup,
   registerUser,
   removePersonalToken,
   resetAvatar,
@@ -35,15 +36,8 @@ import { b, bool, paging, parseCookies, q, route, str, strArray } from './http';
 async function meResponse(userId: string) {
   const u = await getUserById(userId);
   const roles = await getUserRoles(userId);
-  // 2FA obrigatório vale para quem entra com senha local (inclusive contas vinculadas a SAML/OAuth que mantêm a senha);
-  // quem só entra pelo provedor (LDAP, SAML, OAuth) segue a política dele.
-  // Exigido para todos pela configuração ou por algum papel marcado como "exige 2FA".
-  const passwordLogin = u.auth_source === 'local' || (u.auth_source !== 'ldap' && !!u.password_hash);
-  let require2faSetup = !!getSetting('Accounts_TwoFactorAuthentication_Enabled') && passwordLogin && u.type !== 'bot' && !u.totp_enabled;
-  if (require2faSetup && !getSetting('Accounts_TwoFactorAuthentication_Enforce')) {
-    require2faSetup = !!(await one('SELECT 1 FROM roles WHERE id = ANY($1) AND mandatory_2fa', [roles]));
-  }
-  return { ...mapUser(u, { full: true }), permissions: permissionsForRoles(roles), requirePasswordChange: u.require_password_change, require2faSetup };
+  // O servidor também bloqueia o resto da API enquanto a troca de senha ou o 2FA estiverem pendentes (api/http.ts).
+  return { ...mapUser(u, { full: true }), permissions: permissionsForRoles(roles), requirePasswordChange: u.require_password_change, require2faSetup: await needs2faSetup(u) };
 }
 
 export async function resolveUserParam(params: Record<string, any>) {
@@ -156,10 +150,12 @@ export function usersRoutes(app: FastifyInstance) {
   // ---------- Perfil próprio ----------
   route(app, 'POST', 'users.updateOwnBasicInfo', {}, async (req, _rep, ctx) => {
     const d = b(req).data ?? {};
+    // Na troca de senha obrigatória só a senha pode ser alterada.
+    const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: d.statusText };
     const row = await updateUser(
       ctx,
       ctx.userId,
-      { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: d.statusText },
+      fields,
       { asAdmin: false, currentPassword: d.currentPassword },
     );
     return { user: mapUser(row, { full: true }) };
@@ -341,20 +337,27 @@ export function usersRoutes(app: FastifyInstance) {
     return { users: rows.map((r) => mapUser(r, { full: true })) };
   });
 
-  // Avatares
+  // Avatares. Sem login (com Accounts_AvatarBlockUnauthenticatedAccess) só as iniciais do que foi pedido, sem revelar nada.
+  const avatarsPublic = () => !getSetting('Accounts_AvatarBlockUnauthenticatedAccess');
   app.get('/avatar/:username', async (req: any, reply) => {
     const name = String(req.params.username).replace(/^@/, '');
     if (name.startsWith('room/')) return reply.callNotFound();
+    const visible = !!req.ctx || avatarsPublic();
+    reply.header('Cache-Control', visible && !req.ctx ? 'public, max-age=300' : 'private, max-age=300');
+    if (!visible) return reply.type('image/svg+xml').send(initialsSvg(name));
     const u = await one('SELECT u.id, u.username, u.name, a.content_type, a.data, a.updated_at FROM users u LEFT JOIN avatars a ON a.user_id = u.id WHERE lower(u.username) = lower($1)', [name]);
-    reply.header('Cache-Control', 'public, max-age=300');
     if (u?.data) return reply.type(u.content_type).send(u.data);
     return reply.type('image/svg+xml').send(initialsSvg(u?.name || u?.username || name));
   });
   app.get('/avatar/room/:rid', async (req: any, reply) => {
-    const r = await one('SELECT r.name, r.fname, a.content_type, a.data FROM rooms r LEFT JOIN room_avatars a ON a.room_id = r.id WHERE r.id = $1', [req.params.rid]);
-    reply.header('Cache-Control', 'public, max-age=300');
-    if (r?.data) return reply.type(r.content_type).send(r.data);
-    return reply.type('image/svg+xml').send(initialsSvg(r?.fname || r?.name || '#'));
+    const r = await one('SELECT r.*, a.content_type, a.data FROM rooms r LEFT JOIN room_avatars a ON a.room_id = r.id WHERE r.id = $1', [req.params.rid]);
+    reply.header('Cache-Control', 'private, max-age=300');
+    // Sala privada, DM ou atendimento: só para quem tem acesso. Canal público: segue a configuração de avatares.
+    const { canAccessRoom } = await import('../services/rooms');
+    const visible = !!r && (r.t === 'c' && avatarsPublic() ? true : !!req.ctx && (await canAccessRoom(req.ctx.userId, r)));
+    if (!visible) return reply.type('image/svg+xml').send(initialsSvg('#'));
+    if (r.data) return reply.type(r.content_type).send(r.data);
+    return reply.type('image/svg+xml').send(initialsSvg(r.fname || r.name || '#'));
   });
 }
 

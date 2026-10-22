@@ -80,6 +80,27 @@ async function mapRoles(profile: Profile): Promise<string[] | null> {
   return existing.map((r) => r.id);
 }
 
+// Só troca os papéis que o SAML gerencia (os do mapa e os que ele mesmo deu no último login);
+// papéis dados à mão, inclusive admin, ficam.
+async function syncSamlRoles(user: any, granted: string[]) {
+  let map: Record<string, string | string[]> = {};
+  try {
+    map = JSON.parse(getSetting<string>('SAML_Role_Mapping') || '{}');
+  } catch {
+    map = {};
+  }
+  const managed = new Set([...Object.values(map).flat(), ...(user.saml_synced_roles ?? [])]);
+  const next = [...new Set([...user.roles.filter((r: string) => !managed.has(r)), ...granted, 'user'])];
+  if (user.roles.includes('admin') && !next.includes('admin')) {
+    const n = await one(`SELECT count(*)::int AS n FROM users WHERE 'admin' = ANY(roles) AND active AND id <> $1`, [user.id]);
+    if (!n.n) next.push('admin'); // nunca remove o último administrador
+  }
+  const row = await one('UPDATE users SET roles = $2, saml_synced_roles = $3, updated_at = now() WHERE id = $1 RETURNING *', [user.id, next, granted]);
+  const same = next.length === user.roles.length && next.every((r) => user.roles.includes(r));
+  if (!same) await audit({ id: user.id, username: user.username }, 'auth.saml.roles', { userId: user.id }, { before: user.roles, after: next });
+  return row;
+}
+
 // Cria ou atualiza o usuário local a partir do perfil SAML.
 export async function upsertFromProfile(profile: Profile) {
   const { createUser } = await import('../services/users');
@@ -109,10 +130,7 @@ export async function upsertFromProfile(profile: Profile) {
     );
   }
   const roles = await mapRoles(profile);
-  if (roles) {
-    const next = [...new Set([...roles, 'user'])];
-    user = await one('UPDATE users SET roles = $2 WHERE id = $1 RETURNING *', [user.id, next]);
-  }
+  if (roles) user = await syncSamlRoles(user, roles);
   return user;
 }
 

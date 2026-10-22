@@ -39,6 +39,7 @@ add('Accounts', 'Profile', 'Accounts_AllowUsernameChange', 'boolean', true, { pu
 add('Accounts', 'Profile', 'Accounts_AllowEmailChange', 'boolean', true, { public: true, label: 'Permitir alterar e-mail' });
 add('Accounts', 'Profile', 'Accounts_AllowPasswordChange', 'boolean', true, { public: true, label: 'Permitir alterar senha' });
 add('Accounts', 'Profile', 'Accounts_AllowUserAvatarChange', 'boolean', true, { public: true, label: 'Permitir alterar avatar' });
+add('Accounts', 'Profile', 'Accounts_AvatarBlockUnauthenticatedAccess', 'boolean', true, { label: 'Avatares só para usuários logados' });
 add('Accounts', 'Profile', 'Accounts_AllowDeleteOwnAccount', 'boolean', false, { public: true, label: 'Permitir excluir a própria conta' });
 add('Accounts', 'Two Factor', 'Accounts_TwoFactorAuthentication_Enabled', 'boolean', true, { public: true, label: 'Autenticação em dois fatores' });
 add('Accounts', 'Two Factor', 'Accounts_TwoFactorAuthentication_Enforce', 'boolean', false, { public: true, label: 'Exigir 2FA de todos os usuários' });
@@ -47,7 +48,9 @@ add('Accounts', 'Password', 'Accounts_Password_Policy_AtLeastOneUppercase', 'boo
 add('Accounts', 'Password', 'Accounts_Password_Policy_AtLeastOneNumber', 'boolean', false, { public: true, label: 'Exigir número' });
 add('Accounts', 'Password', 'Accounts_Password_Policy_AtLeastOneSpecialCharacter', 'boolean', false, { public: true, label: 'Exigir caractere especial' });
 add('Accounts', 'Session', 'Accounts_LoginExpiration', 'int', 90, { label: 'Validade do login (dias)' });
-add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Attempts', 'int', 10, { label: 'Bloquear após N tentativas falhas (0 = nunca)' });
+add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Attempts', 'int', 10, { label: 'Bloquear o login após N tentativas falhas (0 = nunca)' });
+add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Attempts_By_Ip', 'int', 50, { label: 'Bloquear o IP após N tentativas falhas (0 = nunca)' });
+add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Minutes', 'int', 5, { label: 'Minutos de bloqueio após tentativas falhas' });
 add('Accounts', 'Presence', 'Accounts_Default_Away_Minutes', 'int', 5, { public: true, label: 'Minutos de inatividade para "ausente"' });
 
 // ---------- Mensagens ----------
@@ -120,6 +123,7 @@ add('LDAP', 'Data Sync', 'LDAP_Name_Field', 'string', 'cn', { label: 'Atributo d
 add('LDAP', 'Data Sync', 'LDAP_Email_Field', 'string', 'mail', { label: 'Atributo do e-mail' });
 add('LDAP', 'Data Sync', 'LDAP_Unique_Identifier_Field', 'string', 'objectGUID,entryUUID', { label: 'Identificador único' });
 add('LDAP', 'Data Sync', 'LDAP_Login_Fallback', 'boolean', true, { label: 'Permitir login local se o LDAP falhar' });
+add('LDAP', 'Data Sync', 'LDAP_Merge_Existing_Users', 'boolean', false, { label: 'Vincular a contas locais com o mesmo nome de usuário' });
 add('LDAP', 'Sync', 'LDAP_Background_Sync', 'boolean', false, { label: 'Sincronização em segundo plano' });
 add('LDAP', 'Sync', 'LDAP_Background_Sync_Interval', 'string', '0 */6 * * *', { label: 'Frequência (cron)' });
 add('LDAP', 'Sync', 'LDAP_Background_Sync_Import_New_Users', 'boolean', true, { label: 'Importar novos usuários' });
@@ -149,6 +153,8 @@ add('SAML', 'Mapping', 'SAML_Merge_By_Email', 'boolean', false, { label: 'Vincul
 
 // ---------- Segurança / API ----------
 add('Security', 'Rate Limiter', 'API_Enable_Rate_Limiter', 'boolean', true, { label: 'Limite de requisições na API' });
+add('Security', 'CORS', 'API_Enable_CORS', 'boolean', false, { label: 'Permitir chamadas à API de outros sites (CORS)' });
+add('Security', 'CORS', 'API_CORS_Origin', 'string', '', { label: 'Origens permitidas, separadas por vírgula (ex.: https://intranet.empresa.com.br; * libera todas)' });
 add('Security', 'Rate Limiter', 'API_Enable_Rate_Limiter_Limit_Calls_Default', 'int', 300, { label: 'Chamadas por minuto' });
 add('Security', 'Device Management', 'Device_Management_Enable_Login_Emails', 'boolean', false, { label: 'Enviar e-mail em login de novo dispositivo' });
 add('Security', 'Device Management', 'Device_Management_Allow_Logout_All', 'boolean', true, { public: true, label: 'Permitir encerrar todas as sessões' });
@@ -243,6 +249,11 @@ export function setSettingCache(id: string, value: unknown) {
 
 export function isKnownSetting(id: string) {
   return defs.has(id);
+}
+
+// Configurações cujo valor não pode aparecer em logs nem na auditoria.
+export function isSecretSetting(id: string) {
+  return defs.get(id)?.type === 'password' || /Password|Secret|Token|Private_?Key/i.test(id);
 }
 
 function coerce(def: Def, value: unknown): unknown {

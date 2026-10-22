@@ -56,6 +56,19 @@ export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
 }
 
+// O administrador passou a exigir troca de senha ou 2FA durante a sessão: recarrega para mostrar a tela de configuração
+// (no máximo uma vez a cada 30 s, caso as instâncias do servidor ainda discordem por alguns segundos).
+function setupRequired() {
+  try {
+    const last = Number(sessionStorage.getItem('wescc.setupReload') ?? 0);
+    if (Date.now() - last < 30_000) return;
+    sessionStorage.setItem('wescc.setupReload', String(Date.now()));
+  } catch {
+    // armazenamento indisponível
+  }
+  location.reload();
+}
+
 if (creds) setCredentials(creds);
 
 type Params = Record<string, unknown> | undefined;
@@ -91,6 +104,7 @@ async function request<T = any>(method: string, path: string, data?: Params | Fo
   }
   if (!res.ok || json.success === false) {
     if (res.status === 401 && path !== 'login') onUnauthorized?.();
+    if (res.status === 403 && (json.errorType === 'error-2fa-setup-required' || json.errorType === 'error-password-change-required')) setupRequired();
     throw new ApiError(res.status, json.errorType ?? 'error', json.error ?? `Erro ${res.status}`, json.details);
   }
   return json as T;

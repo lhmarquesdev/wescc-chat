@@ -5,7 +5,7 @@ import { pool } from '../src/db/pool';
 import net from 'node:net';
 import { internalAddress } from '../src/oauth/login';
 import { safeRedirect } from '../src/services/sso';
-import { admin, api, login as passwordLogin, newUser, startServer, stopServer, urlOf, type Auth } from './helpers';
+import { admin, api, enable2fa, login as passwordLogin, newUser, startServer, stopServer, urlOf, type Auth } from './helpers';
 
 // Servidor OAuth 2.0 / OIDC de mentira: /authorize emite o código, /token confere PKCE e cliente,
 // /userinfo e /user devolvem o perfil, /user/emails imita o GitHub.
@@ -473,6 +473,7 @@ describe('OAuth: contas existentes', () => {
     await update('mock', { mergeUsers: false });
 
     // 2FA obrigatório continua valendo para o login com senha da conta vinculada.
+    await enable2fa(A); // senão o próprio admin fica bloqueado até configurar o 2FA
     await api('POST', 'settings', { settings: { Accounts_TwoFactorAuthentication_Enforce: true } }, A);
     const pw = await api('POST', 'login', { user: 'carla', password: 'senha-forte-1' });
     expect(pw.data.me.require2faSetup).toBe(true);

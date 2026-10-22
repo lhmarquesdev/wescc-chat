@@ -15,6 +15,8 @@ export interface Ctx {
   username: string;
   sessionId: string;
   ip?: string;
+  // Troca de senha ou configuração de 2FA pendente: a API só aceita as rotas para resolver isso.
+  setup?: 'password' | '2fa' | null;
 }
 
 export const actorOf = (c: Ctx): Actor => ({ id: c.userId, username: c.username, ip: c.ip });
@@ -120,7 +122,48 @@ export async function registerUser(input: { username: string; name: string; emai
 
 // ---------- Login e sessões ----------
 
-const failed = new Map<string, { count: number; until: number }>();
+// ---------- Bloqueio por tentativas falhas (no banco, vale para todas as instâncias) ----------
+
+// O contador do login usa o id da conta quando ela existe (usuário e e-mail contam juntos).
+const loginKey = (login: string) => `user:${login.trim().toLowerCase()}`;
+
+function attemptKeys(login: string, ip?: string) {
+  const keys: { key: string; max: number }[] = [];
+  const byUser = getSetting<number>('Accounts_Block_Failed_Login_Attempts');
+  const byIp = getSetting<number>('Accounts_Block_Failed_Login_Attempts_By_Ip');
+  if (byUser > 0) keys.push({ key: loginKey(login), max: byUser });
+  if (byIp > 0 && ip) keys.push({ key: `ip:${ip}`, max: byIp });
+  return keys;
+}
+
+const blockMinutes = () => Math.max(1, getSetting<number>('Accounts_Block_Failed_Login_Minutes') || 5);
+
+async function assertNotBlocked(login: string, ip?: string) {
+  const keys = attemptKeys(login, ip).map((k) => k.key);
+  if (!keys.length) return;
+  const r = await one('SELECT max(blocked_until) AS until FROM login_attempts WHERE key = ANY($1) AND blocked_until > now()', [keys]);
+  if (r?.until) throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas falhas. Tente novamente em alguns minutos.');
+}
+
+async function recordFailedAttempt(login: string, ip?: string) {
+  const minutes = blockMinutes();
+  for (const { key, max } of attemptKeys(login, ip)) {
+    // A contagem recomeça depois de um período sem falhas.
+    await query(
+      `INSERT INTO login_attempts (key, count, updated_at) VALUES ($1, 1, now())
+       ON CONFLICT (key) DO UPDATE SET
+         count = CASE WHEN login_attempts.updated_at < now() - make_interval(mins => $2) THEN 1 ELSE login_attempts.count + 1 END,
+         updated_at = now()`,
+      [key, minutes],
+    );
+    await query(`UPDATE login_attempts SET blocked_until = now() + make_interval(mins => $3), count = 0 WHERE key = $1 AND count >= $2`, [key, max, minutes]);
+  }
+}
+
+async function clearFailedAttempts(login: string) {
+  // Só zera o contador do login: o do IP continua (senão bastaria entrar numa conta própria entre as tentativas).
+  await query('DELETE FROM login_attempts WHERE key = $1', [loginKey(login)]);
+}
 
 export interface DeviceInfo {
   userAgent?: string;
@@ -155,17 +198,16 @@ export class TwoFactorRequired extends Error {
 }
 
 export async function login(params: { user: string; password: string; code?: string; device: DeviceInfo }) {
-  const key = `${params.user.toLowerCase()}|${params.device.ip ?? ''}`;
-  const blockAfter = getSetting<number>('Accounts_Block_Failed_Login_Attempts');
-  const f0 = failed.get(key);
-  if (blockAfter > 0 && f0 && f0.until > Date.now())
-    throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas falhas. Tente novamente em alguns minutos.');
-
   let user = await findUserForLogin(params.user);
+  const attemptLogin = user ? `id:${user.id}` : params.user;
+  await assertNotBlocked(attemptLogin, params.device.ip);
   let ok = false;
   if (getSetting('LDAP_Enable') && (!user || user.auth_source === 'ldap')) {
     const { ldapLogin } = await import('../ldap/ldap');
-    const ldapUser = await ldapLogin(params.user, params.password).catch(() => null);
+    const ldapUser = await ldapLogin(params.user, params.password).catch((e) => {
+      if (e instanceof ApiError) throw e; // conflito de conta: mostra o motivo
+      return null;
+    });
     if (ldapUser) {
       user = ldapUser;
       ok = true;
@@ -178,24 +220,21 @@ export async function login(params: { user: string; password: string; code?: str
   if (!ok) user = null;
 
   if (!user) {
-    if (blockAfter > 0) {
-      const f = failed.get(key) ?? { count: 0, until: 0 };
-      f.count++;
-      if (f.count >= blockAfter) {
-        f.until = Date.now() + 5 * 60_000;
-        f.count = 0;
-      }
-      failed.set(key, f);
-    }
+    await recordFailedAttempt(attemptLogin, params.device.ip);
     await audit({ ip: params.device.ip, username: params.user }, 'auth.login.failed', { login: params.user });
     throw unauthorized('Usuário ou senha incorretos.');
   }
-  failed.delete(key);
   if (!user.active) throw unauthorized('Usuário desativado ou aguardando aprovação.');
   if (user.totp_enabled && getSetting('Accounts_TwoFactorAuthentication_Enabled')) {
     if (!params.code) throw new TwoFactorRequired('totp');
-    if (!(await check2fa(user, params.code))) throw unauthorized('Código de verificação inválido.');
+    if (!(await check2fa(user, params.code))) {
+      // Código errado conta como tentativa falha (senão o código de 6 dígitos poderia ser adivinhado).
+      await recordFailedAttempt(attemptLogin, params.device.ip);
+      await audit({ id: user.id, username: user.username, ip: params.device.ip }, 'auth.login.failed', { login: params.user, reason: 'totp' });
+      throw unauthorized('Código de verificação inválido.');
+    }
   }
+  await clearFailedAttempts(attemptLogin);
   const s = await createSession(user.id, params.device);
   await audit({ id: user.id, username: user.username, ip: params.device.ip }, 'auth.login', { sessionId: s.sessionId });
   return { user, ...s };
@@ -284,7 +323,41 @@ export async function revokeAllSessions(userId: string, exceptSessionId?: string
 
 // ---------- 2FA ----------
 
+// Papéis marcados como "exige 2FA" (cache curto; roles.update limpa o cache desta instância).
+let mandatoryRoles = { at: 0, ids: new Set<string>() };
+export function invalidateMandatory2faCache() {
+  mandatoryRoles.at = 0;
+}
+async function mandatory2faRoles() {
+  if (Date.now() - mandatoryRoles.at > 15_000) {
+    const rows = await many('SELECT id FROM roles WHERE mandatory_2fa');
+    mandatoryRoles = { at: Date.now(), ids: new Set(rows.map((r) => r.id)) };
+  }
+  return mandatoryRoles.ids;
+}
+
+// 2FA obrigatório vale para quem entra com senha local (inclusive contas vinculadas a SAML/OAuth que mantêm a senha);
+// quem só entra pelo provedor (LDAP, SAML, OAuth) segue a política dele.
+// Exigido para todos pela configuração ou por algum papel marcado como "exige 2FA".
+export async function needs2faSetup(u: any) {
+  if (!getSetting('Accounts_TwoFactorAuthentication_Enabled') || u.type === 'bot' || u.totp_enabled) return false;
+  const passwordLogin = u.auth_source === 'local' || (u.auth_source !== 'ldap' && !!u.password_hash);
+  if (!passwordLogin) return false;
+  if (getSetting('Accounts_TwoFactorAuthentication_Enforce')) return true;
+  const mandatory = await mandatory2faRoles();
+  return (u.roles ?? []).some((r: string) => mandatory.has(r));
+}
+
+// O que a conta precisa resolver antes de usar o chat: trocar a senha ou configurar o 2FA.
+export async function pendingSetup(u: any): Promise<'password' | '2fa' | null> {
+  if (u.require_password_change) return 'password';
+  return (await needs2faSetup(u)) ? '2fa' : null;
+}
+
 export async function enableTotp(ctx: Ctx) {
+  const u = await getUserById(ctx.userId);
+  // Gerar uma chave nova desligaria o 2FA atual sem pedir código: é preciso desativar antes (com código).
+  if (u?.totp_enabled) throw badRequest('totp-already-enabled', 'O 2FA já está ativo. Desative-o com um código antes de configurar outro aplicativo.');
   const secret = generateSecret();
   await query('UPDATE users SET totp_secret = $2, totp_enabled = false WHERE id = $1', [ctx.userId, secret]);
   return { secret, url: otpauthUrl(secret, ctx.username, getSetting<string>('Site_Name')) };

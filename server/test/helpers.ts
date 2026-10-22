@@ -70,6 +70,16 @@ export async function admin() {
   return login('admin', 'admin-pass-123');
 }
 
+// Ativa o 2FA (TOTP) da conta e devolve a chave, para gerar códigos com totpCode().
+export async function enable2fa(auth: Auth) {
+  const { totpCode } = await import('../src/lib/totp');
+  const setup = await api('POST', 'users.2fa.enableTotp', {}, auth);
+  if (!setup.secret) throw new Error(JSON.stringify(setup));
+  const r = await api('POST', 'users.2fa.verifyTotp', { code: totpCode(setup.secret) }, auth);
+  if (!r.success) throw new Error(JSON.stringify(r));
+  return setup.secret as string;
+}
+
 let seq = 0;
 export async function newUser(adminAuth: Auth, extra: Record<string, unknown> = {}) {
   seq++;

@@ -88,3 +88,16 @@ vira um botão na tela de login.
 - Contas existentes só são vinculadas pelo e-mail quando a opção estiver ligada e o provedor confirmar o e-mail.
 - Papéis e canais podem ser sincronizados a cada login a partir de um claim (ex.: `groups`, `roles`, `realm_access.roles`),
   com mapa JSON valor → papéis/canais; `admin` só é concedido por mapeamento explícito.
+
+## Segurança
+
+- Troca de senha obrigatória e 2FA obrigatório (geral ou por papel) são cobrados pelo servidor: até a pendência ser
+  resolvida, a API só aceita as rotas para resolvê-la e o WebSocket fecha com o código 4005. Quem liga o 2FA
+  obrigatório também precisa configurar o próprio 2FA.
+- Tentativas de login falhas (inclusive código 2FA errado) bloqueiam a conta e o IP por alguns minutos, em todas as
+  instâncias: Configurações › Contas › Sessão.
+- A API só aceita chamadas de outros sites com CORS ligado (Configurações › Segurança › CORS). O cookie de sessão vale
+  apenas para leituras (imagens e downloads) e para o WebSocket da própria página.
+- Avatares exigem login por padrão (`Accounts_AvatarBlockUnauthenticatedAccess`); avatares de salas privadas só para
+  quem tem acesso.
+- O LDAP só vincula uma conta local com o mesmo nome de usuário com `LDAP_Merge_Existing_Users` ligado.

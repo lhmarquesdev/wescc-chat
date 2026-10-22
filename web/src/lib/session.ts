@@ -41,6 +41,8 @@ let started = false;
 export async function startSession() {
   const me = (await api.get('me')) as Me;
   useStore.getState().setMe(me);
+  // Com troca de senha ou 2FA pendente o servidor só aceita as rotas para resolver isso: o resto fica para depois.
+  if (me.requirePasswordChange || me.require2faSetup) return me;
   await Promise.all([loadSubscriptions(), loadCustomEmoji(), loadPermissionMap()]);
   void loadLivechat();
   if (!started) {
@@ -89,6 +91,16 @@ export function endSession() {
   realtime.stop();
   started = false;
   useStore.getState().reset();
+  clearDrafts();
+}
+
+// Rascunhos ficam no navegador: ao sair, não podem ficar para o próximo usuário do computador.
+function clearDrafts() {
+  try {
+    for (const k of Object.keys(localStorage)) if (k.startsWith('wescc.draft.')) localStorage.removeItem(k);
+  } catch {
+    // armazenamento indisponível
+  }
 }
 
 setUnauthorizedHandler(() => {

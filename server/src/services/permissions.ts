@@ -76,7 +76,7 @@ export const DEFAULT_PERMISSIONS: [string, string, string[]][] = [
   ['create-d', 'rooms', [A, U, B]],
   ['start-discussion', 'rooms', [A, U, G, B]],
   ['start-discussion-other-user', 'rooms', [A, U, G, B, O]],
-  ['view-c-room', 'rooms', [A, U, B, G]],
+  ['view-c-room', 'rooms', [A, U, B]],
   ['view-p-room', 'rooms', [A, U, B, G]],
   ['view-joined-room', 'rooms', [G, B, U, A]],
   ['preview-c-room', 'rooms', [A, U]],

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { admin, api, login, newUser, startServer, stopServer, type Auth } from './helpers';
+import { admin, api, enable2fa, login, newUser, startServer, stopServer, type Auth } from './helpers';
 
 let A: Auth;
 beforeAll(async () => {
@@ -24,6 +24,8 @@ describe('contas', () => {
   });
 
   it('2FA obrigatório aparece no me (configuração geral ou papel)', async () => {
+    // O admin também tem o papel "user": com 2FA próprio ele continua podendo mexer nas configurações.
+    await enable2fa(A);
     const u = await newUser(A);
     expect((await api('GET', 'me', undefined, u)).require2faSetup).toBe(false);
     await api('POST', 'roles.update', { roleId: 'user', mandatory2fa: true }, A);

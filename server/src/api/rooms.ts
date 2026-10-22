@@ -123,10 +123,8 @@ export function roomsRoutes(app: FastifyInstance) {
   });
   route(app, 'GET', 'rooms.membersOrderedByRole', {}, async (req, _rep, ctx) => {
     const room = await loadRoomForUser(ctx, str(q(req).roomId, 'roomId'));
-    const r = await listMembers(room.id, { ...paging(q(req)), filter: q(req).filter });
-    const weight = (roles: string[]) => (roles.includes('owner') ? 0 : roles.includes('moderator') ? 1 : roles.includes('leader') ? 2 : 3);
-    r.members.sort((a, c) => weight(a.roles) - weight(c.roles));
-    return r;
+    if (room.broadcast && !(await hasPermission(ctx.userId, 'view-broadcast-member-list', room.id))) throw forbidden();
+    return listMembers(room.id, { ...paging(q(req)), filter: q(req).filter, orderByRole: true });
   });
   route(app, 'POST', 'rooms.saveRoomSettings', {}, async (req, _rep, ctx) => {
     const body = b(req);

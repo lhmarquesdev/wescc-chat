@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
 import { formatDateTime } from '../lib/format';
-import { endSession } from '../lib/session';
+import { endSession, startSession } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
 import { Avatar, Field, Spinner, Toggle, useAsync } from '../components/ui';
 import { QrCode } from '../components/QrCode';
@@ -185,9 +185,6 @@ function Security() {
   const [cur, setCur] = useState('');
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
-  const [setup, setSetup] = useState<{ secret: string; url: string } | null>(null);
-  const [code, setCode] = useState('');
-  const [codes, setCodes] = useState<string[] | null>(null);
   const changePw = async () => {
     if (p1 !== p2) return fail(new Error('As senhas não conferem.'));
     try {
@@ -219,68 +216,82 @@ function Security() {
           </button>
         </div>
       )}
-      {twoFA && (
-        <div className="card form narrow">
-          <h2>Autenticação em dois fatores</h2>
-          {codes ? (
-            <>
-              <p>2FA ativado. Guarde estes códigos de backup em local seguro; cada um funciona uma vez:</p>
-              <pre className="codes">{codes.join('\n')}</pre>
-              <button className="btn" onClick={() => setCodes(null)}>
-                Pronto
-              </button>
-            </>
-          ) : me.twoFactorEnabled ? (
-            <>
-              <p>✅ Ativado com aplicativo autenticador.</p>
-              <Field label="Código atual para desativar">
-                <input value={code} onChange={(e) => setCode(e.target.value)} />
-              </Field>
-              <button
-                className="btn danger"
-                onClick={() =>
-                  api
-                    .post('users.2fa.disableTotp', { code })
-                    .then(() => (useStore.getState().setMe({ ...me, twoFactorEnabled: false }), setCode(''), ok('2FA desativado.')))
-                    .catch(fail)
-                }
-              >
-                Desativar 2FA
-              </button>
-            </>
-          ) : setup ? (
-            <>
-              <p>Escaneie o QR code no seu aplicativo autenticador (Google Authenticator, Microsoft Authenticator, 1Password…):</p>
-              <QrCode text={setup.url} size={200} />
-              <p className="muted small">
-                Ou digite a chave manualmente: <code>{setup.secret}</code>
-              </p>
-              <Field label="Código gerado pelo aplicativo">
-                <input autoFocus inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} />
-              </Field>
-              <button
-                className="btn primary"
-                onClick={() =>
-                  api
-                    .post('users.2fa.verifyTotp', { code })
-                    .then((r) => (setCodes(r.codes), setSetup(null), setCode(''), useStore.getState().setMe({ ...me, twoFactorEnabled: true, require2faSetup: false })))
-                    .catch(fail)
-                }
-              >
-                Verificar e ativar
-              </button>
-            </>
-          ) : (
-            <>
-              <p>Proteja sua conta exigindo um código do celular no login.</p>
-              <button className="btn primary" onClick={() => api.post('users.2fa.enableTotp').then(setSetup).catch(fail)}>
-                Ativar 2FA
-              </button>
-            </>
-          )}
-        </div>
-      )}
+      {twoFA && <TwoFactorCard />}
     </>
+  );
+}
+
+// Cartão do 2FA, usado em Minha conta › Segurança e na tela de 2FA obrigatório (App.tsx).
+export function TwoFactorCard() {
+  const me = useStore((s) => s.me)!;
+  const [setup, setSetup] = useState<{ secret: string; url: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [codes, setCodes] = useState<string[] | null>(null);
+  // Com o 2FA obrigatório pendente, o resto do chat só carrega depois que os códigos de backup forem vistos.
+  const done = () => {
+    setCodes(null);
+    if (me.require2faSetup) void startSession();
+  };
+  return (
+    <div className="card form narrow">
+      <h2>Autenticação em dois fatores</h2>
+      {codes ? (
+        <>
+          <p>2FA ativado. Guarde estes códigos de backup em local seguro; cada um funciona uma vez:</p>
+          <pre className="codes">{codes.join('\n')}</pre>
+          <button className="btn" onClick={done}>
+            Pronto
+          </button>
+        </>
+      ) : me.twoFactorEnabled ? (
+        <>
+          <p>✅ Ativado com aplicativo autenticador.</p>
+          <Field label="Código atual para desativar">
+            <input value={code} onChange={(e) => setCode(e.target.value)} />
+          </Field>
+          <button
+            className="btn danger"
+            onClick={() =>
+              api
+                .post('users.2fa.disableTotp', { code })
+                .then(() => (useStore.getState().setMe({ ...me, twoFactorEnabled: false }), setCode(''), ok('2FA desativado.')))
+                .catch(fail)
+            }
+          >
+            Desativar 2FA
+          </button>
+        </>
+      ) : setup ? (
+        <>
+          <p>Escaneie o QR code no seu aplicativo autenticador (Google Authenticator, Microsoft Authenticator, 1Password…):</p>
+          <QrCode text={setup.url} size={200} />
+          <p className="muted small">
+            Ou digite a chave manualmente: <code>{setup.secret}</code>
+          </p>
+          <Field label="Código gerado pelo aplicativo">
+            <input autoFocus inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} />
+          </Field>
+          <button
+            className="btn primary"
+            onClick={() =>
+              api
+                .post('users.2fa.verifyTotp', { code })
+                .then((r) => (setCodes(r.codes), setSetup(null), setCode(''), useStore.getState().setMe({ ...me, twoFactorEnabled: true })))
+                .catch(fail)
+            }
+          >
+            Verificar e ativar
+          </button>
+        </>
+      ) : (
+        <>
+          <p>Proteja sua conta exigindo um código do celular no login.</p>
+          <button className="btn primary" onClick={() => api.post('users.2fa.enableTotp').then(setSetup).catch(fail)}>
+            Ativar 2FA
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 

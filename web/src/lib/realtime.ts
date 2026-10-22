@@ -60,6 +60,11 @@ class Realtime {
         location.href = '/login';
         return;
       }
+      if (e.code === 4005) {
+        // Troca de senha ou 2FA passou a ser obrigatório: recarrega para mostrar a tela de configuração.
+        location.reload();
+        return;
+      }
       const delay = Math.min(30_000, 1000 * 2 ** this.retry++);
       setTimeout(() => this.connect(), delay);
     };

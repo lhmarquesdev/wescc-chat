@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { getCredentials } from './lib/api';
-import { loadPublicSettings, requestNotificationPermission, startSession } from './lib/session';
+import { loadPublicSettings, logout, requestNotificationPermission, startSession } from './lib/session';
 import { useStore } from './lib/store';
 import { Sidebar } from './components/Sidebar';
 import { Spinner, Toasts } from './components/ui';
 import { ChangePasswordPage, InvitePage, LoginPage, RegisterPage } from './pages/AuthPages';
 import { DirectoryPage, HomePage } from './pages/HomeDirectory';
 import { RoomPage } from './pages/RoomPage';
-import { AccountPage, applyTheme } from './pages/AccountPage';
+import { AccountPage, applyTheme, TwoFactorCard } from './pages/AccountPage';
 import { AdminPage } from './pages/admin/AdminPage';
 import { OmnichannelPage } from './pages/omnichannel/OmnichannelPage';
 
@@ -60,14 +60,16 @@ function Protected() {
   if (state === 'anon' || (state === 'ready' && !me)) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   if (state === 'loading' || !me) return <div className="fullscreen-center"><Spinner /></div>;
   if (me.requirePasswordChange) return <ChangePasswordPage onDone={() => void startSession()} />;
-  if (me.require2faSetup && !location.pathname.startsWith('/account/security')) {
+  if (me.require2faSetup) {
+    // O servidor bloqueia o resto da API até o 2FA ser configurado.
     return (
       <div className="fullscreen-center">
-        <div className="card narrow">
+        <div className="narrow">
           <h2>Autenticação em dois fatores obrigatória</h2>
           <p>O administrador exige autenticação em dois fatores. Configure um aplicativo autenticador para continuar.</p>
-          <button className="btn primary" onClick={() => navigate('/account/security')}>
-            Configurar agora
+          <TwoFactorCard />
+          <button className="btn" onClick={() => void logout().then(() => navigate('/login'))}>
+            Sair
           </button>
         </div>
       </div>

@@ -5,7 +5,8 @@ import { many, one, query } from '../db/pool';
 import { newId } from '../lib/ids';
 import { parseCookies } from '../api/http';
 import { canAccessRoom, getRoom, getSubscriptionRow, userRoomIds } from '../services/rooms';
-import { resolveToken, setStatus } from '../services/users';
+import { isTrustedBrowserOrigin } from '../services/origins';
+import { pendingSetup, resolveToken, setStatus } from '../services/users';
 import { bus, type Conn } from './bus';
 
 async function publishPresence(userId: string) {
@@ -56,6 +57,11 @@ export function registerWebsocket(app: FastifyInstance) {
       if (!r) return false;
       if (authTimer) clearTimeout(authTimer);
       authTimer = null;
+      // Troca de senha ou 2FA obrigatório pendente: o cliente recarrega e mostra a tela de configuração.
+      if (await pendingSetup(r.user)) {
+        socket.close(4005, 'setup-required');
+        return true;
+      }
       conn = {
         id: newId(),
         userId: r.user.id,
@@ -71,9 +77,9 @@ export function registerWebsocket(app: FastifyInstance) {
       return true;
     };
 
-    // Autentica pelo cookie, se houver; senão espera a mensagem "auth".
+    // Autentica pelo cookie, se houver e se a página for do próprio chat (senão outro site usaria a sessão); senão espera a mensagem "auth".
     const cookies = parseCookies(req.headers.cookie);
-    if (cookies.rc_token) void authenticate(cookies.rc_token, cookies.rc_uid).catch(() => {});
+    if (cookies.rc_token && isTrustedBrowserOrigin(req.headers.origin, req.headers.host)) void authenticate(cookies.rc_token, cookies.rc_uid).catch(() => {});
 
     socket.on('message', async (raw) => {
       let ev: ClientEvent;

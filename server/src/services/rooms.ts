@@ -213,7 +213,7 @@ export async function joinDefaultChannels(userId: string) {
   for (const r of rooms) await addUserToRoom(r.id, userId, { silent: false }).catch(() => {});
 }
 
-export async function listMembers(rid: string, opts: { offset?: number; count?: number; filter?: string; status?: string[] } = {}) {
+export async function listMembers(rid: string, opts: { offset?: number; count?: number; filter?: string; status?: string[]; orderByRole?: boolean } = {}) {
   const params: unknown[] = [rid];
   let w = '';
   if (opts.filter) w += ` AND (u.username ILIKE $${params.push(`%${opts.filter}%`)} OR u.name ILIKE $${params.length})`;
@@ -221,7 +221,8 @@ export async function listMembers(rid: string, opts: { offset?: number; count?: 
   const rows = await many(
     `SELECT u.id, u.username, u.name, u.status, u.status_text, u.avatar_etag, s.roles AS room_roles, count(*) OVER() AS total
      FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.room_id = $1 ${w}
-     ORDER BY (u.status <> 'offline') DESC, u.username LIMIT ${Math.min(opts.count ?? 50, 500)} OFFSET ${Number(opts.offset ?? 0)}`,
+     ORDER BY ${opts.orderByRole ? `CASE WHEN 'owner' = ANY(s.roles) THEN 0 WHEN 'moderator' = ANY(s.roles) THEN 1 WHEN 'leader' = ANY(s.roles) THEN 2 ELSE 3 END,` : ''}
+       (u.status <> 'offline') DESC, u.username LIMIT ${Math.min(opts.count ?? 50, 500)} OFFSET ${Number(opts.offset ?? 0)}`,
     params,
   );
   return {

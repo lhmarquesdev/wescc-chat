@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ApiError, forbidden, unauthorized } from '../lib/errors';
 import { hasAnyPermission } from '../services/permissions';
-import { resolveToken, type Ctx } from '../services/users';
+import { pendingSetup, resolveToken, type Ctx } from '../services/users';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -27,7 +27,8 @@ export function extractCredentials(req: FastifyRequest) {
   let token = h['x-auth-token'] as string | undefined;
   const auth = h.authorization;
   if (!token && auth?.startsWith('Bearer ')) token = auth.slice(7);
-  if (!token) {
+  // O cookie só vale para leituras (<img>, downloads): ações exigem o token no cabeçalho, o que impede CSRF.
+  if (!token && (req.method === 'GET' || req.method === 'HEAD')) {
     const c = parseCookies(h.cookie);
     token = c.rc_token;
     userId = userId ?? c.rc_uid;
@@ -41,8 +42,23 @@ export async function authenticate(req: FastifyRequest) {
   if (!token) return;
   const r = await resolveToken(userId, token);
   if (!r) return;
+  const setup = await pendingSetup(r.user);
+  // Com troca de senha ou 2FA pendente, só a API (rotas liberadas em SETUP_ROUTES) reconhece a sessão.
+  if (setup && !req.url.startsWith('/api/')) return;
   req.authUser = r.user;
-  req.ctx = { userId: r.user.id, username: r.user.username, sessionId: r.sessionId, ip: req.ip };
+  req.ctx = { userId: r.user.id, username: r.user.username, sessionId: r.sessionId, ip: req.ip, setup };
+}
+
+// Rotas disponíveis enquanto a conta tem uma pendência obrigatória.
+const SETUP_ROUTES: Record<'password' | '2fa', Set<string>> = {
+  password: new Set(['me', 'logout', 'users.updateOwnBasicInfo']),
+  '2fa': new Set(['me', 'logout', 'users.2fa.enableTotp', 'users.2fa.verifyTotp']),
+};
+
+function setupRequired(setup: 'password' | '2fa') {
+  return setup === 'password'
+    ? new ApiError(403, 'error-password-change-required', 'Defina uma nova senha antes de continuar.')
+    : new ApiError(403, 'error-2fa-setup-required', 'Configure a autenticação em dois fatores antes de continuar.');
 }
 
 export interface RouteOpts {
@@ -65,6 +81,7 @@ export function route(app: FastifyInstance, method: 'GET' | 'POST' | 'PUT' | 'DE
     handler: async (req, reply) => {
       const auth = opts.auth !== false;
       if (auth && !req.ctx) throw unauthorized();
+      if (auth && req.ctx?.setup && !SETUP_ROUTES[req.ctx.setup].has(path)) throw setupRequired(req.ctx.setup);
       if (opts.permissions?.length && !(await hasAnyPermission(req.ctx!.userId, opts.permissions))) throw forbidden();
       const out = await handler(req, reply, req.ctx as Ctx);
       if (reply.sent) return;

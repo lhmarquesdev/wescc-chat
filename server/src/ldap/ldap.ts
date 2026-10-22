@@ -1,5 +1,6 @@
 import { Client, type Entry } from 'ldapts';
 import { many, one, query } from '../db/pool';
+import { ApiError } from '../lib/errors';
 import { audit } from '../services/audit';
 import { getSetting } from '../services/settings';
 
@@ -63,8 +64,8 @@ function parseMap(key: string): Record<string, string | string[]> {
   }
 }
 
-// Cria ou atualiza o usuário local a partir da entrada LDAP.
-async function upsertFromEntry(entry: Entry, groups: string[]) {
+// Cria ou atualiza o usuário local a partir da entrada LDAP (exportado para os testes).
+export async function upsertFromEntry(entry: Entry, groups: string[]) {
   const { createUser } = await import('../services/users');
   const username = (attr(entry, getSetting<string>('LDAP_Username_Field')) ?? '').replace(/[^0-9a-zA-Z._-]/g, '.');
   const name = attr(entry, getSetting<string>('LDAP_Name_Field')) ?? username;
@@ -73,7 +74,17 @@ async function upsertFromEntry(entry: Entry, groups: string[]) {
   if (!username) return null;
 
   let user = await one(`SELECT * FROM users WHERE auth_source = 'ldap' AND external_id = $1`, [uid]);
-  if (!user) user = await one(`SELECT * FROM users WHERE lower(username) = lower($1)`, [username]);
+  if (!user) {
+    const existing = await one(`SELECT * FROM users WHERE lower(username) = lower($1)`, [username]);
+    if (existing) {
+      // Uma conta com o mesmo nome só é vinculada com a opção ligada, e nunca a outra pessoa do LDAP
+      // (senão quem criasse no diretório o usuário "admin" assumiria a conta local).
+      if (!getSetting('LDAP_Merge_Existing_Users') || (existing.auth_source === 'ldap' && existing.external_id && existing.external_id !== uid)) {
+        throw new ApiError(409, 'error-ldap-username-taken', `Já existe um usuário "${username}" que não veio do LDAP. Peça ao administrador para ativar o vínculo de contas existentes.`);
+      }
+      user = existing;
+    }
+  }
   if (!user) {
     user = await createUser({ username, name, email: email ?? null, authSource: 'ldap', externalId: uid, verified: true, skipPasswordPolicy: true });
   } else {

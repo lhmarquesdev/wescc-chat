@@ -180,6 +180,16 @@ describe('SAML', () => {
     expect(new URL(ok.headers.get('location')!, 'http://x').searchParams.get('next')).toBe('/home');
   });
 
+  it('papéis dados à mão continuam; o SAML só troca os que ele gerencia', async () => {
+    const roles = async () => (await pool.query(`SELECT roles FROM users WHERE username = 'ana'`)).rows[0].roles.sort();
+    const id = (await pool.query(`SELECT id FROM users WHERE username = 'ana'`)).rows[0].id;
+    await api('POST', 'users.update', { userId: id, data: { roles: [...(await roles()), 'livechat-manager'] } }, A);
+    await postAcs(samlResponse({ nameID: 'ana@empresa.com', attrs: { uid: 'ana', mail: 'ana@empresa.com', groups: ['suporte'] }, acs }));
+    expect(await roles()).toEqual(['livechat-agent', 'livechat-manager', 'user']);
+    await postAcs(samlResponse({ nameID: 'ana@empresa.com', attrs: { uid: 'ana', mail: 'ana@empresa.com', groups: ['outros'] }, acs }));
+    expect(await roles()).toEqual(['livechat-manager', 'user']);
+  });
+
   it('desativado: rotas respondem 404 e credenciais não valem', async () => {
     await api('POST', 'settings', { settings: { SAML_Enable: false } }, A);
     expect((await fetch(urlOf('/saml/login'), { redirect: 'manual' })).status).toBe(404);

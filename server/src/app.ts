@@ -14,6 +14,7 @@ import { authenticate, errorHandler } from './api/http';
 import { roomsRoutes } from './api/rooms';
 import { usersRoutes } from './api/users';
 import { registerWebsocket } from './realtime/ws';
+import { isCorsOriginAllowed } from './services/origins';
 import { getSetting } from './services/settings';
 
 export async function buildApp(opts: { logger?: boolean } = {}) {
@@ -23,7 +24,8 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
     bodyLimit: 2 * 1024 * 1024,
   });
 
-  await app.register(cors, { origin: true, credentials: true });
+  // Sem cookies entre sites (o cookie de sessão só vale para leituras na mesma origem); outros sites só com CORS ligado.
+  await app.register(cors, { origin: (origin, cb) => cb(null, isCorsOriginAllowed(origin)), credentials: false });
   // Campos de texto limitados em todas as rotas multipart (o padrão do busboy é 1 MB por campo, sem limite de quantidade).
   await app.register(multipart, { limits: { fileSize: 1024 * 1024 * 1024, files: 1, fields: 20, parts: 21, fieldSize: 64 * 1024 } });
   await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
@@ -40,7 +42,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   app.decorateRequest('ctx', null);
   app.decorateRequest('authUser', null);
   app.addHook('onRequest', async (req) => {
-    if (req.url.startsWith('/api/') || req.url.startsWith('/file-upload/')) await authenticate(req);
+    if (req.url.startsWith('/api/') || req.url.startsWith('/file-upload/') || req.url.startsWith('/avatar/')) await authenticate(req);
   });
   app.setErrorHandler(errorHandler);
 

@@ -4,11 +4,11 @@ import { badRequest, forbidden, notFound } from '../lib/errors';
 import { audit, listAuditLog } from '../services/audit';
 import { withExtra } from '../services/messages';
 import { listPermissions, listRoles, mapRole, setPermissionRoles, hasPermission, loadPermissions, roleScope } from '../services/permissions';
-import { isKnownSetting, listSettings, updateSettings } from '../services/settings';
+import { isKnownSetting, isSecretSetting, listSettings, updateSettings } from '../services/settings';
 import { engagementChannels, engagementMessages, engagementUsers, workspaceStatistics } from '../services/stats';
 import { runRetention } from '../services/retention';
 import { mapUser } from '../services/mappers';
-import { actorOf } from '../services/users';
+import { actorOf, invalidateMandatory2faCache } from '../services/users';
 import { bus } from '../realtime/bus';
 import { b, paging, q, route, str, strArray } from './http';
 import { resolveUserParam } from './users';
@@ -37,7 +37,7 @@ export function adminRoutes(app: FastifyInstance) {
     const changed = await updateSettings(values).catch((e) => {
       throw badRequest('error-invalid-setting-value', String(e.message));
     });
-    await audit(actorOf(ctx), 'settings.changed', {}, { settings: changed.map((c) => ({ _id: c._id, value: /Password/i.test(c._id) ? '***' : c.value })) });
+    await audit(actorOf(ctx), 'settings.changed', {}, { settings: changed.map((c) => ({ _id: c._id, value: isSecretSetting(c._id) ? '***' : c.value })) });
     return { changed: changed.map((c) => c._id) };
   });
 
@@ -79,6 +79,7 @@ export function adminRoutes(app: FastifyInstance) {
       body.mandatory2fa ?? null,
       body.scope ?? null,
     ]);
+    invalidateMandatory2faCache();
     await loadPermissions();
     bus.permissionsChanged();
     await audit(actorOf(ctx), 'role.updated', { role: id });

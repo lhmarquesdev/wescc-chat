@@ -160,7 +160,7 @@ export async function assertCanUpload(ctx: Ctx, rid: string) {
 export async function saveUpload(ctx: Ctx, rid: string, file: StoredFile, fields: { msg?: string; description?: string; tmid?: string }) {
   try {
     const f = await registerFile(file, rid, { userId: ctx.userId });
-    return await sendMessage(ctx, { rid, msg: fields.msg ?? '', tmid: fields.tmid || null, files: [f], attachments: [fileAttachment(file, fields.description)] }, { skipCommands: true });
+    return await sendMessage(ctx, { rid, msg: fields.msg ?? '', tmid: fields.tmid || null, files: [f], attachments: [fileAttachment(file, fields.description)] }, { skipCommands: true, internalAttachments: true });
   } catch (e) {
     await discardFile(file);
     throw e;

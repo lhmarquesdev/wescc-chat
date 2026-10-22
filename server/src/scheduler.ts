@@ -35,6 +35,7 @@ export function startScheduler(log: (m: string) => void) {
         await query(`DELETE FROM instances WHERE last_seen < now() - interval '1 day'`);
         await query(`DELETE FROM realtime_spill WHERE created_at < now() - interval '5 minutes'`);
         await query(`DELETE FROM sessions WHERE expires_at < now()`);
+        await query(`DELETE FROM login_attempts WHERE updated_at < now() - interval '1 day' AND (blocked_until IS NULL OR blocked_until < now())`);
       }).catch((e) => log(`limpeza falhou: ${e.message}`));
     }),
   );

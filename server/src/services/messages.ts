@@ -114,15 +114,68 @@ export async function canPostInRoom(ctx: Ctx, room: any) {
   return roles;
 }
 
+// ---------- Anexos enviados pelo cliente ----------
+
+const safeUrl = (v: unknown) => (typeof v === 'string' && v.length <= 2048 && (/^https?:\/\//i.test(v) || /^\/(?!\/)/.test(v)) ? v : undefined);
+const text = (v: unknown, max: number) => (typeof v === 'string' || typeof v === 'number' ? String(v).slice(0, max) : undefined);
+
+function quotedMessageId(link: string) {
+  return /[?&]msg=([A-Za-z0-9]{10,24})/.exec(link)?.[1] ?? /\/msg\/([A-Za-z0-9]{10,24})/.exec(link)?.[1] ?? null;
+}
+
+// A citação é montada no servidor a partir da mensagem original (o cliente só indica qual é),
+// e só se quem cita tem acesso à sala dela: assim não dá para inventar o que outra pessoa disse.
+async function quoteAttachment(ctx: Ctx, link: string): Promise<Attachment | null> {
+  const id = quotedMessageId(link);
+  const m = id ? await getMessageRow(id) : null;
+  if (!m || m.t === 'rm') return null;
+  if (!(await canAccessRoom(ctx.userId, await getRoom(m.room_id)))) return null;
+  const files = (m.files ?? []) as MessageFile[];
+  return { text: m.msg || (files[0] ? `📎 ${files[0].name}` : ''), author_name: m.username, ts: m.created_at, message_link: `?msg=${m.id}` };
+}
+
+export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Attachment[]> {
+  if (!Array.isArray(list)) return [];
+  const out: Attachment[] = [];
+  for (const a of list.slice(0, 20) as any[]) {
+    if (!a || typeof a !== 'object') continue;
+    if (a.message_link) {
+      const q = await quoteAttachment(ctx, String(a.message_link));
+      if (q) out.push(q);
+      continue;
+    }
+    const clean: Record<string, unknown> = {
+      title: text(a.title, 500),
+      title_link: safeUrl(a.title_link),
+      type: a.type === 'file' ? 'file' : undefined,
+      image_url: safeUrl(a.image_url),
+      audio_url: safeUrl(a.audio_url),
+      video_url: safeUrl(a.video_url),
+      description: text(a.description, 5000),
+      text: text(a.text, 5000),
+      author_name: text(a.author_name, 200),
+      color: text(a.color, 30),
+      size: typeof a.size === 'number' ? a.size : undefined,
+      format: text(a.format, 20),
+      fields: Array.isArray(a.fields) ? a.fields.slice(0, 20).map((f: any) => ({ title: String(f?.title ?? '').slice(0, 200), value: String(f?.value ?? '').slice(0, 2000), short: !!f?.short })) : undefined,
+    };
+    for (const k of Object.keys(clean)) if (clean[k] === undefined) delete clean[k];
+    if (Object.keys(clean).length) out.push(clean as Attachment);
+  }
+  return out;
+}
+
 // trusted: mensagens de integrações, que podem definir apelido e avatar próprios.
-export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipCommands?: boolean; trusted?: boolean } = {}) {
+// internalAttachments: anexos montados pelo próprio servidor (upload de arquivo).
+export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipCommands?: boolean; trusted?: boolean; internalAttachments?: boolean } = {}) {
   const room = await getRoom(input.rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   const roles = (await canPostInRoom(ctx, room)) ?? (await getUserRoles(ctx.userId, room.id));
   let msg = (input.msg ?? '').trim();
   const max = getSetting<number>('Message_MaxAllowedSize');
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
-  if (!msg && !input.attachments?.length && !input.files?.length) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  const attachments = opts.internalAttachments ? (input.attachments ?? []) : await sanitizeAttachments(ctx, input.attachments);
+  if (!msg && !attachments.length && !input.files?.length) throw badRequest('error-invalid-message', 'Mensagem vazia.');
 
   if (!opts.skipCommands && msg.startsWith('/') && !input.files?.length) {
     const { runSlashCommand } = await import('./commands');
@@ -173,7 +226,7 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
       tmid,
       JSON.stringify(mentions),
       JSON.stringify(channels),
-      JSON.stringify(input.attachments ?? []),
+      JSON.stringify(attachments),
       JSON.stringify(input.files ?? []),
       input.alias ?? null,
       input.emoji ?? null,
