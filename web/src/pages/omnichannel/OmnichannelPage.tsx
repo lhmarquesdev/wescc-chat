@@ -70,7 +70,9 @@ function QueuePage() {
   const queue = useStore((s) => s.queue);
   const navigate = useNavigate();
   const canTake = usePermission('take-livechat-room');
-  const mySubs = useStore((s) => Object.values(s.subscriptions).filter((x) => x.t === 'l'));
+  // O seletor devolve o objeto do store; filtrar dentro dele criaria um array novo a cada render e travaria a página.
+  const subscriptions = useStore((s) => s.subscriptions);
+  const mySubs = useMemo(() => Object.values(subscriptions).filter((x) => x.t === 'l'), [subscriptions]);
   useTick(15000);
   useEffect(() => {
     api

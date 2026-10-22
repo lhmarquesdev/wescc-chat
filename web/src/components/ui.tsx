@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { avatarBust, useStore } from '../lib/store';
 import { STATUS_LABEL } from '../lib/format';
 
@@ -29,7 +30,8 @@ export function Modal({ title, onClose, children, footer, wide }: { title: React
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [onClose]);
-  return (
+  // Vai direto para o <body>: dentro da barra lateral o modal herdava a cor clara dela e, no celular, ficava preso na gaveta.
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true">
         <div className="modal-head">
@@ -41,7 +43,8 @@ export function Modal({ title, onClose, children, footer, wide }: { title: React
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
