@@ -8,9 +8,10 @@ import { bus } from '../realtime/bus';
 import { mapRoom } from '../services/mappers';
 import { CHANNEL_RE, MENTION_RE, safeUrl } from '../services/messages';
 import { hasPermission } from '../services/permissions';
-import { getRoom, notifyRoomUpdated, notifySubscription } from '../services/rooms';
-import { EMAIL_RE, revokeAllSessions, sendPasswordSetupEmail } from '../services/users';
+import { buildSubscription, getRoom, notifyRoomUpdated, notifySubscription } from '../services/rooms';
+import { revokeAllSessions, sendPasswordSetupEmail } from '../services/users';
 import { channelImportId } from './importers/csv';
+import { MAX_EMAIL, isEmail } from './importers/csv-util';
 import { iterateStaged, markRecordError, markRecordsSkipped } from './staging';
 import {
   DIRECT_MESSAGES_ID,
@@ -43,6 +44,19 @@ const TOKEN_RE = /\u0001([@#])([^|\u0001\u0002]*)(?:\|([^\u0001\u0002]*))?\u0002
 const CSV_ROOM_ID = channelImportId('');
 const nameOnlyId = (id: string) => id.startsWith(CSV_ROOM_ID);
 const RESERVED_USERNAMES = new Set(['all', 'here']);
+// Importadores cujos ids não são da origem (e-mail ou nome): só desativam as contas que uma importação deles criou.
+const CREATED_ONLY = new Set(['csv', 'slack-users']);
+// "-", "n/a", vazio ou espaços no lugar do e-mail valem como sem e-mail, e um texto de mais de 254 caracteres também.
+export const validEmail = isEmail;
+// Um e-mail do arquivo é cortado um caractere além do máximo antes de conferir: comprido demais continua comprido demais
+// e não vale (cortado no máximo, podia virar o endereço de outra pessoa).
+export const EMAIL_CUT = MAX_EMAIL + 1;
+// E-mail confiável (expressão SQL sobre a conta u): confirmado, ou o que uma importação deu à conta que criou, enquanto
+// a conta não o trocar. Login externo entra pelo email_verified: conta criada pelo LDAP ou SAML já nasce confirmada, o
+// OAuth grava o que o provedor diz, e a troca do e-mail pela própria pessoa (permitida também a essas contas) desmarca.
+// Um e-mail digitado por quem usa a conta, no cadastro ou no perfil, não prova que é dela.
+export const trustedEmailSql = (u: string) =>
+  `(${u}.email_verified OR EXISTS (SELECT 1 FROM import_map p WHERE p.kind = 'user-email' AND p.import_id = lower(${u}.email) AND p.target_id = ${u}.id))`;
 
 interface UserRef {
   id: string;
@@ -210,7 +224,7 @@ export function mentionNames(msg: string) {
 interface NormUser {
   importIds: string[];
   email: string; // o primeiro: vira o e-mail da conta nova
-  emails: string[]; // todos, para achar a conta que já existe
+  emails: string[]; // todos os válidos, para achar a conta que já existe
   username: string;
   name: string;
   bio: string;
@@ -231,7 +245,7 @@ function passwordHashOf(v: unknown) {
 }
 
 function normUser(u: ImportUser): NormUser {
-  const emails = uniq((Array.isArray(u.emails) ? u.emails : []).map((e) => str(e, 254)).filter(Boolean));
+  const emails = uniq((Array.isArray(u.emails) ? u.emails : []).map((e) => str(e, EMAIL_CUT)).filter(validEmail));
   return {
     importIds: uniq((Array.isArray(u.importIds) ? u.importIds : []).filter((x) => x !== null && x !== undefined && x !== '').map(String)),
     email: emails[0] ?? '',
@@ -277,10 +291,13 @@ interface NewUserRow {
 }
 
 // notes: avisos gravados no registro depois do COMMIT.
-// viaMap: a conta veio do import_map (esta mesma origem já foi importada antes), e não só do e-mail ou do nome.
+// viaMap: a conta veio do import_map (esta mesma origem já foi importada antes, com e-mail que não contradiz), e não só
+// do e-mail ou do nome.
+// handover: conta provisória desta pessoa (criada por uma importação desta origem sem o e-mail, que era de uma conta que
+// não o tinha confirmado), cujo conteúdo passa para esta conta.
 type UserPlan = { rec: StagedRecord<ImportUser>; n: NormUser; notes: string[] } & (
   | { kind: 'new'; row: NewUserRow }
-  | { kind: 'existing'; userId: string; viaMap: boolean }
+  | { kind: 'existing'; userId: string; viaMap: boolean; handover?: { id: string; username: string } }
   | { kind: 'same'; ref: UserRef }
 );
 
@@ -303,6 +320,9 @@ interface Effects {
   subs: SubRow[];
   deactivated: string[];
   warnings: { id: number; msg: string }[];
+  // Passagem de conta provisória: salas a recalcular, e conversas diretas juntadas a outra (já apagadas).
+  rooms: string[];
+  removed: { room: any; subs: any[] }[];
 }
 
 // ---------- Mensagens ----------
@@ -373,6 +393,12 @@ class Conversion {
   private takenRoomNames = new Set<string>();
   private roleScopes = new Map<string, string>();
   private canGrantAdmin = false;
+  private importerKey = '';
+  private createdOnly = false;
+  // Contas provisórias já passadas para a conta certa nesta importação.
+  private handedOver = new Set<string>();
+  // Usuários do arquivo que não entraram (não selecionados, ou já existentes com skipExistingUsers): id → dados.
+  private skippedUsers: Map<string, NormUser> | null = null;
   // Salas c/p já usadas por algum canal deste arquivo (sala → ids do canal): outro canal nunca se junta a elas.
   private runRooms = new Map<string, Set<string>>();
   // Salas ligadas pelo import_map a algum canal c/p deste arquivo, e as que uma importação criou para um deles
@@ -406,6 +432,9 @@ class Conversion {
   async run(): Promise<ConversionResult> {
     const me = this.actor.userId ? await one('SELECT id, username, name FROM users WHERE id = $1', [this.actor.userId]) : null;
     this.importer = me ? userRef(me) : null;
+    const op = await one('SELECT importer_key FROM import_operations WHERE id = $1', [this.opId]);
+    this.importerKey = String(op?.importer_key ?? '');
+    this.createdOnly = CREATED_ONLY.has(this.importerKey);
     this.online = new Set((await many('SELECT DISTINCT user_id FROM presence_connections')).map((r) => r.user_id));
 
     if (!this.stopped()) await this.convertUsers();
@@ -458,8 +487,13 @@ class Conversion {
       [need],
     );
     for (const r of mapped) this.users.set(r.import_id, userRef(r));
-    const rest = need.filter((id) => !this.users.has(id));
+    let rest = need.filter((id) => !this.users.has(id));
     if (!rest.length) return;
+    if (this.usersDone) {
+      await this.resolveSkipped(rest);
+      rest = rest.filter((id) => !this.users.has(id) && !this.missingUsers.has(id));
+      if (!rest.length) return;
+    }
     // Autor que não veio na lista de usuários (CSV): um usuário que já existe com esse nome.
     const rows = await many('SELECT id, username, name FROM users WHERE lower(username) = ANY($1::text[])', [rest.map((s) => s.toLowerCase())]);
     const byName = new Map(rows.map((r) => [String(r.username).toLowerCase(), r]));
@@ -467,6 +501,49 @@ class Conversion {
       const u = byName.get(id.toLowerCase());
       if (u) this.users.set(id, userRef(u));
       else if (this.usersDone) this.missingUsers.add(id);
+    }
+  }
+
+  // Usuário do arquivo que não entrou (não selecionado, por exemplo porque já existe aqui): fica com a conta que a
+  // importação dele acharia pelo e-mail confiável ou pelo nome (mesmas regras de userBatch), sem mexer nela; nunca com
+  // uma conta nova. O id de uma pessoa do CSV é o e-mail, então o nome dela só é achado por aqui.
+  private async resolveSkipped(ids: string[]) {
+    if (!this.skippedUsers) {
+      const skipped = new Map<string, NormUser>();
+      const recs = await many(
+        `SELECT data->'importIds' AS ids, data->'emails' AS emails, data->'username' AS username, data->'type' AS type
+         FROM import_records WHERE operation_id = $1 AND data_type = 'user' AND skipped`,
+        [this.opId],
+      );
+      for (const r of recs) {
+        const n = normUser({ importIds: r.ids, emails: r.emails, username: r.username, type: r.type } as ImportUser);
+        for (const id of n.importIds) if (!skipped.has(id)) skipped.set(id, n);
+      }
+      this.skippedUsers = skipped;
+    }
+    const found = ids.flatMap((id) => {
+      const n = this.skippedUsers!.get(id);
+      return n ? [[id, n] as const] : [];
+    });
+    if (!found.length) return;
+    const emails = uniq(found.flatMap(([, n]) => n.emails.map((e) => e.toLowerCase())));
+    const names = uniq(found.map(([, n]) => n.username.toLowerCase()).filter(Boolean));
+    const byEmail = new Map(
+      (await many(`SELECT u.id, u.username, u.name, u.email, ${trustedEmailSql('u')} AS trusted FROM users u WHERE lower(u.email) = ANY($1::text[])`, [emails])).map((r) => [
+        String(r.email).toLowerCase(),
+        r,
+      ]),
+    );
+    const byName = new Map((await many('SELECT id, username, name, email, type FROM users WHERE lower(username) = ANY($1::text[])', [names])).map((r) => [String(r.username).toLowerCase(), r]));
+    for (const [id, n] of found) {
+      const held = n.emails.map((e) => byEmail.get(e.toLowerCase())).filter(Boolean);
+      let u = held.find((x) => x.trusted);
+      if (!u && !held.length && n.username) {
+        const db = byName.get(n.username.toLowerCase());
+        if (db && (db.type === 'bot') === n.bot && !(validEmail(db.email) && n.emails.length)) u = db;
+      }
+      if (u) this.users.set(id, userRef(u));
+      else this.missingUsers.add(id);
     }
   }
 
@@ -509,7 +586,7 @@ class Conversion {
       .replace(/[\u0001\u0002]/g, '');
   }
 
-  private async mapIds(c: Queryable, kind: 'user' | 'room' | 'room-created' | 'message' | 'contact', pairs: [string, string][]) {
+  private async mapIds(c: Queryable, kind: 'user' | 'user-created' | 'user-email' | 'room' | 'room-created' | 'message' | 'contact', pairs: [string, string][]) {
     // Um id repetido no mesmo INSERT ... ON CONFLICT DO UPDATE é recusado pelo PostgreSQL.
     const m = new Map(pairs.filter(([i]) => i));
     if (!m.size) return;
@@ -575,13 +652,20 @@ class Conversion {
     const byMap = new Map<string, any>();
     for (const r of await many(`SELECT m.import_id, u.* FROM import_map m JOIN users u ON u.id = m.target_id WHERE m.kind = 'user' AND m.import_id = ANY($1::text[])`, [ids]))
       byMap.set(r.import_id, r);
-    const byEmail = new Map((await many('SELECT * FROM users WHERE lower(email) = ANY($1::text[])', [emails])).map((r) => [String(r.email).toLowerCase(), r]));
+    const byEmail = new Map(
+      (await many(`SELECT u.*, ${trustedEmailSql('u')} AS trusted_email FROM users u WHERE lower(u.email) = ANY($1::text[])`, [emails])).map((r) => [
+        String(r.email).toLowerCase(),
+        r,
+      ]),
+    );
     const byName = new Map((await many('SELECT * FROM users WHERE lower(username) = ANY($1::text[])', [names])).map((r) => [String(r.username).toLowerCase(), r]));
+    // Contas que uma importação desta mesma origem criou para estes ids.
+    const createdHere = new Map((await this.createdRows(pool, ids)).map((r) => [r.import_id, r.target_id]));
 
     const plans: UserPlan[] = [];
     // Repetidos de uma conta nova deste mesmo lote: entram depois dela.
     const later: UserPlan[] = [];
-    const fresh: { rec: StagedRecord<ImportUser>; n: NormUser; base: string; conflict: string; run: RunUser }[] = [];
+    const fresh: { rec: StagedRecord<ImportUser>; n: NormUser; base: string; conflict: string; untrusted: any; disjoint: string; notes: string[]; run: RunUser }[] = [];
     const freshRefs = new Set<UserRef>();
     const batchIds = new Map<string, UserRef>();
     const skipped: StagedRecord<ImportUser>[] = [];
@@ -595,31 +679,72 @@ class Conversion {
       // Ordem: importação anterior (import_map), qualquer um dos e-mails, nome de usuário. Repetidos no mesmo arquivo viram um só.
       const les = n.emails.map((e) => e.toLowerCase());
       const lu = n.username.toLowerCase();
+      const notes: string[] = [];
       const hit = n.importIds.find((id) => byMap.has(id));
-      let existing = hit ? byMap.get(hit) : undefined;
-      const viaMap = !!hit && !this.weakUserIds.has(hit);
+      let existing: any;
+      let viaMap = false;
+      // Ligada antes a uma conta sem e-mail, e o e-mail do arquivo é de uma conta confirmada: fica com ela.
+      let moved = '';
+      let handover: { id: string; username: string } | undefined;
+      let owner: any;
+      // Ligada antes a uma conta com outro e-mail: é outra pessoa, e não junta a nenhuma conta pelo nome.
+      let disjoint = '';
+      if (hit) {
+        // O vínculo de uma importação anterior também passa pelo e-mail: com outro e-mail é outra pessoa (um id de CSV
+        // sem e-mail é só o nome). Conta ligada sem e-mail perde para a dona confirmada do e-mail do arquivo.
+        const m = byMap.get(hit);
+        const own = validEmail(m.email) ? m.email.toLowerCase() : '';
+        owner = own ? undefined : les.map((e) => byEmail.get(e)).find((u) => u?.trusted_email && u.id !== m.id);
+        const label = truncate(n.username || n.email, 100);
+        if (own && les.length && !les.includes(own)) disjoint = `O usuário "${label}" estava ligado à conta "${m.username}" por uma importação anterior, mas ela tem outro e-mail; não foi juntado a ela`;
+        else if (owner) {
+          // Conta que uma importação desta origem criou para esta pessoa sem o e-mail (era de uma conta que não o tinha
+          // confirmado, e agora confirmou): o que foi importado para ela passa para a dona do e-mail.
+          if (m.id !== this.actor.userId && m.type === owner.type && !this.handedOver.has(m.id) && n.importIds.some((id) => createdHere.get(id) === m.id)) {
+            handover = { id: m.id, username: m.username };
+          } else {
+            moved =
+              `O usuário "${label}" estava ligado à conta "${m.username}", que não tem e-mail; agora fica com a conta "${owner.username}", dona do e-mail confirmado. ` +
+              `O que já tinha sido importado continua na conta "${m.username}".`;
+          }
+        } else {
+          existing = m;
+          viaMap = !this.weakUserIds.has(hit);
+        }
+      }
       let same = existing ? undefined : n.importIds.map((id) => this.users.get(id) ?? batchIds.get(id)).find(Boolean);
+      // E-mail de uma conta que não o confirmou: é outra pessoa até alguém confirmar (nem pelo nome de usuário junta).
+      let untrusted: any;
       if (!existing && !same && les.length) {
-        existing = les.map((e) => byEmail.get(e)).find(Boolean);
+        const found = les.map((e) => byEmail.get(e)).filter(Boolean);
+        existing = found.find((u) => u.trusted_email);
         same = existing ? undefined : les.map((e) => this.runByEmail.get(e)).find(Boolean);
+        if (!existing && !same) untrusted = found[0];
       }
       // Só pelo nome de usuário: junta apenas se for o mesmo tipo de conta (bot ou não) e os e-mails não se contradizem.
       // Senão é outra pessoa com o mesmo nome, e ganha uma conta nova com outro nome de usuário.
       let conflict = '';
-      if (!existing && !same && lu) {
+      if (!existing && !same && !untrusted && !disjoint && lu) {
         const db = byName.get(lu);
         const run = db ? undefined : this.runByName.get(lu);
-        const other = db ? { bot: db.type === 'bot', hasEmail: !!db.email } : run;
+        const other = db ? { bot: db.type === 'bot', hasEmail: validEmail(db.email) } : run;
         if (other && other.bot !== n.bot) conflict = other.bot ? 'já existe e é um bot' : 'já existe e não é um bot';
         else if (other && other.hasEmail && n.emails.length) conflict = 'já existe com outro e-mail';
         else if (db) existing = db;
         else same = run?.ref;
       }
-      if (same) (freshRefs.has(same) ? later : plans).push({ kind: 'same', rec, n, ref: same, notes: [] });
-      else if (existing && this.options.skipExistingUsers) skipped.push(rec);
+      if (same) {
+        if (disjoint) notes.push(`${disjoint}.`);
+        else if (moved) notes.push(moved);
+        (freshRefs.has(same) ? later : plans).push({ kind: 'same', rec, n, ref: same, notes });
+      } else if (existing && this.options.skipExistingUsers) skipped.push(rec);
       else if (existing) {
+        if (disjoint) notes.push(`${disjoint}, e sim à conta "${existing.username}", dona do e-mail confirmado.`);
+        else if (moved) notes.push(moved);
         if (!viaMap) n.importIds.forEach((id) => this.weakUserIds.add(id));
-        plans.push({ kind: 'existing', rec, n, userId: existing.id, viaMap, notes: [] });
+        if (handover && existing.id === owner?.id) this.handedOver.add(handover.id);
+        else handover = undefined;
+        plans.push({ kind: 'existing', rec, n, userId: existing.id, viaMap, handover, notes });
       } else {
         // Já conta para os registros seguintes deste lote (mesmo id, e-mail ou nome); o nome final sai abaixo.
         const run: RunUser = { ref: { id: newId(), username: '', name: '' }, bot: n.bot, hasEmail: n.emails.length > 0 };
@@ -628,7 +753,7 @@ class Conversion {
         for (const e of les) if (!this.runByEmail.has(e)) this.runByEmail.set(e, run.ref);
         // Com conflito, o nome do arquivo continua sendo da conta que já existia.
         if (lu && !conflict) this.runByName.set(lu, run);
-        fresh.push({ rec, n, base: usernameBase(n), conflict, run });
+        fresh.push({ rec, n, base: usernameBase(n), conflict, untrusted, disjoint, notes, run });
       }
     }
     await this.skipRecords(skipped, 'users');
@@ -636,15 +761,24 @@ class Conversion {
     if (fresh.length) {
       const bases = uniq(fresh.map((f) => f.base.toLowerCase()));
       const inDb = new Set((await many('SELECT lower(username) AS u FROM users WHERE lower(username) = ANY($1::text[])', [bases])).map((r) => r.u));
-      for (const { rec, n, base, conflict, run } of fresh) {
+      for (const { rec, n, base, conflict, untrusted, disjoint, notes, run } of fresh) {
         const lb = base.toLowerCase();
         let username = base;
         if (inDb.has(lb) || this.takenUsernames.has(lb) || RESERVED_USERNAMES.has(lb)) username = await this.uniqueUsername(base);
         else this.takenUsernames.add(lb);
-        const notes: string[] = [];
+        if (disjoint) notes.push(`${disjoint}; importado como "${username}".`);
         if (conflict) notes.push(`O usuário "${n.username}" ${conflict}; importado como "${username}".`);
+        if (untrusted) {
+          // Na reimportação, com o e-mail confirmado, handOver passa esta conta para a outra (só entre contas do mesmo tipo).
+          const after = untrusted.type === (n.bot ? 'bot' : 'user') ? `: o que foi importado para "${username}" passa para "${untrusted.username}", e "${username}" é desativada` : '';
+          notes.push(
+            `O e-mail "${untrusted.email}" já é da conta "${untrusted.username}", que não confirmou esse e-mail; importado como "${username}", sem ele. ` +
+              `Se a conta "${untrusted.username}" for mesmo desta pessoa, confirme o e-mail dela na administração de usuários e importe de novo${after}.`,
+          );
+        }
         const le = n.email.toLowerCase();
-        const email = n.email && EMAIL_RE.test(n.email) && !this.takenEmails.has(le) ? n.email : null;
+        // O e-mail já é de outra conta (não confirmada): a conta nova fica sem ele.
+        const email = n.email && !this.takenEmails.has(le) && !byEmail.has(le) ? n.email : null;
         if (email) this.takenEmails.add(le);
         const valid = this.importedRoles(n, [], true, notes);
         const roles = n.bot ? uniq(['bot', ...valid.filter((r) => r !== 'user')]) : uniq(['user', ...valid]);
@@ -719,7 +853,7 @@ class Conversion {
   }
 
   private async execUsers(c: Queryable, plans: UserPlan[]): Promise<Effects> {
-    const fx: Effects = { refs: new Map(), subs: [], deactivated: [], warnings: [] };
+    const fx: Effects = { refs: new Map(), subs: [], deactivated: [], warnings: [], rooms: [], removed: [] };
     const rows = plans.flatMap((p) => (p.kind === 'new' ? [p.row] : []));
     if (rows.length) {
       await query(
@@ -752,6 +886,7 @@ class Conversion {
         const { ref, avatar } = await this.updateExisting(c, p, fx);
         fx.refs.set(p, ref);
         if (avatar) avatars.push([ref.id, avatar]);
+        if (p.handover) await this.handOver(c, p, ref, fx);
       } else {
         // Repetido de um usuário novo que pode ter falhado no mesmo lote.
         if (!(await one('SELECT 1 FROM users WHERE id = $1', [p.ref.id], c))) throw new Error('Usuário repetido no arquivo, e a primeira ocorrência falhou.');
@@ -763,6 +898,11 @@ class Conversion {
       'user',
       plans.flatMap((p) => p.n.importIds.map((i): [string, string] => [i, fx.refs.get(p)!.id])),
     );
+    // Contas criadas agora: para que ids da origem (uma lista de membros ou um CSV só desativa as contas que criou) e
+    // com que e-mail (vale como confiável nas próximas importações enquanto a conta não o trocar).
+    const created = plans.flatMap((p) => (p.kind === 'new' ? [p] : []));
+    await this.mapIds(c, 'user-created', created.flatMap((p) => p.n.importIds.map((i): [string, string] => [i, p.row.id])));
+    await this.mapIds(c, 'user-email', created.flatMap((p) => (p.row.email ? [[p.row.email.toLowerCase(), p.row.id] as [string, string]] : [])));
     if (avatars.length) {
       await query(
         `INSERT INTO import_pending_avatars (user_id, url) SELECT * FROM unnest($1::text[], $2::text[])
@@ -789,10 +929,13 @@ class Conversion {
     const add = this.importedRoles(n, u.roles, false, notes);
     if (add.length) sets.push(`roles = $${params.push([...u.roles, ...add])}`);
     if (n.deleted === true && u.active) {
-      // Só desativa a conta ligada a esta mesma origem por uma importação anterior; nunca quem importa nem o último admin.
+      // Só desativa a conta ligada a esta mesma origem por uma importação anterior (lista de membros e CSV: só a que
+      // uma importação desta origem criou, porque o id deles é o e-mail ou o nome); nunca quem importa nem o último admin.
       let why = '';
       if (u.id === this.actor.userId) why = 'A conta não foi desativada: é a de quem está fazendo a importação.';
-      else if (!p.viaMap) why = 'A conta não foi desativada: ela foi encontrada pelo e-mail ou pelo nome de usuário, e não por uma importação anterior desta origem.';
+      else if (this.createdOnly && !(await this.createdFor(c, n.importIds, u.id)))
+        why = 'A conta não foi desativada: ela não foi criada por uma importação desta origem, e este tipo de arquivo só desativa as contas que ele mesmo criou.';
+      else if (!this.createdOnly && !p.viaMap) why = 'A conta não foi desativada: ela foi encontrada pelo e-mail ou pelo nome de usuário, e não por uma importação anterior desta origem.';
       else if (u.roles.includes('admin') && !(await this.otherHumanAdmins(c, u.id))) why = 'A conta não foi desativada: é a do último administrador ativo.';
       if (why) notes.push(why);
       else {
@@ -807,6 +950,123 @@ class Conversion {
     }
     if (rename) await query('UPDATE messages SET user_name = $2 WHERE user_id = $1', [u.id, n.name], c);
     return { ref: { id: u.id, username: u.username, name: rename ? n.name : (u.name ?? '') }, avatar: n.avatarUrl && !u.avatar_etag ? n.avatarUrl : '' };
+  }
+
+  // Contas que uma importação desta mesma origem (o mesmo importador) criou para estes ids: um id igual vindo de outra
+  // origem (o e-mail, por exemplo) não dá a esta o direito de desativar ou passar adiante a conta.
+  private async createdRows(c: Queryable, ids: string[], userId?: string): Promise<{ import_id: string; target_id: string }[]> {
+    if (!ids.length) return [];
+    return many(
+      `SELECT m.import_id, m.target_id FROM import_map m JOIN import_operations o ON o.id = m.operation_id
+       WHERE m.kind = 'user-created' AND m.import_id = ANY($1::text[]) AND o.importer_key = $2 AND ($3::text IS NULL OR m.target_id = $3)`,
+      [ids, this.importerKey, userId ?? null],
+      c,
+    );
+  }
+
+  private async createdFor(c: Queryable, ids: string[], userId: string) {
+    return (await this.createdRows(c, ids, userId)).length > 0;
+  }
+
+  // A conta provisória (criada por uma importação desta origem sem o e-mail, que era de uma conta que ainda não o tinha
+  // confirmado) é desta pessoa: as mensagens, as salas, as conversas diretas e as ligações da importação passam para a
+  // conta certa, e a provisória é desativada. Sem isso, confirmar o e-mail e importar de novo deixaria o histórico com ela.
+  private async handOver(c: Queryable, p: Extract<UserPlan, { kind: 'existing' }>, to: UserRef, fx: Effects) {
+    const from = p.handover!;
+    const rooms = new Set<string>();
+    const add = (r: { rows: { room_id: string }[] }) => r.rows.forEach((x) => rooms.add(x.room_id));
+    add(
+      await query(
+        `WITH m AS (UPDATE messages SET user_id = $2, username = $3, user_name = $4 WHERE user_id = $1 RETURNING room_id) SELECT DISTINCT room_id FROM m`,
+        [from.id, to.id, to.username, to.name],
+        c,
+      ),
+    );
+    // Salas (menos conversas diretas): a assinatura passa para a conta certa; se ela já está na sala, ganha os papéis.
+    await query(
+      `UPDATE subscriptions o SET roles = ARRAY(SELECT DISTINCT x FROM unnest(o.roles || s.roles) x), updated_at = now()
+       FROM subscriptions s JOIN rooms r ON r.id = s.room_id
+       WHERE s.user_id = $1 AND o.user_id = $2 AND o.room_id = s.room_id AND r.t <> 'd' AND NOT (o.roles @> s.roles)`,
+      [from.id, to.id],
+      c,
+    );
+    add(
+      await query(
+        `DELETE FROM subscriptions s USING rooms r
+         WHERE r.id = s.room_id AND r.t <> 'd' AND s.user_id = $1 AND EXISTS (SELECT 1 FROM subscriptions o WHERE o.room_id = s.room_id AND o.user_id = $2)
+         RETURNING s.room_id`,
+        [from.id, to.id],
+        c,
+      ),
+    );
+    const subs = await query<SubRow>(
+      `UPDATE subscriptions s SET user_id = $2, updated_at = now() FROM rooms r WHERE r.id = s.room_id AND r.t <> 'd' AND s.user_id = $1 RETURNING s.id, s.room_id, s.user_id`,
+      [from.id, to.id],
+      c,
+    );
+    fx.subs.push(...subs.rows);
+    add(subs);
+    await query('INSERT INTO team_members (team_id, user_id, roles) SELECT team_id, $2, roles FROM team_members WHERE user_id = $1 ON CONFLICT DO NOTHING', [from.id, to.id], c);
+    await query('DELETE FROM team_members WHERE user_id = $1', [from.id], c);
+    // Conversas diretas: a mesma conversa, agora com a conta certa. Se ela já existe aqui, as duas viram uma só.
+    const dms = await many(`SELECT r.* FROM subscriptions s JOIN rooms r ON r.id = s.room_id WHERE s.user_id = $1 AND r.t = 'd' FOR UPDATE OF r`, [from.id], c);
+    for (const r of dms) {
+      const uids = uniq((r.uids as string[]).map((u) => (u === from.id ? to.id : u))).sort();
+      const key = uids.join(',');
+      const into = await one(`SELECT id FROM rooms WHERE t = 'd' AND dm_key = $1 AND id <> $2 FOR UPDATE`, [key, r.id], c);
+      if (into) {
+        const before = await many('SELECT * FROM subscriptions WHERE room_id = $1', [r.id], c);
+        await this.mergeDirect(c, r.id, into.id);
+        fx.removed.push({ room: r, subs: before });
+        rooms.delete(r.id);
+        rooms.add(into.id);
+        continue;
+      }
+      const names = (await many('SELECT username FROM users WHERE id = ANY($1::text[])', [uids], c)).map((x) => x.username as string).sort();
+      await query(
+        `UPDATE rooms SET uids = $2, usernames = $3, dm_key = $4, users_count = $5, owner_id = CASE WHEN owner_id = $6 THEN $7 ELSE owner_id END, updated_at = now() WHERE id = $1`,
+        [r.id, uids, names, key, uids.length, from.id, to.id],
+        c,
+      );
+      // Conversa entre a provisória e a conta certa: vira a conversa da pessoa consigo mesma.
+      await query('DELETE FROM subscriptions WHERE room_id = $1 AND user_id = $2 AND EXISTS (SELECT 1 FROM subscriptions WHERE room_id = $1 AND user_id = $3)', [r.id, from.id, to.id], c);
+      const moved = await query<SubRow>('UPDATE subscriptions SET user_id = $3, updated_at = now() WHERE room_id = $1 AND user_id = $2 RETURNING id, room_id, user_id', [r.id, from.id, to.id], c);
+      fx.subs.push(...moved.rows);
+      rooms.add(r.id);
+    }
+    const rids = [...rooms];
+    await query('UPDATE rooms SET owner_id = $2 WHERE owner_id = $1 AND id = ANY($3::text[])', [from.id, to.id, rids], c);
+    await query(`UPDATE messages SET edited_by = jsonb_build_object('_id', $2::text, 'username', $3::text) WHERE room_id = ANY($4::text[]) AND edited_by->>'_id' = $1`, [from.id, to.id, to.username, rids], c);
+    await query('UPDATE files SET user_id = $2 WHERE user_id = $1 AND room_id = ANY($3::text[])', [from.id, to.id, rids], c);
+    await query('UPDATE import_pending_files SET user_id = $2 WHERE user_id = $1 AND room_id = ANY($3::text[])', [from.id, to.id, rids], c);
+    // Outros ids ligados à provisória também passam a ser desta conta.
+    await query(`UPDATE import_map SET target_id = $2 WHERE kind = 'user' AND target_id = $1`, [from.id, to.id], c);
+    for (const [id, ref] of this.users) if (ref.id === from.id) this.users.set(id, to);
+    fx.rooms.push(...rids);
+
+    const label = truncate(p.n.username || p.n.email, 100);
+    let msg =
+      `O usuário "${label}" estava ligado à conta "${from.username}", que uma importação anterior criou sem o e-mail; agora fica com a conta "${to.username}", dona do e-mail confirmado. ` +
+      `As mensagens, as salas e as conversas diretas de "${from.username}" passaram para "${to.username}"`;
+    const u = await one('SELECT active, roles FROM users WHERE id = $1 FOR UPDATE', [from.id], c);
+    if (u?.active && u.roles.includes('admin') && !(await this.otherHumanAdmins(c, from.id))) msg += `; "${from.username}" não foi desativada: é a do último administrador ativo.`;
+    else {
+      if (u?.active) {
+        await query('UPDATE users SET active = false, updated_at = now() WHERE id = $1', [from.id], c);
+        fx.deactivated.push(from.id);
+      }
+      msg += u?.active ? `, e "${from.username}" foi desativada.` : `; "${from.username}" já estava desativada.`;
+    }
+    fx.warnings.push({ id: p.rec.id, msg });
+  }
+
+  // A mesma conversa direta em duas salas: tudo da sala antiga vai para a que já existe, e a antiga sai.
+  private async mergeDirect(c: Queryable, rid: string, into: string) {
+    for (const table of ['messages', 'files', 'import_pending_files', 'message_reads', 'message_history', 'calls', 'moderation_reports'])
+      await query(`UPDATE ${table} SET room_id = $2 WHERE room_id = $1`, [rid, into], c);
+    await query('UPDATE rooms SET prid = $2 WHERE prid = $1', [rid, into], c);
+    await query(`UPDATE import_map SET target_id = $2 WHERE kind IN ('room', 'room-created') AND target_id = $1`, [rid, into], c);
+    await query('DELETE FROM rooms WHERE id = $1', [rid], c);
   }
 
   // Administradores que ainda conseguem entrar: pessoas (não bots), ativas, com senha ou com login externo.
@@ -832,8 +1092,20 @@ class Conversion {
     }
     this.sink.inc({ completed: plans.length });
     this.rememberSubs(fx.subs);
+    // Salas que a passagem de uma conta provisória mexeu: contadores, threads e última mensagem são recalculados no fim.
+    for (const rid of fx.rooms) this.msgRooms.add(rid);
     for (const w of fx.warnings) await markRecordError(w.id, w.msg);
     for (const id of fx.deactivated) await revokeAllSessions(id).catch(() => 0);
+    for (const { room, subs } of fx.removed) {
+      try {
+        for (const s of subs) {
+          bus.leaveRoom(s.user_id, room.id);
+          bus.publish({ user: s.user_id }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(s, room) });
+        }
+      } catch {
+        // Só conveniência: quem recarregar já não vê a conversa juntada.
+      }
+    }
   }
 
   // ---------- Contatos ----------
@@ -849,14 +1121,15 @@ class Conversion {
       if (!chosen.length) continue;
       const norm = chosen.map((r) => {
         const d = r.data ?? ({} as ImportContact);
-        const emails = uniq((Array.isArray(d.emails) ? d.emails : []).map((e) => str(e, 254)).filter(Boolean));
+        // "-", "n/a" e afins não são e-mail: nem acham o contato que já existe, nem vão para importedEmails.
+        const emails = uniq((Array.isArray(d.emails) ? d.emails : []).map((e) => str(e, EMAIL_CUT)).filter(validEmail));
         const phones = uniq((Array.isArray(d.phones) ? d.phones : []).map((e) => str(e, 60)).filter(Boolean));
         return {
           ids: uniq((Array.isArray(d.importIds) ? d.importIds : []).filter((x) => x !== null && x !== undefined && x !== '').map(String)),
           name: str(d.name, 120),
           emails,
           phones,
-          email: emails.find((e) => EMAIL_RE.test(e)) ?? null,
+          email: emails[0] ?? null,
           manager: str(d.manager, 100).replace(/^@+/, ''),
           custom: d.customFields && typeof d.customFields === 'object' ? d.customFields : {},
         };
@@ -1007,7 +1280,7 @@ class Conversion {
     const t = c.t === 'p' ? 'p' : c.t === 'd' ? 'd' : 'c';
     const memberIds = uniq((Array.isArray(c.users) ? c.users : []).filter(Boolean).map(String));
     const created = timeOf(c.ts);
-    if (t === 'd') return this.directRecord(ids, memberIds, created);
+    if (t === 'd') return this.directRecord(ids, memberIds, created, recId);
 
     const name = str(c.name, 500);
     if (!name) throw new Error('Sala sem nome.');
@@ -1017,20 +1290,26 @@ class Conversion {
     const creator = c.creator ? this.users.get(String(c.creator)) : undefined;
     const slug = sanitizeRoomName(name);
 
-    // Sala existente: canal padrão, importação anterior desta mesma origem (import_map) ou canal público com o mesmo nome.
-    // Membros e arquivamento só no canal padrão ou numa sala que uma importação criou para estes mesmos ids.
+    // Sala existente: canal padrão, importação anterior desta mesma origem (import_map, só com o mesmo tipo) ou canal
+    // público com o mesmo nome. Membros e arquivamento só no canal padrão ou numa sala que uma importação criou para estes
+    // mesmos ids.
     let room: any = null;
     let owned = false;
     let isDefault = false;
     let lockedGroup = false;
     let lost: string | null = null;
-    if (c.isDefault) {
+    let otherType: { name: string; t: string } | null = null;
+    // Canal padrão é público: um grupo privado nunca cai nele.
+    if (c.isDefault && t === 'c') {
       room = await one(`SELECT * FROM rooms WHERE is_default AND t = 'c' ORDER BY created_at LIMIT 1`);
       owned = isDefault = !!room;
     }
     if (!room) {
       const prev = await this.mappedRoom(ids);
-      if (prev && (prev.t === 'c' || prev.t === 'p') && !prev.prid) {
+      // Ligada antes, mas hoje de outro tipo (o canal virou privado na origem, ou a sala virou privada aqui): outra sala,
+      // senão o conteúdo privado ficaria num canal público, ou os membros da origem entrariam num grupo fechado.
+      if (prev && (prev.t === 'c' || prev.t === 'p') && !prev.prid && prev.t !== t) otherType = { name: String(prev.name ?? ''), t: prev.t };
+      else if (prev && (prev.t === 'c' || prev.t === 'p') && !prev.prid) {
         const creators = await this.creatorsOf(ids, prev.id);
         // Ligada antes só pelo nome: perde a sala para o canal deste arquivo que a criou ou que já a usou aqui.
         const used = this.runRooms.get(prev.id);
@@ -1044,7 +1323,7 @@ class Conversion {
         }
       }
     }
-    if (!room && lost === null && slug && t === 'c') {
+    if (!room && lost === null && !otherType && slug && t === 'c') {
       // Só pelo nome: junta as mensagens a um canal público, sem acrescentar membros nem arquivar. Grupo privado nunca
       // (abriria o histórico dele), nem sala de outro canal deste arquivo (já usada aqui ou ligada a ele pelo import_map):
       // nesses casos cria outra sala.
@@ -1102,7 +1381,11 @@ class Conversion {
     this.createdRooms.add(id);
     this.useRoom(id, ids);
     if (lost !== null) await markRecordError(recId, `O canal "${truncate(name, 100)}" estava ligado à sala "${lost}", que é de outro canal deste arquivo; importado como "${finalName}".`);
-    else if (renamed) await markRecordError(recId, `Já existe uma sala com o nome "${slug}"; importada como "${finalName}".`);
+    else if (otherType) {
+      const was = otherType.t === 'p' ? 'um grupo privado' : 'um canal público';
+      const is = t === 'p' ? 'privado' : 'público';
+      await markRecordError(recId, `O canal "${truncate(name, 100)}" estava ligado à sala "${otherType.name}", que hoje é ${was}, e no arquivo ele é ${is}; importado como "${finalName}".`);
+    } else if (renamed) await markRecordError(recId, `Já existe uma sala com o nome "${slug}"; importada como "${finalName}".`);
     if (t === 'c') this.publicRooms.push(id);
     this.memberRooms.add(id);
     this.rememberSubs(subs);
@@ -1132,15 +1415,18 @@ class Conversion {
     }
   }
 
-  private async directRecord(ids: string[], memberIds: string[], created: number | null): Promise<boolean> {
+  private async directRecord(ids: string[], memberIds: string[], created: number | null, recId: number): Promise<boolean> {
     if (!memberIds.length) throw new Error('Mensagem direta sem participantes.');
     const missing = memberIds.find((id) => !this.users.has(id));
     if (missing) throw new Error(`Mensagem direta com usuário não importado: ${missing}`);
     const members = [...new Map(memberIds.map((id) => [this.users.get(id)!.id, this.users.get(id)!])).values()];
     const uids = members.map((u) => u.id).sort();
     const key = uids.join(',');
+    // A conversa ligada por uma importação anterior só vale com as mesmas pessoas: o id de uma DM do CSV é feito de
+    // nomes, e o mesmo nome pode ser hoje outra pessoa. Senão vai para a conversa entre as pessoas de agora.
     let room: any = await this.mappedRoom(ids);
-    if (room?.t !== 'd') room = await one(`SELECT * FROM rooms WHERE t = 'd' AND dm_key = $1`, [key]);
+    const moved = !!room && (room.t !== 'd' || [...(room.uids ?? [])].sort().join(',') !== key);
+    if (moved || !room) room = await one(`SELECT * FROM rooms WHERE t = 'd' AND dm_key = $1`, [key]);
     let isNew = false;
     const subs = await tx(async (cl) => {
       if (!room) {
@@ -1162,6 +1448,15 @@ class Conversion {
     if (isNew) this.createdRooms.add(room.id);
     this.rememberSubs(subs);
     this.setRoom(ids, room);
+    if (moved) {
+      const names = members.map((u) => u.username).sort();
+      const who = truncate(names.slice(0, 10).join(', ') + (names.length > 10 ? ` e mais ${names.length - 10}` : ''), 500);
+      await markRecordError(
+        recId,
+        `A sala ligada a esta conversa direta por uma importação anterior não é a conversa entre ${who}; esta importação usa a conversa entre essas pessoas, ` +
+          'e as mensagens importadas antes continuam na sala antiga.',
+      );
+    }
     return isNew;
   }
 
@@ -1284,9 +1579,10 @@ class Conversion {
     // Repetida no mesmo lote: já está sendo importada.
     if (importId && inBatch.has(importId)) return null;
     const prev = importId ? known.get(importId) : undefined;
-    // Mensagem importada antes que hoje é de outra pessoa: não mexe.
-    if (prev && prev.userId !== author.id) return null;
-    const roomId = prev?.roomId ?? room.id;
+    // Mensagem importada antes que hoje é de outra pessoa, ou que está em outra sala (a do canal mudou: virou privado,
+    // ou a DM é hoje entre outras pessoas): não mexe, senão o texto novo iria para a sala antiga.
+    if (prev && (prev.userId !== author.id || prev.roomId !== room.id)) return null;
+    const roomId = room.id;
 
     let tmid: string | null = null;
     let deferredParent: string | null = null;

@@ -16,9 +16,18 @@ export const ZIP_LIMITS = {
   maxTotalBytes: 20 * 1024 * MiB, // soma dos tamanhos descompactados declarados
   bombMinBytes: 64 * MiB, // entradas maiores que isso não podem ter taxa de compressão acima de bombRatio
   bombRatio: 200,
-  // read() junta a entrada inteira na memória: acima de readMinBytes, a taxa de compressão não pode passar de readRatio.
+  // Entrada lida (inteira na memória pelo read, ou aos poucos pelo stream): acima de readMinBytes, a taxa de compressão
+  // não pode passar de readRatio.
   readMinBytes: MiB,
   readRatio: 100,
+  // O que o importador vai ler, somado: acima de expandMinBytes, não pode passar de expandRatio vezes o tamanho do .zip.
+  // Muitos arquivos pequenos (abaixo de readMinBytes) com taxa de 1000 viravam milhões de registros.
+  expandMinBytes: 64 * MiB,
+  expandRatio: 100,
+  // Registros que a leitura de um .zip pode gravar: recordsMin, ou recordsPerByte para cada byte do .zip (ver
+  // zipRecordLimit).
+  recordsMin: 100_000,
+  recordsPerByte: 2,
 };
 const DEFAULT_READ_MAX = 256 * MiB;
 
@@ -51,8 +60,29 @@ const tooBig = (name: string, max: number) => new ImportError(`O arquivo "${prin
 const notFound = (name: string) => new ImportError(`Arquivo não encontrado na importação: "${printable(name)}".`);
 const bomb = () => new ImportError('O .zip parece corrompido ou malicioso (taxa de compressão suspeita).');
 const bombEntry = (name: string) => new ImportError(`O arquivo "${printable(name)}" do .zip tem uma taxa de compressão suspeita (o .zip parece corrompido ou malicioso).`);
+const expanded = (total: number, zipSize: number) =>
+  new ImportError(
+    `O .zip parece corrompido ou malicioso: os arquivos a importar somam ${sizeLabel(total)} descompactados, mais de ${ZIP_LIMITS.expandRatio} vezes o tamanho do .zip (${sizeLabel(zipSize)}). Uma exportação de verdade descompacta para bem menos que isso; gere o .zip de novo.`,
+  );
 const encrypted = () => new ImportError('O .zip está protegido por senha. Gere o arquivo de novo sem senha.');
+// 500000 → "500.000", sem depender dos dados de idioma do Node.
+const thousands = (n: number) => String(n).replace(/\B(?=(\d{3})+$)/g, '.');
 const notZip = () => new ImportError('O arquivo enviado não é um .zip válido.');
+
+// Teto de registros (usuários, salas, mensagens, contatos) que a leitura de um .zip grava: abaixo de expandMinBytes,
+// a taxa de compressão do .zip inteiro não é conferida, e um .zip de 160 KB com 63 MB de linhas iguais de CSV virava 3
+// milhões de mensagens (umas 20 por byte do .zip). Medido: uma mensagem do Slack gasta de 3 bytes compactados (todas
+// iguais, "ok" a cada segundo) a 50 (com client_msg_id e textos variados); uma linha de CSV, de 2,6 a 16. Qualquer
+// .zip pode ter até recordsMin.
+export async function zipRecordLimit(filePath: string) {
+  const size = (await fs.promises.stat(filePath)).size;
+  const max = Math.max(ZIP_LIMITS.recordsMin, Math.floor(size * ZIP_LIMITS.recordsPerByte));
+  const error = () =>
+    new ImportError(
+      `O .zip parece corrompido ou malicioso: a leitura passou de ${thousands(max)} registros (usuários, salas, mensagens e contatos), mais de ${ZIP_LIMITS.recordsPerByte} para cada byte do .zip (${sizeLabel(size)}). Uma exportação de verdade comprime bem menos que isso; gere o .zip de novo.`,
+    );
+  return { max, error };
+}
 
 // Junta um stream na memória até maxBytes.
 async function collect(stream: Readable, maxBytes: number, name: string, onError: (e: unknown) => Error) {
@@ -75,6 +105,17 @@ async function collect(stream: Readable, maxBytes: number, name: string, onError
 }
 
 // ---------- .zip ----------
+
+// __MACOSX/, .DS_Store e outros ocultos: nenhum importador lê.
+const isJunkName = (name: string) => name.split('/').some((p) => p.startsWith('.') || p === '__MACOSX');
+
+// A soma dos tamanhos descompactados declarados do que os importadores leem (tudo menos o lixo de quem compactou),
+// contra o tamanho do .zip. Conferida ao ler o diretório central, antes de qualquer entrada ser lida ou gravada.
+function checkExpansion(entries: ArchiveEntry[], zipSize: number) {
+  let total = 0;
+  for (const e of entries) if (!e.isDirectory && !isJunkName(e.name)) total += e.size;
+  if (total > ZIP_LIMITS.expandMinBytes && total > ZIP_LIMITS.expandRatio * Math.max(zipSize, 1)) throw expanded(total, zipSize);
+}
 
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 // Bytes 0x80–0xFF da página de código 850.
@@ -176,14 +217,27 @@ async function openZip(filePath: string, opts: ArchiveOptions): Promise<ArchiveS
     zf.close();
     throw new ImportError(`O .zip tem entradas demais (${zf.entryCount}; o máximo é ${ZIP_LIMITS.maxEntries}).`);
   }
+  const zipSize = (await fs.promises.stat(filePath)).size;
   const warn = opts.warn ?? (() => {});
   let central: Promise<{ entries: ArchiveEntry[]; byName: Map<string, yauzl.Entry> }> | null = null;
   const load = () =>
-    (central ??= readCentralDirectory(zf, warn).catch((e) => {
-      if (e instanceof ImportError) throw e;
-      if (/strong encryption/.test(String(e?.message))) throw encrypted();
-      throw new ImportError('O .zip está corrompido ou incompleto.');
-    }));
+    (central ??= readCentralDirectory(zf, warn).then(
+      (c) => {
+        checkExpansion(c.entries, zipSize);
+        return c;
+      },
+      (e) => {
+        if (e instanceof ImportError) throw e;
+        if (/strong encryption/.test(String(e?.message))) throw encrypted();
+        throw new ImportError('O .zip está corrompido ou incompleto.');
+      },
+    ));
+
+  // Taxa de compressão de uma entrada lida, inteira (read) ou aos poucos (stream): o CSV lê as mensagens aos poucos, e
+  // um messages.csv de 63 MB com taxa de 400 passava.
+  const checkRatio = (entry: ArchiveEntry, ze: yauzl.Entry | undefined) => {
+    if (ze && ze.uncompressedSize > ZIP_LIMITS.readMinBytes && ze.uncompressedSize > ZIP_LIMITS.readRatio * Math.max(ze.compressedSize, 1)) throw bombEntry(entry.name);
+  };
 
   const openEntry = async (entry: ArchiveEntry) => {
     const ze = (await load()).byName.get(entry.name);
@@ -201,11 +255,12 @@ async function openZip(filePath: string, opts: ArchiveOptions): Promise<ArchiveS
     async read(entry, maxBytes = DEFAULT_READ_MAX) {
       const ze = (await load()).byName.get(entry.name);
       if (ze && ze.uncompressedSize > maxBytes) throw tooBig(entry.name, maxBytes);
-      if (ze && ze.uncompressedSize > ZIP_LIMITS.readMinBytes && ze.uncompressedSize > ZIP_LIMITS.readRatio * Math.max(ze.compressedSize, 1)) throw bombEntry(entry.name);
+      checkRatio(entry, ze);
       const { stream } = await openEntry(entry);
       return collect(stream, maxBytes, entry.name, (e) => zipReadError(entry.name, e));
     },
     async stream(entry) {
+      checkRatio(entry, (await load()).byName.get(entry.name));
       const { stream } = await openEntry(entry);
       // Erros do yauzl (em inglês) viram ImportError para quem consome o stream.
       const out = new PassThrough();
@@ -259,8 +314,20 @@ async function openDir(dirPath: string, opts: ArchiveOptions): Promise<ArchiveSo
   const walk = async () => {
     const out: ArchiveEntry[] = [];
     let total = 0;
+    // Nomes que não são UTF-8 (o unzip deixa assim os de um .zip do Windows sem a marca de UTF-8): o nome decodificado
+    // não abre o arquivo no disco. Ficam de fora, num aviso só.
+    let badNames = 0;
+    let badExample = '';
     const visit = async (rel: string) => {
-      for (const name of await fs.promises.readdir(rel ? path.join(root, rel) : root)) {
+      // Em ordem, para a listagem e os avisos não dependerem do sistema de arquivos.
+      for (const raw of (await fs.promises.readdir(rel ? path.join(root, rel) : root, { encoding: 'buffer' })).sort(Buffer.compare)) {
+        let name: string;
+        try {
+          name = utf8.decode(raw);
+        } catch {
+          if (!badNames++) badExample = `${rel ? `${rel}/` : ''}${raw.toString('utf8')}`;
+          continue;
+        }
         const r = rel ? `${rel}/${name}` : name;
         const st = await fs.promises.lstat(path.join(root, r)).catch(() => null);
         if (!st) continue;
@@ -284,6 +351,11 @@ async function openDir(dirPath: string, opts: ArchiveOptions): Promise<ArchiveSo
       }
     };
     await visit('');
+    if (badNames) {
+      warn(
+        `${badNames === 1 ? '1 item da pasta foi ignorado' : `${badNames} itens da pasta foram ignorados`} porque o nome não está em UTF-8 (por exemplo "${printable(badExample)}"). Renomeie esses arquivos e pastas, ou descompacte o .zip com um programa que converta os nomes para UTF-8, e importe de novo.`,
+      );
+    }
     return out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   };
 

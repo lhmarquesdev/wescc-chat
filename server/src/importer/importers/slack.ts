@@ -58,6 +58,29 @@ export const SLACK_LIMITS = {
 const SCAN_PAUSE = MiB;
 // Itens lidos entre uma pausa e outra para o event loop: um dia com muitas mensagens não trava o servidor.
 const YIELD_EVERY = 500;
+// Caracteres convertidos (convertMarkup) entre uma pausa e outra: umas dezenas de ms no pior caso.
+const WORK_PAUSE = 100_000;
+// Dentro de um item só (os membros de um canal, quem reagiu, os arquivos): a vez volta ao event loop depois de PAUSE_MS
+// seguidos. Um item de 16 MB pode ter 500 mil valores, e cada um custa alguns microssegundos (480 mil membros num
+// canal seguravam a vez por meio segundo).
+const PAUSE_MS = 20;
+const PAUSE_CHECK = 500;
+// O maior texto de mensagem do Slack. O resto é cortado antes da conversão, com aviso: sem o corte, um item de 16 MB
+// travava o event loop por segundos e ficava inteiro nos registros gravados (500 deles esgotavam a memória).
+export const MAX_TEXT = 40_000;
+// Ids e nomes (usuário, canal, bot) cortados na leitura, antes das tabelas, dos marcadores de menção e do jsonb.
+const MAX_ID = 200;
+const MAX_NAME = 200;
+// O maior nome de entrada de um .zip. As pastas das conversas são procuradas pelo nome inteiro, sem o corte de MAX_NAME
+// (o de uma MPIM de 9 pessoas passa de 200 caracteres).
+const MAX_PATH = 65_535;
+// Tópico e descrição: o dobro do que a conversão guarda (a marcação encolhe ao ser convertida).
+const MAX_TOPIC = 4000;
+// Anexos: os 20 primeiros (a conversão guarda 20), cada campo até o dobro do que a conversão guarda, e todos juntos até
+// MAX_TEXT.
+const MAX_ATTACHMENTS = 20;
+const MAX_FIELDS = 20;
+const ATTACHMENT_MAX = { title: 1000, text: 10_000, author: 400, fieldTitle: 400, fieldValue: 4000 };
 const breathe = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 // Subtipos que viram mensagens de sistema; o texto é o campo indicado (o resto do texto do Slack é descartado).
@@ -79,15 +102,21 @@ const BROADCASTS = new Set(['thread_broadcast', 'reply_broadcast']);
 
 // ---------- Auxiliares ----------
 
-const CONTROL_RE = /[\u0001\u0002]/g;
+const CONTROL_RE = /[\u0000\u0001\u0002]/g;
 const isObj = (v: unknown): v is Json => !!v && typeof v === 'object' && !Array.isArray(v);
-// Os marcadores de menção (\u0001 e \u0002) nunca podem vir do próprio texto.
+// Os marcadores de menção (\u0001 e \u0002) nunca podem vir do próprio texto, e o PostgreSQL recusa U+0000 (num id,
+// derrubava a gravação da leitura inteira).
 const clean = (v: unknown) => (typeof v === 'string' ? v.replace(CONTROL_RE, '') : '');
 const str = (v: unknown) => clean(v).trim();
-const uniq = <T>(list: T[]) => [...new Set(list)];
-const ids = (v: unknown) => uniq(Array.isArray(v) ? v.map(str).filter(Boolean) : []);
+// Cortado antes de limpar: um campo de 16 MB não é percorrido inteiro.
+const cutText = (v: unknown, max: number) => (typeof v === 'string' ? clean(truncate(v, max)).trim() : '');
+const sid = (v: unknown) => cutText(v, MAX_ID);
+// Nome de pasta: limpo, sem corte; maior que um nome do .zip, não é pasta nenhuma.
+const folderKey = (v: unknown) => (typeof v === 'string' && v.length <= MAX_PATH ? str(v) : '');
 const plural = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`);
 const httpUrl = (v: unknown) => {
+  // Bem maior que o limite já não é endereço: nem é percorrido.
+  if (typeof v !== 'string' || v.length > 16_384) return '';
   const s = str(v);
   return /^https?:\/\//i.test(s) && s.length <= 8192 ? s : '';
 };
@@ -207,7 +236,7 @@ function convertToken(inner: string, names: SlackNames, mode: MarkupMode): strin
   const label = bar < 0 ? '' : decode(inner.slice(bar + 1)).trim();
   const head = target.charAt(0);
   if (head === '@' || head === '#') {
-    const id = target.slice(1).trim();
+    const id = sid(target.slice(1));
     const name = label.replace(/^[@#]/, '') || (id ? (head === '@' ? names.user(id) : names.room(id)) : undefined);
     if (!id) return name ? `${head}${name}` : '';
     if (mode === 'plain') return `${head}${name || id}`;
@@ -244,8 +273,9 @@ function convertToken(inner: string, names: SlackNames, mode: MarkupMode): strin
 // Texto do Slack para o daqui. Cada <...> é tratado sozinho (nunca uma regra pegando dois), e as entidades &amp; &lt;
 // &gt; são decodificadas depois, só no texto comum: "&lt;@U1&gt;" digitado continua texto, não vira menção.
 // Usuários e salas viram marcadores, trocados pelo nome final na conversão (menos no modo plain, ver MarkupMode).
-export function convertMarkup(raw: unknown, names: SlackNames, mode: MarkupMode = 'markdown'): string {
-  const s = clean(raw).replace(/\r\n?/g, '\n');
+// Só os primeiros `max` caracteres: a conversão é linear, mas síncrona (16 MB travavam o servidor por 8 s).
+export function convertMarkup(raw: unknown, names: SlackNames, mode: MarkupMode = 'markdown', max = MAX_TEXT): string {
+  const s = clean(typeof raw === 'string' && raw.length > max ? truncate(raw, max) : raw).replace(/\r\n?/g, '\n');
   if (!s) return '';
   let out = '';
   let last = 0;
@@ -255,6 +285,43 @@ export function convertMarkup(raw: unknown, names: SlackNames, mode: MarkupMode 
     last = m.index + m[0].length;
   }
   return out + plainText(s.slice(last));
+}
+
+// Quanto texto do arquivo ainda pode ser convertido (numa mensagem, nos anexos dela...). Corta antes da conversão e
+// lembra quando o corte foi pelo total, não pelo limite do campo (só esse perde o que a conversão guardaria).
+class TextBudget {
+  cut = false;
+  used = 0;
+  constructor(private left: number) {}
+
+  get done() {
+    return this.left <= 0;
+  }
+
+  // Um pedaço que não é texto do arquivo (menção, emoji): entra inteiro ou não entra, e aí o resto é cortado.
+  spend(n: number): boolean {
+    if (n > this.left) {
+      this.left = 0;
+      this.cut = true;
+      return false;
+    }
+    this.left -= n;
+    this.used += n;
+    return true;
+  }
+
+  take(v: unknown, max = Infinity): string {
+    if (typeof v !== 'string') return '';
+    const n = Math.max(0, Math.min(max, this.left));
+    let s = v;
+    if (s.length > n) {
+      s = truncate(s, n);
+      if (s.length < v.length && n < max) this.cut = true;
+    }
+    this.left = Math.max(0, this.left - s.length);
+    this.used += s.length;
+    return s;
+  }
 }
 
 // ---------- Blocos (rich_text) ----------
@@ -275,38 +342,54 @@ function styled(text: string, style: unknown) {
   return before + s + after;
 }
 
-function richInline(elements: unknown, names: SlackNames, withStyle = true): string {
+// Os laços dos blocos param quando o limite do texto acaba: um bloco com 500 mil elementos não é percorrido inteiro.
+const exhausted = (budget: TextBudget) => {
+  if (budget.done) budget.cut = true;
+  return budget.done;
+};
+
+function richInline(elements: unknown, names: SlackNames, budget: TextBudget, withStyle = true): string {
   if (!Array.isArray(elements)) return '';
   let s = '';
   for (const e of elements) {
+    if (exhausted(budget)) break;
     if (!isObj(e)) continue;
     switch (e.type) {
-      case 'text':
-        s += withStyle ? styled(clean(e.text), e.style) : clean(e.text);
+      case 'text': {
+        const text = clean(budget.take(e.text));
+        s += withStyle ? styled(text, e.style) : text;
         break;
+      }
       case 'link': {
         const url = httpUrl(e.url);
-        const text = str(e.text);
+        const text = str(budget.take(e.text));
         s += url ? (text && withStyle ? markdownLink(text, url) : url) : text;
         break;
       }
-      case 'user':
-        if (str(e.user_id)) s += userToken(str(e.user_id), names.user(str(e.user_id)));
+      // Contam no limite como no texto do Slack: <@U1>, <#C1>, :nome:, <!here>.
+      case 'user': {
+        const id = sid(e.user_id);
+        if (id && budget.spend(id.length + 3)) s += userToken(id, names.user(id));
         break;
-      case 'channel':
-        if (str(e.channel_id)) s += roomToken(str(e.channel_id), names.room(str(e.channel_id)));
+      }
+      case 'channel': {
+        const id = sid(e.channel_id);
+        if (id && budget.spend(id.length + 3)) s += roomToken(id, names.room(id));
         break;
-      case 'emoji':
-        if (str(e.name)) s += `:${emojiName(str(e.name))}:`;
+      }
+      case 'emoji': {
+        const name = cutText(e.name, 100);
+        if (name && budget.spend(name.length + 2)) s += `:${emojiName(name)}:`;
         break;
+      }
       case 'broadcast':
-        s += e.range === 'here' ? '@here' : '@all';
+        if (budget.spend(7)) s += e.range === 'here' ? '@here' : '@all';
         break;
       case 'date':
-        s += str(e.fallback);
+        s += str(budget.take(e.fallback));
         break;
       case 'color':
-        s += str(e.value);
+        s += budget.take(cutText(e.value, 30));
         break;
     }
   }
@@ -320,38 +403,50 @@ function trimEnd(s: string) {
   return end === s.length ? s : s.slice(0, end);
 }
 
-function richText(elements: unknown, names: SlackNames): string {
+function richText(elements: unknown, names: SlackNames, budget: TextBudget): string {
   if (!Array.isArray(elements)) return '';
   const out: string[] = [];
   for (const el of elements) {
+    if (exhausted(budget)) break;
     if (!isObj(el)) continue;
-    if (el.type === 'rich_text_section') out.push(richInline(el.elements, names));
-    else if (el.type === 'rich_text_quote') out.push(trimEnd(richInline(el.elements, names)).split('\n').map((l) => `> ${l}`).join('\n'));
-    else if (el.type === 'rich_text_preformatted') out.push(`\`\`\`\n${trimEnd(richInline(el.elements, names, false))}\n\`\`\``);
+    if (el.type === 'rich_text_section') out.push(richInline(el.elements, names, budget));
+    else if (el.type === 'rich_text_quote') out.push(trimEnd(richInline(el.elements, names, budget)).split('\n').map((l) => `> ${l}`).join('\n'));
+    else if (el.type === 'rich_text_preformatted') out.push(`\`\`\`\n${trimEnd(richInline(el.elements, names, budget, false))}\n\`\`\``);
     else if (el.type === 'rich_text_list' && Array.isArray(el.elements)) {
       const indent = '  '.repeat(Math.max(0, Math.min(8, Number(el.indent) || 0)));
       const offset = Math.max(0, Number(el.offset) || 0);
-      const items = el.elements.filter(isObj);
-      out.push(items.map((it, i) => `${indent}${el.style === 'ordered' ? `${offset + i + 1}.` : '-'} ${trimEnd(richInline(it.elements, names))}`).join('\n'));
+      const items: string[] = [];
+      for (const it of el.elements) {
+        if (exhausted(budget)) break;
+        if (isObj(it)) items.push(`${indent}${el.style === 'ordered' ? `${offset + items.length + 1}.` : '-'} ${trimEnd(richInline(it.elements, names, budget))}`);
+      }
+      out.push(items.join('\n'));
     }
   }
   return out.map(trimEnd).join('\n');
 }
 
-const textObject = (t: unknown, names: SlackNames) => (!isObj(t) ? '' : t.type === 'mrkdwn' ? convertMarkup(t.text, names) : clean(t.text));
+const textObject = (t: unknown, names: SlackNames, budget: TextBudget) => (!isObj(t) ? '' : t.type === 'mrkdwn' ? convertMarkup(budget.take(t.text), names) : clean(budget.take(t.text)));
 
-// Texto das mensagens que só têm blocos (o campo text vazio).
-export function blocksText(blocks: unknown, names: SlackNames): string {
+// Texto das mensagens que só têm blocos (o campo text vazio), até MAX_TEXT caracteres do arquivo.
+export function blocksText(blocks: unknown, names: SlackNames, budget = new TextBudget(MAX_TEXT)): string {
   if (!Array.isArray(blocks)) return '';
   const parts: string[] = [];
-  for (const b of blocks) {
-    if (!isObj(b)) continue;
-    if (b.type === 'rich_text') parts.push(richText(b.elements, names));
-    else if (b.type === 'section' || b.type === 'header') {
-      parts.push([textObject(b.text, names), ...(Array.isArray(b.fields) ? b.fields.map((f: unknown) => textObject(f, names)) : [])].filter(Boolean).join('\n'));
-    } else if (b.type === 'context' && Array.isArray(b.elements)) {
-      parts.push(b.elements.map((e: unknown) => textObject(e, names)).filter(Boolean).join(' '));
+  const texts = (list: unknown[]) => {
+    const out: string[] = [];
+    for (const t of list) {
+      if (exhausted(budget)) break;
+      const text = textObject(t, names, budget);
+      if (text) out.push(text);
     }
+    return out;
+  };
+  for (const b of blocks) {
+    if (exhausted(budget)) break;
+    if (!isObj(b)) continue;
+    if (b.type === 'rich_text') parts.push(richText(b.elements, names, budget));
+    else if (b.type === 'section' || b.type === 'header') parts.push(texts([b.text, ...(Array.isArray(b.fields) ? b.fields : [])]).join('\n'));
+    else if (b.type === 'context' && Array.isArray(b.elements)) parts.push(texts(b.elements).join(' '));
   }
   return parts.map(trimEnd).filter(Boolean).join('\n');
 }
@@ -360,10 +455,10 @@ export function blocksText(blocks: unknown, names: SlackNames): string {
 
 // Arquivo de uma mensagem, baixado depois (o endereço já leva o token de acesso do Slack na query).
 export function slackFile(f: unknown): ImportFile | null {
-  if (!isObj(f) || !str(f.id)) return null;
-  const file: ImportFile = { id: str(f.id), name: str(f.name) || str(f.title) || 'arquivo' };
+  if (!isObj(f) || !sid(f.id)) return null;
+  const file: ImportFile = { id: sid(f.id), name: cutText(f.name, 255) || cutText(f.title, 255) || 'arquivo' };
   if (typeof f.size === 'number' && Number.isFinite(f.size) && f.size >= 0) file.size = f.size;
-  const type = str(f.mimetype);
+  const type = cutText(f.mimetype, 200);
   if (type) file.type = type;
   // Removido no Slack ou escondido pelo limite do plano gratuito: não há o que baixar.
   const gone = f.mode === 'tombstone' || f.mode === 'hidden_by_limit' || f.hidden_by_limit === true;
@@ -376,9 +471,8 @@ export function slackFile(f: unknown): ImportFile | null {
 // ---------- Leitura ----------
 
 function normalizeColor(v: unknown) {
-  const s = str(v);
-  if (/^[0-9a-f]{3}([0-9a-f]{3})?$/i.test(s)) return `#${s}`;
-  return truncate(s, 30);
+  const s = cutText(v, 30);
+  return /^[0-9a-f]{3}([0-9a-f]{3})?$/i.test(s) ? `#${s}` : s;
 }
 
 class SlackReader implements SlackNames {
@@ -394,15 +488,46 @@ class SlackReader implements SlackNames {
   private ignored = new Map<string, number>(); // subtipos não importados → quantidade
   private empty = 0;
   private problems = 0;
+  private cuts = 0; // mensagens cortadas (MAX_TEXT)
+  private work = 0; // caracteres convertidos desde a última pausa
+  private labels = 0; // caracteres de rótulos de menção que a mensagem atual ainda pode receber
+  private lastPause = performance.now();
 
   constructor(private ctx: PrepareContext) {}
 
+  // Ver PAUSE_MS. Chamada a cada PAUSE_CHECK valores dos laços longos de um item.
+  private async pause() {
+    if (performance.now() - this.lastPause < PAUSE_MS) return;
+    await breathe();
+    this.lastPause = performance.now();
+  }
+
+  // Ids de uma lista do arquivo (membros, quem reagiu), sem repetir, com pausas.
+  private async idList(v: unknown, into = new Set<string>()): Promise<Set<string>> {
+    if (!Array.isArray(v)) return into;
+    for (let i = 0; i < v.length; i++) {
+      if (i % PAUSE_CHECK === 0) await this.pause();
+      const id = sid(v[i]);
+      if (id) into.add(id);
+    }
+    return into;
+  }
+
+  // Rótulo de uma menção sem rótulo no texto: o nome no Slack, enquanto couber no limite da mensagem. Sem o limite,
+  // milhares de "<@U1>" (5 caracteres cada) com um nome de 200 viravam um texto 40 vezes maior. Sem rótulo, a conversão
+  // usa o nome final, ou o id quando a pessoa não é importada.
+  private label(name: string | undefined) {
+    if (!name || name.length > this.labels) return undefined;
+    this.labels -= name.length;
+    return name;
+  }
+
   user(id: string) {
-    return this.handles.get(id);
+    return this.label(this.handles.get(id));
   }
 
   room(id: string) {
-    return this.roomNames.get(id);
+    return this.label(this.roomNames.get(id));
   }
 
   // Tabelas que ficam na memória a leitura toda, com limite: um users.json ou channels.json de 64 MB com milhões de
@@ -460,7 +585,12 @@ class SlackReader implements SlackNames {
     // mais de um pedaço de lista fica montado na memória (as quatro listas inteiras juntas esgotavam a memória).
     for (const file of conversations) {
       for await (const piece of readList(ctx, meta.get(file)!, file)) {
-        for (const c of piece) if (isObj(c) && str(c.id) && str(c.name) && !this.roomNames.has(str(c.id))) this.remember(this.roomNames, str(c.id), str(c.name));
+        for (const c of piece) {
+          if (!isObj(c)) continue;
+          const id = sid(c.id);
+          const name = cutText(c.name, MAX_NAME);
+          if (id && name && !this.roomNames.has(id)) this.remember(this.roomNames, id, name);
+        }
       }
       if (ctx.cancelled()) return;
     }
@@ -490,6 +620,9 @@ class SlackReader implements SlackNames {
     }
 
     if (this.problems > MAX_MESSAGE_WARNINGS) ctx.warn(`E mais ${plural(this.problems - MAX_MESSAGE_WARNINGS, 'mensagem ignorada', 'mensagens ignoradas')} por problemas no formato.`);
+    if (this.cuts > MAX_MESSAGE_WARNINGS) {
+      ctx.warn(`E mais ${plural(this.cuts - MAX_MESSAGE_WARNINGS, 'mensagem cortada', 'mensagens cortadas')} por passar de ${thousands(MAX_TEXT)} caracteres.`);
+    }
     if (this.ignored.size) {
       const list = [...this.ignored].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} (${n})`);
       const more = list.length > 15 ? ` e mais ${list.length - 15} tipos` : '';
@@ -511,37 +644,41 @@ class SlackReader implements SlackNames {
     for await (const piece of pieces) for (const u of piece) {
       if (++n % YIELD_EVERY === 0) await breathe();
       if (this.ctx.cancelled()) return;
-      if (!isObj(u) || !str(u.id)) {
+      if (!isObj(u) || !sid(u.id)) {
         invalid++;
         continue;
       }
-      const id = str(u.id);
+      const id = sid(u.id);
       if (this.handles.has(id)) {
         repeated++;
         continue;
       }
       const p: Json = isObj(u.profile) ? u.profile : {};
-      const username = str(u.name) || str(p.display_name_normalized) || str(p.display_name);
-      const email = str(p.email);
+      const username = cutText(u.name, MAX_NAME) || cutText(p.display_name_normalized, MAX_NAME) || cutText(p.display_name, MAX_NAME);
+      // Mais de 254 caracteres não é e-mail (e cortar poderia formar o de outra pessoa): fica sem.
+      const rawEmail = cutText(p.email, 300);
+      const email = rawEmail.length <= 254 ? rawEmail : '';
       if (!username && !email) {
         unnamed++;
         continue;
       }
       const rec: ImportUser = { importIds: [id], emails: email ? [email] : [] };
       if (username) rec.username = username;
-      const name = str(p.real_name) || str(u.real_name) || str(p.display_name);
+      const name = cutText(p.real_name, MAX_NAME) || cutText(u.real_name, MAX_NAME) || cutText(p.display_name, MAX_NAME);
       if (name) rec.name = name;
       if (u.is_bot === true || u.is_app_user === true || id === SLACKBOT) rec.type = 'bot';
       if (u.deleted === true) rec.deleted = true;
-      if (str(p.status_text)) rec.statusText = str(p.status_text);
-      if (str(p.title)) rec.bio = str(p.title);
+      const statusText = cutText(p.status_text, 200);
+      if (statusText) rec.statusText = statusText;
+      const bio = cutText(p.title, 2000);
+      if (bio) rec.bio = bio;
       // Donos do espaço de trabalho também são os administradores dele.
       if (u.is_admin === true || u.is_owner === true || u.is_primary_owner === true) rec.roles = ['admin'];
       // Sem foto escolhida, o Slack manda a padrão dele; aqui as iniciais já fazem esse papel.
       const avatar = p.is_custom_image === false ? '' : httpUrl(p.image_original) || httpUrl(p.image_512);
       if (avatar) rec.avatarUrl = avatar;
       // Mensagens de bot só com bot_id são atribuídas ao usuário do bot.
-      if (str(p.bot_id)) this.remember(this.botAuthors, str(p.bot_id), id);
+      if (sid(p.bot_id)) this.remember(this.botAuthors, sid(p.bot_id), id);
       this.remember(this.handles, id, username || name || id);
       await this.ctx.user(rec);
     }
@@ -566,21 +703,24 @@ class SlackReader implements SlackNames {
     let noMembers = 0;
     let n = 0;
     for await (const piece of pieces) for (const c of piece) {
-      if (++n % YIELD_EVERY === 0) await breathe();
+      if (++n % YIELD_EVERY === 0 || this.work >= WORK_PAUSE) {
+        this.work = 0;
+        await breathe();
+      }
       if (this.ctx.cancelled()) return;
-      if (!isObj(c) || !str(c.id)) {
+      if (!isObj(c) || !sid(c.id)) {
         invalid++;
         continue;
       }
-      const id = str(c.id);
+      const id = sid(c.id);
       if (this.kinds.has(id)) {
         repeated++;
         continue;
       }
-      const users = ids(c.members);
+      const users = [...(await this.idList(c.members))];
       const t: ImportChannel['t'] = kind === 'channels' ? 'c' : kind === 'groups' ? 'p' : kind === 'dms' || users.length <= MAX_DM_MEMBERS ? 'd' : 'p';
       const rec: ImportChannel = { importIds: [id], t, users };
-      const name = str(c.name);
+      const name = cutText(c.name, MAX_NAME);
       if (t === 'd') {
         if (!users.length) {
           noMembers++;
@@ -589,9 +729,9 @@ class SlackReader implements SlackNames {
       } else {
         if (!name) unnamed++;
         rec.name = name || id;
-        if (str(c.creator)) rec.creator = str(c.creator);
-        const topic = convertMarkup(isObj(c.topic) ? c.topic.value : undefined, this, 'plain').trim();
-        const purpose = convertMarkup(isObj(c.purpose) ? c.purpose.value : undefined, this, 'plain').trim();
+        if (sid(c.creator)) rec.creator = sid(c.creator);
+        const topic = this.plain(isObj(c.topic) ? c.topic.value : undefined);
+        const purpose = this.plain(isObj(c.purpose) ? c.purpose.value : undefined);
         if (topic) rec.topic = topic;
         if (purpose) rec.description = purpose;
         if (c.is_archived === true) rec.archived = true;
@@ -600,10 +740,11 @@ class SlackReader implements SlackNames {
       const created = typeof c.created === 'number' || typeof c.created === 'string' ? slackTs(Number(c.created)) : undefined;
       if (created) rec.ts = created;
       this.remember(this.kinds, id, t);
-      this.folder(id, id, true);
-      if (name) {
-        this.folder(name, id);
-        this.folder(name.toLowerCase(), id);
+      this.folder(folderKey(c.id) || id, id, true);
+      const folder = folderKey(c.name);
+      if (folder) {
+        this.folder(folder, id);
+        this.folder(folder.toLowerCase(), id);
       }
       await this.ctx.channel(rec);
     }
@@ -611,6 +752,13 @@ class SlackReader implements SlackNames {
     if (unnamed) this.ctx.warn(`"${file}": ${plural(unnamed, 'canal sem nome recebeu', 'canais sem nome receberam')} o id do Slack como nome.`);
     if (noMembers) this.ctx.warn(`"${file}": ${plural(noMembers, 'conversa sem membros foi ignorada', 'conversas sem membros foram ignoradas')}.`);
     if (repeated) this.ctx.warn(`"${file}": ${plural(repeated, 'conversa repetida foi ignorada', 'conversas repetidas foram ignoradas')} (vale a primeira).`);
+  }
+
+  // Tópico e descrição das salas, até MAX_TOPIC caracteres do arquivo.
+  private plain(v: unknown) {
+    this.work += typeof v === 'string' ? Math.min(v.length, MAX_TOPIC) : 0;
+    this.labels = MAX_TOPIC;
+    return convertMarkup(v, this, 'plain', MAX_TOPIC).trim();
   }
 
   // ---------- Mensagens ----------
@@ -628,24 +776,30 @@ class SlackReader implements SlackNames {
       return;
     }
     await ctx.setMessagesStatus(label);
+    await breathe();
     let n = 0;
     for await (const piece of list.pieces()) for (const m of piece) {
-      if (++n % YIELD_EVERY === 0) await breathe();
+      if (++n % YIELD_EVERY === 0 || this.work >= WORK_PAUSE) {
+        this.work = 0;
+        await breathe();
+      }
       if (ctx.cancelled()) return;
       let rec: ImportMessage | string | null;
+      const cut: string[] = [];
       try {
-        rec = this.message(m, rid);
+        rec = await this.message(m, rid, cut);
       } catch (e) {
         // O limite das tabelas (remember) para a leitura toda, não só esta mensagem.
         if (e instanceof ImportError) throw e;
         rec = 'formato inesperado';
       }
+      const ts = () => (isObj(m) && (typeof m.ts === 'string' || typeof m.ts === 'number') ? ` (ts ${truncate(String(m.ts), 40)})` : '');
       if (typeof rec === 'string') {
-        if (++this.problems <= MAX_MESSAGE_WARNINGS) {
-          const ts = isObj(m) && (typeof m.ts === 'string' || typeof m.ts === 'number') ? ` (ts ${truncate(String(m.ts), 40)})` : '';
-          ctx.warn(`Mensagem ignorada em "${label}"${ts}: ${rec}.`);
-        }
+        if (++this.problems <= MAX_MESSAGE_WARNINGS) ctx.warn(`Mensagem ignorada em "${label}"${ts()}: ${rec}.`);
         rec = null;
+      } else if (rec && cut.length && ++this.cuts <= MAX_MESSAGE_WARNINGS) {
+        const what = cut.join(' e ');
+        ctx.warn(`Mensagem cortada em "${label}"${ts()}: ${what} ${cut.length > 1 || what.startsWith('os ') ? 'passavam' : 'passava'} de ${thousands(MAX_TEXT)} caracteres, e o resto foi descartado.`);
       }
       // O bot já ficou conhecido (outras mensagens dele usam o mesmo id), mesmo que esta mensagem tenha falhado.
       if (this.pendingUsers.length) for (const u of this.pendingUsers.splice(0)) await ctx.user(u);
@@ -663,26 +817,38 @@ class SlackReader implements SlackNames {
 
   // Uma mensagem do Slack; null quando ela não é importada (tipo ignorado, vazia) e o motivo quando tem defeito.
   // O motivo volta como texto, sem exceção: um dia pode ter milhões de itens com defeito, e cada exceção custa caro.
-  private message(m: unknown, rid: string): ImportMessage | string | null {
+  // `cut` recebe o que foi cortado por passar de MAX_TEXT ("o texto", "os anexos"), para o aviso.
+  private async message(m: unknown, rid: string, cut: string[]): Promise<ImportMessage | string | null> {
     if (!isObj(m)) return 'não é um objeto';
     if (m.type !== undefined && m.type !== 'message') return null;
-    const ts = typeof m.ts === 'number' ? String(m.ts) : str(m.ts);
+    const ts = typeof m.ts === 'number' ? String(m.ts) : sid(m.ts);
     if (!ts) return 'sem "ts"';
-    const subtype = str(m.subtype);
+    const subtype = cutText(m.subtype, 100);
     if (subtype === 'tombstone') return null;
 
     const rec: ImportMessage = { importId: slackMessageId(rid, ts), rid, u: '', msg: '' };
     const at = slackTs(ts);
     if (at) rec.ts = at;
+    this.labels = MAX_TEXT;
+    // O texto e os blocos (usados quando o texto fica vazio) têm MAX_TEXT cada um; os anexos, juntos, outro tanto.
+    const textBudget = new TextBudget(MAX_TEXT);
+    const blocksBudget = new TextBudget(MAX_TEXT);
+    const attachmentsBudget = new TextBudget(MAX_TEXT);
+    const done = (r: ImportMessage) => {
+      this.work += textBudget.used + blocksBudget.used + attachmentsBudget.used;
+      if (textBudget.cut || blocksBudget.cut) cut.push('o texto');
+      if (attachmentsBudget.cut) cut.push('os anexos');
+      return r;
+    };
 
     const sys = SYSTEM.get(subtype);
     if (sys) {
-      rec.u = str(m.user);
+      rec.u = sid(m.user);
       if (!rec.u) return `"${subtype}" sem usuário`;
       rec.t = sys.t;
-      if (sys.field) rec.msg = sys.field === 'name' ? str(m.name) : convertMarkup(m[sys.field], this).trim();
-      this.reactions(m, rec);
-      return rec;
+      if (sys.field) rec.msg = sys.field === 'name' ? cutText(m.name, MAX_NAME) : convertMarkup(textBudget.take(m[sys.field]), this).trim();
+      await this.reactions(m, rec);
+      return done(rec);
     }
     if (!REGULAR.has(subtype)) {
       this.skip(subtype);
@@ -690,8 +856,8 @@ class SlackReader implements SlackNames {
     }
 
     const bot = BOT_SUBTYPES.has(subtype);
-    const alias = str(m.username);
-    rec.u = str(m.user);
+    const alias = cutText(m.username, MAX_NAME);
+    rec.u = sid(m.user);
     if (rec.u) {
       if (bot && alias && alias !== this.handles.get(rec.u)) rec.alias = alias;
     } else {
@@ -700,14 +866,14 @@ class SlackReader implements SlackNames {
       rec.u = author;
       if (alias) rec.alias = alias;
     }
-    if (bot || !str(m.user)) rec.bot = true;
+    if (bot || !sid(m.user)) rec.bot = true;
 
-    let text = convertMarkup(m.text, this);
-    if (!text.trim()) text = blocksText(m.blocks, this);
+    let text = convertMarkup(textBudget.take(m.text), this);
+    if (!text.trim()) text = blocksText(m.blocks, this, blocksBudget);
     if (subtype === 'me_message' && text.trim()) text = `_${text.trim()}_`;
     rec.msg = text;
 
-    const threadTs = typeof m.thread_ts === 'number' ? String(m.thread_ts) : str(m.thread_ts);
+    const threadTs = typeof m.thread_ts === 'number' ? String(m.thread_ts) : sid(m.thread_ts);
     if (threadTs && threadTs !== ts) {
       rec.tmid = slackMessageId(rid, threadTs);
       if (BROADCASTS.has(subtype)) rec.tshow = true;
@@ -716,41 +882,45 @@ class SlackReader implements SlackNames {
       const editedAt = slackTs(m.edited.ts);
       if (editedAt) {
         rec.editedAt = editedAt;
-        if (str(m.edited.user)) rec.editedBy = str(m.edited.user);
+        if (sid(m.edited.user)) rec.editedBy = sid(m.edited.user);
       }
     }
-    this.reactions(m, rec);
+    await this.reactions(m, rec);
     if (Array.isArray(m.pinned_to) && m.pinned_to.includes(rid)) rec.pinned = true;
-    const attachments = this.attachments(m.attachments);
+    const attachments = this.attachments(m.attachments, attachmentsBudget);
     if (attachments.length) rec.attachments = attachments;
-    if (isObj(m.icons) && str(m.icons.emoji)) rec.emoji = str(m.icons.emoji);
+    const emoji = isObj(m.icons) ? cutText(m.icons.emoji, 100) : '';
+    if (emoji) rec.emoji = emoji;
 
     const files = new Map<string, ImportFile>();
-    for (const f of [...(Array.isArray(m.files) ? m.files : []), m.file]) {
-      const file = slackFile(f);
+    const list: unknown[] = Array.isArray(m.files) ? m.files : [];
+    for (let i = 0; i <= list.length; i++) {
+      if (i % PAUSE_CHECK === 0) await this.pause();
+      const file = slackFile(i < list.length ? list[i] : m.file);
       if (file && !files.has(file.id)) files.set(file.id, file);
     }
     if (files.size) rec.files = [...files.values()];
 
     // Sem texto, anexos nem arquivos não há o que mostrar; a raiz de uma thread fica, para as respostas.
     if (!rec.msg.trim() && !rec.attachments && !rec.files && threadTs !== ts) {
+      this.work += textBudget.used + blocksBudget.used + attachmentsBudget.used;
       this.empty++;
       return null;
     }
-    return rec;
+    return done(rec);
   }
 
   // Bot sem usuário (integrações, webhooks): um usuário bot por bot_id; sem bot_id, o Slackbot. Null passado o limite
   // de integrações: uma exportação de verdade tem dezenas, e cada uma fica na memória e vira um usuário.
   private botAuthor(m: Json): string | null {
-    const botId = str(m.bot_id);
+    const botId = sid(m.bot_id);
     if (!botId) return SLACKBOT;
     const known = this.botAuthors.get(botId);
     if (known) return known;
     if (this.bots >= SLACK_LIMITS.bots) return null;
     this.bots++;
     const profile: Json = isObj(m.bot_profile) ? m.bot_profile : {};
-    const username = str(profile.name) || str(m.username) || 'bot';
+    const username = cutText(profile.name, MAX_NAME) || cutText(m.username, MAX_NAME) || 'bot';
     const id = `slack-bot:${botId}`;
     // Sem bot_profile.deleted: uma integração removida no Slack não é conta para desativar, e o nome dela (jira,
     // github...) pode ser o de uma conta daqui.
@@ -764,39 +934,46 @@ class SlackReader implements SlackNames {
     return id;
   }
 
-  private reactions(m: Json, rec: ImportMessage) {
+  private async reactions(m: Json, rec: ImportMessage) {
     if (!Array.isArray(m.reactions)) return;
     const out = new Map<string, Set<string>>();
-    for (const r of m.reactions) {
+    for (let i = 0; i < m.reactions.length; i++) {
+      if (i % PAUSE_CHECK === 0) await this.pause();
+      const r = m.reactions[i];
       if (!isObj(r)) continue;
-      // Só sai o tom de pele: a troca de nomes do texto não vale para as reações (slack.md §6.5).
-      const name = withoutSkinTone(str(r.name));
-      const users = ids(r.users);
-      if (!name || !users.length) continue;
+      // Só sai o tom de pele: a troca de nomes do texto não vale para as reações (slack.md §6.5). O nome vira chave
+      // do jsonb: sem U+0000 nem metade de emoji (cut), que derrubavam a gravação da leitura inteira.
+      const name = withoutSkinTone(cutText(r.name, 100));
+      if (!name) continue;
       // +1 e +1::skin-tone-2 são a mesma reação aqui.
       const key = `:${name}:`;
-      const set = out.get(key) ?? new Set<string>();
-      for (const u of users) set.add(u);
-      out.set(key, set);
+      const set = await this.idList(r.users, out.get(key));
+      if (set.size) out.set(key, set);
     }
     if (out.size) rec.reactions = Object.fromEntries([...out].map(([k, v]) => [k, [...v]]));
   }
 
-  private attachments(list: unknown): ImportAttachment[] {
+  private attachments(list: unknown, budget: TextBudget): ImportAttachment[] {
     if (!Array.isArray(list)) return [];
     const out: ImportAttachment[] = [];
+    const L = ATTACHMENT_MAX;
+    const conv = (v: unknown, max: number, mode: MarkupMode = 'markdown') => convertMarkup(budget.take(v, max), this, mode).trim();
     for (const a of list) {
+      if (out.length >= MAX_ATTACHMENTS) break;
       if (!isObj(a)) continue;
       const att: ImportAttachment = {};
       // Título, autor, rodapé e título dos campos aparecem como texto simples: um link em markdown ficaria cru na tela.
-      const title = convertMarkup(a.title, this, 'text').trim();
-      const pretext = convertMarkup(a.pretext, this).trim();
-      let text = convertMarkup(a.text, this).trim();
-      const fields = (Array.isArray(a.fields) ? a.fields : [])
-        .filter(isObj)
-        .map((f) => ({ title: convertMarkup(f.title, this, 'text').trim(), value: convertMarkup(f.value, this).trim(), short: f.short === true }))
-        .filter((f) => f.title || f.value);
-      if (!text && !title && !pretext && !fields.length) text = convertMarkup(a.fallback, this).trim();
+      const title = conv(a.title, L.title, 'text');
+      const pretext = conv(a.pretext, L.text);
+      let text = conv(a.text, L.text);
+      const fields: { title: string; value: string; short: boolean }[] = [];
+      for (const f of Array.isArray(a.fields) ? a.fields : []) {
+        if (fields.length >= MAX_FIELDS) break;
+        if (!isObj(f)) continue;
+        const field = { title: conv(f.title, L.fieldTitle, 'text'), value: conv(f.value, L.fieldValue), short: f.short === true };
+        if (field.title || field.value) fields.push(field);
+      }
+      if (!text && !title && !pretext && !fields.length) text = conv(a.fallback, L.text);
       if (title) att.title = title;
       const link = httpUrl(a.title_link) || httpUrl(a.from_url) || httpUrl(a.original_url);
       if (link) att.title_link = link;
@@ -804,13 +981,13 @@ class SlackReader implements SlackNames {
       if (pretext) att.pretext = pretext;
       const color = normalizeColor(a.color);
       if (color) att.color = color;
-      const author = convertMarkup(a.author_name, this, 'text').trim() || convertMarkup(a.author_subname, this, 'text').trim();
+      const author = conv(a.author_name, L.author, 'text') || conv(a.author_subname, L.author, 'text');
       if (author) att.author_name = author;
       if (httpUrl(a.author_link)) att.author_link = httpUrl(a.author_link);
       if (imageUrl(a.author_icon)) att.author_icon = imageUrl(a.author_icon);
       if (imageUrl(a.image_url)) att.image_url = imageUrl(a.image_url);
       if (imageUrl(a.thumb_url)) att.thumb_url = imageUrl(a.thumb_url);
-      const footer = convertMarkup(a.footer, this, 'text').trim();
+      const footer = conv(a.footer, L.text, 'text');
       if (footer) att.footer = footer;
       if (fields.length) att.fields = fields;
       const ts = slackTs(a.ts);
@@ -957,9 +1134,11 @@ async function cutList(buf: Buffer): Promise<[number, number][]> {
   return s.cuts;
 }
 
-// Um pedaço cortado por cutList, montado. O erro diz a linha no arquivo.
-function parsePiece(buf: Buffer, [start, end]: [number, number]): unknown[] {
+// Um pedaço cortado por cutList, montado. O erro diz a linha no arquivo. Num pedaço grande (um item só, até 16 MB),
+// a decodificação do texto e o JSON.parse ficam em vezes separadas do event loop.
+async function parsePiece(buf: Buffer, [start, end]: [number, number]): Promise<unknown[]> {
   const text = `[${buf.toString('utf8', start, end)}]`;
+  if (end - start > SCAN_PAUSE) await breathe();
   try {
     return JSON.parse(text) as unknown[];
   } catch (e) {
@@ -988,10 +1167,10 @@ class JsonList {
     const buf = await ctx.source.read(entry, MAX_JSON_BYTES);
     const cuts = await cutList(buf);
     // Um pedaço só (quase todo dia de verdade): montado uma vez.
-    if (cuts.length === 1) return new JsonList(buf, cuts, parsePiece(buf, cuts[0]));
+    if (cuts.length === 1) return new JsonList(buf, cuts, await parsePiece(buf, cuts[0]));
     if (validate) {
       for (const cut of cuts) {
-        parsePiece(buf, cut);
+        await parsePiece(buf, cut);
         await breathe();
       }
     }
@@ -1003,9 +1182,13 @@ class JsonList {
       yield this.first;
       return;
     }
+    // Pausas antes e depois de montar cada pedaço: montar um item de 16 MB e converter a mensagem dele, juntos, já
+    // passavam de 100 ms sem devolver a vez.
     for (const cut of this.cuts) {
-      yield parsePiece(this.buf, cut);
       await breathe();
+      const piece = await parsePiece(this.buf, cut);
+      await breathe();
+      yield piece;
     }
   }
 }

@@ -1,11 +1,12 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import yazl from 'yazl';
 import { pool } from '../src/db/pool';
-import { memoryArchive, openArchive } from '../src/importer/archive';
-import { SLACK_LIMITS, blocksText, convertMarkup, emojiName, slackFile, slackImporter, slackMessageId, slackTs, type SlackNames } from '../src/importer/importers/slack';
+import { ZIP_LIMITS, memoryArchive, openArchive } from '../src/importer/archive';
+import { MAX_TEXT, SLACK_LIMITS, blocksText, convertMarkup, emojiName, slackFile, slackImporter, slackMessageId, slackTs, type SlackNames } from '../src/importer/importers/slack';
 import { operationDir } from '../src/importer/operations';
 import { BUSY_STATES, ImportError, ST, roomToken, userToken, type ArchiveSource, type ImportChannel, type ImportMessage, type ImportUser, type PrepareContext } from '../src/importer/types';
 import { admin, api, sleep, startServer, stopServer, type Auth } from './helpers';
@@ -961,6 +962,20 @@ describe('conversas', () => {
     expect(r.messages[0].t).toBe('uj');
   });
 
+  it('MPIM de 9 pessoas com nome de mais de 200 caracteres: as mensagens da pasta dela continuam (o corte do nome desligava a pasta)', async () => {
+    const handles = Array.from({ length: 9 }, (_, i) => `usuario.sobrenome.${String(i).padStart(3, '0')}`);
+    const users = handles.map((h, i) => ({ id: `U${i}`, name: h, profile: { email: `${h}@ex.com` } }));
+    const name = `mpdm-${handles.join('--')}-1`;
+    expect(name.length).toBeGreaterThan(200);
+    const r = await run({
+      'users.json': j(users),
+      'mpims.json': j([{ id: 'G1', name, members: users.map((u) => u.id) }]),
+      [`${name}/2024-01-01.json`]: j([{ type: 'message', ts: '1704067200.000100', user: 'U0', text: 'oi grupo' }]),
+    });
+    expect(r.messages.map((m) => [m.rid, m.msg])).toEqual([['G1', 'oi grupo']]);
+    expect(r.warnings).toEqual([]);
+  });
+
   it('sem filtro de criador; membros ausentes; canal sem nome recebe o id; repetidos e DMs vazias são ignorados', async () => {
     const r = await run({
       'users.json': j(USERS),
@@ -1271,7 +1286,8 @@ describe('arquivos grandes e conteúdo hostil', () => {
     ]);
     const r = await run(files);
     const twelfth = r.messages.filter((m) => m.ts?.startsWith('2024-01-11'));
-    expect(twelfth.map((m) => m.msg)).toEqual([tricky, ...many.slice(0, 1000).map((m) => m.text), 'depois']);
+    // O texto enorme passa inteiro pelo corte da lista; depois, a mensagem fica com os primeiros MAX_TEXT caracteres.
+    expect(twelfth.map((m) => m.msg)).toEqual([tricky.slice(0, MAX_TEXT), ...many.slice(0, 1000).map((m) => m.text), 'depois']);
     r.messages = r.messages.filter((m) => !twelfth.includes(m));
     expect(r.messages).toHaveLength(1 + 3000);
     expect(r.messages.filter((m) => m.msg === 'fica')).toHaveLength(1);
@@ -1283,6 +1299,7 @@ describe('arquivos grandes e conteúdo hostil', () => {
       `"geral/2024-01-06.json" não é um JSON válido (erro perto da linha ${lines - 1}) e foi ignorado.`,
       `"geral/2024-01-07.json" não é um JSON válido (erro perto da linha ${lines - 2}) e foi ignorado.`,
       '"geral/2024-01-08.json" não é um JSON válido e foi ignorado.',
+      'Mensagem cortada em "geral/2024-01-12" (ts 1704931200.000100): o texto passava de 40.000 caracteres, e o resto foi descartado.',
     ]);
     // Os mesmos defeitos em users.json param a leitura.
     for (const [day, content] of Object.entries(broken)) {
@@ -1327,8 +1344,9 @@ describe('arquivos grandes e conteúdo hostil', () => {
       'Mensagens de tipos que não são importados foram ignoradas: outros tipos (3), a (1), b (1).',
     ]);
     // Os bots também contam no limite das tabelas, e passar dele para a leitura (não vira "formato inesperado").
+    // O nome é cortado em 200 caracteres na leitura: com um limite pequeno, o terceiro bot já passa dele.
     const named = messages.slice(0, 5).map((m, i) => ({ ...m, bot_profile: { name: `bot-${i}-${'x'.repeat(200_000)}` } }));
-    const error = await withLimits({ tableBytes: 1024 * 1024 }, () => settle(slackImporter.prepare(fakeContext(memoryArchive(slack(named))).ctx)));
+    const error = await withLimits({ tableBytes: 2000 }, () => settle(slackImporter.prepare(fakeContext(memoryArchive(slack(named))).ctx)));
     expect(error).toBeInstanceOf(ImportError);
     expect(error.message).toMatch(/usuários e conversas demais/);
   });
@@ -1398,7 +1416,8 @@ describe('arquivos grandes e conteúdo hostil', () => {
   });
 
   it('texto com estilo e muitos espaços no meio não trava a leitura (a regex de styled era quadrática)', async () => {
-    const text = 'a' + ' '.repeat(1_000_000) + 'b';
+    // Abaixo do corte de MAX_TEXT, para o texto chegar inteiro a styled.
+    const text = 'a' + ' '.repeat(MAX_TEXT - 1000) + 'b';
     const { r, ms } = await timed(onlyBlocks(section(text, { bold: true })));
     expect(ms).toBeLessThan(1000);
     expect(r.messages[0].msg).toBe(`*${text}*`);
@@ -1409,7 +1428,8 @@ describe('arquivos grandes e conteúdo hostil', () => {
   });
 
   it('muitas quebras de linha num bloco não travam a leitura (a regex de trimEnd era quadrática)', async () => {
-    const text = '\n'.repeat(1_000_000) + 'x';
+    // Os dois blocos juntos abaixo do corte de MAX_TEXT.
+    const text = '\n'.repeat(MAX_TEXT / 2 - 1000) + 'x';
     const { r, ms } = await timed(onlyBlocks([{ type: 'rich_text', elements: [{ type: 'rich_text_section', elements: [{ type: 'text', text }] }, { type: 'rich_text_quote', elements: [{ type: 'text', text }] }] }]));
     expect(ms).toBeLessThan(1000);
     expect(r.messages[0].msg.startsWith(text)).toBe(true);
@@ -1418,15 +1438,17 @@ describe('arquivos grandes e conteúdo hostil', () => {
 
   it('as outras regexes aplicadas ao texto do arquivo levam tempo linear (1 MB hostil em bem menos de 1 s)', () => {
     const n = 1_000_000;
+    // Sem o corte de MAX_TEXT, para medir as regexes num texto de 1 MB.
+    const conv = (s: string) => convertMarkup(s, names, 'markdown', Infinity);
     const cases: [string, () => unknown][] = [
-      ['marcador sem fim', () => convertMarkup('<' + 'a'.repeat(n), names)],
-      ['muitos <', () => convertMarkup('<'.repeat(n), names)],
-      ['link com muitos espaços no rótulo', () => convertMarkup('<https://x.com|' + ' \t'.repeat(n / 2) + 'a>', names)],
-      ['link com muitos parênteses', () => convertMarkup('<https://x.com/' + '('.repeat(n) + '|a>', names)],
-      ['tom de pele sem fim', () => convertMarkup('::skin-tone-' + '1'.repeat(n) + 'x', names)],
-      ['nome de emoji sem fim', () => convertMarkup(':' + 'a'.repeat(n), names)],
-      ['dois-pontos alternados', () => convertMarkup(':a'.repeat(n / 2), names)],
-      ['entidades pela metade', () => convertMarkup('&amp'.repeat(n / 4), names)],
+      ['marcador sem fim', () => conv('<' + 'a'.repeat(n))],
+      ['muitos <', () => conv('<'.repeat(n))],
+      ['link com muitos espaços no rótulo', () => conv('<https://x.com|' + ' \t'.repeat(n / 2) + 'a>')],
+      ['link com muitos parênteses', () => conv('<https://x.com/' + '('.repeat(n) + '|a>')],
+      ['tom de pele sem fim', () => conv('::skin-tone-' + '1'.repeat(n) + 'x')],
+      ['nome de emoji sem fim', () => conv(':' + 'a'.repeat(n))],
+      ['dois-pontos alternados', () => conv(':a'.repeat(n / 2))],
+      ['entidades pela metade', () => conv('&amp'.repeat(n / 4))],
       ['emoji de reação', () => emojiName('::skin-tone-1'.repeat(n / 13) + 'x')],
       ['ts com muitos dígitos', () => slackTs('1'.repeat(n) + 'x')],
       ['ts com muitos pontos', () => slackMessageId('C1', '1.'.repeat(n / 2))],
@@ -1445,6 +1467,158 @@ describe('arquivos grandes e conteúdo hostil', () => {
     expect(ms).toBeLessThan(1000);
     expect(Object.keys(r.messages[0].reactions!)).toEqual([':+1:']);
     expect(r.messages[0].reactions![':+1:']).toHaveLength(60_000);
+  });
+
+  it('texto acima de 40.000 caracteres é cortado antes da conversão, com aviso por mensagem e depois só a contagem (antes ia inteiro, até 16 MB)', async () => {
+    const long = (i: number) => ({ type: 'message', ts: `1704067200.${String(i).padStart(6, '0')}`, user: 'U1', text: `${i} ${'a'.repeat(MAX_TEXT)}` });
+    const r = await run(slack([...Array.from({ length: 52 }, (_, i) => long(i)), { type: 'message', ts: '1704067300.000100', user: 'U1', text: 'curta' }]));
+    expect(r.messages).toHaveLength(53);
+    expect(r.messages[0].msg).toBe(`0 ${'a'.repeat(MAX_TEXT - 2)}`);
+    expect(r.messages.every((m) => m.msg.length <= MAX_TEXT)).toBe(true);
+    expect(r.messages.at(-1)!.msg).toBe('curta');
+    expect(r.warnings).toHaveLength(51);
+    expect(r.warnings[0]).toBe('Mensagem cortada em "geral/2024-01-01" (ts 1704067200.000000): o texto passava de 40.000 caracteres, e o resto foi descartado.');
+    expect(r.warnings.at(-1)).toBe('E mais 2 mensagens cortadas por passar de 40.000 caracteres.');
+
+    // Um texto de 8 MB (o item pode ter até 16 MB) também: cortado, sem ser percorrido inteiro.
+    const { r: big, ms } = await timed(slack([{ type: 'message', ts: '1704067200.000100', user: 'U1', text: `<@U2> ${'b'.repeat(8 * 1024 * 1024)}` }]));
+    expect(ms).toBeLessThan(1000);
+    expect(big.messages[0].msg).toBe(`${userToken('U2', 'bob')} ${'b'.repeat(MAX_TEXT - 6)}`);
+
+    // Só com blocos: o mesmo limite para o texto dos blocos.
+    const blocks = await run(onlyBlocks([{ type: 'section', text: { type: 'mrkdwn', text: 'c'.repeat(MAX_TEXT + 10) } }, { type: 'section', text: { type: 'plain_text', text: 'some' } }]));
+    expect(blocks.messages[0].msg).toBe('c'.repeat(MAX_TEXT));
+    expect(blocks.warnings).toEqual(['Mensagem cortada em "geral/2024-01-01" (ts 1704067200.000100): o texto passava de 40.000 caracteres, e o resto foi descartado.']);
+
+    // Anexos: juntos até MAX_TEXT; os que não cabem ficam de fora, com aviso.
+    const attachments = Array.from({ length: 10 }, (_, i) => ({ title: `anexo ${i}`, text: 'd'.repeat(5000) }));
+    const att = await run(slack([{ type: 'message', ts: '1704067200.000100', user: 'U1', text: 'oi', attachments }]));
+    const kept = att.messages[0].attachments!;
+    expect(kept.slice(0, 7).every((a) => a.text!.length === 5000)).toBe(true);
+    expect(kept.map((a) => a.title)).toEqual(Array.from({ length: 8 }, (_, i) => `anexo ${i}`));
+    expect(kept.reduce((n, a) => n + (a.title?.length ?? 0) + (a.text?.length ?? 0), 0)).toBe(MAX_TEXT);
+    expect(att.warnings).toEqual(['Mensagem cortada em "geral/2024-01-01" (ts 1704067200.000100): os anexos passavam de 40.000 caracteres, e o resto foi descartado.']);
+    // Mais de 20 anexos ou campos: só os 20 primeiros, como a conversão guarda.
+    const many = await one({ attachments: Array.from({ length: 30 }, (_, i) => ({ text: `a${i}`, fields: Array.from({ length: 30 }, (_, k) => ({ title: `c${k}`, value: 'v' })) })) });
+    expect(many.attachments).toHaveLength(20);
+    expect(many.attachments![0].fields).toHaveLength(20);
+  });
+
+  it('a conversão da marcação não trava o event loop: o maior item permitido leva bem menos de 100 ms (antes uns 8 s)', async () => {
+    // O pior padrão medido: um marcador vazio atrás do outro, 16 MB (o maior item).
+    const hostile = '<>'.repeat(SLACK_LIMITS.itemBytes / 2);
+    const times = [0, 1, 2].map(() => {
+      const t = performance.now();
+      convertMarkup(hostile, names);
+      return performance.now() - t;
+    });
+    expect(Math.min(...times)).toBeLessThan(100);
+
+    // Pela leitura: três mensagens de 15 MB assim, no texto e nos anexos. Outras tarefas do servidor rodam no meio.
+    const part = '<>'.repeat(1.5 * 1024 * 1024);
+    const day = Array.from({ length: 3 }, (_, i) => ({ type: 'message', ts: `1704067200.00010${i}`, user: 'U1', text: part, attachments: [{ text: part, pretext: part, fields: [{ title: part, value: part }] }] }));
+    const files: Record<string, string> = slack([]);
+    files['geral/2024-01-01.json'] = j(day.slice(0, 1));
+    files['geral/2024-01-02.json'] = j(day.slice(1));
+    const { ctx, r } = fakeContext(memoryArchive(files));
+    let last = performance.now();
+    let lag = 0;
+    const timer = setInterval(() => {
+      const now = performance.now();
+      lag = Math.max(lag, now - last);
+      last = now;
+    }, 1);
+    try {
+      await slackImporter.prepare(ctx);
+    } finally {
+      clearInterval(timer);
+    }
+    expect(r.warnings).toEqual(['3 mensagens sem texto nem arquivos foram ignoradas.']);
+    expect(lag).toBeLessThan(500);
+  });
+
+  it('centenas de milhares de membros num canal ou de pessoas numa reação não seguram o event loop (antes meio segundo de uma vez)', async () => {
+    const many = Array.from({ length: 480_000 }, (_, i) => `U${i.toString(36).padStart(8, '0')}${'z'.repeat(20)}`);
+    const channels = j([{ id: 'C1', name: 'geral', creator: 'U1', members: many }]);
+    const day = j([{ type: 'message', ts: '1704067200.000100', user: 'U1', text: 'oi', reactions: [{ name: 'smile', users: many }] }]);
+    // O piso: montar um item desses (o JSON.parse) roda inteiro de uma vez.
+    const floor = Math.min(
+      ...[channels, day, channels].map((t) => {
+        const start = performance.now();
+        JSON.parse(t);
+        return performance.now() - start;
+      }),
+    );
+    const { ctx, r } = fakeContext(memoryArchive({ 'users.json': j(USERS), 'channels.json': channels, 'geral/2024-01-01.json': day }));
+    let last = performance.now();
+    let lag = 0;
+    const timer = setInterval(() => {
+      const now = performance.now();
+      lag = Math.max(lag, now - last);
+      last = now;
+    }, 1);
+    try {
+      await slackImporter.prepare(ctx);
+    } finally {
+      clearInterval(timer);
+    }
+    expect(r.channels[0].users).toHaveLength(480_000);
+    expect(r.messages[0].reactions?.[':smile:']).toHaveLength(480_000);
+    expect(lag).toBeLessThan(2 * floor + 100);
+  });
+
+  it('blocos com dezenas de milhares de menções e emoji param no limite do texto, como o texto do Slack (antes cresciam sem limite)', async () => {
+    const elements = Array.from({ length: 80_000 }, (_, i) => (i % 2 ? { type: 'user', user_id: 'U2' } : { type: 'emoji', name: 'smile' }));
+    const r = await run(slack([{ type: 'message', ts: '1704067200.000100', user: 'U1', text: '', blocks: [{ type: 'rich_text', elements: [{ type: 'rich_text_section', elements }] }] }]));
+    // :smile: (7) e <@U2> (5) contam como no texto do Slack: 3333 pares cabem em 40.000.
+    const msg = r.messages[0].msg;
+    expect(msg.match(/:smile:/g)).toHaveLength(3333);
+    expect(msg.split(userToken('U2', 'bob')).length - 1).toBe(3333);
+    expect(r.warnings).toEqual(['Mensagem cortada em "geral/2024-01-01" (ts 1704067200.000100): o texto passava de 40.000 caracteres, e o resto foi descartado.']);
+  });
+
+  it('menções sem rótulo a um nome comprido não multiplicam o texto, e ids, nomes e e-mails são cortados na leitura', async () => {
+    const users = [{ id: 'U1', name: 'n'.repeat(1000), profile: { email: `${'e'.repeat(300)}@ex.com`, real_name: 'r'.repeat(1000), title: 't'.repeat(5000) } }, USERS[1]];
+    const r = await run({ ...slack([{ type: 'message', ts: '1704067200.000100', user: 'U2', text: '<@U1> '.repeat(6000) }]), 'users.json': j(users) });
+    expect(r.users[0]).toMatchObject({ username: 'n'.repeat(200), name: 'r'.repeat(200), bio: 't'.repeat(2000), emails: [] });
+    const msg = r.messages[0].msg;
+    // Os primeiros com o nome; quando o limite da mensagem acaba, só o id (a conversão põe o nome final).
+    expect(msg.startsWith(`${userToken('U1', 'n'.repeat(200))} `)).toBe(true);
+    expect(msg.endsWith(`${userToken('U1')} `)).toBe(true);
+    expect(msg.length).toBeLessThan(2 * MAX_TEXT);
+    // Antes: 6000 vezes o nome inteiro (uns 6 milhões de caracteres).
+    const labels = msg.split(userToken('U1', 'n'.repeat(200))).length - 1;
+    expect(labels).toBe(MAX_TEXT / 200);
+
+    const huge = await run({
+      'users.json': j([{ id: `U${'9'.repeat(5000)}`, name: 'z' }, ...USERS]),
+      'channels.json': j([{ id: 'C1', name: `canal-${'x'.repeat(5000)}`, members: ['U1'] }]),
+    });
+    expect(huge.users[0].importIds[0]).toHaveLength(200);
+    expect(huge.channels[0].name).toHaveLength(200);
+  });
+
+  it('U+0000 e metade de emoji em ids, ts e nomes de reações são limpos na leitura (o PostgreSQL recusava e a leitura inteira falhava)', async () => {
+    const r = await run({
+      'users.json': j([{ id: 'U9\u0000', name: 'zed' }, ...USERS]),
+      'channels.json': j([{ id: 'C1\u0000', name: 'geral', members: ['U1', 'U9\u0000'] }]),
+      'geral/2024-01-01.json': j([
+        {
+          type: 'message',
+          ts: '1704067200.000100\u0000',
+          user: 'U9\u0000',
+          text: 'oi <@U9\u0000>',
+          reactions: [
+            { name: 'smile\u0000', users: ['U1\u0000'] },
+            { name: 'thumbsup\ud83c', users: ['U2'] },
+          ],
+        },
+      ]),
+    });
+    expect(r.users[0].importIds).toEqual(['U9']);
+    expect(r.channels[0]).toMatchObject({ importIds: ['C1'], users: ['U1', 'U9'] });
+    expect(r.messages[0]).toMatchObject({ importId: 'slack-C1-1704067200-000100', rid: 'C1', u: 'U9', msg: `oi ${userToken('U9', 'zed')}` });
+    expect(r.messages[0].reactions).toEqual({ ':smile:': ['U1'], ':thumbsup\ufffd:': ['U2'] });
   });
 });
 
@@ -1600,6 +1774,121 @@ describe('de ponta a ponta', () => {
     expect(await imported()).toBe(10);
     expect(Number((await pool.query('SELECT count(*) FROM import_pending_files WHERE message_id = $1', [reply.id])).rows[0].count)).toBe(1);
     expect(Number((await pool.query(`SELECT count(*) FROM users WHERE username ILIKE 'alice%' OR username ILIKE 'slackbot%'`)).rows[0].count)).toBe(2);
+  });
+
+  it('exportação com U+0000 em ids e meio emoji em reações chega à seleção e é importada (antes a leitura inteira falhava)', async () => {
+    const { done } = await importZip({
+      'users.json': j([
+        { id: 'U0NULO001\u0000', name: 'nulo', profile: { email: 'nulo@example.com' } },
+        { id: 'U0NULO002', name: 'nulo2', profile: { email: 'nulo2@example.com' } },
+      ]),
+      'channels.json': j([{ id: 'C0NULO001\u0000', name: 'nulos', members: ['U0NULO001', 'U0NULO002'] }]),
+      'nulos/2023-11-14.json': j([
+        ...Array.from({ length: 600 }, (_, i) => ({ type: 'message', ts: `1700000000.${String(i).padStart(6, '0')}`, user: 'U0NULO002', text: `m${i}` })),
+        {
+          type: 'message',
+          ts: '1700000100.000100\u0000',
+          user: 'U0NULO001\u0000',
+          text: 'com reações',
+          reactions: [
+            { name: 'smile\u0000', users: ['U0NULO002'] },
+            { name: 'thumbsup\ud83c', users: ['U0NULO002'] },
+          ],
+        },
+      ]),
+    });
+    expect(done.count).toMatchObject({ users: 3, channels: 1, messages: 601, error: 0 });
+    expect(await userOf('U0NULO001')).toMatchObject({ username: 'nulo', email: 'nulo@example.com' });
+    expect(await roomOf('C0NULO001')).toMatchObject({ name: 'nulos', t: 'c' });
+    // Meio emoji não é nome de reação válido aqui: só a outra fica.
+    expect(await messageOf('slack-C0NULO001-1700000100-000100')).toMatchObject({ msg: 'com reações', reactions: { ':smile:': { usernames: ['nulo2'] } } });
+  });
+
+  it('.zip pequeno que descompacta para mais de 100 vezes o tamanho é recusado antes de gravar qualquer registro', async () => {
+    const saved = ZIP_LIMITS.expandMinBytes;
+    // Com o mínimo de verdade (64 MB), o teste montaria milhões de mensagens; a conta é a mesma.
+    ZIP_LIMITS.expandMinBytes = 1024 * 1024;
+    try {
+      // Dias abaixo de 1 MiB: a taxa de cada arquivo não é conferida (read só confere acima disso).
+      const day = `[${'{"type":"message","ts":"1700000000.000100","user":"U0BOMB001","text":"x"},'.repeat(14_000)}{"ts":"1"}]`;
+      expect(day.length).toBeLessThan(1024 * 1024);
+      const files: Record<string, string> = {
+        'users.json': j([{ id: 'U0BOMB001', name: 'bomba', profile: { email: 'bomba@example.com' } }]),
+        'channels.json': j([{ id: 'C0BOMB001', name: 'bomba', members: ['U0BOMB001'] }]),
+      };
+      for (let i = 1; i <= 5; i++) files[`bomba/2023-11-0${i}.json`] = day;
+      const fd = new FormData();
+      fd.append('importerKey', 'slack');
+      const zip = await zipBuffer(files);
+      expect(zip.length * 100).toBeLessThan(5 * day.length);
+      fd.append('file', new Blob([new Uint8Array(zip)], { type: 'application/zip' }), 'bomba.zip');
+      const up = await api('POST', 'uploadImportFile', fd, A);
+      expect(up.success, j(up)).toBe(true);
+      ops.push(up.operation._id);
+      const op = await waitOp((o) => o._id === up.operation._id && !BUSY_STATES.includes(o.status));
+      expect(op.status).toBe(ST.failed);
+      expect(op.error).toMatch(/^O \.zip parece corrompido ou malicioso: os arquivos a importar somam 4,9 MB descompactados, mais de 100 vezes o tamanho do \.zip \(\d+(,\d)? KB\)\./);
+      expect(op.count.total).toBe(0);
+      expect(Number((await pool.query('SELECT count(*) FROM import_records WHERE operation_id = $1', [op._id])).rows[0].count)).toBe(0);
+    } finally {
+      ZIP_LIMITS.expandMinBytes = saved;
+    }
+  });
+
+  it('.zip pequeno com mais registros que bytes é recusado; uma exportação de verdade passa com folga', async () => {
+    const saved = { ...ZIP_LIMITS };
+    // O mínimo de verdade é 100 mil registros; a conta é a mesma.
+    ZIP_LIMITS.recordsMin = 500;
+    try {
+      // Dias abaixo de 1 MiB e o .zip inteiro abaixo de 64 MiB: nenhuma taxa de compressão é conferida.
+      const files: Record<string, string> = {
+        'users.json': j([{ id: 'U0BOMB002', name: 'bomba2', profile: { email: 'bomba2@example.com' } }]),
+        'channels.json': j([{ id: 'C0BOMB002', name: 'bomba2', members: ['U0BOMB002'] }]),
+      };
+      const day = `[${'{"type":"message","ts":"1700000000.000100","user":"U0BOMB002","text":"x"},'.repeat(14_000)}{"ts":"1"}]`;
+      for (let i = 1; i <= 5; i++) files[`bomba2/2023-11-0${i}.json`] = day;
+      const fd = new FormData();
+      fd.append('importerKey', 'slack');
+      fd.append('file', new Blob([new Uint8Array(await zipBuffer(files))], { type: 'application/zip' }), 'bomba2.zip');
+      const up = await api('POST', 'uploadImportFile', fd, A);
+      ops.push(up.operation._id);
+      const op = await waitOp((o) => o._id === up.operation._id && !BUSY_STATES.includes(o.status));
+      expect(op.status).toBe(ST.failed);
+      expect(op.error).toMatch(/^O \.zip parece corrompido ou malicioso: a leitura passou de [\d.]+ registros/);
+      expect(Number((await pool.query('SELECT count(*) FROM import_records WHERE operation_id = $1', [op._id])).rows[0].count)).toBe(0);
+
+      // Como a exportação do Slack de verdade: JSON com recuo, client_msg_id, textos e horários variados.
+      const words = 'bom dia pessoal reunião às dez revisão do contrato cliente novo deploy feito testes passaram obrigado valeu até amanhã'.split(' ');
+      const people = ['U0REAL001', 'U0REAL002', 'U0REAL003', 'U0REAL004'];
+      let ts = 1700000000;
+      const real: Record<string, string> = {
+        'users.json': JSON.stringify(people.map((id, i) => ({ id, name: `pessoa${i}`, profile: { real_name: `Pessoa ${i}`, email: `pessoa${i}@empresa.com.br` } })), null, 4),
+        'channels.json': JSON.stringify([{ id: 'C0REAL001', name: 'geral-real', created: ts, members: people }], null, 4),
+      };
+      for (let d = 1; d <= 20; d++) {
+        const msgs = Array.from({ length: 100 }, () => ({
+          client_msg_id: crypto.randomUUID(),
+          type: 'message',
+          text: Array.from({ length: 3 + crypto.randomInt(15) }, () => words[crypto.randomInt(words.length)]).join(' '),
+          user: people[crypto.randomInt(people.length)],
+          ts: `${(ts += crypto.randomInt(30, 900))}.${String(crypto.randomInt(1e6)).padStart(6, '0')}`,
+          team: 'T0REAL001',
+        }));
+        real[`geral-real/2023-11-${String(d).padStart(2, '0')}.json`] = JSON.stringify(msgs, null, 4);
+      }
+      const zip = await zipBuffer(real);
+      // Uns 2000 registros num .zip de bem mais de 20 bytes por registro.
+      expect(zip.length).toBeGreaterThan(20 * 2006);
+      const fd2 = new FormData();
+      fd2.append('importerKey', 'slack');
+      fd2.append('file', new Blob([new Uint8Array(zip)], { type: 'application/zip' }), 'real.zip');
+      const up2 = await api('POST', 'uploadImportFile', fd2, A);
+      ops.push(up2.operation._id);
+      const ready = await waitOp((o) => o._id === up2.operation._id && !BUSY_STATES.includes(o.status));
+      expect(ready).toMatchObject({ status: ST.userSelection, count: { messages: 2000 } });
+    } finally {
+      Object.assign(ZIP_LIMITS, saved);
+    }
   });
 
   const userOf = async (importId: string) => (await pool.query(`SELECT u.* FROM import_map m JOIN users u ON u.id = m.target_id WHERE m.kind = 'user' AND m.import_id = $1`, [importId])).rows[0];

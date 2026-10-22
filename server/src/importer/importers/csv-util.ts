@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { parse } from 'csv-parse';
+import { truncate } from '../../lib/text';
+import { EMAIL_RE } from '../../services/users';
 import { sizeLabel } from '../archive';
 import { ImportError, type ArchiveEntry, type ArchiveSource, type PrepareContext } from '../types';
 
@@ -652,3 +654,19 @@ export class RowIssues {
 export function contentId(prefix: string, parts: string[]) {
   return prefix + createHash('sha1').update(parts.join('\u0000')).digest('base64url').slice(0, 22);
 }
+
+// Id de importação montado de nomes e e-mails do arquivo. O import_map indexa o id, e o índice do PostgreSQL recusa uma
+// linha de mais de uns 2.700 bytes: um nome de canal ou de usuário enorme derrubava a gravação com um erro em inglês.
+// Até 500 caracteres (o limite da API) o id fica como está; acima disso, o começo cortado por caractere e um hash do id
+// inteiro, para dois nomes compridos com o mesmo começo não virarem o mesmo id. Quem cita o id o monta pela mesma função
+// e recebe o mesmo valor.
+const MAX_IMPORT_ID = 500;
+export function boundedId(id: string) {
+  if (id.length <= MAX_IMPORT_ID) return id;
+  return `${truncate(id, MAX_IMPORT_ID - 28)}~${createHash('sha1').update(id).digest('base64url')}`;
+}
+
+// E-mail que identifica alguém: com formato de e-mail e até 254 caracteres (o máximo de um endereço). "-", "n/a" ou um
+// texto enorme não são e-mail de ninguém, e cortar um comprido podia formar o endereço de outra pessoa.
+export const MAX_EMAIL = 254;
+export const isEmail = (v: unknown): v is string => typeof v === 'string' && v.length <= MAX_EMAIL && EMAIL_RE.test(v);

@@ -1,6 +1,6 @@
 import type { Readable } from 'node:stream';
 import { ImportError, ST, type ImportContact, type Importer, type PrepareContext } from '../types';
-import { RowIssues, byteProgress, csvTable, isBlankRow, openSingleCsv, semicolonError, semicolonSeparated, splitList } from './csv-util';
+import { RowIssues, boundedId, byteProgress, csvTable, isBlankRow, isEmail, openSingleCsv, semicolonError, semicolonSeparated, splitList } from './csv-util';
 
 type Column = 'name' | 'emails' | 'phones' | 'manager' | 'id';
 
@@ -71,7 +71,11 @@ export async function parseContactsCsv(input: Readable | Buffer, ctx: PrepareCon
       issues.add(EMPTY, row.line);
       continue;
     }
-    const importId = get(index.id) || (emails.length ? `contact:${emails[0].toLowerCase()}` : phones.length ? `contact:${phones[0].replace(/[^\d+]/g, '') || phones[0]}` : `contact:row${row.line}`);
+    // Só um e-mail válido identifica o contato: "-" ou "n/a" dariam o mesmo id a contatos diferentes.
+    const email = emails.find(isEmail);
+    const importId = boundedId(
+      get(index.id) || (email ? `contact:${email.toLowerCase()}` : phones.length ? `contact:${phones[0].replace(/[^\d+]/g, '') || phones[0]}` : `contact:row${row.line}`),
+    );
     if (seen.has(importId)) {
       issues.add(REPEATED, row.line);
       continue;

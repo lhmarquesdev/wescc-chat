@@ -4,12 +4,14 @@ import {
   CsvFileError,
   type CsvRow,
   RowIssues,
+  boundedId,
   columnCount,
   contentId,
   csvRows,
   csvTable,
   invalidUtf8Warning,
   isBlankRow,
+  isEmail,
   isHeaderCell,
   isJunkEntry,
   legacyWarning,
@@ -37,8 +39,11 @@ const DM_FOLDER = 'directmessages';
 
 const isMarker = (rel: string) => (ROOT_FILES as readonly string[]).includes(rel.toLowerCase()) || rel.toLowerCase().startsWith(`${DM_FOLDER}/`);
 
-export const channelImportId = (name: string) => `csv:c:${name}`;
-export const directImportId = (a: string, b: string) => `csv:d:${[a, b].sort().join('/')}`;
+export const channelImportId = (name: string) => boundedId(`csv:c:${name}`);
+export const directImportId = (a: string, b: string) => boundedId(`csv:d:${[a, b].sort().join('/')}`);
+// Pessoa de users.csv: o e-mail, quando há um válido; senão o nome. Só o nome deixaria outro arquivo, com o mesmo
+// nome mas outra pessoa, herdar o vínculo (import_map) desta e ficar com os grupos e as mensagens dela.
+export const userImportId = (username: string, email: string) => boundedId(`csv:u:${(isEmail(email) ? email : username).toLowerCase()}`);
 
 const USER_HEADER = ['username', 'usuario', 'user', 'login', 'nome de usuario'];
 const EMAIL_HEADER = ['email', 'e-mail', 'mail'];
@@ -70,7 +75,8 @@ interface Item {
 }
 
 class CsvReader {
-  private users = new Map<string, string>(); // nome em minúsculas → id de importação (o nome como está em users.csv)
+  private users = new Map<string, string>(); // nome em minúsculas → id de importação da pessoa (userImportId)
+  private names = new Map<string, string>(); // nome em minúsculas → nome como está em users.csv
   private channels = new Map<string, string>(); // nome exato → id de importação
   private channelsLower = new Map<string, string>();
   private folders = new Map<string, string | null>();
@@ -212,10 +218,18 @@ class CsvReader {
     }
   }
 
-  // Nome de usuário como em users.csv, sem diferença de maiúsculas ("Alice" e "alice" são a mesma pessoa).
+  // Quem está em users.csv vira o id da pessoa, sem diferença de maiúsculas ("Alice" e "alice" são a mesma pessoa);
+  // quem não está fica com o nome.
   private user(ref: string | undefined) {
     const s = (ref ?? '').trim().replace(/^@+/, '');
     return s ? (this.users.get(s.toLowerCase()) ?? s) : '';
+  }
+
+  // O nome (como em users.csv) para os ids de mensagens e conversas diretas: eles não mudam quando o e-mail entra em
+  // users.csv ou quando um CSV vem sem users.csv, e reimportar não duplica nada. Quem é a pessoa sai de user().
+  private nameOf(ref: string | undefined) {
+    const s = (ref ?? '').trim().replace(/^@+/, '');
+    return s ? (this.names.get(s.toLowerCase()) ?? s) : '';
   }
 
   // ---------- users.csv ----------
@@ -247,8 +261,10 @@ class CsvReader {
         issues.add(USER_REPEATED, row.line);
         continue;
       }
-      this.users.set(key, username);
-      const rec: ImportUser = { importIds: [username], emails: email ? [email] : [], username };
+      const id = userImportId(username, email);
+      this.users.set(key, id);
+      this.names.set(key, username);
+      const rec: ImportUser = { importIds: [id], emails: email ? [email] : [], username };
       if (f[2]) rec.name = f[2];
       await this.ctx.user(rec);
     }
@@ -318,7 +334,7 @@ class CsvReader {
       const text = restOfRow(row, 2);
       if (!author || !text) return issues.add(INCOMPLETE, row.line);
       if (columnCount(f) > 3) issues.add(EXTRA_COMMAS, row.line);
-      await this.message({ rid, author, rawTs: f[1], text, file: it.rel, line: row.line }, issues, ids);
+      await this.message({ rid, author, name: this.nameOf(f[0]), rawTs: f[1], text, file: it.rel, line: row.line }, issues, ids);
     });
   }
 
@@ -329,12 +345,14 @@ class CsvReader {
       const text = restOfRow(row, 3);
       if (!from || !to || !text) return issues.add(INCOMPLETE_DM, row.line);
       if (columnCount(f) > 4) issues.add(EXTRA_COMMAS, row.line);
-      const rid = directImportId(from, to);
+      // O id da conversa vem dos nomes; a conversão confere se a sala ligada a ele é mesmo entre estas pessoas.
+      const name = this.nameOf(f[0]);
+      const rid = directImportId(name, this.nameOf(f[1]));
       if (!this.directs.has(rid)) {
         this.directs.add(rid);
         await this.ctx.channel({ importIds: [rid], t: 'd', users: from === to ? [from] : [from, to].sort() });
       }
-      await this.message({ rid, author: from, rawTs: f[2], text, file: it.rel, line: row.line }, issues, ids);
+      await this.message({ rid, author: from, name, rawTs: f[2], text, file: it.rel, line: row.line }, issues, ids);
     });
   }
 
@@ -374,7 +392,7 @@ class CsvReader {
     await ctx.setMessagesStatus(null);
   }
 
-  private async message(m: { rid: string; author: string; rawTs: string | undefined; text: string; file: string; line: number }, issues: RowIssues, ids: Map<string, number>) {
+  private async message(m: { rid: string; author: string; name: string; rawTs: string | undefined; text: string; file: string; line: number }, issues: RowIssues, ids: Map<string, number>) {
     const { ts, seconds } = parseTimestamp(m.rawTs);
     if (!ts) issues.add(BAD_DATE, m.line);
     if (seconds && !this.secondsWarned) {
@@ -383,7 +401,7 @@ class CsvReader {
     }
     // Sem data, a posição no arquivo distingue mensagens iguais. A mesma mensagem repetida no mesmo arquivo continua
     // repetida; o limite só protege a memória em arquivos enormes.
-    const base = contentId('csv:m:', [m.rid, m.author, ts ?? `?${m.file}:${m.line}`, m.text]);
+    const base = contentId('csv:m:', [m.rid, m.name, ts ?? `?${m.file}:${m.line}`, m.text]);
     if (ids.size > 200_000) ids.clear();
     const seen = ids.get(base) ?? 0;
     ids.set(base, seen + 1);

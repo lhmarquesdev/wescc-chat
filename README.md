@@ -144,7 +144,8 @@ Em Administração › Importação dá para trazer dados de outros sistemas, co
   threads, reações, mensagens fixadas e anexos de integrações. O canal geral do Slack entra no canal padrão daqui.
 - **CSV**: um .zip com `users.csv`, `channels.csv`, uma pasta por canal com as mensagens e `directmessages/`.
   A tela de nova importação mostra o formato completo.
-- **Usuários do Slack**: o .csv de "Exportar lista de membros" (admins, bots e contas desativadas são respeitados).
+- **Usuários do Slack**: o .csv de "Exportar lista de membros" (admins, bots e contas desativadas são respeitados;
+  linhas sem um e-mail válido ficam de fora, com aviso).
 - **Contatos do omnichannel**: um .csv com `name`, `emails`, `phones`, `manager` e `id`.
 - **API**: `import.new`, `import.addUsers` e `import.run`, para sistemas que mandam os dados direto. As senhas seguem
   a mesma política das contas e são guardadas só como hash; cada chamada de `import.addUsers` aceita até 500 usuários
@@ -157,6 +158,23 @@ pelos botões "Baixar arquivos pendentes" e "Baixar fotos pendentes". A importa�
 nome de usuário de contas que já existem, e só acrescenta papéis que existem aqui. O papel de administrador só vai para
 contas criadas pela importação, e só quando quem importa tem a permissão `assign-admin-role`. Avisos da conversão
 (papel ignorado, nome de usuário ou de sala trocado por já existir) aparecem com os erros, nos detalhes da importação.
+
+Uma pessoa do arquivo entra numa conta que já existe quando uma importação anterior da mesma origem a ligou a essa
+conta (e a conta não tem outro e-mail), quando o e-mail dela é de uma conta que o confirmou (ou que o recebeu da
+importação que a criou), ou pelo nome de usuário, quando a conta daqui ou a pessoa do arquivo não tem e-mail. O e-mail
+de uma conta que não o confirmou não basta: a pessoa ganha outra conta, sem esse e-mail, e a importação avisa. Se a conta
+for mesmo dela, marque "E-mail verificado" nela em Administração › Usuários e importe de novo: o que foi importado passa
+para ela, e a conta criada no lugar é desativada. "-", "n/a" e outros valores que não são e-mail valem como sem e-mail.
+Uma sala ligada por uma importação anterior só é usada de novo se ainda for do mesmo tipo (e, numa conversa direta, entre
+as mesmas pessoas); senão a importação cria outra sala e avisa, e nada de um grupo privado vai para um canal público. A
+lista de membros do Slack e o CSV só desativam contas que uma importação do mesmo tipo criou; a exportação completa do
+Slack, só contas ligadas a ela por uma importação anterior. Nenhuma desativa quem importa nem o último administrador
+ativo.
+
+Contra arquivos feitos para derrubar o servidor: o texto de cada mensagem é cortado em 40.000 caracteres (o máximo do
+Slack), com aviso; um .zip que descompactado passa de 64 MiB e de 100 vezes o próprio tamanho, ou que traz mais de 100
+mil registros e mais de 2 por byte do .zip, é recusado com uma mensagem que diz o motivo. Numa pasta do servidor,
+arquivos e pastas com nome fora do UTF-8 ficam de fora, com um aviso só.
 
 Os downloads (URL, arquivos e fotos pendentes) recusam endereços da rede interna. Para liberar um servidor interno,
 inclua `host:porta` em `IMPORT_ALLOWED_HOSTS`.

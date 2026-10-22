@@ -2,6 +2,7 @@ import http from 'node:http';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { pool } from '../src/db/pool';
 import { mentionNames, nameFromUsername, runConversion, sanitizeRoomName, sanitizeUsername } from '../src/importer/converter';
+import { buildSelection } from '../src/importer/operations';
 import { DIRECT_MESSAGES_ID, ST, roomToken, userToken, type ImportOptions, type ProgressSink, type ShortSelection } from '../src/importer/types';
 import { newId } from '../src/lib/ids';
 import { hashPassword } from '../src/lib/password';
@@ -33,10 +34,10 @@ let seq = 0;
 const tag = () => `${++seq}${Math.random().toString(36).slice(2, 6)}`;
 
 // Importação de teste: grava a operação e os registros direto no banco, como a leitura do arquivo faria.
-async function stage(recs: Rec[]) {
+async function stage(recs: Rec[], importer = 'csv') {
   const opId = newId();
   await pool.query('UPDATE import_operations SET valid = false WHERE valid');
-  await pool.query(`INSERT INTO import_operations (id, importer_key, status, user_id) VALUES ($1, 'csv', $2, $3)`, [opId, ST.importingStarted, A.userId]);
+  await pool.query(`INSERT INTO import_operations (id, importer_key, status, user_id) VALUES ($1, $4, $2, $3)`, [opId, ST.importingStarted, A.userId, importer]);
   for (const r of recs) {
     const importId = r.type === 'message' ? null : (r.data.importIds?.[0] ?? null);
     await pool.query('INSERT INTO import_records (operation_id, data_type, import_id, data) VALUES ($1,$2,$3,$4)', [opId, r.type, importId, JSON.stringify(r.data)]);
@@ -64,8 +65,11 @@ function fakeSink(cancelAfter?: number, throwAt?: string) {
   return { s, sink };
 }
 
-async function convert(recs: Rec[], opts: { selection?: ShortSelection; options?: ImportOptions; actor?: Auth; cancelAfter?: number; throwAt?: string } = {}) {
-  const opId = await stage(recs);
+async function convert(
+  recs: Rec[],
+  opts: { selection?: ShortSelection; options?: ImportOptions; actor?: Auth; cancelAfter?: number; throwAt?: string; importer?: string } = {},
+) {
+  const opId = await stage(recs, opts.importer);
   const { s, sink } = fakeSink(opts.cancelAfter, opts.throwAt);
   const actor = opts.actor ?? A;
   const result = await runConversion({ operationId: opId, actor: { userId: actor.userId, username: actor.username }, selection: opts.selection ?? ALL, options: opts.options ?? {}, sink });
@@ -123,7 +127,7 @@ describe('nomes', () => {
 describe('usuários', () => {
   it('cria contas novas e junta às existentes por e-mail ou nome de usuário, sem trocar nome de usuário, e-mail ou senha', async () => {
     const t = tag();
-    const byEmail = await newUser(A);
+    const byEmail = await newUser(A, { verified: true });
     const byName = await newUser(A);
     await pool.query('UPDATE users SET name = username WHERE id = $1', [byName.userId]);
     const { opId, result, s } = await convert([
@@ -168,6 +172,7 @@ describe('usuários', () => {
     expect((await errorsOf(opId))[`bad-${t}`]).toEqual(['Usuário sem e-mail e sem nome de usuário.']);
   });
 
+  // Exportação do Slack (ids da origem): basta a ligação feita por uma importação anterior.
   it('desativa contas excluídas na origem só quando ligadas a ela por uma importação anterior, menos a de quem importa e a do último administrador', async () => {
     const t = tag();
     const actor = await newUser(A);
@@ -187,7 +192,7 @@ describe('usuários', () => {
         U({ importIds: [`o-${t}`], emails: [], username: off.username }),
         U({ importIds: [`n-${t}`], emails: [], username: byName.username, deleted: true }),
       ],
-      { actor },
+      { actor, importer: 'slack' },
     );
     expect((await userByName(byName.username)).active).toBe(true);
     expect((await errorsOf(first.opId))[`n-${t}`]).toEqual([
@@ -202,7 +207,7 @@ describe('usuários', () => {
         U({ importIds: [`v-${t}`], emails: [], username: victim.username, deleted: true }),
         U({ importIds: [`o-${t}`], emails: [], username: off.username, deleted: false }),
       ],
-      { actor },
+      { actor, importer: 'slack' },
     );
     expect(result.users).toMatchObject({ updated: 4, failed: 0 });
     expect((await userByName('admin')).active).toBe(true);
@@ -216,7 +221,7 @@ describe('usuários', () => {
     expect(errs[`s-${t}`]).toEqual(['A conta não foi desativada: é a de quem está fazendo a importação.']);
 
     // Quem importa nunca se desativa, mesmo sendo administrador.
-    const again = await convert([U({ importIds: [`a2-${t}`], emails: [], username: 'admin', deleted: true })]);
+    const again = await convert([U({ importIds: [`a2-${t}`], emails: [], username: 'admin', deleted: true })], { importer: 'slack' });
     expect((await userByName('admin')).active).toBe(true);
     expect((await errorsOf(again.opId))[`a2-${t}`]).toEqual(['A conta não foi desativada: é a de quem está fazendo a importação.']);
   });
@@ -259,7 +264,7 @@ describe('usuários', () => {
     const joao = await newUser(A);
     const semEmail = await newUser(A);
     await pool.query('UPDATE users SET email = NULL WHERE id = $1', [semEmail.userId]);
-    const porEmail = await newUser(A);
+    const porEmail = await newUser(A, { verified: true });
     await convert([U({ importIds: [`R0-${t}`], emails: [], username: `robo${t}`, type: 'bot' })]);
     const robo = await userByName(`robo${t}`);
     const { opId, result } = await convert([
@@ -310,7 +315,7 @@ describe('usuários', () => {
           U({ importIds: [`B-${t}`], emails: [], username: `integracao${t}`, type: 'bot', roles: ['admin'] }),
           U({ importIds: [`UA-${t}`], emails: [], username: 'admin', deleted: true }),
         ],
-        { actor },
+        { actor, importer: 'slack' },
       );
       expect((await userByName(`integracao${t}`)).roles).toEqual(['bot', 'admin']);
       expect((await userByName('admin')).active).toBe(true);
@@ -327,17 +332,16 @@ describe('usuários', () => {
     const victim = await newUser(A);
     // 500 registros por lote: o segundo registro com o mesmo id cai no lote seguinte.
     const fillers = Array.from({ length: 500 }, (_, i) => U({ importIds: [`F${i}-${t}`], emails: [], username: `fill${i}x${t}` }));
-    const { opId } = await convert([
-      U({ importIds: [`X-${t}`], emails: [], username: victim.username }),
-      ...fillers,
-      U({ importIds: [`X-${t}`], emails: [], username: victim.username, deleted: true }),
-    ]);
+    const { opId } = await convert(
+      [U({ importIds: [`X-${t}`], emails: [], username: victim.username }), ...fillers, U({ importIds: [`X-${t}`], emails: [], username: victim.username, deleted: true })],
+      { importer: 'slack' },
+    );
     expect((await row('SELECT active FROM users WHERE id = $1', [victim.userId])).active).toBe(true);
     expect((await errorsOf(opId))[`X-${t}`]).toEqual([
       'A conta não foi desativada: ela foi encontrada pelo e-mail ou pelo nome de usuário, e não por uma importação anterior desta origem.',
     ]);
     // Na importação seguinte a conta já está ligada a esta origem por uma importação anterior.
-    await convert([U({ importIds: [`X-${t}`], emails: [], username: victim.username, deleted: true })]);
+    await convert([U({ importIds: [`X-${t}`], emails: [], username: victim.username, deleted: true })], { importer: 'slack' });
     expect((await row('SELECT active FROM users WHERE id = $1', [victim.userId])).active).toBe(false);
   });
 
@@ -417,6 +421,321 @@ describe('usuários', () => {
     });
     expect(skip.result.users).toMatchObject({ inserted: 1, skipped: 1 });
     expect((await login(`api.${t}`, 'segredo-123')).username).toBe(`api.${t}`);
+  });
+
+  it('e-mail que a própria conta digitou e não confirmou não junta: outra conta, com aviso que diz como resolver', async () => {
+    const t = tag();
+    // Cadastro aberto: alguém se cadastra com o e-mail da Ana, que ainda não tem conta aqui.
+    expect((await api('POST', 'users.register', { username: `mallory${t}`, name: 'Mallory', email: `ana${t}@explorer.example`, pass: 'Senha-forte-123' })).success).toBe(true);
+    const mallory = await login(`mallory${t}`, 'Senha-forte-123');
+    // Conta criada pelo admin, com e-mail confirmado, que troca o próprio e-mail para o da Bia: deixa de estar confirmado.
+    const eve = await newUser(A, { verified: true });
+    expect((await api('POST', 'users.updateOwnBasicInfo', { data: { email: `bia${t}@explorer.example`, currentPassword: 'senha-forte-1' } }, eve)).success).toBe(true);
+    // Confiáveis: e-mail confirmado, e login externo com o e-mail que veio do diretório (a conta do LDAP nasce confirmada).
+    const carlos = await newUser(A, { verified: true });
+    const dani = await newUser(A, { verified: true });
+    await pool.query(`UPDATE users SET auth_source = 'ldap' WHERE id = $1`, [dani.userId]);
+    // Login externo que troca o próprio e-mail (sem senha nem confirmação) para o do Otávio: o login externo não o
+    // torna confiável.
+    const oscar = await newUser(A, { verified: true });
+    await pool.query(`UPDATE users SET auth_source = 'oauth', password_hash = NULL WHERE id = $1`, [oscar.userId]);
+    expect((await api('POST', 'users.updateOwnBasicInfo', { data: { email: `otavio${t}@explorer.example` } }, oscar)).success).toBe(true);
+    expect(await row('SELECT email_verified, auth_source FROM users WHERE id = $1', [oscar.userId])).toEqual({ email_verified: false, auth_source: 'oauth' });
+    const bruno = await newUser(A);
+    const { opId, result } = await convert([
+      U({ importIds: [`ana-${t}`], emails: [`ANA${t}@explorer.example`], username: `ana${t}`, name: 'Ana Lima' }),
+      U({ importIds: [`bia-${t}`], emails: [`bia${t}@explorer.example`], username: `bia${t}` }),
+      U({ importIds: [`car-${t}`], emails: [`${carlos.username}@test.local`], username: `carlos${t}` }),
+      U({ importIds: [`dan-${t}`], emails: [`${dani.username}@test.local`], username: `dani${t}` }),
+      U({ importIds: [`ota-${t}`], emails: [`otavio${t}@explorer.example`], username: `otavio${t}` }),
+      C({ importIds: [`G-${t}`], t: 'p', name: `diretoria-${t}`, users: [`ana-${t}`, `bia-${t}`, `ota-${t}`, bruno.username], creator: `ana-${t}` }),
+      C({ importIds: [`D-${t}`], t: 'd', users: [bruno.username, `ana-${t}`] }),
+      M({ importId: `g1-${t}`, rid: `G-${t}`, u: `ana-${t}`, msg: 'folha de pagamento confidencial', ts: '2021-01-01T00:00:00.000Z' }),
+      M({ importId: `d1-${t}`, rid: `D-${t}`, u: bruno.username, msg: 'ana, segue meu atestado', ts: '2021-01-01T00:00:01.000Z' }),
+    ]);
+    expect(result.users).toMatchObject({ inserted: 3, updated: 2, failed: 0 });
+    const ana = await row('SELECT * FROM users WHERE id = $1', [await mapped('user', `ana-${t}`)]);
+    const bia = await row('SELECT * FROM users WHERE id = $1', [await mapped('user', `bia-${t}`)]);
+    const ota = await row('SELECT * FROM users WHERE id = $1', [await mapped('user', `ota-${t}`)]);
+    expect(ana).toMatchObject({ username: `ana${t}`, email: null, name: 'Ana Lima' });
+    expect(bia).toMatchObject({ username: `bia${t}`, email: null });
+    expect(ota).toMatchObject({ username: `otavio${t}`, email: null });
+    expect([ana.id, bia.id, ota.id]).not.toContain(mallory.userId);
+    expect([ana.id, bia.id, ota.id]).not.toContain(eve.userId);
+    expect(ota.id).not.toBe(oscar.userId);
+    expect(await mapped('user', `car-${t}`)).toBe(carlos.userId);
+    expect(await mapped('user', `dan-${t}`)).toBe(dani.userId);
+    const g = await mapped('room', `G-${t}`);
+    expect(await membersOf(g)).toEqual([`ana${t}`, `bia${t}`, `otavio${t}`, bruno.username].sort());
+    expect((await api('GET', 'groups.history', { roomId: g }, mallory)).success).toBe(false);
+    expect((await api('GET', 'groups.history', { roomId: g }, eve)).success).toBe(false);
+    expect((await api('GET', 'groups.history', { roomId: g }, oscar)).success).toBe(false);
+    expect([...(await row('SELECT uids FROM rooms WHERE id = $1', [await mapped('room', `D-${t}`)])).uids].sort()).toEqual([ana.id, bruno.userId].sort());
+    const errs = await errorsOf(opId);
+    expect(errs[`ana-${t}`]).toEqual([
+      `O e-mail "ana${t}@explorer.example" já é da conta "mallory${t}", que não confirmou esse e-mail; importado como "ana${t}", sem ele. ` +
+        `Se a conta "mallory${t}" for mesmo desta pessoa, confirme o e-mail dela na administração de usuários e importe de novo: ` +
+        `o que foi importado para "ana${t}" passa para "mallory${t}", e "ana${t}" é desativada.`,
+    ]);
+    expect(errs[`bia-${t}`]?.[0]).toContain(`já é da conta "${eve.username}", que não confirmou esse e-mail`);
+    expect(errs[`ota-${t}`]?.[0]).toContain(`já é da conta "${oscar.username}", que não confirmou esse e-mail`);
+    expect(errs[`car-${t}`]).toBeUndefined();
+    expect(errs[`dan-${t}`]).toBeUndefined();
+    // As contas que já existiam não mudaram.
+    expect(await row('SELECT email, email_verified FROM users WHERE id = $1', [mallory.userId])).toEqual({ email: `ana${t}@explorer.example`, email_verified: false });
+  });
+
+  it('o e-mail dado pela importação que criou a conta vale nas seguintes até a conta trocá-lo; confirmar o e-mail e reimportar junta à conta certa', async () => {
+    const t = tag();
+    // Criada por uma importação: o e-mail que ela deu vale para a importação seguinte, de outra origem.
+    await convert([U({ importIds: [`S1-${t}`], emails: [`rui${t}@a.example`], username: `rui${t}` })], { importer: 'slack' });
+    const rui = await userByName(`rui${t}`);
+    const second = await convert([U({ importIds: [`rui${t}@a.example`], emails: [`rui${t}@a.example`], username: `rui.costa${t}` })], { importer: 'slack-users' });
+    expect(second.result.users).toMatchObject({ inserted: 0, updated: 1 });
+    expect(await mapped('user', `rui${t}@a.example`)).toBe(rui.id);
+    // A conta troca o e-mail (sem confirmação) para o de outra pessoa: esse não vale.
+    await pool.query('UPDATE users SET email = $2 WHERE id = $1', [rui.id, `sara${t}@a.example`]);
+    const third = await convert([U({ importIds: [`S2-${t}`], emails: [`sara${t}@a.example`], username: `sara${t}` })], { importer: 'slack' });
+    expect(third.result.users).toMatchObject({ inserted: 1, updated: 0 });
+    expect(await mapped('user', `S2-${t}`)).not.toBe(rui.id);
+
+    // A conta que se cadastrou sozinha é mesmo da Lia: na primeira importação a Lia do arquivo ganha outra conta; o admin
+    // confirma o e-mail e importa de novo, e daí em diante tudo vai para a conta dela.
+    expect((await api('POST', 'users.register', { username: `lia${t}`, name: 'Lia', email: `lia${t}@a.example`, pass: 'Senha-forte-123' })).success).toBe(true);
+    const lia = await userByName(`lia${t}`);
+    const zip = [U({ importIds: [`L-${t}`], emails: [`lia${t}@a.example`], username: `lia${t}` }), C({ importIds: [`GL-${t}`], t: 'p', name: `lia-${t}`, users: [`L-${t}`] })];
+    await convert(zip, { importer: 'slack' });
+    const copy = await mapped('user', `L-${t}`);
+    expect(copy).not.toBe(lia.id);
+    expect(await row('SELECT username, email FROM users WHERE id = $1', [copy])).toEqual({ username: `lia${t}.2`, email: null });
+    expect((await api('POST', 'users.update', { userId: lia.id, data: { verified: true } }, A)).success).toBe(true);
+    const again = await convert(zip, { importer: 'slack' });
+    expect(await mapped('user', `L-${t}`)).toBe(lia.id);
+    expect(await membersOf(await mapped('room', `GL-${t}`))).toContain(`lia${t}`);
+    expect((await errorsOf(again.opId))[`L-${t}`]).toEqual([
+      `O usuário "lia${t}" estava ligado à conta "lia${t}.2", que uma importação anterior criou sem o e-mail; agora fica com a conta "lia${t}", dona do e-mail confirmado. ` +
+        `As mensagens, as salas e as conversas diretas de "lia${t}.2" passaram para "lia${t}", e "lia${t}.2" foi desativada.`,
+    ]);
+  });
+
+  it('confirmar o e-mail e importar de novo passa para a conta certa as mensagens, os grupos e as conversas diretas da conta criada no lugar dela', async () => {
+    const t = tag();
+    expect((await api('POST', 'users.register', { username: `lia${t}`, name: 'Lia', email: `lia${t}@a.example`, pass: 'Senha-forte-123' })).success).toBe(true);
+    const lia = await login(`lia${t}`, 'Senha-forte-123');
+    const bruno = await newUser(A, { verified: true });
+    const carla = await newUser(A, { verified: true });
+    const zip = [
+      U({ importIds: [`L-${t}`], emails: [`lia${t}@a.example`], username: `lia${t}` }),
+      U({ importIds: [`B-${t}`], emails: [`${bruno.username}@test.local`], username: bruno.username }),
+      U({ importIds: [`K-${t}`], emails: [`${carla.username}@test.local`], username: carla.username }),
+      C({ importIds: [`D-${t}`], t: 'd', users: [`L-${t}`, `B-${t}`] }),
+      C({ importIds: [`DK-${t}`], t: 'd', users: [`K-${t}`, `L-${t}`] }),
+      C({ importIds: [`G-${t}`], t: 'p', name: `contratos-${t}`, users: [`L-${t}`, `B-${t}`], creator: `L-${t}` }),
+      M({ importId: `d1-${t}`, rid: `D-${t}`, u: `B-${t}`, msg: 'oi Lia, segue o contrato', ts: '2021-01-01T00:00:00.000Z' }),
+      M({ importId: `d2-${t}`, rid: `D-${t}`, u: `L-${t}`, msg: 'obrigada', ts: '2021-01-01T00:00:01.000Z', reactions: { ':+1:': [`B-${t}`] } }),
+      M({ importId: `k1-${t}`, rid: `DK-${t}`, u: `K-${t}`, msg: 'Lia, e o relatório?', ts: '2021-01-01T00:00:02.000Z' }),
+      M({ importId: `g1-${t}`, rid: `G-${t}`, u: `L-${t}`, msg: 'mensagem da Lia no grupo', ts: '2021-01-01T00:00:03.000Z', reactions: { ':eyes:': [`L-${t}`] } }),
+    ];
+    const first = await convert(zip, { importer: 'slack' });
+    const copy = await mapped('user', `L-${t}`);
+    expect(copy).not.toBe(lia.userId);
+    expect((await errorsOf(first.opId))[`L-${t}`]?.[0]).toContain(`o que foi importado para "lia${t}.2" passa para "lia${t}", e "lia${t}.2" é desativada.`);
+    const oldDm = await mapped('room', `D-${t}`);
+    const oldDk = await mapped('room', `DK-${t}`);
+    // Antes da reimportação, a Lia de verdade e a Carla já conversaram aqui: as duas conversas viram uma só.
+    const dk = await api('POST', 'im.create', { username: carla.username }, lia);
+    expect(dk.success).toBe(true);
+    expect((await api('POST', 'chat.sendMessage', { message: { rid: dk.room._id, msg: 'oi Carla, cheguei' } }, lia)).success).toBe(true);
+    expect((await api('POST', 'users.update', { userId: lia.userId, data: { verified: true } }, A)).success).toBe(true);
+
+    const again = await convert(zip, { importer: 'slack' });
+    expect(await mapped('user', `L-${t}`)).toBe(lia.userId);
+    expect(again.result.messages).toMatchObject({ inserted: 0, updated: 4, skipped: 0, failed: 0 });
+    // A conversa com o Bruno é a mesma sala, agora entre a Lia e o Bruno, com o histórico.
+    expect(await mapped('room', `D-${t}`)).toBe(oldDm);
+    const dm = await row('SELECT * FROM rooms WHERE id = $1', [oldDm]);
+    expect(dm).toMatchObject({ uids: [lia.userId, bruno.userId].sort(), usernames: [`lia${t}`, bruno.username].sort(), dm_key: [lia.userId, bruno.userId].sort().join(',') });
+    expect((await api('GET', 'im.history', { roomId: oldDm }, lia)).messages.map((m: any) => m.msg).sort()).toEqual(['obrigada', 'oi Lia, segue o contrato']);
+    expect((await roomMessages(oldDm)).map((m) => [m.user_id, m.username])).toEqual([
+      [bruno.userId, bruno.username],
+      [lia.userId, `lia${t}`],
+    ]);
+    // A conversa com a Carla já existia aqui: o histórico importado foi para ela, e a sala antiga saiu.
+    expect(await mapped('room', `DK-${t}`)).toBe(dk.room._id);
+    expect(await row('SELECT id FROM rooms WHERE id = $1', [oldDk])).toBeUndefined();
+    expect((await roomMessages(dk.room._id)).filter((m) => !m.t).map((m) => m.msg)).toEqual(['Lia, e o relatório?', 'oi Carla, cheguei']);
+    expect((await row('SELECT msgs FROM rooms WHERE id = $1', [dk.room._id])).msgs).toBe(2);
+    // O grupo: a Lia entrou no lugar da outra conta, como dona, e a mensagem é dela.
+    const g = await mapped('room', `G-${t}`);
+    expect(await membersOf(g)).toEqual([bruno.username, `lia${t}`].sort());
+    expect((await row('SELECT roles FROM subscriptions WHERE room_id = $1 AND user_id = $2', [g, lia.userId])).roles).toEqual(['owner']);
+    const gm = (await roomMessages(g)).filter((m) => !m.t);
+    expect(gm.map((m) => [m.user_id, m.username, m.msg])).toEqual([[lia.userId, `lia${t}`, 'mensagem da Lia no grupo']]);
+    expect(gm[0].reactions).toEqual({ ':eyes:': { usernames: [`lia${t}`] } });
+    expect((await row('SELECT last_message FROM rooms WHERE id = $1', [g])).last_message.u).toEqual({ _id: lia.userId, username: `lia${t}`, name: 'Lia' });
+    expect((await api('GET', 'groups.history', { roomId: g }, lia)).success).toBe(true);
+    // A conta criada no lugar dela não fica com nada e está desativada.
+    expect(await row('SELECT active FROM users WHERE id = $1', [copy])).toEqual({ active: false });
+    expect(await rows('SELECT room_id FROM subscriptions WHERE user_id = $1', [copy])).toEqual([]);
+    expect(await rows('SELECT id FROM messages WHERE user_id = $1', [copy])).toEqual([]);
+    const errs = await errorsOf(again.opId);
+    expect(errs[`L-${t}`]).toEqual([
+      `O usuário "lia${t}" estava ligado à conta "lia${t}.2", que uma importação anterior criou sem o e-mail; agora fica com a conta "lia${t}", dona do e-mail confirmado. ` +
+        `As mensagens, as salas e as conversas diretas de "lia${t}.2" passaram para "lia${t}", e "lia${t}.2" foi desativada.`,
+    ]);
+    // Nenhum aviso falso sobre as conversas diretas.
+    expect(Object.keys(errs)).toEqual([`L-${t}`]);
+    // A terceira importação não muda mais nada.
+    const third = await convert(zip, { importer: 'slack' });
+    expect(await errorsOf(third.opId)).toEqual({});
+    expect(third.result.messages).toMatchObject({ inserted: 0, updated: 4 });
+
+    // Conta ligada sem e-mail que nenhuma importação desta origem criou (era daqui, achada pelo nome): fica com o que tinha.
+    const nina = await newUser(A);
+    await pool.query('UPDATE users SET email = NULL WHERE id = $1', [nina.userId]);
+    const nzip = (email: string[]) => [
+      U({ importIds: [`N-${t}`], emails: email, username: nina.username }),
+      C({ importIds: [`NG-${t}`], t: 'p', name: `nina-${t}`, users: [`N-${t}`] }),
+      M({ importId: `n1-${t}`, rid: `NG-${t}`, u: `N-${t}`, msg: 'da Nina', ts: '2021-01-01T00:00:00.000Z' }),
+    ];
+    await convert(nzip([]), { importer: 'slack' });
+    expect(await mapped('user', `N-${t}`)).toBe(nina.userId);
+    const dona = await newUser(A, { verified: true });
+    const moved = await convert(nzip([`${dona.username}@test.local`]), { importer: 'slack' });
+    expect(await mapped('user', `N-${t}`)).toBe(dona.userId);
+    expect((await roomMessages(await mapped('room', `NG-${t}`))).map((m) => m.user_id)).toEqual([nina.userId]);
+    expect(await row('SELECT active FROM users WHERE id = $1', [nina.userId])).toEqual({ active: true });
+    expect((await errorsOf(moved.opId))[`N-${t}`]).toEqual([
+      `O usuário "${nina.username}" estava ligado à conta "${nina.username}", que não tem e-mail; agora fica com a conta "${dona.username}", dona do e-mail confirmado. ` +
+        `O que já tinha sido importado continua na conta "${nina.username}".`,
+    ]);
+  });
+
+  it('ligação de uma importação anterior não junta outra pessoa: com outro e-mail, a conta ligada não recebe nada', async () => {
+    const t = tag();
+    const joao = await newUser(A, { verified: true });
+    const maria = await newUser(A);
+    // 1º arquivo: outro João, com outro e-mail, ganha a conta "joao.2", ligada ao id J.
+    await convert([U({ importIds: [`J-${t}`], emails: [`joao.silva${t}@outra.example`], username: joao.username })]);
+    const silva = await mapped('user', `J-${t}`);
+    expect(silva).not.toBe(joao.userId);
+    // 2º arquivo, de outra origem, com o mesmo id e o e-mail da conta daqui: é o João daqui.
+    const { opId } = await convert([
+      U({ importIds: [`J-${t}`], emails: [`${joao.username}@test.local`], username: joao.username }),
+      C({ importIds: [`RH-${t}`], t: 'p', name: `rh-${t}`, users: [`J-${t}`, maria.username] }),
+      C({ importIds: [`DJ-${t}`], t: 'd', users: [maria.username, `J-${t}`] }),
+      M({ importId: `rh1-${t}`, rid: `RH-${t}`, u: `J-${t}`, msg: 'salários do RH', ts: '2021-02-01T00:00:00.000Z' }),
+    ]);
+    expect(await mapped('user', `J-${t}`)).toBe(joao.userId);
+    const rh = await mapped('room', `RH-${t}`);
+    expect(await membersOf(rh)).toEqual(['admin', joao.username, maria.username].sort());
+    expect((await roomMessages(rh)).map((m) => m.user_id)).toEqual([joao.userId]);
+    expect([...(await row('SELECT uids FROM rooms WHERE id = $1', [await mapped('room', `DJ-${t}`)])).uids].sort()).toEqual([joao.userId, maria.userId].sort());
+    expect((await errorsOf(opId))[`J-${t}`]).toEqual([
+      `O usuário "${joao.username}" estava ligado à conta "${joao.username}.2" por uma importação anterior, mas ela tem outro e-mail; não foi juntado a ela, e sim à conta "${joao.username}", dona do e-mail confirmado.`,
+    ]);
+
+    // Ligado antes só pelo nome (sem e-mail), e agora com um e-mail que contradiz o da conta: outra conta.
+    const jose = await newUser(A, { verified: true });
+    await convert([U({ importIds: [`JS-${t}`], emails: [], username: jose.username })]);
+    expect(await mapped('user', `JS-${t}`)).toBe(jose.userId);
+    const later = await convert([
+      U({ importIds: [`JS-${t}`], emails: [`jose.silva${t}@outra.example`], username: jose.username }),
+      C({ importIds: [`PJ-${t}`], t: 'p', name: `proj-${t}`, users: [`JS-${t}`] }),
+    ]);
+    const other = await mapped('user', `JS-${t}`);
+    expect(other).not.toBe(jose.userId);
+    expect(await row('SELECT username, email FROM users WHERE id = $1', [other])).toEqual({ username: `${jose.username}.2`, email: `jose.silva${t}@outra.example` });
+    expect(await membersOf(await mapped('room', `PJ-${t}`))).toEqual(['admin', `${jose.username}.2`].sort());
+    expect((await errorsOf(later.opId))[`JS-${t}`]).toEqual([
+      `O usuário "${jose.username}" estava ligado à conta "${jose.username}" por uma importação anterior, mas ela tem outro e-mail; não foi juntado a ela; importado como "${jose.username}.2".`,
+    ]);
+
+    // Com outro e-mail, também não junta pelo nome a outra conta daqui (sem e-mail) que tem o nome do arquivo: conta nova.
+    const m = await newUser(A, { verified: true });
+    await convert([U({ importIds: [`JM-${t}`], emails: [`${m.username}@test.local`], username: `qualquer${t}` })], { importer: 'slack' });
+    expect(await mapped('user', `JM-${t}`)).toBe(m.userId);
+    const x = await newUser(A);
+    await pool.query('UPDATE users SET email = NULL WHERE id = $1', [x.userId]);
+    const third = await convert(
+      [U({ importIds: [`JM-${t}`], emails: [`outra${t}@outra.example`], username: x.username }), C({ importIds: [`PM-${t}`], t: 'p', name: `pm-${t}`, users: [`JM-${t}`] })],
+      { importer: 'slack' },
+    );
+    const now = await mapped('user', `JM-${t}`);
+    expect([m.userId, x.userId]).not.toContain(now);
+    expect(await row('SELECT username, email FROM users WHERE id = $1', [now])).toEqual({ username: `${x.username}.2`, email: `outra${t}@outra.example` });
+    expect(await membersOf(await mapped('room', `PM-${t}`))).toEqual(['admin', `${x.username}.2`].sort());
+    expect((await errorsOf(third.opId))[`JM-${t}`]).toEqual([
+      `O usuário "${x.username}" estava ligado à conta "${m.username}" por uma importação anterior, mas ela tem outro e-mail; não foi juntado a ela; importado como "${x.username}.2".`,
+    ]);
+  });
+
+  it('lista de membros do Slack ou CSV só desativa as contas que uma importação dela criou', async () => {
+    const t = tag();
+    const ana = await newUser(A, { verified: true });
+    const email = `${ana.username}@test.local`;
+    const novo = `novo${t}@ws.example`;
+    // Lista A: a Ana daqui é encontrada pelo e-mail; "novo" é criado pela lista.
+    await convert([U({ importIds: [email], emails: [email], username: 'ana' }), U({ importIds: [novo], emails: [novo], username: `novo${t}` })], { importer: 'slack-users' });
+    expect(await mapped('user', email)).toBe(ana.userId);
+    // Lista B, de outro workspace: as duas aparecem desativadas.
+    const { opId } = await convert(
+      [U({ importIds: [email], emails: [email], username: 'ana.b', deleted: true }), U({ importIds: [novo], emails: [novo], username: `novo${t}`, deleted: true })],
+      { importer: 'slack-users' },
+    );
+    expect((await row('SELECT active FROM users WHERE id = $1', [ana.userId])).active).toBe(true);
+    expect((await api('GET', 'me', undefined, ana)).username).toBe(ana.username);
+    expect((await userByName(`novo${t}`)).active).toBe(false);
+    expect((await errorsOf(opId))[email]).toEqual(['A conta não foi desativada: ela não foi criada por uma importação desta origem, e este tipo de arquivo só desativa as contas que ele mesmo criou.']);
+
+    // Conta criada por outra origem (a API) com o e-mail como id: uma lista de membros do Slack não a desativa.
+    const api1 = `api${t}@ws.example`;
+    await convert([U({ importIds: [api1], emails: [api1], username: `api${t}` })], { importer: 'api' });
+    const fromApi = await convert([U({ importIds: [api1], emails: [api1], username: `api${t}`, deleted: true })], { importer: 'slack-users' });
+    expect((await userByName(`api${t}`)).active).toBe(true);
+    expect((await errorsOf(fromApi.opId))[api1]).toEqual(['A conta não foi desativada: ela não foi criada por uma importação desta origem, e este tipo de arquivo só desativa as contas que ele mesmo criou.']);
+
+    // CSV: a conta ligada pelo nome num CSV anterior continua ativa.
+    const victim = await newUser(A);
+    await convert([U({ importIds: [`csv:u:${victim.username}`], emails: [], username: victim.username })]);
+    await convert([U({ importIds: [`csv:u:${victim.username}`], emails: [], username: victim.username, deleted: true })]);
+    expect((await row('SELECT active FROM users WHERE id = $1', [victim.userId])).active).toBe(true);
+  });
+
+  it('e-mail que não é e-mail ("-", "n/a", espaços) vale como sem e-mail: junta pelo nome e não duplica a conta', async () => {
+    const t = tag();
+    const carlos = await newUser(A);
+    const { opId, result } = await convert([
+      U({ importIds: [`C-${t}`], emails: ['-'], username: carlos.username, name: 'Carlos' }),
+      U({ importIds: [`N-${t}`], emails: ['n/a', '   ', 'nao-tem'], username: `nina${t}` }),
+      U({ importIds: [`X-${t}`], emails: ['-'] }),
+      C({ importIds: [`csv:c:ti-${t}`], t: 'p', name: `ti-${t}`, users: [`C-${t}`, `N-${t}`] }),
+    ]);
+    expect(result.users).toMatchObject({ inserted: 1, updated: 1, failed: 1 });
+    expect(await mapped('user', `C-${t}`)).toBe(carlos.userId);
+    expect(await userByName(`${carlos.username}.2`)).toBeUndefined();
+    expect((await userByName(`nina${t}`)).email).toBeNull();
+    expect(await membersOf(await mapped('room', `csv:c:ti-${t}`))).toEqual(['admin', carlos.username, `nina${t}`].sort());
+    expect(await errorsOf(opId)).toEqual({ [`X-${t}`]: ['Usuário sem e-mail e sem nome de usuário.'] });
+  });
+
+  it('e-mail de mais de 254 caracteres não vale e não é cortado: o começo dele não junta à conta que tem esse e-mail', async () => {
+    const t = tag();
+    // Exatamente 254 caracteres, confirmado; no arquivo vem com um caractere a mais.
+    const e254 = `${'d'.repeat(244 - t.length)}${t}@x.example`;
+    expect(e254).toHaveLength(254);
+    const dono = await api('POST', 'users.create', { username: `dono${t}`, name: 'Dono', email: e254, password: 'senha-forte-1', verified: true }, A);
+    expect(dono.success).toBe(true);
+    const { result } = await convert([
+      U({ importIds: [`L-${t}`], emails: [`${e254}m`], username: `longo${t}` }),
+      C({ importIds: [`csv:c:dir-${t}`], t: 'p', name: `dir-${t}`, users: [`L-${t}`] }),
+    ]);
+    expect(result.users).toMatchObject({ inserted: 1, updated: 0 });
+    const novo = await userByName(`longo${t}`);
+    expect(novo.id).not.toBe(dono.user._id);
+    expect(novo.email).toBeNull();
+    expect(await mapped('user', `L-${t}`)).toBe(novo.id);
+    expect(await membersOf(await mapped('room', `csv:c:dir-${t}`))).toEqual(['admin', `longo${t}`].sort());
   });
 });
 
@@ -738,6 +1057,103 @@ describe('salas', () => {
     expect(self.uids).toEqual([d1]);
     expect((await errorsOf(opId))[`DMX-${t}`]).toEqual([`Mensagem direta com usuário não importado: ghost-${t}`]);
   });
+
+  it('conversa direta ligada pelo id, mas hoje entre outras pessoas, não recebe as mensagens: elas vão para a conversa certa', async () => {
+    const t = tag();
+    const jo = await newUser(A, { verified: true });
+    const ma = await newUser(A);
+    const dmId = `csv:d:${jo.username}/${ma.username}`;
+    // 1º CSV, só com directmessages/: os nomes são as contas daqui.
+    await convert([
+      C({ importIds: [dmId], t: 'd', users: [jo.username, ma.username] }),
+      M({ importId: `p1-${t}`, rid: dmId, u: jo.username, msg: 'oi Maria (Pereira)', ts: '2023-11-14T22:13:20.000Z' }),
+      M({ importId: `p2-${t}`, rid: dmId, u: ma.username, msg: 'oi João', ts: '2023-11-14T22:14:00.000Z' }),
+    ]);
+    const old = await mapped('room', dmId);
+    // 2º CSV, de outra origem: "jo" é outra pessoa (outro e-mail) e ganha outra conta; a conversa tem o mesmo id.
+    const { opId, result } = await convert([
+      U({ importIds: [jo.username], emails: [`silva${t}@outra.example`], username: jo.username, name: 'João Silva' }),
+      C({ importIds: [dmId], t: 'd', users: [jo.username, ma.username] }),
+      M({ importId: `s1-${t}`, rid: dmId, u: jo.username, msg: 'Maria, meu salário é 9 mil (Silva)', ts: '2023-11-14T22:15:00.000Z' }),
+      // Uma mensagem com o id de uma da conversa antiga: lá ela fica como estava.
+      M({ importId: `p2-${t}`, rid: dmId, u: ma.username, msg: 'texto da outra conversa', ts: '2023-11-14T22:14:00.000Z' }),
+    ]);
+    expect(result.messages).toMatchObject({ inserted: 1, updated: 0, skipped: 1, failed: 0 });
+    const silva = await mapped('user', jo.username);
+    expect(silva).not.toBe(jo.userId);
+    const now = await mapped('room', dmId);
+    expect(now).not.toBe(old);
+    expect([...(await row('SELECT uids FROM rooms WHERE id = $1', [now])).uids].sort()).toEqual([silva, ma.userId].sort());
+    expect((await roomMessages(old)).map((m) => m.msg)).toEqual(['oi Maria (Pereira)', 'oi João']);
+    expect((await roomMessages(now)).map((m) => m.msg)).toEqual(['Maria, meu salário é 9 mil (Silva)']);
+    const seen = await api('GET', 'im.history', { roomId: old }, jo);
+    expect(seen.messages.map((m: any) => m.msg).sort()).toEqual(['oi João', 'oi Maria (Pereira)']);
+    const who = [`${jo.username}.2`, ma.username].sort().join(', ');
+    expect((await errorsOf(opId))[dmId]).toEqual([
+      `A sala ligada a esta conversa direta por uma importação anterior não é a conversa entre ${who}; esta importação usa a conversa entre essas pessoas, ` +
+        'e as mensagens importadas antes continuam na sala antiga.',
+    ]);
+  });
+
+  it('sala ligada pelo id, mas hoje de outro tipo, vira outra sala: conteúdo privado nunca vai para um canal público', async () => {
+    const t = tag();
+    const ana = await newUser(A);
+    const bruno = await newUser(A);
+    const dave = await newUser(A);
+    // Exportação 1: canal público. Exportação 2: o mesmo canal (mesmo id) virou privado no Slack.
+    await convert(
+      [
+        C({ importIds: [`C1-${t}`], t: 'c', name: `projeto-${t}`, users: [ana.username] }),
+        M({ importId: `m1-${t}`, rid: `C1-${t}`, u: ana.username, msg: 'mensagem pública', ts: '2022-01-01T00:00:00.000Z' }),
+      ],
+      { importer: 'slack' },
+    );
+    const pub = await mapped('room', `C1-${t}`);
+    const { opId } = await convert(
+      [
+        C({ importIds: [`C1-${t}`], t: 'p', name: `projeto-${t}`, users: [ana.username, bruno.username] }),
+        M({ importId: `m1-${t}`, rid: `C1-${t}`, u: ana.username, msg: 'mensagem pública, editada depois de virar privado', ts: '2022-01-01T00:00:00.000Z' }),
+        M({ importId: `m2-${t}`, rid: `C1-${t}`, u: bruno.username, msg: 'agora é privado: demissões em março', ts: '2022-02-01T00:00:00.000Z' }),
+      ],
+      { importer: 'slack' },
+    );
+    const priv = await mapped('room', `C1-${t}`);
+    expect(priv).not.toBe(pub);
+    expect(await row('SELECT t, name FROM rooms WHERE id = $1', [pub])).toEqual({ t: 'c', name: `projeto-${t}` });
+    expect(await row('SELECT t, name FROM rooms WHERE id = $1', [priv])).toEqual({ t: 'p', name: `projeto-${t}-2` });
+    expect(await membersOf(pub)).toEqual(['admin', ana.username].sort());
+    expect(await membersOf(priv)).toEqual(['admin', ana.username, bruno.username].sort());
+    expect((await roomMessages(pub)).map((m) => m.msg)).toEqual(['mensagem pública']);
+    expect((await roomMessages(priv)).map((m) => m.msg)).toEqual(['agora é privado: demissões em março']);
+    const seen = await api('GET', 'channels.history', { roomId: pub }, dave);
+    expect(seen.messages.map((m: any) => m.msg)).toEqual(['mensagem pública']);
+    expect((await errorsOf(opId))[`C1-${t}`]).toEqual([`O canal "projeto-${t}" estava ligado à sala "projeto-${t}", que hoje é um canal público, e no arquivo ele é privado; importado como "projeto-${t}-2".`]);
+
+    // A sala virou privada aqui: reimportar a mesma exportação não põe ninguém nela.
+    await convert([C({ importIds: [`C2-${t}`], t: 'c', name: `sala-${t}`, users: [ana.username] })], { importer: 'slack' });
+    const fechada = await mapped('room', `C2-${t}`);
+    await pool.query(`UPDATE rooms SET t = 'p' WHERE id = $1`, [fechada]);
+    const again = await convert([C({ importIds: [`C2-${t}`], t: 'c', name: `sala-${t}`, users: [ana.username, bruno.username] })], { importer: 'slack' });
+    expect(await membersOf(fechada)).toEqual(['admin', ana.username].sort());
+    expect(await mapped('room', `C2-${t}`)).not.toBe(fechada);
+    expect((await errorsOf(again.opId))[`C2-${t}`]).toEqual([`O canal "sala-${t}" estava ligado à sala "sala-${t}", que hoje é um grupo privado, e no arquivo ele é público; importado como "sala-${t}-2".`]);
+
+    // No CSV o id é o nome: um grupo privado de outro arquivo com o nome de um canal público também vira outra sala.
+    await convert([C({ importIds: [`csv:c:diretoria-${t}`], t: 'c', name: `diretoria-${t}`, users: [ana.username] })]);
+    const aberto = await mapped('room', `csv:c:diretoria-${t}`);
+    await convert([
+      C({ importIds: [`csv:c:diretoria-${t}`], t: 'p', name: `diretoria-${t}`, users: [bruno.username] }),
+      M({ rid: `csv:c:diretoria-${t}`, u: bruno.username, msg: 'salários da diretoria: confidencial', ts: '2022-03-01T00:00:00.000Z' }),
+    ]);
+    expect(await membersOf(aberto)).toEqual(['admin', ana.username].sort());
+    expect(await roomMessages(aberto)).toEqual([]);
+    const grupo = await mapped('room', `csv:c:diretoria-${t}`);
+    expect(await row('SELECT t FROM rooms WHERE id = $1', [grupo])).toEqual({ t: 'p' });
+
+    // Grupo privado nunca cai no canal padrão, que é público.
+    await convert([C({ importIds: [`GD-${t}`], t: 'p', name: `geral-privado-${t}`, isDefault: true, users: [] })], { importer: 'slack' });
+    expect(await mapped('room', `GD-${t}`)).not.toBe(await geralId());
+  });
 });
 
 describe('mensagens', () => {
@@ -1053,6 +1469,97 @@ describe('seleção e cancelamento', () => {
     // Mensagens diretas selecionadas pelo item único "Mensagens diretas".
     const dms = await convert([C({ importIds: [`SD2-${t}`], t: 'd', users: [`S1-${t}`, 'admin'] })], { selection: { channels: { list: [DIRECT_MESSAGES_ID] } } });
     expect(dms.result.channels).toMatchObject({ inserted: 1 });
+  });
+
+  it('usuário não selecionado (por já existir aqui) fica com a conta daqui pelo e-mail confirmado ou pelo nome, sem mudar nada nela', async () => {
+    const t = tag();
+    const des = await newUser(A, { verified: true });
+    const nom = await newUser(A);
+    await pool.query('UPDATE users SET email = NULL WHERE id = $1', [nom.userId]);
+    expect((await api('POST', 'users.register', { username: `mal${t}`, name: 'Mal', email: `eva${t}@a.example`, pass: 'Senha-forte-123' })).success).toBe(true);
+    const sel = `csv:u:sel${t}@a.example`;
+    const ids = { des: `csv:u:${des.username}@test.local`, nom: `csv:u:${nom.username}`, eva: `csv:u:eva${t}@a.example`, novo: `csv:u:novo${t}` };
+    const { opId, result } = await convert(
+      [
+        U({ importIds: [sel], emails: [`sel${t}@a.example`], username: `sel${t}` }),
+        U({ importIds: [ids.des], emails: [`${des.username}@test.local`], username: des.username, name: 'Outro Nome' }),
+        U({ importIds: [ids.nom], emails: [], username: nom.username }),
+        // O e-mail é de uma conta que não o confirmou: nem por ele nem pelo nome.
+        U({ importIds: [ids.eva], emails: [`eva${t}@a.example`], username: `mal${t}` }),
+        U({ importIds: [ids.novo], emails: [], username: `novo${t}` }),
+        C({ importIds: [`csv:c:time-${t}`], t: 'p', name: `time-${t}`, users: [sel, ids.des, ids.nom, ids.eva, ids.novo] }),
+        M({ rid: `csv:c:time-${t}`, u: ids.des, msg: 'do des', ts: '2021-01-01T00:00:00.000Z' }),
+        M({ rid: `csv:c:time-${t}`, u: ids.nom, msg: 'do nom', ts: '2021-01-01T00:00:01.000Z' }),
+        M({ rid: `csv:c:time-${t}`, u: ids.eva, msg: 'da eva', ts: '2021-01-01T00:00:02.000Z' }),
+        M({ rid: `csv:c:time-${t}`, u: ids.novo, msg: 'do novo', ts: '2021-01-01T00:00:03.000Z' }),
+      ],
+      { selection: { users: { list: [sel] }, channels: { all: true } } },
+    );
+    expect(result.users).toMatchObject({ inserted: 1, skipped: 4 });
+    expect(result.messages).toMatchObject({ inserted: 2, failed: 2 });
+    const room = await mapped('room', `csv:c:time-${t}`);
+    expect(await membersOf(room)).toEqual(['admin', des.username, nom.username, `sel${t}`].sort());
+    expect((await roomMessages(room)).map((m) => [m.user_id, m.msg])).toEqual([
+      [des.userId, 'do des'],
+      [nom.userId, 'do nom'],
+    ]);
+    const errs = await errorsOf(opId);
+    expect(errs['da eva']).toEqual([`Autor não encontrado: ${ids.eva}`]);
+    expect(errs['do novo']).toEqual([`Autor não encontrado: ${ids.novo}`]);
+    // Nada muda nas contas, nenhuma conta nova, e o vínculo não é gravado.
+    expect((await row('SELECT name FROM users WHERE id = $1', [des.userId])).name).not.toBe('Outro Nome');
+    expect(await userByName(`novo${t}`)).toBeUndefined();
+    expect(await mapped('user', ids.des)).toBeNull();
+  });
+
+  it('a prévia mostra como já existente só o que a importação junta: e-mail confiável, ligação que confere e sala do mesmo tipo', async () => {
+    const t = tag();
+    expect((await api('POST', 'users.register', { username: `mal${t}`, name: 'Mal', email: `ana${t}@a.example`, pass: 'Senha-forte-123' })).success).toBe(true);
+    const carlos = await newUser(A, { verified: true });
+    const semEmail = await newUser(A);
+    await pool.query('UPDATE users SET email = NULL WHERE id = $1', [semEmail.userId]);
+    const comEmail = await newUser(A);
+    const livre = await newUser(A);
+    await pool.query('UPDATE users SET email = NULL WHERE id = $1', [livre.userId]);
+    const m = await newUser(A, { verified: true });
+    await convert([U({ importIds: [`J-${t}`], emails: [`${m.username}@test.local`], username: `j${t}` })], { importer: 'slack' });
+    await convert([C({ importIds: [`C1-${t}`], t: 'c', name: `aberto-${t}`, users: [] })], { importer: 'slack' });
+    const opId = await stage(
+      [
+        U({ importIds: [`ana-${t}`], emails: [`ana${t}@a.example`], username: `ana${t}` }),
+        // E-mail de uma conta que não o confirmou: nem pelo nome de uma conta daqui sem e-mail.
+        U({ importIds: [`liv-${t}`], emails: [`ana${t}@a.example`], username: livre.username }),
+        U({ importIds: [`car-${t}`], emails: [`${carlos.username}@test.local`], username: `c${t}` }),
+        U({ importIds: [`sem-${t}`], emails: ['-'], username: semEmail.username }),
+        U({ importIds: [`com-${t}`], emails: ['n/a'], username: comEmail.username }),
+        U({ importIds: [`J-${t}`], emails: [`outra${t}@outra.example`], username: semEmail.username }),
+        C({ importIds: [`C1-${t}`], t: 'p', name: `aberto-${t}`, users: [] }),
+        C({ importIds: [`GD-${t}`], t: 'p', name: `privado-${t}`, isDefault: true, users: [] }),
+        C({ importIds: [`CD-${t}`], t: 'c', name: `publico-${t}`, isDefault: true, users: [] }),
+      ],
+      'slack',
+    );
+    const preview = await buildSelection(opId);
+    expect(Object.fromEntries(preview.users.map((u) => [u.user_id, u.is_email_taken]))).toEqual({
+      [`ana-${t}`]: false,
+      [`liv-${t}`]: false,
+      [`car-${t}`]: true,
+      [`sem-${t}`]: true,
+      [`com-${t}`]: true,
+      [`J-${t}`]: false,
+    });
+    expect(Object.fromEntries(preview.channels.map((c) => [c.channel_id, c.exists]))).toEqual({ [`C1-${t}`]: false, [`GD-${t}`]: false, [`CD-${t}`]: true });
+    // A conversão faz o que a prévia mostrou.
+    const { result } = await convert(
+      [
+        U({ importIds: [`ana-${t}`], emails: [`ana${t}@a.example`], username: `ana${t}` }),
+        U({ importIds: [`sem-${t}`], emails: ['-'], username: semEmail.username }),
+        U({ importIds: [`com-${t}`], emails: ['n/a'], username: comEmail.username }),
+        U({ importIds: [`J-${t}`], emails: [`outra${t}@outra.example`], username: semEmail.username }),
+      ],
+      { importer: 'slack' },
+    );
+    expect(result.users).toMatchObject({ inserted: 2, updated: 2 });
   });
 
   it('para no meio quando a importação é cancelada', async () => {

@@ -12,8 +12,8 @@ import { audit, type Actor } from '../services/audit';
 import { rolesHavePermission } from '../services/permissions';
 import { getSetting } from '../services/settings';
 import { safeMimeType } from '../services/uploads';
-import { openForImporter } from './archive';
-import { runConversion, sanitizeRoomName } from './converter';
+import { openForImporter, zipRecordLimit } from './archive';
+import { EMAIL_CUT, runConversion, sanitizeRoomName, trustedEmailSql, validEmail } from './converter';
 import { downloadToFile } from './download';
 import { countPendingAvatars, countPendingFiles, runPendingAvatars, runPendingFiles } from './pending';
 import { getImporter, importerName, importers } from './registry';
@@ -50,6 +50,13 @@ import {
 
 const LOCK_KEY = 727105;
 const MAX_WARNINGS = 200;
+// O maior texto de mensagem (o do Slack). O leitor do Slack corta antes de converter a marcação (convertido, o texto
+// pode passar disso com os nomes das menções, que a conversão troca de volta). Nos outros formatos o texto vai como veio
+// do arquivo (uma célula de CSV tem até 1 milhão de caracteres), e o corte é na leitura, aqui.
+const MAX_MESSAGE_TEXT = 40_000;
+const CUTS_OWN_TEXT = new Set(['slack']);
+// Avisos de mensagem cortada, um por mensagem; depois só a contagem.
+const MAX_CUT_WARNINGS = 50;
 const ACTIVE: ImportStatus[] = Object.values(ST).filter((s) => !FINAL_STATES.includes(s));
 const INTERRUPTED =
   'A importação foi interrompida porque o servidor reiniciou. Os dados já importados foram mantidos; você pode importar o mesmo arquivo de novo (o que já foi importado é atualizado, não duplicado).';
@@ -622,16 +629,31 @@ export async function startPreparation(opId: string): Promise<void> {
 
   let source: ArchiveSource | null = null;
   let error: unknown = null;
+  let cuts = 0;
   try {
     const importer = getImporter(row.importer_key);
     if (!importer) throw new ImportError('Tipo de importação desconhecido.');
     source = await openForImporter(row.file_path, importer, { warn: (m) => warnings.add(m) });
+    if (source.kind === 'zip') {
+      const limit = await zipRecordLimit(row.file_path);
+      writer.limit(limit.max, limit.error);
+    }
+    const ownCut = CUTS_OWN_TEXT.has(importer.key);
+    const bounded = (rec: ImportMessage) => {
+      if (ownCut || typeof rec.msg !== 'string' || rec.msg.length <= MAX_MESSAGE_TEXT) return rec;
+      const msg = truncate(rec.msg, MAX_MESSAGE_TEXT);
+      if (msg.length === rec.msg.length) return rec;
+      if (++cuts <= MAX_CUT_WARNINGS) {
+        warnings.add(`Mensagem cortada em "${rec.rid}"${rec.ts ? ` (${rec.ts})` : ''}: o texto passava de 40.000 caracteres, e o resto foi descartado.`);
+      }
+      return { ...rec, msg };
+    };
     const ctx: PrepareContext = {
       operationId: opId,
       source,
       user: (rec: ImportUser) => writer.add('user', rec.importIds?.[0] ?? null, rec),
       channel: (rec: ImportChannel) => writer.add('channel', rec.importIds?.[0] ?? null, rec),
-      message: (rec: ImportMessage) => writer.add('message', rec.importId ?? null, rec),
+      message: (rec: ImportMessage) => writer.add('message', rec.importId ?? null, bounded(rec)),
       contact: (rec: ImportContact) => writer.add('contact', rec.importIds?.[0] ?? null, rec),
       setStep: async (step) => {
         if (!PREPARING_STATES.includes(step) || step === live.status) return;
@@ -643,11 +665,16 @@ export async function startPreparation(opId: string): Promise<void> {
       },
       progress: (v) => rate.call(Math.max(0, Math.min(100, Math.round(Number(v) * 10) / 10 || 0))),
       warn: (m) => warnings.add(m),
-      cancelled: () => job.cancel,
+      // Passado o teto de registros, o importador para como se fosse cancelado, e a operação falha com o erro do teto.
+      cancelled: () => job.cancel || !!writer.failure(),
       findImported: async (kind, importId) => (await one('SELECT target_id FROM import_map WHERE kind = $1 AND import_id = $2', [kind, importId]))?.target_id ?? null,
     };
     await importer.prepare(ctx);
+    const over = writer.failure();
+    if (over) throw over;
     await writer.flush();
+    const more = cuts - MAX_CUT_WARNINGS;
+    if (more > 0) warnings.add(`E mais ${more === 1 ? '1 mensagem cortada' : `${more} mensagens cortadas`} por passar de 40.000 caracteres.`);
   } catch (e) {
     error = e;
   } finally {
@@ -696,30 +723,40 @@ export async function buildSelection(opId: string): Promise<ImportSelection> {
   const users: ImportUser[] = [];
   for await (const batch of iterateStaged<ImportUser>(opId, 'user', 2000)) for (const r of batch) users.push(r.data);
   // Mesmas regras que a conversão usa para achar a conta existente (e juntar os dados a ela): importação anterior do
-  // mesmo id, qualquer um dos e-mails, ou o nome de usuário quando a conta é do mesmo tipo (bot ou não) e os e-mails
-  // não se contradizem. Fora isso, mesmo nome é outra pessoa, que ganha uma conta nova com outro nome.
+  // mesmo id, se a conta ligada não tem outro e-mail; um e-mail confiável (confirmado, ou dado por uma importação); ou o
+  // nome de usuário quando a conta é do mesmo tipo (bot ou não) e os e-mails não se contradizem. O e-mail de uma conta
+  // que não o confirmou, ou a ligação a uma conta com outro e-mail, dão uma conta nova (nem pelo nome junta).
   const clean = (v: unknown, max: number) => (typeof v === 'string' ? truncate(v.trim(), max) : '');
-  const emailsOf = (u: ImportUser) => (Array.isArray(u.emails) ? u.emails : []).map((e) => clean(e, 254).toLowerCase()).filter(Boolean);
+  const emailsOf = (u: ImportUser) => [...new Set((Array.isArray(u.emails) ? u.emails : []).map((e) => clean(e, EMAIL_CUT)).filter(validEmail).map((e) => e.toLowerCase()))];
   const usernameOf = (u: ImportUser) => clean(u.username, 200).replace(/^@+/, '').toLowerCase();
   const idsOf = (v: { importIds?: unknown }) => (Array.isArray(v.importIds) ? v.importIds : []).filter((i) => i !== null && i !== undefined && i !== '').map(String);
   const emails = [...new Set(users.flatMap(emailsOf))];
   const usernames = [...new Set(users.map(usernameOf).filter(Boolean))];
-  const takenEmails = new Set((await many('SELECT lower(email) AS v FROM users WHERE lower(email) = ANY($1::text[])', [emails])).map((r) => r.v));
+  const holders = new Map(
+    (await many(`SELECT lower(u.email) AS v, ${trustedEmailSql('u')} AS trusted FROM users u WHERE lower(u.email) = ANY($1::text[])`, [emails])).map((r) => [r.v, !!r.trusted]),
+  );
   const byName = new Map(
     (await many('SELECT lower(username) AS v, type, email FROM users WHERE lower(username) = ANY($1::text[])', [usernames])).map((r) => [r.v, r]),
   );
-  const mappedUsers = new Set(
+  const mappedUsers = new Map(
     (
-      await many(`SELECT m.import_id FROM import_map m JOIN users u ON u.id = m.target_id WHERE m.kind = 'user' AND m.import_id = ANY($1::text[])`, [
+      await many(`SELECT m.import_id, u.email FROM import_map m JOIN users u ON u.id = m.target_id WHERE m.kind = 'user' AND m.import_id = ANY($1::text[])`, [
         [...new Set(users.flatMap(idsOf))],
       ])
-    ).map((r) => r.import_id),
+    ).map((r) => [r.import_id, { email: r.email as string | null }]),
   );
   const existing = (u: ImportUser) => {
     const mine = emailsOf(u);
-    if (idsOf(u).some((i) => mappedUsers.has(i)) || mine.some((e) => takenEmails.has(e))) return true;
+    const trusted = mine.some((e) => holders.get(e) === true);
+    const linked = idsOf(u).map((i) => mappedUsers.get(i)).find(Boolean);
+    if (linked) {
+      const own = validEmail(linked.email) ? linked.email.toLowerCase() : '';
+      return !(own && mine.length && !mine.includes(own)) || trusted;
+    }
+    if (trusted) return true;
+    if (mine.some((e) => holders.has(e))) return false;
     const other = byName.get(usernameOf(u));
-    return !!other && (other.type === 'bot') === (u.type === 'bot') && !(other.email && mine.length);
+    return !!other && (other.type === 'bot') === (u.type === 'bot') && !(validEmail(other.email) && mine.length);
   };
   out.users = users.map((u) => ({
     user_id: u.importIds?.[0] ?? '',
@@ -769,9 +806,13 @@ export async function buildSelection(opId: string): Promise<ImportSelection> {
   const existingRoom = (c: ImportChannel): string | null => {
     const ids = roomIdsOf(c);
     if (!ids.length || !clean(c.name, 500)) return null;
-    if (c.isDefault && defaultRoom) return defaultRoom.id;
+    const t = c.t === 'p' ? 'p' : 'c';
+    // Canal padrão é público: um grupo privado nunca cai nele.
+    if (c.isDefault && t === 'c' && defaultRoom) return defaultRoom.id;
     const prev = ids.map((i) => mappedById.get(i)).find(Boolean);
     if (prev && (prev.t === 'c' || prev.t === 'p') && !prev.prid) {
+      // Sala ligada antes, mas hoje de outro tipo: a conversão cria outra sala (e nem procura pelo nome).
+      if (prev.t !== t) return null;
       // Ligada antes só pelo nome: fica com o canal deste arquivo que a criou ou que já a usou acima.
       const created = ids.some((i) => mappedById.get(i)?.id === prev.id && mappedById.get(i)?.created);
       const holders = used.get(prev.id);

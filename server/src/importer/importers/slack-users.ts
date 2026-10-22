@@ -1,5 +1,5 @@
 import { ST, type ImportUser, type Importer, type PrepareContext } from '../types';
-import { RowIssues, byteProgress, csvTable, isBlankRow, openSingleCsv, semicolonError, semicolonSeparated } from './csv-util';
+import { RowIssues, byteProgress, csvTable, isBlankRow, isEmail, openSingleCsv, semicolonError, semicolonSeparated } from './csv-util';
 
 // Lista de membros exportada pelo Slack (Gerenciar membros → Exportar lista de membros). A primeira linha é o
 // cabeçalho: username,email,status,billing-active,has-2fa,has-sso,userid,fullname,displayname,...
@@ -21,7 +21,7 @@ const HEADER: Record<string, Column> = {
 // Posições do arquivo do Slack, para um cabeçalho com outros nomes.
 const POSITIONS: Record<Column, number> = { username: 0, email: 1, status: 2, fullname: 7, displayname: 8 };
 
-const NO_EMAIL = ['linha sem e-mail ignorada', 'linhas sem e-mail ignoradas'] as const;
+const NO_EMAIL = ['linha sem e-mail válido ignorada', 'linhas sem e-mail válido ignoradas'] as const;
 const REPEATED = ['e-mail repetido ignorado (vale a primeira linha)', 'e-mails repetidos ignorados (vale a primeira linha)'] as const;
 
 function columnsOf(header: string[]): Partial<Record<Column, number>> | null {
@@ -62,8 +62,9 @@ async function prepare(ctx: PrepareContext) {
     }
     const c = cols;
     const get = (k: Column) => (c[k] === undefined ? '' : (row.fields[c[k]] ?? '').trim());
+    // O e-mail é o id da pessoa: "-", "n/a" e afins não são e-mail, e virariam o mesmo id para pessoas diferentes.
     const email = get('email');
-    if (!email) {
+    if (!isEmail(email)) {
       issues.add(NO_EMAIL, row.line);
       continue;
     }

@@ -296,7 +296,7 @@ describe('arquivo .zip', () => {
     await src.close();
   });
 
-  it('read recusa entrada de mais de 1 MiB com taxa de compressão acima de 100; stream continua lendo aos pedaços', async () => {
+  it('read e stream recusam entrada de mais de 1 MiB com taxa de compressão acima de 100 (antes o stream lia, e um messages.csv assim virava milhões de mensagens)', async () => {
     const buf = await zipBuffer([
       ['zeros.json', Buffer.alloc(2 * MiB)],
       ['aleatorio.bin', crypto.randomBytes(2 * MiB)],
@@ -308,9 +308,10 @@ describe('arquivo .zip', () => {
     expect((await src.read(random)).length).toBe(2 * MiB);
     expect(text.size).toBeGreaterThan(MiB);
     expect((await src.read(text)).length).toBe(text.size);
+    await expect(src.stream(zeros)).rejects.toThrow(new ImportError('O arquivo "zeros.json" do .zip tem uma taxa de compressão suspeita (o .zip parece corrompido ou malicioso).'));
     let n = 0;
-    for await (const c of await src.stream(zeros)) n += (c as Buffer).length;
-    expect(n).toBe(2 * MiB);
+    for await (const c of await src.stream(text)) n += (c as Buffer).length;
+    expect(n).toBe(text.size);
     await src.close();
   });
 
@@ -333,6 +334,75 @@ describe('arquivo .zip', () => {
     } finally {
       Object.assign(ZIP_LIMITS, saved);
     }
+  });
+
+  // Exportação do Slack parecida com a de verdade: JSON com 4 espaços, perfil do autor e blocos repetidos em cada
+  // mensagem, textos variados. Gerador determinístico, para o teste não variar.
+  function realisticExport(minBytes: number): ZipItem[] {
+    let seed = 42;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    const pick = <T>(list: T[]) => list[Math.floor(rnd() * list.length)];
+    const words = 'a o de que e do da em um para com não uma os no se na por mais as como mas foi ao ele tem seu sua ou ser quando muito já está eu também só pelo até isso ela entre era depois sem mesmo deploy servidor banco pedido cliente reunião amanhã ontem hoje revisar código teste erro corrigido versão produção chamado prazo entrega relatório planilha'.split(' ');
+    const users = Array.from({ length: 200 }, (_, i) => ({ id: `U0${(100000 + i * 7919).toString(36).toUpperCase()}`, name: `usuario${i}`, real: `Pessoa ${i} Sobrenome${i % 37}` }));
+    const items: ZipItem[] = [['users.json', JSON.stringify(users.map((u) => ({ id: u.id, name: u.name, profile: { real_name: u.real } })), null, 4)]];
+    let total = 0;
+    let ts = 1700000000;
+    for (let day = 0; total < minBytes; day++) {
+      const messages = Array.from({ length: 400 }, () => {
+        const u = pick(users);
+        const text = Array.from({ length: 3 + Math.floor(rnd() * 40) }, () => pick(words)).join(' ');
+        return {
+          client_msg_id: Array.from({ length: 4 }, () => Math.floor(rnd() * 0xffffffff).toString(16).padStart(8, '0')).join('-'),
+          type: 'message',
+          text,
+          user: u.id,
+          ts: `${(ts += 37)}.${String(Math.floor(rnd() * 1e6)).padStart(6, '0')}`,
+          team: 'T0ABCDEF',
+          user_profile: { avatar_hash: Math.floor(rnd() * 0xffffffff).toString(16), image_72: `https://avatars.slack-edge.com/${u.id}_72.png`, real_name: u.real, display_name: u.name, name: u.name },
+          blocks: [{ type: 'rich_text', block_id: Math.floor(rnd() * 1e6).toString(36), elements: [{ type: 'rich_text_section', elements: [{ type: 'text', text }] }] }],
+        };
+      });
+      const json = Buffer.from(JSON.stringify(messages, null, 4));
+      total += json.length;
+      items.push([`geral/2023-${String(1 + Math.floor(day / 28)).padStart(2, '0')}-${String(1 + (day % 28)).padStart(2, '0')}.json`, json]);
+    }
+    return items;
+  }
+
+  it('o .zip inteiro tem limite de taxa de compressão: muitos arquivos pequenos (sem a conferência de cada um) não viram milhões de registros', async () => {
+    // Dias de 1 MiB (no limite em que read() confere a taxa de cada arquivo) só com mensagens mínimas: uns 70 MB de
+    // registros num .zip de uns 100 KB.
+    const day = Buffer.from(`[${'{"ts":"1","text":"x"},'.repeat(47_000)}{"ts":"1","text":"x"}]`.padEnd(MiB, ' '));
+    expect(day.length).toBe(MiB);
+    const hostile = await zipBuffer([['users.json', '[]'], ...Array.from({ length: 70 }, (_, i): ZipItem => [`geral/2024-01-${i}.json`, day])]);
+    expect(hostile.length).toBeLessThan(MiB);
+    const src = await openForImporter(await writeTmp(hostile), zipImporter);
+    // Antes de qualquer entrada ser lida: list() é a primeira coisa que os importadores chamam.
+    await expect(src.list()).rejects.toThrow(/^O \.zip parece corrompido ou malicioso: os arquivos a importar somam 70 MB descompactados, mais de 100 vezes o tamanho do \.zip \(\d+(,\d)? KB\)\./);
+    await expect(src.read({ name: 'users.json', size: 2, isDirectory: false })).rejects.toThrow(/mais de 100 vezes/);
+    await src.close();
+
+    // Até 64 MiB descompactados passa, qualquer que seja a taxa; o lixo do macOS não conta.
+    const items = Array.from({ length: 63 }, (_, i): ZipItem => [`geral/2024-02-${i}.json`, day]);
+    const ok = await openForImporter(await writeTmp(await zipBuffer([...items, ['__MACOSX/geral/._grande', Buffer.alloc(10 * MiB)]])), zipImporter);
+    expect(await ok.list()).toHaveLength(64);
+    await ok.close();
+    const over = await openForImporter(await writeTmp(await zipBuffer([...items, ['geral/grande.json', Buffer.alloc(10 * MiB)]])), zipImporter);
+    await expect(over.list()).rejects.toThrow(/somam 73 MB descompactados/);
+    await over.close();
+  });
+
+  it('uma exportação de verdade (JSON comprime de 5 a 20 vezes) acima de 64 MiB passa pela conferência do .zip inteiro', async () => {
+    const items = realisticExport(70 * MiB);
+    const zip = await zipBuffer(items);
+    const total = items.reduce((n, [, c]) => n + Buffer.byteLength(c as Buffer | string), 0);
+    expect(total).toBeGreaterThan(70 * MiB);
+    const ratio = total / zip.length;
+    expect(ratio).toBeGreaterThan(5);
+    expect(ratio).toBeLessThan(20);
+    const src = await openForImporter(await writeTmp(zip), zipImporter);
+    expect(await src.list()).toHaveLength(items.length);
+    await src.close();
   });
 
   it('read respeita maxBytes; bytes além do tamanho declarado são recusados', async () => {
@@ -421,6 +491,33 @@ describe('pasta no servidor e arquivo único', () => {
     const zipped = await openForImporter(await writeTmp(await zipBuffer([['users.csv', 'a']])), { sourceKind: 'zip-or-dir' });
     expect(zipped.kind).toBe('zip');
     await zipped.close();
+  });
+
+  it('itens com nome que não é UTF-8 ficam de fora com um aviso só, com a contagem (antes sumiam sem aviso)', async () => {
+    const root = await fs.promises.mkdtemp(path.join(tmp, 'latin-'));
+    await fs.promises.writeFile(path.join(root, 'users.csv'), 'ana,ana@x.com,Ana\n');
+    await fs.promises.mkdir(path.join(root, 'geral'));
+    await fs.promises.writeFile(path.join(root, 'geral', 'messages.csv'), 'ana,1704100000000,oi\n');
+    // "vendas-são-paulo" e "relatório.csv" em Latin-1, como o unzip deixa os nomes de um .zip do Windows sem a marca de
+    // UTF-8: o nome decodificado (com U+FFFD) não abre o arquivo no disco.
+    const at = (...parts: (string | Buffer)[]) => Buffer.concat(parts.map((p) => (Buffer.isBuffer(p) ? p : Buffer.from(p))));
+    const latin = (s: string) => Buffer.from(s, 'latin1');
+    const folder = at(root, '/', latin('vendas-são-paulo'));
+    fs.mkdirSync(folder);
+    fs.writeFileSync(at(folder, '/messages.csv'), 'ana,1704100000000,mensagem perdida\n');
+    fs.writeFileSync(at(root, '/geral/', latin('relatório.csv')), 'ana,1704100000000,outra\n');
+    const warnings: string[] = [];
+    const src = await openForImporter(root, { sourceKind: 'zip-or-dir' }, { warn: (m) => warnings.push(m) });
+    expect(await names(src)).toEqual(['geral', 'geral/messages.csv', 'users.csv']);
+    expect(warnings).toEqual([
+      '2 itens da pasta foram ignorados porque o nome não está em UTF-8 (por exemplo "geral/relat\ufffdrio.csv"). Renomeie esses arquivos e pastas, ou descompacte o .zip com um programa que converta os nomes para UTF-8, e importe de novo.',
+    ]);
+    // Um só: no singular.
+    fs.rmSync(at(root, '/geral/', latin('relatório.csv')));
+    const one: string[] = [];
+    await (await openForImporter(root, { sourceKind: 'zip-or-dir' }, { warn: (m) => one.push(m) })).list();
+    expect(one).toHaveLength(1);
+    expect(one[0]).toMatch(/^1 item da pasta foi ignorado porque o nome não está em UTF-8 \(por exemplo "vendas-s\ufffdo-paulo"\)\./);
   });
 
   it('limite de itens também vale para pastas', async () => {

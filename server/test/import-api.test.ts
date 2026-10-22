@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -6,8 +7,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import yazl from 'yazl';
 import { pool } from '../src/db/pool';
 import { addUsersLimits } from '../src/importer/api';
+import { ZIP_LIMITS } from '../src/importer/archive';
 import { dispositionFileName } from '../src/importer/download';
 import { operationDir, plainMentions, recoverInterrupted, uploadLimits } from '../src/importer/operations';
+import { STAGING_LIMITS, StagingWriter, iterateStaged } from '../src/importer/staging';
 import { BUSY_STATES, PREPARING_STATES } from '../src/importer/types';
 import { verifyPassword } from '../src/lib/password';
 import { bus } from '../src/realtime/bus';
@@ -174,7 +177,7 @@ describe('envio e leitura do arquivo', () => {
       { importIds: ['u1'], emails: ['ADMIN@localhost'], username: 'chefe', name: 'Chefe' },
       { importIds: ['u2'], emails: ['nova@ex.com'], username: 'nova', deleted: true },
       { importIds: ['b1'], emails: [], username: 'Admin', type: 'bot' },
-      { importIds: ['u3'], emails: ['outra@ex.com'], username: 'outra' },
+      { importIds: ['u3'], emails: [], username: 'outra' },
     ],
     channels: [
       { importIds: ['c1'], t: 'c', name: 'Geral', users: ['u1', 'u2'] },
@@ -217,7 +220,8 @@ describe('envio e leitura do arquivo', () => {
     const users = Object.fromEntries(data.users.map((u: any) => [u.user_id, u]));
     expect(users.u1).toMatchObject({ username: 'chefe', name: 'Chefe', email: 'ADMIN@localhost', is_email_taken: true, is_deleted: false, is_bot: false, do_import: true });
     expect(users.u2).toMatchObject({ is_email_taken: false, is_deleted: true });
-    // Id já importado antes conta como existente. Um bot com o nome de uma pessoa ("Admin") é outra conta.
+    // Id já importado antes conta como existente (a conta ligada a ele não tem outro e-mail no arquivo). Um bot com o
+    // nome de uma pessoa ("Admin") é outra conta.
     expect(users.b1).toMatchObject({ is_email_taken: false, is_bot: true, email: '' });
     expect(users.u3.is_email_taken).toBe(true);
     expect(data.channels).toEqual([
@@ -854,8 +858,10 @@ describe('correções da revisão', () => {
           { importIds: ['n3'], emails: ['novo@ex.com'], username: semEmail },
           // Mesmo nome, mas um é bot: outra conta.
           { importIds: ['n4'], emails: [], username: semEmail, type: 'bot' },
-          // Qualquer um dos e-mails serve.
-          { importIds: ['n5'], emails: ['nada@ex.com', `${U.username}@test.local`], username: 'qualquer', roles: ['user', 'admin'] },
+          // Qualquer um dos e-mails serve, se a conta que tem o e-mail o confirmou.
+          { importIds: ['n5'], emails: ['nada@ex.com', 'admin@localhost'], username: 'qualquer', roles: ['user', 'admin'] },
+          // E-mail de uma conta que não o confirmou: conta nova (nem pelo nome junta).
+          { importIds: ['n6'], emails: [`${U.username}@test.local`], username: U.username },
         ],
       }),
     );
@@ -867,6 +873,7 @@ describe('correções da revisão', () => {
       ['n3', true, false],
       ['n4', false, false],
       ['n5', true, true],
+      ['n6', false, false],
     ]);
   });
 
@@ -1196,6 +1203,258 @@ describe('correções da revisão', () => {
     expect(errors.total).toBe(1);
     // Corte por caractere (lib/text): o emoji na posição 2000 fica inteiro, nada de "�" no fim.
     expect(errors.errors[0].messages).toEqual(['nomeruim', `${'x'.repeat(1999)}😀`]);
+  });
+
+  it('U+0000 num id da origem é limpo, não derruba a leitura nem o import.addUsers (antes: a leitura toda falhava, e erro 500)', async () => {
+    await upload(
+      'test',
+      'ids.json',
+      json({
+        users: [{ importIds: ['u\u00001', 'legado\u0000'], emails: ['idnulo@ex.com'], username: 'idnulo' }],
+        channels: [{ importIds: ['c\u00001'], t: 'c', name: 'canal-nulo', users: ['u1'] }],
+        messages: [{ importId: 'm\u00001', rid: 'c1', u: 'u1', msg: 'oi' }],
+      }),
+    );
+    let op = await waitOp(settled);
+    expect(op).toMatchObject({ status: 'importer_user_selection', count: { users: 1, channels: 1, messages: 1 } });
+    let rows = await opRows(op._id);
+    expect(rows.map((r) => r.import_id)).toEqual(['u1', 'c1', 'm1']);
+    expect(rows[0].data.importIds).toEqual(['u1', 'legado']);
+    expect(rows[2].data.importId).toBe('m1');
+    // A prévia e a conversão veem o mesmo id.
+    expect((await api('GET', 'getImportFileData', undefined, A)).users[0].user_id).toBe('u1');
+
+    // Id comprido: limpo, mas inteiro (outros registros citam o mesmo id), igual na coluna e no próprio registro.
+    const longo = `L${'é'.repeat(600)}\u0000\ud83d`;
+    await upload('test', 'longo.json', json({ users: [{ importIds: [longo], emails: ['idlongo@ex.com'] }], channels: [{ importIds: ['c-longo'], t: 'c', name: 'longo', users: [longo] }] }));
+    op = await waitOp((o) => settled(o) && o.file === 'longo.json');
+    rows = await opRows(op._id);
+    expect(rows[0].import_id).toBe(`L${'é'.repeat(600)}\ufffd`);
+    expect(rows[0].data.importIds).toEqual([rows[0].import_id]);
+    expect(rows[1].data.users).toEqual([rows[0].import_id]);
+
+    expect((await api('POST', 'import.new', {}, A)).success).toBe(true);
+    const r = await api('POST', 'import.addUsers', { users: [{ importIds: ['x\u0000y'], emails: ['xy@ex.com'], username: 'xy' }] }, A);
+    expect(r).toMatchObject({ success: true, operation: { status: 'importer_user_selection' } });
+    rows = await opRows(r.operation._id);
+    expect(rows.map((x) => [x.import_id, x.data.importIds])).toEqual([['xy', ['xy']]]);
+  });
+
+  it('chaves de objetos com U+0000 ou meio emoji são limpas (o nome de uma reação derrubava a leitura inteira)', async () => {
+    const reactions = { ':smile\u0000:': ['u1'], ':thumbsup\ud83c:': ['u1'], ':ok:': ['u1'] };
+    const extra = { 'campo\u0000': 1, [`${'k'.repeat(600)}`]: 2, inteiro: { 'dentro\udc00': 3 } };
+    await upload('test', 'chaves.json', json({ messages: [{ importId: 'm1', rid: 'c1', u: 'u1', msg: 'oi', reactions, extra }] }));
+    const op = await waitOp(settled);
+    expect(op.status).toBe('importer_user_selection');
+    const [row] = await opRows(op._id);
+    expect(Object.keys(row.data.reactions).sort()).toEqual([':ok:', ':smile:', ':thumbsup\ufffd:']);
+    expect(row.data.extra).toEqual({ campo: 1, [`${'k'.repeat(500)}`]: 2, inteiro: { 'dentro\ufffd': 3 } });
+  });
+
+  it('os dados lidos são gravados e lidos em lotes limitados também pelo tamanho (500 registros grandes esgotavam a memória)', async () => {
+    const created = await api('POST', 'import.new', {}, A);
+    const id = created.operation._id;
+    const staged = async () => Number((await pool.query('SELECT count(*) FROM import_records WHERE operation_id = $1', [id])).rows[0].count);
+    const saved = { ...STAGING_LIMITS };
+    Object.assign(STAGING_LIMITS, { flushChars: 3000, readBytes: 5000 });
+    try {
+      const writer = new StagingWriter(id);
+      const big = (i: number) => ({ importId: `m${i}`, rid: 'c1', u: 'u1', msg: 'x'.repeat(1000) });
+      await writer.add('message', 'm0', big(0));
+      await writer.add('message', 'm1', big(1));
+      expect(await staged()).toBe(0);
+      // Uns 3100 caracteres de JSON guardados: grava sem esperar os 500 registros.
+      await writer.add('message', 'm2', big(2));
+      expect(await staged()).toBe(3);
+      for (let i = 3; i < 10; i++) await writer.add('message', `m${i}`, big(i));
+      await writer.flush();
+      expect(await staged()).toBe(10);
+      expect(writer.counts().message).toBe(10);
+
+      // A leitura para o lote antes de passar de 5000 bytes de JSON (quatro registros de uns 1050), na ordem.
+      const batches = async (size: number) => {
+        const out: string[][] = [];
+        for await (const b of iterateStaged<any>(id, 'message', size)) out.push(b.map((r) => r.importId!));
+        return out;
+      };
+      const all = Array.from({ length: 10 }, (_, i) => `m${i}`);
+      expect(await batches(500)).toEqual([all.slice(0, 4), all.slice(4, 8), all.slice(8)]);
+      // O limite de registros continua valendo.
+      expect((await batches(3)).map((b) => b.length)).toEqual([3, 3, 3, 1]);
+      // Um registro maior que o limite vem sozinho, e a leitura continua depois dele.
+      const writer2 = new StagingWriter(id);
+      await writer2.add('message', 'enorme', { ...big(10), msg: 'y'.repeat(6000) });
+      expect(await staged()).toBe(11);
+      await writer2.add('message', 'depois', big(11));
+      await writer2.flush();
+      expect((await batches(500)).slice(-2)).toEqual([['enorme'], ['depois']]);
+    } finally {
+      Object.assign(STAGING_LIMITS, saved);
+    }
+  });
+
+  it('a leitura em lotes calcula o tamanho de cada registro uma vez só (antes, com registros grandes, cada lote convertia de novo os que ficavam de fora)', async () => {
+    const id = (await api('POST', 'import.new', {}, A)).operation._id;
+    // Texto aleatório (não comprime): cada registro fica fora da linha da tabela, e ler o JSON dele custa de verdade.
+    const N = 80;
+    const writer = new StagingWriter(id);
+    for (let i = 0; i < N; i++) await writer.add('message', `g${i}`, { importId: `g${i}`, rid: 'c1', u: 'u1', msg: crypto.randomBytes(150_000).toString('base64') });
+    await writer.flush();
+    const max = Number((await pool.query('SELECT max(octet_length(data::text)) AS n FROM import_records WHERE operation_id = $1', [id])).rows[0].n);
+    const saved = { ...STAGING_LIMITS };
+    // Dois registros por lote, a mesma proporção de registros de 16 MB contra o limite de 32 MB.
+    STAGING_LIMITS.readBytes = 2 * max;
+    try {
+      const pass = async () => {
+        const t = performance.now();
+        const sizes: number[] = [];
+        const seen: string[] = [];
+        for await (const b of iterateStaged<any>(id, 'message')) {
+          sizes.push(b.length);
+          seen.push(...b.map((r) => r.importId!));
+        }
+        return { ms: performance.now() - t, sizes, seen };
+      };
+      // A mesma leitura só pelo id, dois por vez: o piso do que ler esses registros custa.
+      const plain = async () => {
+        const t = performance.now();
+        for (let last = 0; ; ) {
+          const r = await pool.query('SELECT id, data FROM import_records WHERE operation_id = $1 AND data_type = $2 AND id > $3 ORDER BY id LIMIT 2', [id, 'message', last]);
+          if (!r.rows.length) break;
+          last = Number(r.rows[r.rows.length - 1].id);
+        }
+        return performance.now() - t;
+      };
+      await plain();
+      const r = await pass();
+      expect(r.sizes).toEqual(Array(N / 2).fill(2));
+      expect(r.seen).toEqual(Array.from({ length: N }, (_, i) => `g${i}`));
+      const floor = Math.min(await plain(), await plain());
+      const ms = Math.min(r.ms, (await pass()).ms);
+      // Antes: uns 20 vezes o piso (cada lote convertia de novo todos os que vinham depois).
+      expect(ms).toBeLessThan(4 * floor + 100);
+    } finally {
+      Object.assign(STAGING_LIMITS, saved);
+    }
+  });
+
+  it('gravar um registro de 15 MB com 480 mil ids não segura o event loop, e U+0000 e meio emoji nele continuam limpos (antes uns 700 ms de uma vez)', async () => {
+    const id = (await api('POST', 'import.new', {}, A)).operation._id;
+    const users = Array.from({ length: 480_000 }, (_, i) => `U${i.toString(36).padStart(8, '0')}${'z'.repeat(20)}`);
+    users[1] = 'sujo\u0000';
+    users[2] = 'meio\ud83d';
+    const rec = { importId: 'grande', rid: 'c1', u: 'u1', msg: 'texto com \\u0000 digitado', reactions: { ':smile:': users, ':ok\u0000:': ['u1'] } };
+    // O piso: o JSON.stringify do registro roda inteiro de uma vez.
+    const floor = Math.min(
+      ...[0, 1].map(() => {
+        const t = performance.now();
+        JSON.stringify(rec);
+        return performance.now() - t;
+      }),
+    );
+    let last = performance.now();
+    let lag = 0;
+    const timer = setInterval(() => {
+      const now = performance.now();
+      lag = Math.max(lag, now - last);
+      last = now;
+    }, 1);
+    try {
+      const writer = new StagingWriter(id);
+      await writer.add('message', 'grande', rec);
+      await writer.add('message', 'pequena', { importId: 'pequena', rid: 'c1', u: 'u1', msg: 'oi' });
+      await writer.flush();
+    } finally {
+      clearInterval(timer);
+    }
+    // Medido: perto do piso. Antes, de 4 a 10 vezes ele (a lista do lote escapada pelo node-postgres e uma função de
+    // limpeza chamada para cada um dos 480 mil valores).
+    expect(lag).toBeLessThan(2.5 * floor + 20);
+    const rows = (
+      await pool.query(
+        `SELECT import_id, jsonb_array_length(data->'reactions'->':smile:') AS n, data->'reactions'->':smile:'->>1 AS a, data->'reactions'->':smile:'->>2 AS b,
+                data->>'msg' AS msg, data->'reactions' ? ':ok:' AS ok FROM import_records WHERE operation_id = $1 ORDER BY id`,
+        [id],
+      )
+    ).rows;
+    expect(rows.map((r) => r.import_id)).toEqual(['grande', 'pequena']);
+    expect(rows[0]).toMatchObject({ n: 480_000, a: 'sujo', b: 'meio�', msg: 'texto com \\u0000 digitado', ok: true });
+  });
+
+  it('ids compridos não são cortados na gravação: as mensagens continuam ligadas ao canal e ao autor (antes o corte em 500 deixava "Sala não encontrada")', async () => {
+    const canal = `canal-${'c'.repeat(600)}`;
+    const nome = 'u'.repeat(600);
+    const zip = await zipBuffer({
+      'users.csv': `ana.longa,ana.longa@ex.com,Ana\n${nome},,Longo\n`,
+      'channels.csv': `${canal},ana.longa,public,ana.longa;${nome}\n`,
+      [`${canal}/mensagens.csv`]: `${nome},1704100000000,do usuario longo no canal longo\n`,
+    });
+    const r = await upload('csv', 'longos.zip', zip, { type: 'application/zip' });
+    expect(r.success).toBe(true);
+    expect(await waitOp(settled)).toMatchObject({ status: 'importer_user_selection', count: { users: 2, channels: 1, messages: 1 } });
+    expect((await api('POST', 'startImport', { input: { users: { all: true }, channels: { all: true } } }, A)).success).toBe(true);
+    const done = await waitOp(settled, 30_000);
+    expect(done).toMatchObject({ status: 'importer_done', count: { completed: 4, error: 0 } });
+    const msg = (await pool.query(`SELECT m.username, r.name FROM messages m JOIN rooms r ON r.id = m.room_id WHERE m.msg = 'do usuario longo no canal longo'`)).rows;
+    expect(msg).toHaveLength(1);
+  });
+
+  it('texto de mensagem do CSV acima de 40.000 caracteres é cortado na leitura, com aviso por mensagem e depois só a contagem (antes ia inteiro, até 1 milhão)', async () => {
+    // Texto aleatório: com letras repetidas o .zip seria recusado pela taxa de compressão.
+    const text = (n: number) => crypto.randomBytes(n).toString('base64').slice(0, n);
+    const lines = Array.from({ length: 51 }, (_, i) => `ana.corte,${1704100000000 + i * 1000},${text(45_000)}`);
+    lines.push(`ana.corte,1704200000000,${text(40_000)}`);
+    // 40 mil emoji: 80 mil unidades UTF-16, mas 40 mil caracteres. Não é cortado.
+    lines.push(`ana.corte,1704200001000,${'😀'.repeat(40_000)}`);
+    const zip = await zipBuffer({
+      'users.csv': 'ana.corte,ana.corte@ex.com,Ana\n',
+      'channels.csv': 'corte,ana.corte,public,ana.corte\n',
+      'corte/mensagens.csv': `${lines.join('\n')}\n`,
+    });
+    expect((await upload('csv', 'cortes.zip', zip, { type: 'application/zip' })).success).toBe(true);
+    const op = await waitOp(settled, 30_000);
+    expect(op).toMatchObject({ status: 'importer_user_selection', count: { messages: 53 } });
+    const staged = (await pool.query(`SELECT length(data->>'msg') AS n FROM import_records WHERE operation_id = $1 AND data_type = 'message' ORDER BY id`, [op._id])).rows.map((r) => r.n);
+    expect(staged).toEqual(Array(53).fill(40_000));
+    const cuts = op.warnings.filter((w: string) => w.startsWith('Mensagem cortada'));
+    expect(cuts).toHaveLength(50);
+    expect(cuts[0]).toBe('Mensagem cortada em "csv:c:corte" (2024-01-01T09:06:40.000Z): o texto passava de 40.000 caracteres, e o resto foi descartado.');
+    expect(op.warnings).toContain('E mais 1 mensagem cortada por passar de 40.000 caracteres.');
+  });
+
+  it('.zip pequeno com mais registros que bytes é recusado; uma exportação de verdade passa (antes 160 KB de .zip viravam 3 milhões de mensagens)', async () => {
+    const saved = { ...ZIP_LIMITS };
+    // O mínimo de verdade é 100 mil registros; a conta é a mesma.
+    ZIP_LIMITS.recordsMin = 2000;
+    try {
+      // Arquivos abaixo de 1 MiB (a taxa de cada um não é conferida) e o .zip abaixo de 64 MiB (nem a do .zip inteiro).
+      const files: Record<string, string> = { 'users.csv': 'ana.bomba,ana.bomba@ex.com,Ana\n', 'channels.csv': 'bomba,ana.bomba,public,ana.bomba\n' };
+      for (let i = 0; i < 10; i++) files[`bomba/parte${i}.csv`] = 'ana.bomba,1704100000000,x\n'.repeat(20_000);
+      const bomb = await zipBuffer(files);
+      expect(bomb.length).toBeLessThan(20_000);
+      expect((await upload('csv', 'bomba.zip', bomb, { type: 'application/zip' })).success).toBe(true);
+      const op = await waitOp(settled, 30_000);
+      expect(op.status).toBe('importer_import_failed');
+      expect(op.error).toMatch(/^O \.zip parece corrompido ou malicioso: a leitura passou de [\d.]+ registros \(usuários, salas, mensagens e contatos\), mais de 2 para cada byte do \.zip \(\d+(,\d)? KB\)\./);
+      expect(Number((await pool.query('SELECT count(*) FROM import_records WHERE operation_id = $1', [op._id])).rows[0].count)).toBe(0);
+
+      // Mensagens de verdade: autores, horários e textos variados. Comprimem umas 5 vezes, uns 15 bytes por linha.
+      const words = 'oi bom dia reunião amanhã projeto entrega cliente revisar documento pronto obrigado ok vamos agora depois'.split(' ');
+      const pick = (n: number) => Array.from({ length: n }, () => words[crypto.randomInt(words.length)]).join(' ');
+      const people = ['ana.real', 'beto.real', 'caio.real', 'dani.real', 'eva.real'];
+      let ts = 1704100000000;
+      const msgs = Array.from({ length: 6000 }, () => `${people[crypto.randomInt(people.length)]},${(ts += crypto.randomInt(1000, 600_000))},${pick(3 + crypto.randomInt(12))}`);
+      const real = await zipBuffer({
+        'users.csv': people.map((p) => `${p},${p}@empresa.com.br,${p}`).join('\n'),
+        'channels.csv': `geral-real,ana.real,public,${people.join(';')}\n`,
+        'geral-real/mensagens.csv': `${msgs.join('\n')}\n`,
+      });
+      expect(real.length).toBeGreaterThan(10 * 6000);
+      expect((await upload('csv', 'real.zip', real, { type: 'application/zip' })).success).toBe(true);
+      expect(await waitOp(settled, 30_000)).toMatchObject({ status: 'importer_user_selection', count: { messages: 6000 } });
+    } finally {
+      Object.assign(ZIP_LIMITS, saved);
+    }
   });
 
   it('cancelar uma importação que roda em outra instância apaga o hash das senhas', async () => {

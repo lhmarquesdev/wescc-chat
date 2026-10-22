@@ -109,16 +109,19 @@ describe('importador CSV: formato', () => {
   it('lê o .zip de exemplo: usuários, canais, conversas diretas, mensagens e contatos', async () => {
     const r = await csv(EXAMPLE);
     expect(r.warnings).toEqual([]);
+    // Quem está em users.csv é referido pelo id da pessoa (o e-mail), em canais, conversas e mensagens; os ids das
+    // conversas e das mensagens continuam feitos dos nomes, para reimportar sem duplicar.
+    const [alice, bob, carol] = ['alice', 'bob', 'carol'].map((u) => `csv:u:${u}@example.com`);
     expect(r.users).toEqual([
-      { importIds: ['alice'], emails: ['alice@example.com'], username: 'alice', name: 'Alice Smith' },
-      { importIds: ['bob'], emails: ['bob@example.com'], username: 'bob', name: 'Bob Jones' },
-      { importIds: ['carol'], emails: ['carol@example.com'], username: 'carol', name: "O'Neil, Carol" },
+      { importIds: [alice], emails: ['alice@example.com'], username: 'alice', name: 'Alice Smith' },
+      { importIds: [bob], emails: ['bob@example.com'], username: 'bob', name: 'Bob Jones' },
+      { importIds: [carol], emails: ['carol@example.com'], username: 'carol', name: "O'Neil, Carol" },
     ]);
     expect(r.channels).toEqual([
-      { importIds: ['csv:c:town-square'], t: 'c', name: 'town-square', creator: 'alice', users: ['alice', 'bob', 'carol'] },
-      { importIds: ['csv:c:design-team'], t: 'p', name: 'design-team', creator: 'bob', users: ['bob', 'carol'] },
-      { importIds: ['csv:d:alice/bob'], t: 'd', users: ['alice', 'bob'] },
-      { importIds: ['csv:d:alice/carol'], t: 'd', users: ['alice', 'carol'] },
+      { importIds: ['csv:c:town-square'], t: 'c', name: 'town-square', creator: alice, users: [alice, bob, carol] },
+      { importIds: ['csv:c:design-team'], t: 'p', name: 'design-team', creator: bob, users: [bob, carol] },
+      { importIds: ['csv:d:alice/bob'], t: 'd', users: [alice, bob] },
+      { importIds: ['csv:d:alice/carol'], t: 'd', users: [alice, carol] },
     ]);
     expect(r.messages).toHaveLength(8);
     expect(r.messages.map((m) => m.rid)).toEqual([
@@ -134,7 +137,7 @@ describe('importador CSV: formato', () => {
     // Texto entre aspas com quebra de linha e aspas duplicadas.
     expect(r.messages[2].msg).toBe('Two lines:\nsecond line with "quotes"');
     expect(r.messages[1].msg).toBe('Hi Alice, welcome aboard');
-    expect(r.messages[7]).toMatchObject({ u: 'carol', msg: 'Lunch?', ts: new Date(1700000420000).toISOString() });
+    expect(r.messages[7]).toMatchObject({ u: carol, msg: 'Lunch?', ts: new Date(1700000420000).toISOString() });
     expect(r.contacts).toEqual([
       { importIds: ['contact-1'], name: 'Jane Doe', emails: ['jane@example.com', 'jd@example.org'], phones: ['+5511999990000'], manager: 'alice', customFields: { company: 'ACME' } },
     ]);
@@ -178,9 +181,10 @@ describe('importador CSV: formato', () => {
       'Users.CSV': ' alice , alice@example.com , Alice Smith \n',
       'Channels.CSV': ' general , alice , Public , " alice ; bob " \nsecret , bob , Private , carol;;dave;\n',
     });
-    expect(r.users).toEqual([{ importIds: ['alice'], emails: ['alice@example.com'], username: 'alice', name: 'Alice Smith' }]);
+    const alice = 'csv:u:alice@example.com';
+    expect(r.users).toEqual([{ importIds: [alice], emails: ['alice@example.com'], username: 'alice', name: 'Alice Smith' }]);
     expect(r.channels).toEqual([
-      { importIds: ['csv:c:general'], t: 'c', name: 'general', creator: 'alice', users: ['alice', 'bob'] },
+      { importIds: ['csv:c:general'], t: 'c', name: 'general', creator: alice, users: [alice, 'bob'] },
       { importIds: ['csv:c:secret'], t: 'p', name: 'secret', creator: 'bob', users: ['carol', 'dave'] },
     ]);
   });
@@ -211,11 +215,53 @@ describe('importador CSV: formato', () => {
       'general/m.csv': 'alice,1700000000000,oi\ndana,1700000001000,olá\n@ghost,1700000002000,boo\n',
       'directmessages/m.csv': 'dana,bob,1700000003000,oi bob\n',
     });
-    // Sem diferença de maiúsculas, as referências usam o nome como está em users.csv.
-    expect(r.channels[0]).toMatchObject({ creator: 'Alice', users: ['Alice', 'dana'] });
-    expect(r.messages.map((m) => m.u)).toEqual(['Alice', 'dana', 'ghost', 'dana']);
+    // Sem diferença de maiúsculas, quem está em users.csv é referido pelo id da pessoa; os outros, pelo nome.
+    const alice = 'csv:u:alice@x.com';
+    expect(r.channels[0]).toMatchObject({ creator: alice, users: [alice, 'dana'] });
+    expect(r.messages.map((m) => m.u)).toEqual([alice, 'dana', 'ghost', 'dana']);
     expect(r.channels[1]).toEqual({ importIds: ['csv:d:bob/dana'], t: 'd', users: ['bob', 'dana'] });
     expect(r.users).toHaveLength(1);
+  });
+
+  it('o id da pessoa de users.csv é o e-mail: outro arquivo com o mesmo nome, mas outra pessoa, tem outro id', async () => {
+    const files = (row: string) => ({
+      'users.csv': `${row}\n`,
+      'channels.csv': 'rh,joao,private,joao;maria\n',
+      'rh/m.csv': 'joao,1700000000000,salários\n',
+      'directmessages/d.csv': 'maria,JOAO,1700000001000,oi\n',
+    });
+    const silva = await csv(files('joao,Joao.Silva@Outra.example,João Silva'));
+    const id = 'csv:u:joao.silva@outra.example';
+    expect(silva.users[0].importIds).toEqual([id]);
+    expect(silva.channels[0]).toMatchObject({ creator: id, users: [id, 'maria'] });
+    // O id da conversa é feito dos nomes (a conversão confere as pessoas), e os membros são as pessoas.
+    expect(silva.channels[1]).toEqual({ importIds: ['csv:d:joao/maria'], t: 'd', users: [id, 'maria'] });
+    expect(silva.messages.map((m) => m.u)).toEqual([id, 'maria']);
+    // Mesmo nome, outro e-mail: outro id para a pessoa (o import_map de um não serve para o outro).
+    const pereira = await csv(files('joao,joao.pereira@explorer.example,João Pereira'));
+    expect(pereira.users[0].importIds).toEqual(['csv:u:joao.pereira@explorer.example']);
+    expect(pereira.messages.map((m) => m.u)).toEqual(['csv:u:joao.pereira@explorer.example', 'maria']);
+    // Sem e-mail, ou com algo que não é e-mail no lugar dele, o id é o nome (com prefixo, nunca o nome puro).
+    for (const row of ['joao,,João', 'joao,-,João', 'JOAO, n/a ,João']) expect((await csv(files(row))).users[0].importIds).toEqual(['csv:u:joao']);
+  });
+
+  it('os ids das mensagens e das conversas diretas vêm dos nomes: pôr o e-mail em users.csv ou mandar o CSV sem users.csv não muda nenhum', async () => {
+    const base = {
+      'channels.csv': 'geral,ana,public,ana;bia\n',
+      'geral/m.csv': 'ana,1700000000000,primeira\nbia,1700000001000,segunda\n',
+      'directmessages/dm.csv': 'ana,bia,1700000002000,dm\n',
+    };
+    const semEmail = await csv({ 'users.csv': 'ana,,Ana\nbia,bia@x.example,Bia\n', ...base });
+    const comEmail = await csv({ 'users.csv': 'ana,ana@x.example,Ana\nbia,bia@x.example,Bia\n', ...base });
+    const semUsers = await csv(base);
+    const keys = (r: Run) => ({ messages: r.messages.map((m) => [m.importId, m.rid]), directs: r.channels.filter((c) => c.t === 'd').map((c) => c.importIds) });
+    expect(keys(semEmail)).toEqual(keys(comEmail));
+    expect(keys(semUsers)).toEqual(keys(comEmail));
+    expect(keys(comEmail).directs).toEqual([['csv:d:ana/bia']]);
+    // Quem é a pessoa muda com o e-mail; os ids do conteúdo, não.
+    expect(semEmail.messages[0].u).toBe('csv:u:ana');
+    expect(comEmail.messages[0].u).toBe('csv:u:ana@x.example');
+    expect(semUsers.messages[0].u).toBe('ana');
   });
 
   it('ignora __MACOSX, pastas, arquivos ocultos e o que fica solto na raiz', async () => {
@@ -295,8 +341,8 @@ describe('importador CSV: correções em relação ao Rocket.Chat', () => {
       'general/m.csv': withBom('alice,1700000000000,oi\n'),
       'contacts.csv': withBom('name,emails\nJane,jane@x.com\n'),
     });
-    expect(r.users[0].importIds).toEqual(['alice']);
-    expect(r.messages[0].u).toBe('alice');
+    expect(r.users[0].importIds).toEqual(['csv:u:alice@x.com']);
+    expect(r.messages[0].u).toBe('csv:u:alice@x.com');
     expect(r.contacts[0]).toMatchObject({ name: 'Jane' });
     expect(r.contacts[0].customFields).toBeUndefined();
   });
@@ -472,10 +518,10 @@ describe('importador CSV: correções em relação ao Rocket.Chat', () => {
       'users.csv': 'username,email,name\nsemmail,,Sem Mail\n,maria.silva@x.com,Maria\n,,Só Nome\nzeca\nALICE,a@x.com,Alice\nalice,outra@x.com,Outra\n',
     });
     expect(r.users).toEqual([
-      { importIds: ['semmail'], emails: [], username: 'semmail', name: 'Sem Mail' },
-      { importIds: ['maria.silva'], emails: ['maria.silva@x.com'], username: 'maria.silva', name: 'Maria' },
-      { importIds: ['zeca'], emails: [], username: 'zeca' },
-      { importIds: ['ALICE'], emails: ['a@x.com'], username: 'ALICE', name: 'Alice' },
+      { importIds: ['csv:u:semmail'], emails: [], username: 'semmail', name: 'Sem Mail' },
+      { importIds: ['csv:u:maria.silva@x.com'], emails: ['maria.silva@x.com'], username: 'maria.silva', name: 'Maria' },
+      { importIds: ['csv:u:zeca'], emails: [], username: 'zeca' },
+      { importIds: ['csv:u:a@x.com'], emails: ['a@x.com'], username: 'ALICE', name: 'Alice' },
     ]);
     expect(r.warnings).toEqual([
       '"users.csv": a primeira linha parece um cabeçalho e foi ignorada (este arquivo não leva cabeçalho).',
@@ -779,7 +825,7 @@ describe('arquivos grandes, malformados ou feitos para travar o servidor', () =>
     // Antes da correção, as 500 mil linhas ficavam na memória (mais de 100 MB) antes do primeiro usuário.
     expect(heap).toBeGreaterThanOrEqual(0);
     expect(heap).toBeLessThan(30 * MiB);
-    expect(out.users).toEqual([{ importIds: ['a'], emails: [], username: 'a' }]);
+    expect(out.users).toEqual([{ importIds: ['csv:u:a'], emails: [], username: 'a' }]);
     expect(out.warnings).toEqual(['"users.csv": 524287 usuários repetidos ignorados (vale a primeira linha) (linhas 2, 3, 4, 5, 6 e outras).']);
   });
 
@@ -988,6 +1034,38 @@ describe('arquivos grandes, malformados ou feitos para travar o servidor', () =>
     });
     expect(r.messages.map((m) => m.msg)).toEqual(['Olá, tudo bem?', 'Olá, tudo bem?', 'Olá,  tudo, bem']);
   });
+
+  it('nomes enormes viram ids de tamanho limitado, iguais em todo lugar que os cita e diferentes entre si', async () => {
+    // O import_map indexa o id, e o índice do PostgreSQL recusa uma linha de mais de uns 2.700 bytes.
+    const a = `${'c'.repeat(3000)}a`;
+    const b = `${'c'.repeat(3000)}b`;
+    const u = 'u'.repeat(3000);
+    const r = await csv({
+      'users.csv': `${u},,Longo\nana,${'e'.repeat(300)}@x.com,Ana\nbia,bia@x.com,Bia\n`,
+      'channels.csv': `${a},${u},public,${u};ana\n${b},ana,private,ana\ncurto,bia,public,bia\n`,
+      [`${a}/m.csv`]: `${u},1700000000000,oi\n`,
+      [`${b}/m.csv`]: 'ana,1700000000000,olá\n',
+      'directmessages/d.csv': `${u},ana,1700000001000,direta\n`,
+    });
+    const [longo, ana, bia] = r.users.map((x) => x.importIds[0]);
+    // Um e-mail de mais de 254 caracteres não é e-mail: o id da pessoa sai do nome.
+    expect([ana, bia]).toEqual(['csv:u:ana', 'csv:u:bia@x.com']);
+    expect(longo).toMatch(/^csv:u:u{400,}~[\w-]{27}$/);
+    const [ca, cb, curto, dm] = r.channels;
+    expect(curto.importIds).toEqual(['csv:c:curto']);
+    for (const id of [longo, ca.importIds[0], cb.importIds[0], dm.importIds[0]]) expect(id.length).toBeLessThanOrEqual(500);
+    expect(ca.importIds[0]).not.toBe(cb.importIds[0]);
+    expect(ca.importIds[0].startsWith('csv:c:ccc')).toBe(true);
+    expect(ca.users).toEqual([longo, ana]);
+    expect(ca.creator).toBe(longo);
+    expect(dm).toMatchObject({ t: 'd', users: [longo, ana].sort() });
+    expect(r.messages.map((m) => [m.rid, m.u, m.msg])).toEqual([
+      [ca.importIds[0], longo, 'oi'],
+      [cb.importIds[0], ana, 'olá'],
+      [dm.importIds[0], longo, 'direta'],
+    ]);
+    expect(r.warnings).toEqual([]);
+  });
 });
 
 describe('importador de usuários do Slack', () => {
@@ -1009,9 +1087,21 @@ describe('importador de usuários do Slack', () => {
       { importIds: ['bot@example.com'], emails: ['bot@example.com'], username: 'helperbot', name: 'Helper Bot', type: 'bot' },
       { importIds: ['dave@example.com'], emails: ['dave@example.com'], username: 'dave', name: 'Dave Old', deleted: true },
     ]);
-    expect(r.warnings).toEqual(['"membros.csv": linha sem e-mail ignorada (linha 6).']);
+    expect(r.warnings).toEqual(['"membros.csv": linha sem e-mail válido ignorada (linha 6).']);
     expect(r.steps).toEqual([ST.preparingUsers]);
     expect(r.rates.at(-1)).toBe(100);
+  });
+
+  it('"-", "n/a" ou espaços no lugar do e-mail não viram o id de ninguém: a linha é ignorada como sem e-mail', async () => {
+    const r = await slackUsers('username,email,status\nbob,-,Member\ncarol,n/a,Deactivated\ndan, ,Member\neva,eva@x.com,Member\nfred,-,Member\n');
+    expect(r.users).toEqual([{ importIds: ['eva@x.com'], emails: ['eva@x.com'], username: 'eva', name: 'eva' }]);
+    expect(r.warnings).toEqual(['"membros.csv": 4 linhas sem e-mail válido ignoradas (linhas 2, 3, 4 e 6).']);
+  });
+
+  it('e-mail de mais de 254 caracteres não é e-mail: a linha é ignorada (como id, derrubava a gravação do vínculo)', async () => {
+    const r = await slackUsers(`username,email,status\nzed,${'z'.repeat(300)}@x.com,Member\neva,eva@x.com,Member\n`);
+    expect(r.users.map((u) => u.importIds)).toEqual([['eva@x.com']]);
+    expect(r.warnings).toEqual(['"membros.csv": linha sem e-mail válido ignorada (linha 2).']);
   });
 
   it('usa os nomes das colunas do cabeçalho, em qualquer ordem', async () => {
@@ -1081,6 +1171,27 @@ describe('importador de contatos do omnichannel', () => {
     expect(empty.warnings).toEqual(['"contatos.csv" está vazio.']);
   });
 
+  it('"-" ou "n/a" no lugar do e-mail não identificam o contato: contatos diferentes continuam diferentes', async () => {
+    const r = await contacts('name,emails,phones\nAna,-,1111\nBob,-,2222\nCid,n/a;cid@x.com,\nDé,n/a,\n');
+    expect(r.contacts.map((c) => [c.name, c.importIds[0]])).toEqual([
+      ['Ana', 'contact:1111'],
+      ['Bob', 'contact:2222'],
+      ['Cid', 'contact:cid@x.com'],
+      ['Dé', 'contact:row5'],
+    ]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('id enorme do contato fica com tamanho limitado, e dois ids com o mesmo começo continuam diferentes', async () => {
+    const id = 'i'.repeat(3000);
+    const r = await contacts(`name,phones,id\nZé,1,${id}\nZá,2,${id}x\nZu,3,curto\n`);
+    const ids = r.contacts.map((c) => c.importIds[0]);
+    expect(ids[2]).toBe('curto');
+    expect(ids[0]).not.toBe(ids[1]);
+    for (const x of ids) expect(x.length).toBeLessThanOrEqual(500);
+    expect(r.warnings).toEqual([]);
+  });
+
   it('parseContactsCsv devolve quantos contatos foram lidos', async () => {
     const { ctx, out } = context(memoryArchive({}));
     expect(await parseContactsCsv(Buffer.from('name,phones\nA,1\nB,2\n,\n'), ctx, 'lista.csv')).toBe(2);
@@ -1125,8 +1236,8 @@ describe('importação CSV de ponta a ponta', () => {
     ops.push(r.operation._id);
     return settle();
   }
-  async function run() {
-    expect((await api('POST', 'startImport', { input: { users: { all: true }, channels: { all: true }, contacts: { all: true } } }, A)).success).toBe(true);
+  async function run(input: unknown = { users: { all: true }, channels: { all: true }, contacts: { all: true } }) {
+    expect((await api('POST', 'startImport', { input }, A)).success).toBe(true);
     const done = await settle(60_000);
     expect(done.status).toBe(ST.done);
     return done;
@@ -1195,5 +1306,139 @@ describe('importação CSV de ponta a ponta', () => {
     const bad = await upload('csv', 'vazio.zip', await zipFile([['readme.txt', 'nada aqui']]));
     expect(bad.status).toBe(ST.failed);
     expect(bad.error).toMatch(/^Nenhum dado válido foi encontrado no arquivo\..*readme\.txt/);
+  });
+
+  it('reimportar depois de pôr o e-mail que faltava em users.csv, ou sem users.csv, não duplica mensagens nem conversas', async () => {
+    const k = Math.random().toString(36).slice(2, 7);
+    const base: [string, string][] = [
+      ['channels.csv', `geral${k},ana${k},public,ana${k};bia${k}\n`],
+      [`geral${k}/m.csv`, `ana${k},1700000000000,primeira\nbia${k},1700000001000,segunda\n`],
+      ['directmessages/dm.csv', `ana${k},bia${k},1700000002000,dm\n`],
+    ];
+    const state = async () => ({
+      channel: (
+        await pool.query(`SELECT m.username, m.msg FROM messages m JOIN rooms r ON r.id = m.room_id WHERE r.name = $1 AND m.t IS NULL ORDER BY m.created_at`, [`geral${k}`])
+      ).rows,
+      dm: await count(`SELECT count(*)::int AS n FROM messages m JOIN rooms r ON r.id = m.room_id WHERE r.t = 'd' AND $1 = ANY(r.usernames) AND m.t IS NULL`, [`ana${k}`]),
+      accounts: await count('SELECT count(*)::int AS n FROM users WHERE username LIKE $1', [`ana${k}%`]),
+    });
+    await upload('csv', 'a.zip', await zipFile([['users.csv', `ana${k},,Ana\nbia${k},bia${k}@x.example,Bia\n`], ...base]));
+    await run();
+    const before = await state();
+    expect(before).toEqual({
+      channel: [
+        { username: `ana${k}`, msg: 'primeira' },
+        { username: `bia${k}`, msg: 'segunda' },
+      ],
+      dm: 1,
+      accounts: 1,
+    });
+    await upload('csv', 'a.zip', await zipFile([['users.csv', `ana${k},ana${k}@x.example,Ana\nbia${k},bia${k}@x.example,Bia\n`], ...base]));
+    await run();
+    expect(await state()).toEqual(before);
+    await upload('csv', 'b.zip', await zipFile(base));
+    await run();
+    expect(await state()).toEqual(before);
+  });
+
+  it('quem foi desmarcado na prévia porque já existe aqui continua no canal, e as mensagens são da conta daqui', async () => {
+    const k = Math.random().toString(36).slice(2, 7);
+    const r0 = await api('POST', 'users.create', { username: `des${k}`, name: 'Des', email: `des${k}@x.example`, password: 'senha-forte-1', verified: true }, A);
+    expect(r0.success).toBe(true);
+    await upload(
+      'csv',
+      'd.zip',
+      await zipFile([
+        ['users.csv', `des${k},des${k}@x.example,Outro Nome\noutro${k},outro${k}@x.example,Outro\n`],
+        ['channels.csv', `canal${k},outro${k},private,des${k};outro${k}\n`],
+        [`canal${k}/m.csv`, `des${k},1700000000000,mensagem do des\n`],
+      ]),
+    );
+    const preview = await api('GET', 'getImportFileData', undefined, A);
+    const desId = preview.users.find((u: any) => u.username === `des${k}`);
+    expect(desId.is_email_taken).toBe(true);
+    const done = await run({ users: { list: preview.users.filter((u: any) => u !== desId).map((u: any) => u.user_id) }, channels: { all: true }, contacts: { all: true } });
+    expect(done.count).toMatchObject({ error: 0 });
+    const room = (await pool.query('SELECT id FROM rooms WHERE name = $1', [`canal${k}`])).rows[0].id;
+    const members = (await pool.query('SELECT u.username FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.room_id = $1', [room])).rows.map((r) => r.username);
+    expect(members.sort()).toEqual([`des${k}`, `outro${k}`]);
+    expect((await pool.query('SELECT user_id, msg FROM messages WHERE room_id = $1 AND t IS NULL', [room])).rows).toEqual([{ user_id: r0.user._id, msg: 'mensagem do des' }]);
+    expect((await pool.query('SELECT name FROM users WHERE id = $1', [r0.user._id])).rows[0].name).toBe('Des');
+  });
+
+  it('listas de membros com "-" no lugar do e-mail não juntam nem desativam outra pessoa', async () => {
+    const k = Math.random().toString(36).slice(2, 7);
+    const head = 'username,email,status\n';
+    const first = await upload('slack-users', 'a.csv', `${head}bob${k},-,Member\nreal${k},real${k}@x.example,Member\n`);
+    expect(first.warnings).toEqual(['"a.csv": linha sem e-mail válido ignorada (linha 2).']);
+    await run();
+    await upload('slack-users', 'b.csv', `${head}carol${k},n/a,Deactivated\nreal${k},real${k}@x.example,Member\n`);
+    await run();
+    expect(await count('SELECT count(*)::int AS n FROM users WHERE username IN ($1, $2)', [`bob${k}`, `carol${k}`])).toBe(0);
+    expect((await pool.query('SELECT active FROM users WHERE username = $1', [`real${k}`])).rows).toEqual([{ active: true }]);
+    expect(await count(`SELECT count(*)::int AS n FROM import_map WHERE import_id IN ('-', 'n/a')`)).toBe(0);
+  });
+
+  it('nomes de canal e de usuário e ids de contato enormes são importados (o índice do banco recusava o vínculo com um erro em inglês)', async () => {
+    // Letras aleatórias: o PostgreSQL comprime uma linha do índice repetitiva, e "u" repetido passava.
+    const rnd = (n: number) => Array.from({ length: n }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('');
+    const canal = `canal-${rnd(4000)}`;
+    const nome = rnd(4000);
+    const k = Math.random().toString(36).slice(2, 7);
+    const op = await upload(
+      'csv',
+      'enormes.zip',
+      await zipFile([
+        ['users.csv', `${nome},,Longo\nana${k},ana${k}@x.example,Ana\n`],
+        ['channels.csv', `${canal},ana${k},public,ana${k};${nome}\n`],
+        [`${canal}/m.csv`, `${nome},1700000000000,do longo no canal longo ${k}\n`],
+        ['directmessages/d.csv', `${nome},ana${k},1700000001000,direta longa ${k}\n`],
+        ['contacts.csv', `name,phones,id\nContato ${k},55${Math.floor(Math.random() * 1e9)},${rnd(4000)}\n`],
+      ]),
+    );
+    expect(op).toMatchObject({ status: ST.userSelection, count: { users: 2, channels: 2, messages: 2, contacts: 1 } });
+    const done = await run();
+    expect(done.count).toMatchObject({ total: 7, completed: 7, error: 0 });
+    const msgs = (await pool.query(`SELECT r.t, m.msg FROM messages m JOIN rooms r ON r.id = m.room_id WHERE m.msg LIKE $1 ORDER BY m.created_at`, [`%${k}`])).rows;
+    expect(msgs).toEqual([
+      { t: 'c', msg: `do longo no canal longo ${k}` },
+      { t: 'd', msg: `direta longa ${k}` },
+    ]);
+    expect(await count('SELECT count(*)::int AS n FROM livechat_visitors WHERE name = $1', [`Contato ${k}`])).toBe(1);
+  });
+
+  it('um CSV de outra origem com o mesmo nome de usuário não fica com o vínculo de quem um CSV anterior importou', async () => {
+    const k = Math.random().toString(36).slice(2, 7);
+    const create = async (username: string, email: string) => {
+      const r = await api('POST', 'users.create', { username, name: username, email, password: 'senha-forte-1', verified: true }, A);
+      expect(r.success).toBe(true);
+      return r.user._id as string;
+    };
+    const pereira = await create(`joao${k}`, `pereira${k}@explorer.example`);
+    const maria = await create(`maria${k}`, `maria${k}@explorer.example`);
+    // 1º CSV: outro João, com outro e-mail, ganha a conta "joao.2".
+    await upload('csv', 'silva.zip', await zipFile([['users.csv', `joao${k},silva${k}@outra.example,João Silva\n`]]));
+    await run();
+    const silva = (await pool.query('SELECT id, username FROM users WHERE lower(email) = $1', [`silva${k}@outra.example`])).rows[0];
+    expect(silva.username).toBe(`joao${k}.2`);
+    // 2º CSV, de outra origem: só o nome, sem e-mail. Pelo nome é o João daqui, não a conta criada para o Silva.
+    await upload(
+      'csv',
+      'rh.zip',
+      await zipFile([
+        ['users.csv', `joao${k},,João\n`],
+        ['channels.csv', `rh${k},joao${k},private,joao${k};maria${k}\n`],
+        [`rh${k}/m.csv`, `joao${k},1700000000000,salários do RH\n`],
+        ['directmessages/d.csv', `maria${k},joao${k},1700000001000,oi João\n`],
+      ]),
+    );
+    await run();
+    const rh = (await pool.query('SELECT id FROM rooms WHERE name = $1', [`rh${k}`])).rows[0].id;
+    const members = (await pool.query('SELECT user_id FROM subscriptions WHERE room_id = $1', [rh])).rows.map((r) => r.user_id);
+    expect(members.sort()).toEqual([pereira, maria].sort());
+    expect((await pool.query('SELECT user_id FROM messages WHERE room_id = $1 AND t IS NULL', [rh])).rows).toEqual([{ user_id: pereira }]);
+    const dms = (await pool.query(`SELECT uids FROM rooms WHERE t = 'd' AND $1 = ANY(uids)`, [maria])).rows.map((r) => [...r.uids].sort());
+    expect(dms).toEqual([[pereira, maria].sort()]);
+    expect(dms.flat()).not.toContain(silva.id);
   });
 });
