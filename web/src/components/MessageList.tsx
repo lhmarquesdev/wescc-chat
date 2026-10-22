@@ -1,15 +1,30 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Message, Subscription } from '@shared/index';
+import { watchAcks } from '../lib/acks';
 import { api } from '../lib/api';
 import { formatDay } from '../lib/format';
 import { useSetting, useStore } from '../lib/store';
+import { AckBar } from './AckBar';
 import { MessageItem, type MessageActions } from './MessageItem';
 import { Spinner } from './ui';
 
 const EMPTY: Message[] = [];
 
-export function MessageList({ rid, sub, actions, canModerate }: { rid: string; sub?: Subscription; actions: MessageActions; canModerate: boolean }) {
+export function MessageList({
+  rid,
+  sub,
+  actions,
+  canModerate,
+  notice,
+}: {
+  rid: string;
+  sub?: Subscription;
+  actions: MessageActions;
+  canModerate: boolean;
+  // Canal de avisos: "Ciente" ligado e se quem vê publica aqui.
+  notice?: { ack: boolean; canPost: boolean };
+}) {
   const data = useStore((s) => s.messages[rid]);
   const list = data?.list ?? EMPTY;
   const ref = useRef<HTMLDivElement>(null);
@@ -20,6 +35,13 @@ export function MessageList({ rid, sub, actions, canModerate }: { rid: string; s
   const jumpTo = params.get('msg');
   const groupingPeriod = useSetting<number>('Message_GroupingPeriod') ?? 300;
   const prevHeight = useRef(0);
+  // Avisos antigos podem pedir "Ciente" mesmo depois que a opção foi desligada no canal.
+  const hasAck = list.some((m) => m.ackRequired);
+  const member = !!sub;
+
+  useEffect(() => {
+    if (member && (notice?.ack || hasAck)) return watchAcks(rid);
+  }, [rid, member, notice?.ack, hasAck]);
 
   const load = useCallback(async () => {
     const r = await api.get('rooms.history', { roomId: rid, count: 50 });
@@ -124,6 +146,8 @@ export function MessageList({ rid, sub, actions, canModerate }: { rid: string; s
           prev.alias === m.alias &&
           new Date(m.ts).getTime() - new Date(prev.ts).getTime() < groupingPeriod * 1000 &&
           !(prev.tcount ?? 0) &&
+          !prev.ackRequired &&
+          !m.ackRequired &&
           !m.tmid;
         return (
           <Fragment key={m._id}>
@@ -138,6 +162,7 @@ export function MessageList({ rid, sub, actions, canModerate }: { rid: string; s
               </div>
             )}
             <MessageItem m={m} grouped={grouped} actions={actions} canModerate={canModerate} />
+            {m.ackRequired && !m.t && <AckBar m={m} rid={rid} canPost={!!notice?.canPost} member={member} />}
           </Fragment>
         );
       })}

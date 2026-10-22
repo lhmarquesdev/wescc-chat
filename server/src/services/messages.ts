@@ -5,9 +5,10 @@ import { newId } from '../lib/ids';
 import { trimEndChars, truncate } from '../lib/text';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
+import { assertCanSendDirect, partyOf } from './direct';
 import { mapMessage } from './mappers';
 import { dispatchNotifications } from './notifications';
-import { getUserRoles, hasPermission, rolesHavePermission } from './permissions';
+import { getUserRoles, hasPermission, restrictedRoleIds, rolesHavePermission } from './permissions';
 import { canAccessRoom, getRoom, getSubscriptionRow, loadRoomForUser, notifyRoomUpdated } from './rooms';
 import { getSetting } from './settings';
 import { recordActivity } from './stats';
@@ -92,6 +93,7 @@ export interface SendInput {
   emoji?: string;
   avatar?: string;
   customFields?: Record<string, unknown>;
+  ackRequired?: boolean; // aviso que pede "Ciente"
 }
 
 export async function canPostInRoom(ctx: Ctx, room: any) {
@@ -100,19 +102,33 @@ export async function canPostInRoom(ctx: Ctx, room: any) {
     if (room.t === 'l' && (await hasPermission(ctx.userId, 'view-livechat-rooms'))) return;
     throw forbidden('Você precisa entrar na sala para enviar mensagens.');
   }
+  return assertCanWrite(ctx, room);
+}
+
+// Regras de escrita, sem exigir inscrição: valem para enviar, editar e criar discussão. Editar ou abrir uma
+// discussão numa sala em que a pessoa não pode enviar seria outro jeito de publicar texto ali.
+async function assertCanWrite(ctx: Ctx, room: any, roles?: string[]) {
   if (room.archived) throw badRequest('error-room-archived', 'Esta sala está arquivada.');
-  const roles = await getUserRoles(ctx.userId, room.id);
-  if (room.ro && !rolesHavePermission(roles, 'post-readonly')) throw forbidden('Esta sala é somente leitura.');
-  if (room.muted?.includes(ctx.username)) throw forbidden('Você está silenciado nesta sala.');
-  if (room.t === 'd' && room.uids.length === 2) {
-    // DM com usuário desativado não aceita mensagens.
-    const other = room.uids.find((u: string) => u !== ctx.userId);
-    if (other) {
-      const o = await one('SELECT active FROM users WHERE id = $1', [other]);
-      if (o && !o.active) throw badRequest('error-user-deactivated', 'Este usuário está desativado.');
-    }
+  roles ??= await getUserRoles(ctx.userId, room.id);
+  if (room.ro && !rolesHavePermission(roles, 'post-readonly')) {
+    throw forbidden(room.notice ? 'Este é um canal de avisos: só os publicadores enviam mensagens.' : 'Esta sala é somente leitura.');
   }
+  if (room.muted?.includes(ctx.username)) throw forbidden('Você está silenciado nesta sala.');
+  if (room.t === 'd') await assertDirectOpen(ctx, room);
+  else await assertCanSendDirect(ctx, room);
   return roles;
+}
+
+// DM: participante desativado (conversa a dois) e política de conversas diretas, com uma só consulta.
+async function assertDirectOpen(ctx: Ctx, room: any) {
+  const restricted = restrictedRoleIds().length > 0;
+  if (room.uids.length !== 2 && !restricted) return;
+  const users = await many('SELECT id, username, roles, active FROM users WHERE id = ANY($1)', [[...new Set([ctx.userId, ...room.uids])]]);
+  if (room.uids.length === 2) {
+    const other = users.find((u) => u.id !== ctx.userId && room.uids.includes(u.id));
+    if (other && !other.active) throw badRequest('error-user-deactivated', 'Este usuário está desativado.');
+  }
+  if (restricted) await assertCanSendDirect(ctx, room, users.map(partyOf));
 }
 
 // ---------- Anexos enviados pelo cliente ----------
@@ -182,6 +198,9 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
   const attachments = opts.internalAttachments ? (input.attachments ?? []) : await sanitizeAttachments(ctx, input.attachments);
   if (!msg && !attachments.length && !input.files?.length) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  if (input.ackRequired && (!room.notice || !room.notice_ack || input.tmid)) {
+    throw badRequest('error-ack-not-allowed', 'Só avisos de um canal de avisos com “Ciente” ativado podem pedir confirmação.');
+  }
 
   if (!opts.skipCommands && msg.startsWith('/') && !input.files?.length) {
     const { runSlashCommand } = await import('./commands');
@@ -220,8 +239,8 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
   if (input.tshow && tmid) extra.tshow = true;
   if (input.customFields) extra.customFields = input.customFields;
   const row = await one(
-    `INSERT INTO messages (id, room_id, user_id, username, user_name, msg, tmid, mentions, channels, attachments, files, alias, emoji, avatar, extra, unread)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+    `INSERT INTO messages (id, room_id, user_id, username, user_name, msg, tmid, mentions, channels, attachments, files, alias, emoji, avatar, extra, unread, ack_required)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
     [
       id,
       room.id,
@@ -239,6 +258,7 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
       input.avatar ?? null,
       JSON.stringify(extra),
       receipts && room.users_count > 1,
+      !!input.ackRequired,
     ],
   );
   if (input.files?.length) {
@@ -348,10 +368,11 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   const max = getSetting<number>('Message_MaxAllowedSize');
   const msg = filterBadWords(text.trim());
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
+  const room = await getRoom(m.room_id);
+  await assertCanWrite(ctx, room, roles);
   if (getSetting('Message_KeepHistory')) {
     await query('INSERT INTO message_history (message_id, room_id, msg, edited_by) VALUES ($1,$2,$3,$4)', [m.id, m.room_id, m.msg, ctx.userId]);
   }
-  const room = await getRoom(m.room_id);
   const { mentions, channels } = await parseMentions(msg, room);
   const row = await one(
     `UPDATE messages SET msg = $2, mentions = $3, channels = $4, edited_at = now(), edited_by = $5, updated_at = now() WHERE id = $1 RETURNING *`,
@@ -387,11 +408,13 @@ export async function removeMessageRow(m: any) {
   const { deleteFilesOfMessage } = await import('./uploads');
   await deleteFilesOfMessage(m.id);
   if (m.tcount > 0) {
-    // Raiz de thread com respostas: mantém o lugar como "mensagem removida".
+    // Raiz de thread com respostas: mantém o lugar como "mensagem removida", sem o pedido de "Ciente" nem as confirmações.
     const row = await one(
-      `UPDATE messages SET msg = '', t = 'rm', attachments = '[]', files = '[]', reactions = '{}', updated_at = now() WHERE id = $1 RETURNING *`,
+      `UPDATE messages SET msg = '', t = 'rm', attachments = '[]', files = '[]', reactions = '{}', ack_required = false, ack_count = 0, updated_at = now()
+       WHERE id = $1 RETURNING *`,
       [m.id],
     );
+    if (m.ack_required) await query('UPDATE message_reads SET ack_at = NULL WHERE message_id = $1 AND ack_at IS NOT NULL', [m.id]);
     bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
   } else {
     await query('DELETE FROM messages WHERE id = $1', [m.id]);
@@ -417,13 +440,46 @@ export async function removeMessageRow(m: any) {
 
 // ---------- Reações, fixar, favoritar ----------
 
+// Os shortcodes que a web desenha como emoji (as chaves de EMOJI em web/src/lib/emoji.ts; um teste confere que são as mesmas).
+export const STANDARD_EMOJI = new Set(
+  (
+    '100 smile smiley grinning blush wink heart_eyes kissing_heart relaxed joy rofl sweat_smile laughing innocent slight_smile upside_down yum ' +
+    'stuck_out_tongue stuck_out_tongue_winking_eye sunglasses nerd thinking neutral_face expressionless no_mouth smirk unamused rolling_eyes ' +
+    'grimacing relieved pensive sleepy sleeping mask nauseated_face sneezing_face hot_face cold_face dizzy_face exploding_head cowboy ' +
+    'partying_face confused worried slight_frown open_mouth astonished flushed pleading_face cry sob scream confounded persevere disappointed ' +
+    'sweat weary tired_face yawning_face triumph rage angry skull poop clown ghost alien robot smiley_cat see_no_evil hear_no_evil speak_no_evil ' +
+    'hugging shushing_face zipper_mouth money_mouth star_struck face_with_monocle saluting_face melting_face wave raised_hand ok_hand v ' +
+    'crossed_fingers metal call_me point_left point_right point_up point_down thumbsup +1 thumbsdown -1 fist punch clap raised_hands open_hands ' +
+    'handshake pray muscle writing_hand eyes brain heart orange_heart yellow_heart green_heart blue_heart purple_heart black_heart broken_heart ' +
+    'two_hearts sparkling_heart heartbeat fire sparkles star star2 zap boom tada confetti_ball balloon gift trophy medal first_place rocket ' +
+    'airplane car coffee beer beers wine_glass pizza hamburger cake birthday apple banana popcorn sun sunny cloud umbrella snowflake rainbow ' +
+    'earth_americas moon dog cat unicorn bug bee tree seedling rose sunflower check white_check_mark heavy_check_mark x warning no_entry question ' +
+    'exclamation bulb memo pencil book books calendar date clock hourglass alarm_clock bell mega loudspeaker email envelope inbox_tray ' +
+    'outbox_tray package paperclip pushpin round_pushpin link lock unlock key hammer wrench gear computer keyboard iphone telephone phone ' +
+    'video_camera camera tv chart_with_upwards_trend chart_with_downwards_trend bar_chart clipboard file_folder mag money_with_wings moneybag ' +
+    'dollar credit_card briefcase house office hospital school checkered_flag triangular_flag_on_post flag_br soccer basketball video_game ' +
+    'musical_note headphones art red_circle green_circle yellow_circle blue_circle white_circle black_circle arrow_right arrow_left arrow_up ' +
+    'arrow_down repeat recycle infinity hourglass_flowing_sand stopwatch zzz speech_balloon thought_balloon dash sweat_drops droplet ok new free ' +
+    'sos cool top soon'
+  ).split(' '),
+);
+
+async function isKnownEmoji(key: string) {
+  const name = key.slice(1, -1);
+  return STANDARD_EMOJI.has(name) || !!(await one('SELECT 1 FROM custom_emoji WHERE name = $1 OR $1 = ANY(aliases)', [name]));
+}
+
 export async function react(ctx: Ctx, msgId: string, emoji: string, shouldReact?: boolean) {
   const m = await getMessageRow(msgId);
   if (!m) throw notFound('error-message-not-found', 'Mensagem não encontrada.');
   const room = await loadRoomForUser(ctx, m.room_id);
   if (room.archived) throw badRequest('error-room-archived', 'Sala arquivada.');
-  if (room.ro && !room.react_when_ro && !(await hasPermission(ctx.userId, 'post-readonly', room.id))) throw forbidden('Sala somente leitura.');
+  const reader = !!room.ro && !(await hasPermission(ctx.userId, 'post-readonly', room.id));
+  if (reader && !room.react_when_ro) {
+    throw forbidden(room.notice ? 'Este canal de avisos não aceita reações.' : 'Sala somente leitura.');
+  }
   if (room.muted?.includes(ctx.username)) throw forbidden('Você está silenciado nesta sala.');
+  await assertCanSendDirect(ctx, room);
   const key = emoji.startsWith(':') ? emoji : `:${emoji}:`;
   if (!/^:[a-z0-9_+\-]{1,64}:$/i.test(key)) throw badRequest('error-invalid-emoji', 'Emoji inválido.');
   const reactions = m.reactions ?? {};
@@ -431,6 +487,8 @@ export async function react(ctx: Ctx, msgId: string, emoji: string, shouldReact?
   const has = users.includes(ctx.username);
   const add = shouldReact ?? !has;
   if (add === has) return withExtra(m);
+  // Em sala somente leitura a reação é a única voz de quem lê: reação nova só com emoji de verdade, nunca texto livre.
+  if (add && reader && !users.length && !(await isKnownEmoji(key))) throw badRequest('error-invalid-emoji', 'Escolha um emoji da lista para reagir.');
   if (add) reactions[key] = { usernames: [...users, ctx.username] };
   else {
     const rest = users.filter((u) => u !== ctx.username);
@@ -676,6 +734,8 @@ export async function createDiscussion(ctx: Ctx, input: { prid: string; pmid?: s
   if (!(await hasPermission(ctx.userId, 'start-discussion', parent.id)) && !(await hasPermission(ctx.userId, 'start-discussion-other-user', parent.id)))
     throw forbidden();
   if (parent.prid) throw badRequest('error-nested-discussion', 'Não é possível criar uma discussão dentro de outra.');
+  // A discussão publica o nome na sala de origem (e numa DM junta os mesmos participantes): valem as regras de envio dela.
+  await assertCanWrite(ctx, parent);
   let pm: any = null;
   if (input.pmid) {
     pm = await getMessageRow(input.pmid);

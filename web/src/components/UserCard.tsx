@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
-import { formatDateTime, roomPath, STATUS_LABEL } from '../lib/format';
+import { partyOf, useDirect, type DirectState } from '../lib/direct';
+import { formatDateTime, roleLabel, roomPath, STATUS_LABEL } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
 import { canWithRoles, useStore } from '../lib/store';
 import { Avatar, Modal, Spinner, StatusDot, useAsync } from './ui';
@@ -9,22 +10,21 @@ export function UserCard({ username, rid, roomRoles, onClose }: { username: stri
   const navigate = useNavigate();
   const me = useStore((s) => s.me)!;
   const presence = useStore((s) => s.presence[username]);
+  const can = (p: string) => canWithRoles(p, roomRoles);
   const { data, loading, error, reload } = useAsync(async () => {
     const u = (await api.get('users.info', { username })).user;
-    let roles: string[] = [];
-    let muted = false;
-    if (rid) {
-      const r = await api.get('rooms.membersOrderedByRole', { roomId: rid, filter: username, count: 5 }).catch(() => null);
-      roles = r?.members.find((m: any) => m.username === username)?.roles ?? [];
-      const info = await api.get('rooms.info', { roomId: rid }).catch(() => null);
-      muted = !!info?.room.muted?.includes(username);
-      return { u, roles, inRoom: !!r?.members.some((m: any) => m.username === username), muted, roomType: info?.room.t };
-    }
-    return { u, roles, inRoom: false, muted, roomType: undefined };
+    if (!rid) return { u, roles: [] as string[], inRoom: false, muted: false, roomType: undefined, notice: false };
+    const info = await api.get('rooms.info', { roomId: rid }).catch(() => null);
+    // Lista de membros oculta ("Ocultar a lista de membros"): quem não pode vê-la nem pergunta.
+    const hidden = !!info?.room.broadcast && !can('view-broadcast-member-list');
+    const r = hidden ? null : await api.get('rooms.membersOrderedByRole', { roomId: rid, filter: username, count: 5 }).catch(() => null);
+    const roles: string[] = r?.members.find((m: any) => m.username === username)?.roles ?? [];
+    const muted = !!info?.room.muted?.includes(username);
+    return { u, roles, inRoom: !!r?.members.some((m: any) => m.username === username), muted, roomType: info?.room.t, notice: !!info?.room.notice };
   }, [username, rid]);
 
   const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
-  const can = (p: string) => canWithRoles(p, roomRoles);
+  const direct = useDirect();
 
   const dm = async () => {
     try {
@@ -36,11 +36,14 @@ export function UserCard({ username, rid, roomRoles, onClose }: { username: stri
     }
   };
 
-  const roleAction = (role: 'Owner' | 'Moderator' | 'Leader', add: boolean) =>
+  const roleAction = (role: 'Owner' | 'Moderator' | 'Leader' | 'Publisher', add: boolean) =>
     api
       .post(`${data?.roomType === 'p' ? 'groups' : 'channels'}.${add ? 'add' : 'remove'}${role}`, { roomId: rid, userId: data!.u._id })
       .then(reload)
       .catch(fail);
+
+  // Abrir, só ver o histórico (bloqueada) ou nada (não dá para começar).
+  const dmState = data && data.u._id !== me._id ? direct.state([partyOf(data.u)]) : null;
 
   return (
     <Modal title="Usuário" onClose={onClose}>
@@ -66,7 +69,7 @@ export function UserCard({ username, rid, roomRoles, onClose }: { username: stri
               ))}
               {data.roles.map((r: string) => (
                 <span key={r} className="pill accent">
-                  {r} da sala
+                  {roleLabel(r)} da sala
                 </span>
               ))}
             </div>
@@ -74,11 +77,7 @@ export function UserCard({ username, rid, roomRoles, onClose }: { username: stri
             {data.u.email && <div className="muted small">✉ {data.u.email}</div>}
             {data.u.lastLogin && <div className="muted small">Último acesso: {formatDateTime(data.u.lastLogin)}</div>}
             <div className="row-actions wrap">
-              {data.u._id !== me._id && (
-                <button className="btn primary" onClick={dm}>
-                  💬 Mensagem direta
-                </button>
-              )}
+              {dmState && <DirectButton st={dmState} onOpen={dm} onView={(path) => (navigate(path), onClose())} />}
               {rid && data.inRoom && data.u._id !== me._id && (
                 <>
                   {can('set-owner') && (
@@ -94,6 +93,11 @@ export function UserCard({ username, rid, roomRoles, onClose }: { username: stri
                   {can('set-leader') && (
                     <button className="btn" onClick={() => roleAction('Leader', !data.roles.includes('leader'))}>
                       {data.roles.includes('leader') ? 'Remover líder' : 'Tornar líder'}
+                    </button>
+                  )}
+                  {data.notice && can('set-publisher') && (
+                    <button className="btn" onClick={() => roleAction('Publisher', !data.roles.includes('publisher'))}>
+                      {data.roles.includes('publisher') ? 'Remover publicador' : '📢 Tornar publicador'}
                     </button>
                   )}
                   {can('mute-user') && (
@@ -117,9 +121,24 @@ export function UserCard({ username, rid, roomRoles, onClose }: { username: stri
                 </button>
               )}
             </div>
+            {dmState && dmState.kind !== 'open' && <p className="muted small direct-note">🚫 {dmState.text}</p>}
           </div>
         )
       )}
     </Modal>
+  );
+}
+
+function DirectButton({ st, onOpen, onView }: { st: DirectState; onOpen: () => void; onView: (path: string) => void }) {
+  if (st.kind === 'view')
+    return (
+      <button className="btn primary" onClick={() => onView(st.path)}>
+        💬 Ver conversa
+      </button>
+    );
+  return (
+    <button className="btn primary" onClick={onOpen} disabled={st.kind === 'none'} title={st.kind === 'none' ? st.text : undefined}>
+      💬 Mensagem direta
+    </button>
   );
 }

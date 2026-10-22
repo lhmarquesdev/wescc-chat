@@ -281,15 +281,22 @@ export function usersRoutes(app: FastifyInstance) {
   route(app, 'GET', 'users.autocomplete', {}, async (req, _rep, ctx) => {
     const term = String(q(req).selector ? JSON.parse(q(req).selector).term ?? '' : q(req).term ?? '');
     const exclude = strArray(q(req).exclude);
-    const rid = q(req).rid;
+    // inRoom só para quem pode ver os membros da sala; sem acesso, ou com a lista de membros oculta, o rid é ignorado.
+    let rid: string | undefined;
+    if (q(req).rid) {
+      const { canAccessRoom, getRoom } = await import('../services/rooms');
+      const room = await getRoom(String(q(req).rid));
+      const visible = room && (await canAccessRoom(ctx.userId, room)) && (!room.broadcast || (await hasPermission(ctx.userId, 'view-broadcast-member-list', room.id)));
+      if (visible) rid = room.id;
+    }
     const rows = await many(
-      `SELECT id, username, name, status, avatar_etag ${rid ? ', EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = $4 AND s.user_id = users.id) AS in_room' : ''}
+      `SELECT id, username, name, status, avatar_etag, roles ${rid ? ', EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = $4 AND s.user_id = users.id) AS in_room' : ''}
        FROM users WHERE active AND (username ILIKE $1 OR name ILIKE $1) AND NOT (username = ANY($2))
        ORDER BY ${rid ? 'in_room DESC, ' : ''}(lower(username) = lower($3)) DESC, username LIMIT 15`,
       rid ? [`${term}%`, exclude, term, rid] : [`${term}%`, exclude, term],
     );
-    void ctx;
-    return { items: rows.map((r) => ({ _id: r.id, username: r.username, name: r.name, status: r.status, avatarETag: r.avatar_etag, inRoom: r.in_room })) };
+    // roles (globais): a web decide antes do clique se dá para abrir uma conversa direta.
+    return { items: rows.map((r) => ({ _id: r.id, username: r.username, name: r.name, status: r.status, avatarETag: r.avatar_etag, roles: r.roles, inRoom: r.in_room })) };
   });
   route(app, 'GET', 'users.presence', {}, async (req) => {
     const ids = strArray(q(req).ids);

@@ -22,6 +22,8 @@ interface State {
   emojiVersion: number;
   toasts: { id: number; text: string; kind: 'info' | 'error' }[];
   permMap: Record<string, string[]>;
+  restrictedRoles: string[]; // papéis globais com "Restrito em conversas diretas"
+  userRoles: Record<string, string[]>; // papéis globais anunciados por eventos "user" desde a conexão (id -> papéis)
   livechatRooms: Record<string, LivechatRoomInfo>;
   queue: Record<string, LivechatInquiry>;
   agentStatus: LivechatAgentStatus | null;
@@ -73,6 +75,8 @@ const initial = {
   emojiVersion: 0,
   toasts: [],
   permMap: {},
+  restrictedRoles: [],
+  userRoles: {},
   livechatRooms: {},
   queue: {},
   agentStatus: null,
@@ -206,6 +210,7 @@ export function applyEvent(ev: ServerEvent) {
       break;
     case 'user':
       if (st.me && ev.user._id === st.me._id) st.setMe({ ...st.me, ...ev.user } as Me);
+      if (ev.user.roles) useStore.setState({ userRoles: { ...st.userRoles, [ev.user._id]: ev.user.roles } });
       if (ev.user.avatarETag !== undefined && ev.user.username) avatarBust[ev.user.username] = String(ev.user.avatarETag ?? Date.now());
       break;
     case 'livechat.inquiry': {

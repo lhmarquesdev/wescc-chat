@@ -23,6 +23,7 @@ import {
   threadsList,
   updateMessage,
 } from '../services/messages';
+import { ackMessage, assertCanSeeReceipts, listAcks, myAcks } from '../services/notices';
 import { getReadReceipts } from '../services/reads';
 import { getRoomByName, loadRoomForUser, resolveRoom } from '../services/rooms';
 import { assertCanUpload, getFileForUser, getFileForVisitor, inlineMimeType, listRoomFiles, readUpload, safeMimeType, saveUpload } from '../services/uploads';
@@ -42,6 +43,7 @@ export function chatRoutes(app: FastifyInstance) {
       emoji: m.emoji,
       avatar: m.avatar,
       customFields: m.customFields,
+      ackRequired: !!bool(m.ackRequired),
     });
     return { message: out };
   });
@@ -150,7 +152,23 @@ export function chatRoutes(app: FastifyInstance) {
     const r = await searchMessages(ctx, { rid: q(req).roomId || undefined, searchText: str(q(req).searchText, 'searchText'), ...p });
     return { ...r, count: r.messages.length, offset: p.offset };
   });
-  route(app, 'GET', 'chat.getMessageReadReceipts', {}, async (req, _rep, ctx) => ({ receipts: await getReadReceipts(ctx, str(q(req).messageId, 'messageId')) }));
+  route(app, 'GET', 'chat.getMessageReadReceipts', {}, async (req, _rep, ctx) => {
+    const messageId = str(q(req).messageId, 'messageId');
+    const receipts = await getReadReceipts(ctx, messageId);
+    await assertCanSeeReceipts(ctx, messageId);
+    return { receipts };
+  });
+
+  // ---------- "Ciente" nos canais de avisos ----------
+  route(app, 'POST', 'chat.ack', {}, async (req, _rep, ctx) => ackMessage(ctx, str(b(req).messageId, 'messageId')));
+  route(app, 'GET', 'chat.getAcks', {}, async (req, _rep, ctx) => {
+    const query = q(req);
+    const status = query.status ?? 'acked';
+    if (status !== 'acked' && status !== 'pending') throw badRequest('error-invalid-params', 'status deve ser "acked" ou "pending".');
+    const p = paging(query);
+    return listAcks(ctx, str(query.messageId, 'messageId'), { status, offset: p.offset, count: p.count });
+  });
+  route(app, 'GET', 'chat.myAcks', {}, async (req, _rep, ctx) => myAcks(ctx, str(q(req).roomId, 'roomId')));
   route(app, 'POST', 'chat.reportMessage', {}, async (req, _rep, ctx) => {
     const body = b(req);
     const m = await getMessageRow(str(body.messageId, 'messageId'));

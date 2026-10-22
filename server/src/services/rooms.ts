@@ -4,6 +4,7 @@ import { badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
+import { assertCanBringIn, assertCanStartDirect } from './direct';
 import { mapRoom, mapSubscription } from './mappers';
 import { sendSystemMessage } from './messages';
 import { hasPermission, rolesHavePermission, getUserRoles } from './permissions';
@@ -155,6 +156,8 @@ export async function addUserToRoom(
   const room = await getRoom(rid, opts.db);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   if (room.archived) throw badRequest('error-room-archived', 'A sala está arquivada.');
+  // Os participantes de uma DM são os do uids (é sobre eles que valem as regras de conversa direta).
+  if (room.t === 'd' && !room.uids.includes(userId)) throw badRequest('error-not-allowed', 'Não é possível adicionar pessoas a uma DM existente.');
   const existing = await one('SELECT * FROM subscriptions WHERE room_id = $1 AND user_id = $2', [rid, userId], opts.db);
   if (existing) {
     if (!existing.open) await query('UPDATE subscriptions SET open = true, updated_at = now() WHERE id = $1', [existing.id], opts.db);
@@ -162,6 +165,7 @@ export async function addUserToRoom(
   }
   const user = await one('SELECT id, username, name FROM users WHERE id = $1', [userId], opts.db);
   if (!user) throw notFound('error-invalid-user', 'Usuário não encontrado.');
+  if (opts.inviter && opts.inviter.id !== userId) await assertCanBringIn(opts.inviter.id, room, [userId]);
   const sub = await one(
     `INSERT INTO subscriptions (id, room_id, user_id, roles, ls) VALUES ($1,$2,$3,$4, now()) ON CONFLICT (room_id, user_id) DO NOTHING RETURNING *`,
     [newId(), rid, userId, opts.roles ?? []],
@@ -221,7 +225,7 @@ export async function listMembers(rid: string, opts: { offset?: number; count?: 
   const rows = await many(
     `SELECT u.id, u.username, u.name, u.status, u.status_text, u.avatar_etag, s.roles AS room_roles, count(*) OVER() AS total
      FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.room_id = $1 ${w}
-     ORDER BY ${opts.orderByRole ? `CASE WHEN 'owner' = ANY(s.roles) THEN 0 WHEN 'moderator' = ANY(s.roles) THEN 1 WHEN 'leader' = ANY(s.roles) THEN 2 ELSE 3 END,` : ''}
+     ORDER BY ${opts.orderByRole ? `CASE WHEN 'owner' = ANY(s.roles) THEN 0 WHEN 'moderator' = ANY(s.roles) THEN 1 WHEN 'leader' = ANY(s.roles) THEN 2 WHEN 'publisher' = ANY(s.roles) THEN 3 ELSE 4 END,` : ''}
        (u.status <> 'offline') DESC, u.username LIMIT ${Math.min(opts.count ?? 50, 500)} OFFSET ${Number(opts.offset ?? 0)}`,
     params,
   );
@@ -252,6 +256,9 @@ export interface CreateRoomInput {
   teamMain?: boolean;
   isDefault?: boolean;
   broadcast?: boolean;
+  notice?: boolean; // canal de avisos (sempre somente leitura)
+  noticeAck?: boolean;
+  reactWhenReadOnly?: boolean;
   encrypted?: boolean;
   prid?: string | null;
   pmid?: string | null;
@@ -269,11 +276,15 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
     validateRoomName(input.name);
     if (await getRoomByName(input.name)) throw badRequest('error-duplicate-channel-name', `Já existe uma sala chamada ${input.name}.`);
   }
+  const usernames = [...new Set((input.members ?? []).map((m) => m.replace(/^@/, '')))].filter((u) => u !== owner?.username);
+  const users = usernames.length ? await many('SELECT id, username FROM users WHERE lower(username) = ANY($1) AND active', [usernames.map((u) => u.toLowerCase())]) : [];
+  // Antes de criar: uma recusa no meio deixaria a sala pela metade.
+  if (owner && users.length) await assertCanBringIn(owner.id, { t: input.type, team_id: input.teamId, team_main: input.teamMain }, users.map((u) => u.id));
   const id = newId();
-  const ro = input.readOnly || input.broadcast || false;
+  const ro = input.readOnly || input.broadcast || input.notice || false;
   await query(
-    `INSERT INTO rooms (id, t, name, fname, topic, description, owner_id, ro, broadcast, encrypted, team_id, team_main, is_default, prid, pmid)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+    `INSERT INTO rooms (id, t, name, fname, topic, description, owner_id, ro, broadcast, encrypted, team_id, team_main, is_default, prid, pmid, notice, notice_ack, react_when_ro)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
     [
       id,
       input.type,
@@ -290,14 +301,13 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
       input.isDefault ?? false,
       input.prid ?? null,
       input.pmid ?? null,
+      input.notice ?? false,
+      input.noticeAck ?? false,
+      input.reactWhenReadOnly ?? false,
     ],
   );
   if (owner) await addUserToRoom(id, owner.id, { roles: ['owner'], silent: true });
-  const usernames = [...new Set((input.members ?? []).map((m) => m.replace(/^@/, '')))].filter((u) => u !== owner?.username);
-  if (usernames.length) {
-    const users = await many('SELECT id, username FROM users WHERE lower(username) = ANY($1) AND active', [usernames.map((u) => u.toLowerCase())]);
-    for (const u of users) await addUserToRoom(id, u.id, { inviter: owner ?? undefined, silent: true });
-  }
+  for (const u of users) await addUserToRoom(id, u.id, { inviter: owner ?? undefined, silent: true });
   if (ctx) await audit(actorOf(ctx), 'room.created', { rid: id, name: input.name, t: input.type });
   const room = await getRoom(id);
   if (room.t === 'c') bus.publish({ all: true }, { type: 'room', action: 'inserted', room: mapRoom(room) });
@@ -325,6 +335,8 @@ export async function createDirect(ctx: Ctx, usernames: string[]) {
     }
     return existing;
   }
+  // Só uma conversa nova passa pela política; reabrir uma antiga mostra o histórico e o compositor explica o bloqueio.
+  await assertCanStartDirect(ctx, others.map((u) => u.id));
   const id = newId();
   const inserted = await one(
     `INSERT INTO rooms (id, t, uids, usernames, owner_id, users_count, dm_key) VALUES ($1,'d',$2,$3,$4,0,$5)
@@ -375,6 +387,7 @@ export async function inviteToRoom(ctx: Ctx, rid: string, userIds: string[]) {
     (room.t === 'c' && rolesHavePermission(roles, 'add-user-to-any-c-room')) ||
     (room.t === 'p' && rolesHavePermission(roles, 'add-user-to-any-p-room'));
   if (!allowed) throw forbidden();
+  await assertCanBringIn(ctx.userId, room, userIds);
   for (const uid of userIds) await addUserToRoom(rid, uid, { inviter: { id: ctx.userId, username: ctx.username } });
 }
 
@@ -400,6 +413,9 @@ export interface RoomSettings {
   roomType?: 'c' | 'p';
   readOnly?: boolean;
   reactWhenReadOnly?: boolean;
+  notice?: boolean;
+  noticeAck?: boolean;
+  broadcast?: boolean; // "Ocultar a lista de membros"
   default?: boolean;
   featured?: boolean;
   encrypted?: boolean;
@@ -442,16 +458,42 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   }
   if (s.roomType !== undefined && s.roomType !== room.t && room.t !== 'd') {
     if (!can(s.roomType === 'c' ? 'create-c' : 'create-p')) throw forbidden();
+    if (s.roomType === 'p') {
+      const ids = (await many('SELECT user_id FROM subscriptions WHERE room_id = $1', [rid])).map((r) => r.user_id);
+      await assertCanBringIn(ctx.userId, { t: 'p', team_id: room.team_id, team_main: room.team_main }, ids, { privatize: true });
+    }
     sets.push(`t = $${params.push(s.roomType)}`);
     sys.push(['room_changed_privacy', s.roomType === 'c' ? 'public' : 'private']);
     if (room.team_main && room.team_id) await query('UPDATE teams SET type = $2 WHERE id = $1', [room.team_id, s.roomType === 'c' ? 0 : 1]);
   }
-  if (s.readOnly !== undefined && s.readOnly !== room.ro) {
+  const noticeChanged = s.notice !== undefined && s.notice !== !!room.notice;
+  const notice = noticeChanged ? !!s.notice : !!room.notice;
+  if (noticeChanged) {
+    if (room.t !== 'c' && room.t !== 'p') throw badRequest('error-not-allowed', 'Só canais e grupos podem ser canais de avisos.');
+    if (!can('set-readonly')) throw forbidden();
+  }
+  if (s.readOnly === false && notice) {
+    throw badRequest('error-notice-readonly', 'Um canal de avisos é sempre somente leitura. Desative “Canal de avisos” para liberar a escrita.');
+  }
+  if (noticeChanged) {
+    // A mensagem de sistema do aviso já diz tudo: sem "somente leitura" junto.
+    sets.push(`notice = $${params.push(notice)}`, `ro = $${params.push(notice || s.readOnly === true)}`);
+    sys.push([notice ? 'room-set-notice' : 'room-removed-notice', '']);
+  } else if (s.readOnly !== undefined && s.readOnly !== room.ro) {
     if (!can('set-readonly')) throw forbidden();
     sets.push(`ro = $${params.push(s.readOnly)}`);
     sys.push([s.readOnly ? 'room-set-read-only' : 'room-removed-read-only', '']);
   }
-  if (s.reactWhenReadOnly !== undefined) {
+  if (s.noticeAck !== undefined && s.noticeAck !== !!room.notice_ack) {
+    if (!can('set-readonly')) throw forbidden();
+    sets.push(`notice_ack = $${params.push(s.noticeAck)}`);
+  }
+  if (s.broadcast !== undefined && s.broadcast !== !!room.broadcast) {
+    if (!can('set-readonly')) throw forbidden();
+    sets.push(`broadcast = $${params.push(s.broadcast)}`);
+  }
+  // Só quando muda: o painel da sala reenvia o valor atual, e o moderador não tem essa permissão.
+  if (s.reactWhenReadOnly !== undefined && s.reactWhenReadOnly !== !!room.react_when_ro) {
     if (!can('set-react-when-readonly')) throw forbidden();
     sets.push(`react_when_ro = $${params.push(s.reactWhenReadOnly)}`);
   }
@@ -483,8 +525,8 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   for (const [t, msg] of sys) await sendSystemMessage(rid, t, me, msg);
   await audit(actorOf(ctx), 'room.settings.changed', { rid, name: room.name }, { fields: Object.keys(s) });
   await notifyRoomUpdated(rid);
-  // Nome/tipo mudam a exibição das assinaturas.
-  if (s.roomName !== undefined || s.roomType !== undefined) {
+  // Nome, tipo e canal de avisos mudam a exibição das assinaturas.
+  if (s.roomName !== undefined || s.roomType !== undefined || noticeChanged) {
     const subs = await many('SELECT * FROM subscriptions WHERE room_id = $1', [rid]);
     const updated = await getRoom(rid);
     for (const sub of subs) {
@@ -530,12 +572,15 @@ export async function deleteRoom(ctx: Ctx, rid: string) {
 
 // ---------- Papéis na sala ----------
 
-const ROLE_PERMS: Record<string, string> = { owner: 'set-owner', moderator: 'set-moderator', leader: 'set-leader' };
-const ROLE_MSG: Record<string, string> = { owner: 'owner', moderator: 'moderator', leader: 'leader' };
+const ROLE_PERMS: Record<string, string> = { owner: 'set-owner', moderator: 'set-moderator', leader: 'set-leader', publisher: 'set-publisher' };
+const ROLE_MSG: Record<string, string> = { owner: 'owner', moderator: 'moderator', leader: 'leader', publisher: 'publisher' };
 
 export async function setRoomRole(ctx: Ctx, rid: string, userId: string, role: string, add: boolean) {
   const perm = ROLE_PERMS[role];
   if (!perm) throw badRequest('error-invalid-role', 'Papel inválido.');
+  const room = await getRoom(rid);
+  if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
+  if (room.t === 'd') throw badRequest('error-not-allowed', 'Mensagens diretas não têm papéis de sala.');
   if (!(await hasPermission(ctx.userId, perm, rid))) throw forbidden();
   const sub = await getSubscriptionRow(rid, userId);
   if (!sub) throw badRequest('error-user-not-in-room', 'Usuário não está na sala.');
@@ -552,7 +597,6 @@ export async function setRoomRole(ctx: Ctx, rid: string, userId: string, role: s
     role: ROLE_MSG[role],
   });
   await notifySubscription(userId, rid, 'updated', row);
-  const room = await getRoom(rid);
   if (room.team_main && room.team_id) {
     await query(`UPDATE team_members SET roles = $3 WHERE team_id = $1 AND user_id = $2`, [room.team_id, userId, roles.length ? roles : ['member']]);
   }
@@ -641,14 +685,23 @@ export async function directory(ctx: Ctx, opts: { type: 'channels' | 'users' | '
   const text = `%${opts.text ?? ''}%`;
   if (opts.type === 'users') {
     const rows = await many(
-      `SELECT id, username, name, status, status_text, avatar_etag, bio, created_at, count(*) OVER() AS total FROM users
+      `SELECT id, username, name, status, status_text, avatar_etag, bio, roles, created_at, count(*) OVER() AS total FROM users
        WHERE active AND type = 'user' AND (username ILIKE $1 OR name ILIKE $1)
        ORDER BY username LIMIT ${count} OFFSET ${offset}`,
       [text],
     );
     return {
       total: Number(rows[0]?.total ?? 0),
-      result: rows.map((r) => ({ _id: r.id, username: r.username, name: r.name, status: r.status, statusText: r.status_text, avatarETag: r.avatar_etag, createdAt: r.created_at })),
+      result: rows.map((r) => ({
+        _id: r.id,
+        username: r.username,
+        name: r.name,
+        status: r.status,
+        statusText: r.status_text,
+        avatarETag: r.avatar_etag,
+        roles: r.roles,
+        createdAt: r.created_at,
+      })),
     };
   }
   if (opts.type === 'teams') {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
+import { partyOf, useDirect } from '../lib/direct';
 import { formatDateTime, roomIcon, roomPath } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
 import { requestNotificationPermission } from '../lib/session';
@@ -77,6 +78,7 @@ export function DirectoryPage() {
     return () => clearTimeout(t);
   }, [text]);
   const { data, loading } = useAsync(() => api.get('directory', { type, text: q, offset, count: 25 }), [type, q, offset]);
+  const direct = useDirect();
 
   const openUser = async (username: string) => {
     try {
@@ -108,7 +110,7 @@ export function DirectoryPage() {
         ) : !data?.result.length ? (
           <Empty>Nada encontrado.</Empty>
         ) : (
-          <table className="table">
+          <table className="table directory-table">
             <thead>
               {type === 'users' ? (
                 <tr>
@@ -126,16 +128,26 @@ export function DirectoryPage() {
               )}
             </thead>
             <tbody>
-              {data.result.map((r: any) =>
-                type === 'users' ? (
-                  <tr key={r._id} className="clickable" onClick={() => openUser(r.username)}>
-                    <td>
-                      <UserAvatar username={r.username} size={28} status={r.status} /> <strong>{r.name}</strong>
-                    </td>
-                    <td className="muted">@{r.username}</td>
-                    <td className="muted">{formatDateTime(r.createdAt)}</td>
-                  </tr>
-                ) : (
+              {data.result.map((r: any) => {
+                if (type === 'users') {
+                  // Conversa nova bloqueada pela política: explica sem chamar o servidor. Se a conversa já existe só para leitura, abre o histórico.
+                  const st = direct.state([partyOf(r)]);
+                  const blocked = st.kind === 'none';
+                  const open = () => (st.kind === 'none' ? useStore.getState().toast(st.text) : st.kind === 'view' ? navigate(st.path) : openUser(r.username));
+                  return (
+                    <tr key={r._id} className={`clickable ${blocked ? 'blocked' : ''}`} title={st.kind === 'open' ? undefined : st.text} onClick={open}>
+                      <td>
+                        <UserAvatar username={r.username} size={28} status={r.status} /> <strong>{r.name}</strong>
+                      </td>
+                      <td className="muted">
+                        @{r.username}
+                        {blocked && <span className="pill blocked nowrap">🚫 Sem conversa direta</span>}
+                      </td>
+                      <td className="muted">{formatDateTime(r.createdAt)}</td>
+                    </tr>
+                  );
+                }
+                return (
                   <tr key={r._id} className="clickable" onClick={() => navigate(roomPath(type === 'teams' ? { _id: r.roomId, t: r.type === 1 ? 'p' : 'c' } : r))}>
                     <td>
                       <Avatar rid={type === 'teams' ? r.roomId : r._id} size={28} /> <strong>{type === 'teams' ? `👥 ${r.name}` : `${roomIcon(r)} ${r.fname || r.name}`}</strong>
@@ -146,8 +158,8 @@ export function DirectoryPage() {
                     <td>{type === 'teams' ? r.roomsCount : r.teamName ?? '—'}</td>
                     <td className="muted">{formatDateTime(r.ts)}</td>
                   </tr>
-                ),
-              )}
+                );
+              })}
             </tbody>
           </table>
         )}

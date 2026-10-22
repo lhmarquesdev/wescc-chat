@@ -6,11 +6,14 @@ import { roomDisplayName, roomIcon, roomPath, STATUS_LABEL } from '../lib/format
 import { realtime } from '../lib/realtime';
 import { renderMarkdown } from '../lib/markdown';
 import { startCall } from '../lib/calls';
-import { useSetting, useStore } from '../lib/store';
+import { sendText } from '../lib/direct';
+import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { Composer } from '../components/Composer';
 import { LIVECHAT_STATUS, LivechatActions } from '../components/LivechatPanel';
 import { CreateModal } from '../components/CreateModal';
+import { MessageGateContext } from '../components/MessageItem';
 import { MessageList } from '../components/MessageList';
+import { NoticeBar } from '../components/NoticeBar';
 import { RoomPanel, type PanelId } from '../components/RoomPanels';
 import { ThreadPanel } from '../components/ThreadPanel';
 import { UserCard } from '../components/UserCard';
@@ -102,6 +105,23 @@ export function RoomPage() {
     void loadRoom();
   }, [rid, loadRoom]);
 
+  // Permissões ou papéis de alguém da conversa mudaram: a política da DM (e quem publica) pode ter mudado.
+  // A regra (escopo) também muda a política. O evento da sala não traz a lista de silenciados: quando a pessoa é
+  // silenciada ou liberada aqui, busca de novo.
+  const dmUids = room?.t === 'd' ? (room.uids ?? []).join(',') : '';
+  // Discussão criada numa DM: a política vem da DM de origem, cujos participantes a web não conhece aqui.
+  const fromDirect = !!room?.direct && room.t !== 'd';
+  useEffect(() => {
+    const off = realtime.on((ev) => {
+      if (ev.type === 'permissions.changed' || (ev.type === 'user' && ev.user.roles && (fromDirect || dmUids.split(',').includes(ev.user._id)))) void loadRoom();
+      else if ((dmUids || fromDirect) && ev.type === 'settings.changed' && ev.settings.some((s) => s._id === 'Direct_Restriction_Scope')) void loadRoom();
+      else if (ev.type === 'message' && ev.message.rid === rid && (ev.message.t === 'user-muted' || ev.message.t === 'user-unmuted') && ev.message.msg === me.username) void loadRoom();
+    });
+    return () => {
+      off();
+    };
+  }, [dmUids, fromDirect, loadRoom, rid, me.username]);
+
   useEffect(() => {
     if (roomLive && room && roomLive._updatedAt !== room._updatedAt) setRoom((r) => (r ? { ...r, ...roomLive } : r));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -129,6 +149,40 @@ export function RoomPage() {
     setParams(params);
   };
 
+  const canPostRO = canWithRoles('post-readonly', roles);
+  const muted = !!room?.muted?.includes(me.username);
+  const directBlocked = sendText(room);
+  const disabledReason = !room
+    ? undefined
+    : room.archived
+      ? 'Esta sala está arquivada.'
+      : directBlocked
+        ? directBlocked
+        : muted
+          ? 'Você está silenciado nesta sala.'
+          : room.ro && !canPostRO
+            ? room.notice
+              ? 'Este é um canal de avisos: só os publicadores enviam mensagens.'
+              : 'Esta sala é somente leitura.'
+            : undefined;
+  // As mesmas recusas do servidor: reagir não exige poder escrever (canal de avisos com reações), mas sala arquivada,
+  // silêncio e DM bloqueada também barram a reação. Discussão e edição seguem as regras de envio.
+  const canReact = !!room && !room.archived && !muted && room.direct?.canSend !== false && (!room.ro || room.reactWhenReadOnly || canPostRO);
+  // Discussão dentro de discussão o servidor também recusa.
+  const canDiscuss = !disabledReason && !room?.prid && (canWithRoles('start-discussion', roles) || canWithRoles('start-discussion-other-user', roles));
+  // "Ocultar a lista de membros": o servidor recusa a lista para quem não tem view-broadcast-member-list.
+  const membersHidden = !!room?.broadcast && !canWithRoles('view-broadcast-member-list', roles);
+  // Recibos de leitura mostram quem está na sala e quem já confirmou: num canal de avisos (ou com a lista oculta) só
+  // para quem publica ou vê a lista.
+  const canSeeReceipts = canWithRoles('view-message-read-receipts', roles);
+  const receiptsLimited = !!(room?.notice || room?.broadcast);
+  const canSeeLimitedReceipts = canPostRO || (!!room?.broadcast && !membersHidden);
+  // Vale para a lista e para a thread (que monta as próprias ações).
+  const gate = useMemo(
+    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts }),
+    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts],
+  );
+
   const actions = useMemo(
     () => ({
       onReplyThread: (m: Message) => threadsOn && navigate(`${roomPath({ _id: rid, t: room?.t ?? 'c' })}/thread/${m._id}`),
@@ -136,8 +190,9 @@ export function RoomPage() {
       onQuote: (m: Message) => setQuoting(m),
       onDiscussion: (m: Message) => setDiscussionFrom(m),
       onUserClick: (u: string) => setUserCard(u),
+      ...gate,
     }),
-    [navigate, rid, room?.t, threadsOn],
+    [navigate, rid, room?.t, threadsOn, gate],
   );
 
   const editLast = () => {
@@ -158,149 +213,157 @@ export function RoomPage() {
       useStore.getState().toast(errorMessage(e), 'error');
     }
   };
-  const muted = room.muted?.includes(me.username);
-  const canPostRO = me.permissions.includes('post-readonly') || canModerate;
-  const disabledReason = room.archived
-    ? 'Esta sala está arquivada.'
-    : muted
-      ? 'Você está silenciado nesta sala.'
-      : room.ro && !canPostRO
-        ? 'Esta sala é somente leitura.'
-        : undefined;
+  const callBlocked = room.direct?.canCall === false ? room.direct.callBlockedReason : undefined;
   const dmUser = room.t === 'd' && sub && !sub.name.includes(',') ? sub.name : null;
+  const panels = PANELS.filter((p) => (!p.when || p.when(room)) && !(p.id === 'members' && membersHidden));
 
   return (
-    <div className={`room ${panel || tmid ? 'with-panel' : ''}`}>
-      <div className="room-main">
-        <header className="room-header">
-          <button className="icon-btn mobile-only" onClick={() => navigate('/home')}>
-            ←
-          </button>
-          {dmUser ? (
-            <span className="avatar-wrap" style={{ width: 32, height: 32 }}>
-              <Avatar username={dmUser} size={32} />
-              <StatusDot username={dmUser} />
-            </span>
-          ) : (
-            <span className="room-icon">{roomIcon(room)}</span>
-          )}
-          <div className="room-title">
-            <div className="room-name">
-              {name}
-              {sub?.f && <span title="Favorito"> ★</span>}
-              {room.encrypted && <span title="Criptografada"> 🔐</span>}
-              {room.ro && <span className="pill">somente leitura</span>}
-              {room.archived && <span className="pill">arquivada</span>}
-              {room.team && !room.teamMain && (
-                <span className="pill clickable" onClick={() => navigate(roomPath({ _id: room.team.roomId, t: 'c' }))}>
-                  👥 {room.team.name}
-                </span>
-              )}
-              {room.parent && (
-                <span className="pill clickable" onClick={() => navigate(roomPath(room.parent))}>
-                  ↖ {room.parent.fname || room.parent.name}
-                </span>
-              )}
-            </div>
-            <div className="room-topic">
-              {dmUser ? `${STATUS_LABEL[presence?.status ?? 'offline']}${presence?.statusText ? ` — ${presence.statusText}` : ''}` : room.topic ? renderMarkdown(room.topic) : null}
-            </div>
-          </div>
-          <div className="room-actions">
-            {room.t === 'l' && <LivechatActions rid={rid} onPanel={() => setPanel(panel === 'livechat' ? null : 'livechat')} />}
-            {dmUser && callsEnabled && room.uids?.length === 2 && (
-              <>
-                <button className="icon-btn" title="Chamada de voz" onClick={() => void startCall(rid, 'audio')}>
-                  📞
-                </button>
-                <button className="icon-btn" title="Chamada de vídeo" onClick={() => void startCall(rid, 'video')}>
-                  🎥
-                </button>
-              </>
+    <MessageGateContext.Provider value={gate}>
+      <div className={`room ${panel || tmid ? 'with-panel' : ''}`}>
+        <div className="room-main">
+          <header className="room-header">
+            <button className="icon-btn mobile-only" onClick={() => navigate('/home')}>
+              ←
+            </button>
+            {dmUser ? (
+              <span className="avatar-wrap" style={{ width: 32, height: 32 }}>
+                <Avatar username={dmUser} size={32} />
+                <StatusDot username={dmUser} />
+              </span>
+            ) : (
+              <span className="room-icon">{roomIcon(room)}</span>
             )}
-            {sub && (
-              <button className="icon-btn" title={sub.f ? 'Remover dos favoritos' : 'Favoritar'} onClick={() => api.post('rooms.favorite', { roomId: rid, favorite: !sub.f })}>
-                {sub.f ? '★' : '☆'}
-              </button>
-            )}
-            {PANELS.filter((p) => ['info', 'threads', 'members', 'search'].includes(p.id) && (!p.when || p.when(room))).map((p) => (
-              <button key={p.id} className={`icon-btn ${panel === p.id ? 'on' : ''}`} title={p.label} onClick={() => setPanel(panel === p.id ? null : p.id)}>
-                {p.icon}
-              </button>
-            ))}
-            <Menu trigger={<button className="icon-btn" title="Mais">⋮</button>}>
-              {(close) => (
+            <div className="room-title">
+              <div className="room-name">
+                {name}
+                {sub?.f && <span title="Favorito"> ★</span>}
+                {room.encrypted && <span title="Criptografada"> 🔐</span>}
+                {room.notice ? (
+                  <span className="pill notice" title="Canal de avisos" aria-label="Canal de avisos">
+                    📢 <span className="pill-label">avisos</span>
+                  </span>
+                ) : (
+                  room.ro && <span className="pill">somente leitura</span>
+                )}
+                {room.direct?.canSend === false && (
+                  <span className="pill blocked" title={room.direct.sendBlockedReason} aria-label="Conversa bloqueada">
+                    🚫 <span className="pill-label">conversa bloqueada</span>
+                  </span>
+                )}
+                {room.archived && <span className="pill">arquivada</span>}
+                {room.team && !room.teamMain && (
+                  <span className="pill clickable" onClick={() => navigate(roomPath({ _id: room.team.roomId, t: 'c' }))}>
+                    👥 {room.team.name}
+                  </span>
+                )}
+                {room.parent && (
+                  <span className="pill clickable" onClick={() => navigate(roomPath(room.parent))}>
+                    ↖ {room.parent.fname || room.parent.name}
+                  </span>
+                )}
+              </div>
+              <div className="room-topic">
+                {dmUser ? `${STATUS_LABEL[presence?.status ?? 'offline']}${presence?.statusText ? ` — ${presence.statusText}` : ''}` : room.topic ? renderMarkdown(room.topic) : null}
+              </div>
+            </div>
+            <div className="room-actions">
+              {room.t === 'l' && <LivechatActions rid={rid} onPanel={() => setPanel(panel === 'livechat' ? null : 'livechat')} />}
+              {dmUser && callsEnabled && room.uids?.length === 2 && (
                 <>
-                  {PANELS.filter((p) => !p.when || p.when(room)).map((p) => (
-                    <button key={p.id} onClick={() => (setPanel(p.id), close())}>
-                      {p.icon} {p.label}
-                    </button>
-                  ))}
-                  {sub && (
-                    <>
-                      <hr />
-                      <button onClick={() => (api.post('subscriptions.unread', { roomId: rid }), close())}>● Marcar como não lida</button>
-                      <button onClick={() => (api.post('rooms.hide', { roomId: rid }).then(() => navigate('/home')), close())}>🙈 Ocultar</button>
-                      {room.t !== 'd' && (
-                        <button
-                          className="danger"
-                          onClick={() => {
-                            close();
-                            if (confirm(`Sair de ${name}?`)) api.post('rooms.leave', { roomId: rid }).then(() => navigate('/home')).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
-                          }}
-                        >
-                          ↩ Sair da sala
-                        </button>
-                      )}
-                    </>
-                  )}
+                  <button className="icon-btn" title={callBlocked ?? 'Chamada de voz'} disabled={!!callBlocked} onClick={() => void startCall(rid, 'audio')}>
+                    📞
+                  </button>
+                  <button className="icon-btn" title={callBlocked ?? 'Chamada de vídeo'} disabled={!!callBlocked} onClick={() => void startCall(rid, 'video')}>
+                    🎥
+                  </button>
                 </>
               )}
-            </Menu>
-          </div>
-        </header>
-        {room.announcement && <div className="announcement">📣 {renderMarkdown(room.announcement)}</div>}
-        <MessageList key={rid} rid={rid} sub={sub} actions={actions} canModerate={canModerate} />
-        <TypingIndicator id={rid} />
-        {sub ? (
-          <Composer
-            rid={rid}
-            disabled={!!disabledReason}
-            disabledReason={disabledReason}
-            placeholder={`Mensagem para ${room.t === 'd' ? '@' : '#'}${name}`}
-            editing={editing}
-            setEditing={setEditing}
-            quoting={quoting}
-            setQuoting={setQuoting}
-            onEditLast={editLast}
-            canned={room.t === 'l' ? { contactName: room.fname ?? '', agentName: me.name } : undefined}
-          />
-        ) : (
-          <div className="join-bar">
-            {room.t === 'c' ? (
-              <>
-                <span>Você está vendo uma prévia de #{name}.</span>
-                <button className="btn primary" onClick={join}>
-                  Entrar no canal
+              {sub && (
+                <button className="icon-btn" title={sub.f ? 'Remover dos favoritos' : 'Favoritar'} onClick={() => api.post('rooms.favorite', { roomId: rid, favorite: !sub.f })}>
+                  {sub.f ? '★' : '☆'}
                 </button>
-              </>
-            ) : room.t === 'l' ? (
-              <LivechatJoinBar rid={rid} />
-            ) : (
-              <span>Você não participa desta sala.</span>
-            )}
-          </div>
+              )}
+              {panels.filter((p) => ['info', 'threads', 'members', 'search'].includes(p.id)).map((p) => (
+                <button key={p.id} className={`icon-btn room-shortcut ${panel === p.id ? 'on' : ''}`} title={p.label} onClick={() => setPanel(panel === p.id ? null : p.id)}>
+                  {p.icon}
+                </button>
+              ))}
+              <Menu trigger={<button className="icon-btn" title="Mais">⋮</button>}>
+                {(close) => (
+                  <>
+                    {panels.map((p) => (
+                      <button key={p.id} onClick={() => (setPanel(p.id), close())}>
+                        {p.icon} {p.label}
+                      </button>
+                    ))}
+                    {sub && (
+                      <>
+                        <hr />
+                        <button onClick={() => (api.post('subscriptions.unread', { roomId: rid }), close())}>● Marcar como não lida</button>
+                        <button onClick={() => (api.post('rooms.hide', { roomId: rid }).then(() => navigate('/home')), close())}>🙈 Ocultar</button>
+                        {room.t !== 'd' && (
+                          <button
+                            className="danger"
+                            onClick={() => {
+                              close();
+                              if (confirm(`Sair de ${name}?`)) api.post('rooms.leave', { roomId: rid }).then(() => navigate('/home')).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
+                            }}
+                          >
+                            ↩ Sair da sala
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </Menu>
+            </div>
+          </header>
+          {room.notice && <NoticeBar room={room} canPost={canPostRO} />}
+          {room.announcement && <div className="announcement">📌 {renderMarkdown(room.announcement)}</div>}
+          <MessageList key={rid} rid={rid} sub={sub} actions={actions} canModerate={canModerate} notice={room.notice ? { ack: room.noticeAck, canPost: canPostRO } : undefined} />
+          <TypingIndicator id={rid} />
+          {sub ? (
+            <Composer
+              rid={rid}
+              disabled={!!disabledReason}
+              disabledReason={disabledReason}
+              placeholder={`Mensagem para ${room.t === 'd' ? '@' : '#'}${name}`}
+              editing={editing}
+              setEditing={setEditing}
+              quoting={quoting}
+              setQuoting={setQuoting}
+              onEditLast={editLast}
+              canned={room.t === 'l' ? { contactName: room.fname ?? '', agentName: me.name } : undefined}
+              ackOption={!!(room.notice && room.noticeAck && canPostRO)}
+            />
+          ) : (
+            <div className="join-bar">
+              {room.t === 'c' ? (
+                <>
+                  <span>Você está vendo uma prévia de #{name}.</span>
+                  <button className="btn primary" onClick={join}>
+                    Entrar no canal
+                  </button>
+                </>
+              ) : room.t === 'l' ? (
+                <LivechatJoinBar rid={rid} />
+              ) : (
+                <span>Você não participa desta sala.</span>
+              )}
+            </div>
+          )}
+        </div>
+        {tmid ? (
+          <ThreadPanel key={tmid} rid={rid} tmid={tmid} room={room} canModerate={canModerate} onClose={() => navigate(roomPath(room))} onUserClick={setUserCard} isMember={!!sub} disabledReason={disabledReason} />
+        ) : panel ? (
+          <RoomPanel id={panel} room={room} sub={sub} roles={roles} onClose={() => setPanel(null)} onChanged={loadRoom} onUserClick={setUserCard} />
+        ) : null}
+        {discussionFrom && (
+          <CreateModal kind="discussion" parent={{ _id: room._id, name: room.name ?? '', fname: name, t: room.t }} pmid={discussionFrom._id} onClose={() => setDiscussionFrom(null)} />
         )}
+        {userCard && <UserCard username={userCard} rid={rid} roomRoles={roles} onClose={() => setUserCard(null)} />}
       </div>
-      {tmid ? (
-        <ThreadPanel key={tmid} rid={rid} tmid={tmid} room={room} canModerate={canModerate} onClose={() => navigate(roomPath(room))} onUserClick={setUserCard} isMember={!!sub} disabledReason={disabledReason} />
-      ) : panel ? (
-        <RoomPanel id={panel} room={room} sub={sub} roles={roles} onClose={() => setPanel(null)} onChanged={loadRoom} onUserClick={setUserCard} />
-      ) : null}
-      {discussionFrom && (
-        <CreateModal kind="discussion" parent={{ _id: room._id, name: room.name ?? '', fname: name, t: room.t }} pmid={discussionFrom._id} onClose={() => setDiscussionFrom(null)} />
-      )}
-      {userCard && <UserCard username={userCard} rid={rid} roomRoles={roles} onClose={() => setUserCard(null)} />}
-    </div>
+    </MessageGateContext.Provider>
   );
 }

@@ -3,6 +3,7 @@ import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
+import { assertCanCall, callPolicies } from './direct';
 import { sendSystemMessage } from './messages';
 import { getRoom, getSubscriptionRow } from './rooms';
 import { getSetting } from './settings';
@@ -81,6 +82,7 @@ export async function startCall(ctx: Ctx, input: { roomId: string; kind: CallKin
   const calleeId = room.uids.find((u: string) => u !== ctx.userId);
   const callee = calleeId ? await one('SELECT id, active, type FROM users WHERE id = $1', [calleeId]) : null;
   if (!callee?.active || callee.type === 'bot') throw badRequest('error-call-user', 'Este usuário não pode receber chamadas.');
+  await assertCanCall(ctx, room);
   const conn = await assertOwnConnection(ctx, input.connectionId);
   if (await one(`SELECT 1 FROM calls WHERE status = ANY($2) AND (caller_id = $1 OR callee_id = $1)`, [ctx.userId, ACTIVE])) {
     throw new ApiError(409, 'error-call-in-progress', 'Você já está em uma chamada.');
@@ -162,7 +164,15 @@ export async function listCalls(ctx: Ctx, opts: { offset: number; count: number 
      WHERE c.caller_id = $1 OR c.callee_id = $1 ORDER BY c.created_at DESC LIMIT ${Math.min(opts.count, 100)} OFFSET ${opts.offset}`,
     [ctx.userId],
   );
-  return { calls: rows.map(mapCall), total: Number(rows[0]?.total ?? 0) };
+  const calls = rows.map(mapCall);
+  // Para os botões de ligar de novo: a política de conversas diretas vale também para o histórico.
+  const policies = await callPolicies(ctx, calls.map((c) => c.rid));
+  for (const c of calls) {
+    const p = policies.get(c.rid);
+    c.canCall = p?.canCall ?? true;
+    if (p?.reason) c.callBlockedReason = p.reason;
+  }
+  return { calls, total: Number(rows[0]?.total ?? 0) };
 }
 
 // Sinalização: só entre as duas conexões da chamada em andamento, nunca para outra.

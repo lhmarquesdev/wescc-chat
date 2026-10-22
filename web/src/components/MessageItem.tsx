@@ -1,4 +1,4 @@
-import { Component, memo, useState, type ReactNode } from 'react';
+import { Component, createContext, memo, useContext, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Attachment, Message } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
@@ -7,7 +7,7 @@ import { resolveEmoji } from '../lib/emoji';
 import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
 import { useSetting, useStore } from '../lib/store';
 import { EmojiPicker } from './EmojiPicker';
-import { Avatar, Menu, Modal } from './ui';
+import { Avatar, Menu, Modal, useAsync } from './ui';
 
 export interface MessageActions {
   onReplyThread?: (m: Message) => void;
@@ -15,7 +15,23 @@ export interface MessageActions {
   onQuote?: (m: Message) => void;
   onDiscussion?: (m: Message) => void;
   onUserClick?: (username: string) => void;
+  // Ações que a sala recusaria (somente leitura, conversa direta bloqueada): sem os botões. Padrão: true.
+  canReact?: boolean;
+  canReply?: boolean;
+  canDiscuss?: boolean;
 }
+
+export type MessageGate = Pick<MessageActions, 'canReact' | 'canReply' | 'canDiscuss'> & {
+  // Recibos de leitura (as mesmas regras do servidor): com a permissão de ver recibos; num canal de avisos, com a lista
+  // de membros oculta ou num aviso com "Ciente", os das mensagens dos outros só para quem publica (ou vê a lista oculta).
+  canSeeReceipts?: boolean;
+  receiptsLimited?: boolean;
+  canSeeLimitedReceipts?: boolean;
+};
+
+// As mesmas regras para toda mensagem da sala, inclusive as da thread, que monta as próprias ações.
+// O que vier em actions tem prioridade.
+export const MessageGateContext = createContext<MessageGate>({});
 
 // Só links http(s) ou do próprio servidor (o servidor já filtra; aqui é a segunda barreira).
 const safeHref = (url?: string) => (url && /^(https?:\/\/|\/(?!\/))/i.test(url) ? url : undefined);
@@ -170,7 +186,7 @@ function AttachmentView({ a }: { a: Attachment }) {
   return <RichAttachment a={a} />;
 }
 
-function Reactions({ m }: { m: Message }) {
+function Reactions({ m, canReact }: { m: Message; canReact: boolean }) {
   const me = useStore((s) => s.me);
   const entries = Object.entries(m.reactions ?? {});
   if (!entries.length) return null;
@@ -180,9 +196,22 @@ function Reactions({ m }: { m: Message }) {
       {entries.map(([code, r]) => {
         const e = resolveEmoji(code);
         const mine = r.usernames.includes(me?.username ?? '');
-        return (
-          <button key={code} className={`reaction ${mine ? 'mine' : ''}`} title={`${r.usernames.join(', ')} reagiu com ${code}`} onClick={() => toggle(code)}>
+        const title = `${r.usernames.join(', ')} reagiu com ${code}`;
+        const content = (
+          <>
             {e?.unicode ?? (e?.url ? <img src={e.url} alt={code} /> : code)} <span>{r.usernames.length}</span>
+          </>
+        );
+        // Onde reagir é recusado, as reações antigas continuam visíveis, mas não são botões.
+        if (!canReact)
+          return (
+            <span key={code} className={`reaction ${mine ? 'mine' : ''}`} title={title}>
+              {content}
+            </span>
+          );
+        return (
+          <button key={code} className={`reaction ${mine ? 'mine' : ''}`} title={title} onClick={() => toggle(code)}>
+            {content}
           </button>
         );
       })}
@@ -191,11 +220,13 @@ function Reactions({ m }: { m: Message }) {
 }
 
 function ReadReceipts({ m, onClose }: { m: Message; onClose: () => void }) {
-  const [list, setList] = useState<any[] | null>(null);
-  if (list === null) void api.get('chat.getMessageReadReceipts', { messageId: m._id }).then((r) => setList(r.receipts)).catch(() => setList([]));
+  const { data, error } = useAsync(() => api.get('chat.getMessageReadReceipts', { messageId: m._id }), [m._id]);
+  const list: any[] | null = data?.receipts ?? null;
   return (
     <Modal title="Lida por" onClose={onClose}>
-      {!list ? (
+      {error ? (
+        <div className="form-error">{error}</div>
+      ) : !list ? (
         'Carregando…'
       ) : list.length === 0 ? (
         <div className="muted">Ninguém leu ainda.</div>
@@ -291,6 +322,12 @@ function MessageView({ m, grouped, actions, inThread, canModerate }: MessageItem
   const showEdited = useSetting<boolean>('Message_ShowEditedStatus');
   const own = m.u._id === me._id;
   const perms = me.permissions;
+  const gate = useContext(MessageGateContext);
+  const canReact = (actions.canReact ?? gate.canReact) !== false;
+  const canReply = (actions.canReply ?? gate.canReply) !== false;
+  const canDiscuss = (actions.canDiscuss ?? gate.canDiscuss) !== false;
+  const limited = !!gate.receiptsLimited || !!m.ackRequired;
+  const showReceipts = receiptsOn && gate.canSeeReceipts !== false && (own || !limited || !!gate.canSeeLimitedReceipts);
 
   if (m.t && m.t !== 'rm' && m.t !== 'discussion-created' && m.t !== 'message_pinned') {
     return (
@@ -356,7 +393,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate }: MessageItem
         {m.attachments?.map((a, i) => (
           <AttachmentView key={i} a={a} />
         ))}
-        <Reactions m={m} />
+        <Reactions m={m} canReact={canReact} />
         {!inThread && (m.tcount ?? 0) > 0 && (
           <button className="thread-summary" onClick={() => actions.onReplyThread?.(m)}>
             <span className="replies">
@@ -382,25 +419,30 @@ function MessageView({ m, grouped, actions, inThread, canModerate }: MessageItem
       )}
       {m.t !== 'rm' && (
         <div className="msg-toolbar">
-          <button title="Reagir" onClick={() => setPicker(true)}>
-            😊
-          </button>
-          {!inThread && (
+          {canReact && (
+            <button title="Reagir" onClick={() => setPicker(true)}>
+              😊
+            </button>
+          )}
+          {!inThread && canReply && (
             <button title="Responder em thread" onClick={() => actions.onReplyThread?.(m)}>
               💬
             </button>
           )}
-          <button title="Citar" onClick={() => actions.onQuote?.(m)}>
-            ❝
-          </button>
+          {canReply && (
+            <button title="Citar" onClick={() => actions.onQuote?.(m)}>
+              ❝
+            </button>
+          )}
           <Menu trigger={<button title="Mais">⋯</button>}>
             {(close) => (
               <>
-                {own && allowEdit && !m.t && (
+                {/* Editar segue as regras de envio da sala: o servidor recusa a edição onde não dá para escrever. */}
+                {own && allowEdit && canReply && !m.t && (
                   <button onClick={() => (actions.onEdit?.(m), close())}>✏️ Editar</button>
                 )}
-                {!own && perms.includes('edit-message') && canModerate && !m.t && <button onClick={() => (actions.onEdit?.(m), close())}>✏️ Editar</button>}
-                {!m.drid && !inThread && actions.onDiscussion && <button onClick={() => (actions.onDiscussion?.(m), close())}>🗨 Iniciar discussão</button>}
+                {!own && perms.includes('edit-message') && canModerate && canReply && !m.t && <button onClick={() => (actions.onEdit?.(m), close())}>✏️ Editar</button>}
+                {!m.drid && !inThread && actions.onDiscussion && canDiscuss && <button onClick={() => (actions.onDiscussion?.(m), close())}>🗨 Iniciar discussão</button>}
                 {allowPin && (
                   <button onClick={() => (api.post(m.pinned ? 'chat.unPinMessage' : 'chat.pinMessage', { messageId: m._id }).catch(fail), close())}>
                     📌 {m.pinned ? 'Desafixar' : 'Fixar'}
@@ -416,7 +458,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate }: MessageItem
                 {!own && (
                   <button onClick={() => (api.post('subscriptions.unread', { firstUnreadMessage: { _id: m._id } }).catch(fail), close())}>● Marcar como não lida</button>
                 )}
-                {receiptsOn && <button onClick={() => (setReceipts(true), close())}>👁 Confirmações de leitura</button>}
+                {showReceipts && <button onClick={() => (setReceipts(true), close())}>👁 Confirmações de leitura</button>}
                 {(own ? allowDelete : canModerate || perms.includes('delete-message')) && (
                   <button className="danger" onClick={() => (del(), close())}>
                     🗑 Apagar

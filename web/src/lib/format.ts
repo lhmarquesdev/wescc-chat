@@ -6,9 +6,10 @@ export function roomPath(r: { _id?: string; rid?: string; t: string }) {
   return `/${base}/${id}`;
 }
 
-export function roomIcon(r: { t: string; prid?: string | null; teamMain?: boolean }) {
+export function roomIcon(r: { t: string; prid?: string | null; teamMain?: boolean; notice?: boolean }) {
   if (r.prid) return '💬';
   if (r.teamMain) return '👥';
+  if (r.notice) return '📢';
   if (r.t === 'p') return '🔒';
   if (r.t === 'd') return '@';
   if (r.t === 'l') return '🎧';
@@ -91,6 +92,10 @@ export function systemText(m: Message & Record<string, any>): string {
       return `${u} tornou a sala somente leitura`;
     case 'room-removed-read-only':
       return `${u} permitiu escrita na sala`;
+    case 'room-set-notice':
+      return `${u} transformou a sala em canal de avisos`;
+    case 'room-removed-notice':
+      return `${u} transformou o canal de avisos em sala comum`;
     case 'room-archived':
       return `${u} arquivou a sala`;
     case 'room-unarchived':
@@ -156,7 +161,7 @@ export function systemText(m: Message & Record<string, any>): string {
 }
 
 export function roleLabel(role?: string) {
-  return ({ owner: 'dono', moderator: 'moderador', leader: 'líder' } as Record<string, string>)[role ?? ''] ?? role ?? '';
+  return ({ owner: 'dono', moderator: 'moderador', leader: 'líder', publisher: 'publicador' } as Record<string, string>)[role ?? ''] ?? role ?? '';
 }
 
 export const STATUS_LABEL: Record<string, string> = { online: 'Online', away: 'Ausente', busy: 'Ocupado', offline: 'Offline' };

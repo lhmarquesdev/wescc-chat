@@ -44,6 +44,8 @@ export function mapRoom(r: any): Room {
     encrypted: r.encrypted,
     broadcast: r.broadcast,
     reactWhenReadOnly: r.react_when_ro,
+    notice: !!r.notice,
+    noticeAck: !!r.notice_ack,
     teamId: r.team_id,
     teamMain: r.team_main,
     prid: r.prid,
@@ -82,6 +84,7 @@ export function mapSubscription(s: any, room: any, user: { id: string; username:
     prid: room.prid,
     teamId: room.team_id,
     teamMain: room.team_main,
+    notice: room.notice ? true : undefined,
     notifications: s.notifications,
     _updatedAt: s.updated_at,
   };
@@ -120,6 +123,8 @@ export function mapMessage(r: any): Message {
     emoji: r.emoji ?? undefined,
     avatar: r.avatar ?? undefined,
     unread: r.unread ?? undefined,
+    ackRequired: r.ack_required || undefined,
+    ackCount: r.ack_required ? r.ack_count : undefined,
   };
 }
 

@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { api, errorMessage } from '../../lib/api';
 import { useStore } from '../../lib/store';
 import { Field, Spinner, Toggle, useAsync } from '../../components/ui';
@@ -70,6 +71,14 @@ export function AdminSettings() {
           ))}
         </div>
       )}
+      {group === 'LDAP' && !filter && (
+        <div className="callout info">
+          <span>Mapeamentos, histórico de sincronização e teste de usuário ficam na página LDAP / AD.</span>
+          <Link className="btn" to="/admin/ldap">
+            Abrir página LDAP / AD
+          </Link>
+        </div>
+      )}
       {Object.entries(sections).map(([section, list]) => (
         <div key={section} className="card form">
           {section && <h3>{section}</h3>}
@@ -104,7 +113,7 @@ export function AdminSettings() {
   );
 }
 
-function SettingInput({ s, value, onChange }: { s: any; value: any; onChange: (v: unknown) => void }) {
+export function SettingInput({ s, value, onChange, hint }: { s: any; value: any; onChange: (v: unknown) => void; hint?: ReactNode }) {
   const label = (
     <>
       {s.label} <span className="muted mono small">{s._id}</span>
@@ -112,16 +121,26 @@ function SettingInput({ s, value, onChange }: { s: any; value: any; onChange: (v
   );
   switch (s.type) {
     case 'boolean':
-      return <Toggle checked={!!value} onChange={onChange} label={label} />;
+      return hint ? (
+        <div className="field">
+          <Toggle checked={!!value} onChange={onChange} label={label} />
+          {/* Alinhada ao rótulo: trilho de 34 px + 10 px de espaço. */}
+          <span className="field-hint" style={{ paddingLeft: 44 }}>
+            {hint}
+          </span>
+        </div>
+      ) : (
+        <Toggle checked={!!value} onChange={onChange} label={label} />
+      );
     case 'int':
       return (
-        <Field label={label}>
+        <Field label={label} hint={hint}>
           <input type="number" value={value ?? 0} onChange={(e) => onChange(Number(e.target.value))} />
         </Field>
       );
     case 'select':
       return (
-        <Field label={label}>
+        <Field label={label} hint={hint}>
           <select value={value} onChange={(e) => onChange(e.target.value)}>
             {s.values.map((v: any) => (
               <option key={v.key} value={v.key}>
@@ -134,19 +153,19 @@ function SettingInput({ s, value, onChange }: { s: any; value: any; onChange: (v
     case 'code':
     case 'multiline':
       return (
-        <Field label={label}>
+        <Field label={label} hint={hint}>
           <textarea className={s.type === 'code' ? 'mono' : ''} rows={s.type === 'code' ? 6 : 4} value={value ?? ''} onChange={(e) => onChange(e.target.value)} />
         </Field>
       );
     case 'password':
       return (
-        <Field label={label}>
+        <Field label={label} hint={hint}>
           <input type="password" value={value ?? ''} onChange={(e) => onChange(e.target.value)} autoComplete="new-password" />
         </Field>
       );
     default:
       return (
-        <Field label={label}>
+        <Field label={label} hint={hint}>
           <input value={value ?? ''} onChange={(e) => onChange(e.target.value)} />
         </Field>
       );

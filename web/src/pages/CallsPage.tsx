@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Call } from '@shared/index';
 import { api } from '../lib/api';
 import { startCall } from '../lib/calls';
 import { formatDateTime, formatDuration } from '../lib/format';
+import { realtime } from '../lib/realtime';
 import { useSetting, useStore } from '../lib/store';
 import { Avatar, Empty, Pager, Spinner, useAsync } from '../components/ui';
 
@@ -25,7 +26,23 @@ export function CallsPage() {
   const enabled = useSetting<boolean>('Calls_Enabled');
   const navigate = useNavigate();
   const [offset, setOffset] = useState(0);
-  const { data, loading } = useAsync(() => api.get('calls.list', { offset, count: COUNT }) as Promise<{ calls: Call[]; total: number }>, [offset]);
+  const { data, loading, error, reload } = useAsync(() => api.get('calls.list', { offset, count: COUNT }) as Promise<{ calls: Call[]; total: number }>, [offset]);
+  // Quem pode ligar depende dos papéis das duas pessoas e da regra de conversas diretas: quando mudam, busca de novo.
+  const people = data ? data.calls.map((c) => `${c.caller._id},${c.callee._id}`).join(',') : '';
+  useEffect(() => {
+    const off = realtime.on((ev) => {
+      if (
+        ev.type === 'permissions.changed' ||
+        (ev.type === 'user' && ev.user.roles && (ev.user._id === me._id || people.split(',').includes(ev.user._id))) ||
+        (ev.type === 'settings.changed' && ev.settings.some((s) => s._id === 'Direct_Restriction_Scope'))
+      )
+        reload();
+    });
+    return () => {
+      off();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [people, me._id]);
   return (
     <div className="page">
       <header className="page-head">
@@ -33,8 +50,10 @@ export function CallsPage() {
       </header>
       <div className="page-body">
         <div className="card">
-          {loading ? (
+          {loading && !data ? (
             <Spinner />
+          ) : error ? (
+            <div className="form-error">Não foi possível carregar as chamadas: {error}</div>
           ) : !data?.calls.length ? (
             <Empty>Nenhuma chamada ainda. Abra uma mensagem direta e use 📞 ou 🎥 no topo da conversa.</Empty>
           ) : (
@@ -56,10 +75,10 @@ export function CallsPage() {
                     <span className="muted small">{formatDateTime(c.createdAt)}</span>
                     {enabled && (
                       <span className="call-list-actions">
-                        <button className="icon-btn" title="Chamada de voz" onClick={() => void startCall(c.rid, 'audio')}>
+                        <button className="icon-btn" title={c.canCall === false ? c.callBlockedReason : 'Chamada de voz'} disabled={c.canCall === false} onClick={() => void startCall(c.rid, 'audio')}>
                           📞
                         </button>
-                        <button className="icon-btn" title="Chamada de vídeo" onClick={() => void startCall(c.rid, 'video')}>
+                        <button className="icon-btn" title={c.canCall === false ? c.callBlockedReason : 'Chamada de vídeo'} disabled={c.canCall === false} onClick={() => void startCall(c.rid, 'video')}>
                           🎥
                         </button>
                       </span>

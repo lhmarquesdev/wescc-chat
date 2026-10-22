@@ -3,6 +3,7 @@ import { many, one, query } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { audit } from '../services/audit';
+import { assertCanBringIn, directParentFor, directPolicyFor } from '../services/direct';
 import { mapRoom, mapTeam } from '../services/mappers';
 import { cleanHistory, createDiscussion, listDiscussions } from '../services/messages';
 import { hasPermission } from '../services/permissions';
@@ -119,6 +120,10 @@ export function roomsRoutes(app: FastifyInstance) {
       if (p) out.parent = { _id: p.id, t: p.t, name: p.name, fname: p.fname };
     }
     out.joinCodeRequired = !!room.join_code;
+    // Calculado para quem pergunta: a web desativa o compositor e as chamadas antes do clique.
+    // A discussão criada numa DM segue a política da DM para quem participa dela.
+    const direct = room.t === 'd' ? room : await directParentFor(ctx, room);
+    if (direct) out.direct = await directPolicyFor(ctx, direct);
     return { room: out };
   });
   route(app, 'GET', 'rooms.membersOrderedByRole', {}, async (req, _rep, ctx) => {
@@ -128,7 +133,10 @@ export function roomsRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'rooms.saveRoomSettings', {}, async (req, _rep, ctx) => {
     const body = b(req);
-    const room = await saveRoomSettings(ctx, str(body.rid, 'rid'), body);
+    // Booleanos normalizados só quando enviados: a auditoria registra os campos que vieram.
+    const settings: Record<string, any> = { ...body };
+    for (const k of ['readOnly', 'reactWhenReadOnly', 'notice', 'noticeAck', 'broadcast']) if (k in body) settings[k] = bool(body[k]);
+    const room = await saveRoomSettings(ctx, str(body.rid, 'rid'), settings);
     return { rid: room.id, room: mapRoom(room) };
   });
   route(app, 'POST', 'rooms.delete', {}, async (req, _rep, ctx) => {
@@ -200,6 +208,9 @@ export function roomsRoutes(app: FastifyInstance) {
         topic: extra.topic,
         description: extra.description,
         broadcast: !!bool(extra.broadcast),
+        notice: !!bool(extra.notice),
+        noticeAck: !!bool(extra.noticeAck),
+        reactWhenReadOnly: !!bool(extra.reactWhenReadOnly),
         encrypted: !!bool(extra.encrypted),
         teamId: extra.teamId,
       });
@@ -256,6 +267,7 @@ export function roomsRoutes(app: FastifyInstance) {
       ['Owner', 'owner'],
       ['Moderator', 'moderator'],
       ['Leader', 'leader'],
+      ['Publisher', 'publisher'],
     ] as const) {
       route(app, 'POST', `${prefix}.add${action}`, {}, async (req, _rep, ctx) => {
         const body = b(req);
@@ -389,10 +401,16 @@ export function roomsRoutes(app: FastifyInstance) {
   // ---------- Times ----------
   route(app, 'POST', 'teams.create', {}, async (req, _rep, ctx) => {
     const body = b(req);
+    const members = strArray(body.members);
+    // A sala principal nasce antes dos membros: a regra de quem traz restritos é conferida antes de criar.
+    if (members.length && Number(body.type) === 1 && (await hasPermission(ctx.userId, 'create-team'))) {
+      const ids = (await many('SELECT id FROM users WHERE lower(username) = ANY($1) AND active', [members.map((m) => m.replace(/^@/, '').toLowerCase())])).map((u) => u.id);
+      await assertCanBringIn(ctx.userId, { t: 'p' }, ids);
+    }
     const team = await createTeam(ctx, {
       name: str(body.name, 'name'),
       type: Number(body.type) === 1 ? 1 : 0,
-      members: strArray(body.members),
+      members,
       readOnly: !!bool(body.room?.readOnly),
       topic: body.room?.extraData?.topic,
       description: body.room?.extraData?.description,
@@ -416,12 +434,23 @@ export function roomsRoutes(app: FastifyInstance) {
   });
   route(app, 'GET', 'teams.members', {}, async (req, _rep, ctx) => {
     const p = paging(q(req));
-    const r = await teamMembers(ctx, await requireTeam(q(req)), { ...p, text: q(req).username ?? q(req).name });
+    const team = await requireTeam(q(req));
+    // "Ocultar a lista de membros" na sala principal vale também para a lista do time.
+    if ((await getRoom(team.room_id))?.broadcast && !(await hasPermission(ctx.userId, 'view-broadcast-member-list', team.room_id))) throw forbidden();
+    const r = await teamMembers(ctx, team, { ...p, text: q(req).username ?? q(req).name });
     return { ...r, count: r.members.length, offset: p.offset };
   });
   route(app, 'POST', 'teams.addMembers', {}, async (req, _rep, ctx) => {
     const body = b(req);
-    await addTeamMembers(ctx, await requireTeam(body), (body.members ?? []).map((m: any) => ({ userId: m.userId, roles: m.roles })));
+    const team = await requireTeam(body);
+    const members = (body.members ?? []).map((m: any) => ({ userId: m.userId, roles: m.roles }));
+    // Quem entra no time entra também nas salas padrão dele: confere todas antes de adicionar alguém.
+    if (members.length && (await hasPermission(ctx.userId, 'add-team-member', team.room_id))) {
+      const ids = members.map((m: { userId: string }) => String(m.userId));
+      const rooms = await many(`SELECT * FROM rooms WHERE id = $1 OR (team_id = $2 AND NOT team_main AND (custom_fields->>'teamDefault')::boolean)`, [team.room_id, team.id]);
+      for (const r of rooms) await assertCanBringIn(ctx.userId, r, ids);
+    }
+    await addTeamMembers(ctx, team, members);
     return {};
   });
   route(app, 'POST', 'teams.removeMember', {}, async (req, _rep, ctx) => {
@@ -456,7 +485,16 @@ export function roomsRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'teams.updateRoom', {}, async (req, _rep, ctx) => {
     const body = b(req);
-    await updateTeamRoom(ctx, str(body.roomId, 'roomId'), !!bool(body.isDefault));
+    const rid = str(body.roomId, 'roomId');
+    const isDefault = !!bool(body.isDefault);
+    // Sala padrão recebe todos os membros do time de uma vez, trazidos por quem marcou.
+    const room = isDefault ? await getRoom(rid) : null;
+    const team = room?.team_id ? await requireTeam({ teamId: room.team_id }) : null;
+    if (room && team && (await hasPermission(ctx.userId, 'edit-team-channel', team.room_id))) {
+      const ids = (await many('SELECT user_id FROM team_members WHERE team_id = $1', [team.id])).map((m) => m.user_id);
+      await assertCanBringIn(ctx.userId, room, ids);
+    }
+    await updateTeamRoom(ctx, rid, isDefault);
     return {};
   });
   route(app, 'POST', 'teams.delete', {}, async (req, _rep, ctx) => {
@@ -478,6 +516,7 @@ export function roomsRoutes(app: FastifyInstance) {
     const body = b(req);
     const rid = str(body.rid, 'rid');
     if (!(await hasPermission(ctx.userId, 'create-invite-links', rid))) throw forbidden();
+    if ((await getRoom(rid))?.t === 'd') throw badRequest('error-not-allowed', 'Não é possível adicionar pessoas a uma DM existente.');
     const days = Number(body.days ?? 1);
     const maxUses = Number(body.maxUses ?? 0);
     let inv = await one(
@@ -515,6 +554,9 @@ export function roomsRoutes(app: FastifyInstance) {
     const inv = await one('SELECT * FROM invites WHERE id = $1', [str(b(req).token, 'token')]);
     if (!inv || (inv.expires_at && new Date(inv.expires_at) < new Date()) || (inv.max_uses > 0 && inv.uses >= inv.max_uses))
       throw badRequest('invalid-invite-token', 'Convite inválido ou expirado.');
+    // Quem traz a pessoa é quem criou o link.
+    const target = await getRoom(inv.room_id);
+    if (target && inv.user_id) await assertCanBringIn(inv.user_id, target, [ctx.userId], { joinerId: ctx.userId });
     await addUserToRoom(inv.room_id, ctx.userId);
     await query('UPDATE invites SET uses = uses + 1 WHERE id = $1', [inv.id]);
     const room = await getRoom(inv.room_id);

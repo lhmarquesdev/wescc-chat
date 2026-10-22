@@ -121,6 +121,8 @@ function UserForm({ id, roles, onClose, onSaved }: { id?: string; roles: any[]; 
   };
   const toggleRole = (r: string) => setF({ ...f, roles: f.roles.includes(r) ? f.roles.filter((x: string) => x !== r) : [...f.roles, r] });
   const globalRoles = roles.filter((r) => r.scope === 'Users');
+  // O papel user dá create-p, create-team e start-discussion: com ele, pessoas restritas abrem salas privadas entre si.
+  const restrictedWithUser = f.roles.includes('user') && globalRoles.some((r) => r.restrictDirect && f.roles.includes(r._id));
 
   return (
     <Modal
@@ -166,12 +168,15 @@ function UserForm({ id, roles, onClose, onSaved }: { id?: string; roles: any[]; 
             <span className="field-label">Papéis</span>
             <div className="chips">
               {globalRoles.map((r) => (
-                <label key={r._id} className={`chip selectable ${f.roles.includes(r._id) ? 'on' : ''}`}>
+                <label key={r._id} className={`chip selectable ${f.roles.includes(r._id) ? 'on' : ''}`} title={r.restrictDirect ? 'Restrito em conversas diretas' : undefined}>
                   <input type="checkbox" hidden checked={f.roles.includes(r._id)} onChange={() => toggleRole(r._id)} />
-                  {r._id}
+                  {r.restrictDirect ? `🚫 ${r._id}` : r._id}
                 </label>
               ))}
             </div>
+            {restrictedWithUser && (
+              <p className="warn-note">⚠ O papel user permite criar grupos privados, times e discussões. Pessoas com papel restrito em conversas diretas normalmente não devem tê-lo.</p>
+            )}
           </div>
           <Toggle checked={f.active} onChange={(v) => setF({ ...f, active: v })} label="Ativo" />
           <Toggle checked={f.verified} onChange={(v) => setF({ ...f, verified: v })} label="E-mail verificado" />

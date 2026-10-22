@@ -204,14 +204,12 @@ export async function login(params: { user: string; password: string; code?: str
   let ok = false;
   if (getSetting('LDAP_Enable') && (!user || user.auth_source === 'ldap')) {
     const { ldapLogin } = await import('../ldap/ldap');
-    const ldapUser = await ldapLogin(params.user, params.password).catch((e) => {
-      if (e instanceof ApiError) throw e; // conflito de conta: mostra o motivo
-      return null;
-    });
-    if (ldapUser) {
-      user = ldapUser;
+    const r = await ldapLogin(params.user, params.password); // só lança o conflito de conta (409)
+    if (r.status === 'ok') {
+      user = r.user;
       ok = true;
-    } else if (user && getSetting('LDAP_Login_Fallback')) {
+    } else if (r.status === 'unavailable' && user && getSetting('LDAP_Login_Fallback')) {
+      // Servidor fora do ar: vale a senha local. Recusa do diretório (senha errada, conta desativada) não cai aqui.
       ok = await verifyPassword(params.password, user.password_hash);
     }
   } else if (user) {
@@ -502,7 +500,11 @@ export async function updateUser(
     sets.push(`password_hash = $${params.push(await hashPassword(data.password))}`, 'require_password_change = false');
   }
   if (opts.asAdmin) {
-    if (data.active !== undefined) sets.push(`active = $${params.push(data.active)}`);
+    if (data.active !== undefined) {
+      sets.push(`active = $${params.push(data.active)}`);
+      // "Ativo" mudado à mão é decisão do administrador: a sincronização do LDAP só reativa o que ela mesma desativou.
+      if (data.active !== u.active) sets.push('ldap_deactivated_at = NULL', 'ldap_deactivated_reason = NULL');
+    }
     if (data.roles !== undefined) sets.push(`roles = $${params.push(data.roles.length ? data.roles : ['user'])}`);
     if (data.requirePasswordChange !== undefined) sets.push(`require_password_change = $${params.push(data.requirePasswordChange)}`);
     if (data.verified !== undefined && data.email === undefined) sets.push(`email_verified = $${params.push(data.verified)}`);

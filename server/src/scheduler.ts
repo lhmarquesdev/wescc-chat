@@ -68,20 +68,14 @@ export function startScheduler(log: (m: string) => void) {
         }).catch((e) => log(`retenção falhou: ${e.message}`));
       });
     }
-    const lexpr = getSetting<boolean>('LDAP_Background_Sync') ? getSetting<string>('LDAP_Background_Sync_Interval') : '';
+    const lexpr = getSetting<boolean>('LDAP_Background_Sync') ? String(getSetting<string>('LDAP_Background_Sync_Interval') ?? '').trim() : '';
     if (lexpr !== ldapExpr) {
       ldapTask?.stop();
       ldapTask = null;
       ldapExpr = lexpr;
-      if (lexpr && cron.validate(lexpr)) {
-        ldapTask = cron.schedule(lexpr, () => {
-          void withLock(727103, async () => {
-            const { ldapSync } = await import('./ldap/ldap');
-            const r = await ldapSync();
-            log(`LDAP: ${r.imported} importados, ${r.updated} atualizados, ${r.deactivated} desativados`);
-          }).catch((e) => log(`sincronização LDAP falhou: ${e.message}`));
-        });
-      }
+      if (lexpr && !cron.validate(lexpr)) log(`sincronização LDAP: expressão cron inválida "${lexpr}"; a sincronização automática está parada.`);
+      // runScheduledLdapSync pega o lock sozinho (e fica quieto quando outra instância já está sincronizando).
+      else if (lexpr) ldapTask = cron.schedule(lexpr, () => void import('./ldap/ldap').then((m) => m.runScheduledLdapSync(log)));
     }
   };
   reschedule();

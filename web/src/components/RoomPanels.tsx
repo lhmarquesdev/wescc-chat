@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Message, Room, Subscription } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
-import { formatBytes, formatDateTime, formatRelative, roomIcon, roomPath } from '../lib/format';
+import { partyOf, useDirect } from '../lib/direct';
+import { formatBytes, formatDateTime, formatRelative, roleLabel, roomIcon, roomPath } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
 import { canWithRoles, useStore } from '../lib/store';
 import { LivechatInfoPanel } from './LivechatPanel';
@@ -82,33 +83,48 @@ function MessageResult({ m }: { m: Message }) {
   );
 }
 
+// Valores do formulário de edição a partir da sala carregada (também a base para enviar só o que mudou).
+function roomForm(room: Room & Record<string, any>) {
+  return {
+    roomName: room.t === 'd' ? '' : room.prid ? room.fname : room.name,
+    roomTopic: room.topic ?? '',
+    roomDescription: room.description ?? '',
+    roomAnnouncement: room.announcement ?? '',
+    roomType: room.t,
+    readOnly: room.ro,
+    reactWhenReadOnly: room.reactWhenReadOnly,
+    notice: !!room.notice,
+    noticeAck: !!room.noticeAck,
+    broadcast: !!room.broadcast,
+    default: room.default,
+    featured: room.featured,
+    encrypted: room.encrypted,
+    joinCode: '',
+    retention: room.retention ?? { enabled: false, overrideGlobal: false, maxAgeDays: 30, filesOnly: false, excludePinned: true },
+  };
+}
+
 function InfoPanel({ room, sub, roles, onChanged }: Props) {
   const navigate = useNavigate();
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState<any>({});
   const canEdit = hasPerm('edit-room', roles);
+  const canSetRO = hasPerm('set-readonly', roles);
+  const canSetReact = hasPerm('set-react-when-readonly', roles);
   const isAdmin = useStore((s) => s.me?.permissions.includes('view-room-administration'));
   const canRetention = useStore((s) => s.me?.permissions.includes('edit-room-retention-policy'));
   useEffect(() => {
-    setF({
-      roomName: room.t === 'd' ? '' : room.prid ? room.fname : room.name,
-      roomTopic: room.topic ?? '',
-      roomDescription: room.description ?? '',
-      roomAnnouncement: room.announcement ?? '',
-      roomType: room.t,
-      readOnly: room.ro,
-      reactWhenReadOnly: room.reactWhenReadOnly,
-      default: room.default,
-      featured: room.featured,
-      encrypted: room.encrypted,
-      joinCode: '',
-      retention: room.retention ?? { enabled: false, overrideGlobal: false, maxAgeDays: 30, filesOnly: false, excludePinned: true },
-    });
+    setF(roomForm(room));
   }, [room, edit]);
 
   const save = async () => {
     try {
-      const body: any = { rid: room._id, ...f };
+      // Só o que mudou: quem não tem set-readonly (moderador) salva o resto sem 403 e sem mensagens de sistema à toa.
+      const base: Record<string, any> = roomForm(room);
+      const body: any = { rid: room._id };
+      for (const [k, v] of Object.entries(f)) if (JSON.stringify(v) !== JSON.stringify(base[k])) body[k] = v;
+      // Canal de avisos é sempre somente leitura: o servidor cuida de ro.
+      if (f.notice) delete body.readOnly;
       if (!canRetention) delete body.retention;
       if (!isAdmin) {
         delete body.default;
@@ -151,8 +167,35 @@ function InfoPanel({ room, sub, roles, onChanged }: Props) {
         {room.t !== 'd' && (
           <>
             <Toggle checked={f.roomType === 'p'} onChange={(v) => setF({ ...f, roomType: v ? 'p' : 'c' })} label="Privada" />
-            <Toggle checked={f.readOnly} onChange={(v) => setF({ ...f, readOnly: v })} label="Somente leitura" />
-            <Toggle checked={f.reactWhenReadOnly} onChange={(v) => setF({ ...f, reactWhenReadOnly: v })} label="Permitir reações em somente leitura" />
+            {canSetRO && (room.t === 'c' || room.t === 'p') && (
+              <>
+                {/* Desligar um canal de avisos libera a escrita e mostra os membros (dá para religar abaixo); numa sala que não
+                    era de avisos, ligar e desligar antes de salvar volta ao que estava. */}
+                <Toggle
+                  checked={f.notice}
+                  onChange={(v) => {
+                    const leaving = !v && room.notice;
+                    setF({ ...f, notice: v, readOnly: leaving ? false : f.readOnly, broadcast: leaving ? false : !!room.broadcast });
+                  }}
+                  label="📢 Canal de avisos"
+                />
+                <span className="field-hint opt-hint">Só donos, moderadores e publicadores escrevem; todos leem.</span>
+                {f.notice ? (
+                  <div className="notice-opts">
+                    {canSetReact && <Toggle checked={f.reactWhenReadOnly} onChange={(v) => setF({ ...f, reactWhenReadOnly: v })} label="Permitir reações aos avisos" />}
+                    <Toggle checked={f.noticeAck} onChange={(v) => setF({ ...f, noticeAck: v })} label="Pedir “Ciente” nos avisos" />
+                    <Toggle checked={f.broadcast} onChange={(v) => setF({ ...f, broadcast: v })} label="Ocultar a lista de membros" />
+                  </div>
+                ) : (
+                  <>
+                    <Toggle checked={f.readOnly} onChange={(v) => setF({ ...f, readOnly: v })} label="Somente leitura" />
+                    {canSetReact && <Toggle checked={f.reactWhenReadOnly} onChange={(v) => setF({ ...f, reactWhenReadOnly: v })} label="Permitir reações em somente leitura" />}
+                    {/* Sala que tinha a lista oculta (aviso desligado agora, ou "Transmissão" antiga): dá para desfazer aqui. */}
+                    {room.broadcast && <Toggle checked={f.broadcast} onChange={(v) => setF({ ...f, broadcast: v })} label="Ocultar a lista de membros" />}
+                  </>
+                )}
+              </>
+            )}
             <Toggle checked={f.encrypted} onChange={(v) => setF({ ...f, encrypted: v })} label="Criptografada" />
             {f.roomType === 'c' && (
               <Field label="Código de acesso" hint="Deixe vazio para não exigir código.">
@@ -224,6 +267,7 @@ function InfoPanel({ room, sub, roles, onChanged }: Props) {
           {renderMarkdown(room.announcement)}
         </section>
       )}
+      {room.notice && <NoticeInfo room={room} />}
       <section className="muted small">
         Criada em {formatDateTime(room.ts)} · {room.usersCount} membros · {room.msgs} mensagens
         {room.retention?.overrideGlobal && room.retention.enabled && <div>🧹 Mensagens com mais de {room.retention.maxAgeDays} dias são apagadas automaticamente.</div>}
@@ -263,6 +307,52 @@ function InfoPanel({ room, sub, roles, onChanged }: Props) {
         )}
       </div>
     </div>
+  );
+}
+
+const PUBLISHER_ROLES = ['owner', 'moderator', 'publisher'];
+
+// Quem publica num canal de avisos e como os avisos funcionam nele.
+function NoticeInfo({ room }: { room: Room }) {
+  const { data, loading, error } = useAsync(
+    () => api.get(`${room.t === 'p' ? 'groups' : 'channels'}.roles`, { roomId: room._id }) as Promise<{ roles: { u: { _id: string; username: string; name?: string }; roles: string[] }[] }>,
+    [room._id, room.t],
+  );
+  const people = (data?.roles ?? [])
+    .map((r) => ({ u: r.u, roles: PUBLISHER_ROLES.filter((x) => r.roles.includes(x)) }))
+    .filter((r) => r.roles.length)
+    .sort((a, b) => PUBLISHER_ROLES.indexOf(a.roles[0]) - PUBLISHER_ROLES.indexOf(b.roles[0]) || a.u.username.localeCompare(b.u.username, 'pt-BR'));
+  return (
+    <section className="notice-info">
+      <h4>📢 Canal de avisos</h4>
+      <p>Quem publica: donos, moderadores e publicadores da sala, além de quem tem permissão para publicar em salas somente leitura.</p>
+      {loading ? (
+        <Spinner />
+      ) : error ? (
+        <p className="muted small">{error}</p>
+      ) : (
+        people.length > 0 && (
+          <ul className="plain-list">
+            {people.map((p) => (
+              <li key={p.u._id}>
+                <Avatar username={p.u.username} size={24} />
+                <span className="ack-person">
+                  <strong>{p.u.name || p.u.username}</strong> <span className="muted">@{p.u.username}</span>
+                </span>
+                {p.roles.map((r) => (
+                  <span key={r} className="pill">
+                    {roleLabel(r)}
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+        )
+      )}
+      <p className="muted small">
+        {room.reactWhenReadOnly ? 'Reações: permitidas' : 'Reações: não permitidas'} · {room.noticeAck ? 'Ciente: ativado' : 'Ciente: desativado'}
+      </p>
+    </section>
   );
 }
 
@@ -379,19 +469,30 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
   const [filter, setFilter] = useState('');
   const [onlineOnly, setOnlineOnly] = useState(false);
   const [adding, setAdding] = useState<PickedUser[]>([]);
-  const { data, loading, reload } = useAsync(
-    () => api.get('rooms.membersOrderedByRole', { roomId: room._id, filter, count: 200 }),
-    [room._id, filter],
+  // "Ocultar a lista de membros": sem view-broadcast-member-list o servidor recusa a lista.
+  const hidden = !!room.broadcast && !hasPerm('view-broadcast-member-list', roles);
+  const { data, error, loading, reload } = useAsync(
+    () => (hidden ? Promise.resolve(null) : api.get('rooms.membersOrderedByRole', { roomId: room._id, filter, count: 200 })),
+    [room._id, filter, hidden],
   );
   const canAdd = hasPerm('add-user-to-joined-room', roles);
+  const direct = useDirect();
+  // Grupo privado ou canal de um time privado: só os membros leem.
+  const isPrivate = room.t === 'p' || (room.t === 'c' && !room.teamMain && (room as any).team?.type === 1);
   const members = (data?.members ?? []).filter((m: any) => !onlineOnly || m.status !== 'offline');
+  if (hidden) return <Empty>A lista de membros deste canal está oculta: só donos e moderadores veem quem participa.</Empty>;
   return (
     <>
       <input placeholder="Filtrar membros" value={filter} onChange={(e) => setFilter(e.target.value)} />
       <Toggle checked={onlineOnly} onChange={setOnlineOnly} label="Somente online" />
       {canAdd && room.t !== 'd' && (
         <div className="form">
-          <UserPicker value={adding} onChange={setAdding} placeholder="Adicionar pessoas" />
+          <UserPicker
+            value={adding}
+            onChange={setAdding}
+            placeholder="Adicionar pessoas"
+            itemDisabled={isPrivate ? (u) => direct.bringIn(adding.map(partyOf), partyOf(u)) : undefined}
+          />
           {adding.length > 0 && (
             <button
               className="btn primary"
@@ -409,6 +510,8 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
       )}
       {loading ? (
         <Spinner />
+      ) : error ? (
+        <div className="form-error">{error}</div>
       ) : (
         <>
           <div className="muted small">{data?.total} membros</div>
@@ -420,7 +523,7 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
               </span>
               {m.roles.map((r: string) => (
                 <span key={r} className="pill">
-                  {r === 'owner' ? 'dono' : r === 'moderator' ? 'moderador' : r === 'leader' ? 'líder' : r}
+                  {roleLabel(r)}
                 </span>
               ))}
               {room.muted?.includes(m.username) && <span className="pill">🔇</span>}

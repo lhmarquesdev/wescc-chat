@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
+import type { DirectRestrictionReport } from '@shared/direct';
 import { api, errorMessage } from '../../lib/api';
 import { useStore } from '../../lib/store';
 import { UserPicker, type PickedUser } from '../../components/Pickers';
@@ -23,6 +24,7 @@ export function AdminPermissions() {
   const [tab, setTab] = useState<'permissions' | 'roles'>('permissions');
   const perms = useAsync(() => api.get('permissions.listAll'), []);
   const roles = useAsync(() => api.get('roles.list'), []);
+  const report = useAsync(() => api.get('directRestriction.report').then((r) => r.report as DirectRestrictionReport), []);
   const [filter, setFilter] = useState('');
   const [editRole, setEditRole] = useState<any>(null);
   const [usersOf, setUsersOf] = useState<string | null>(null);
@@ -46,6 +48,7 @@ export function AdminPermissions() {
       await api.post('permissions.update', { permissions: [{ _id: perm._id, roles: next }] });
       perm.roles = next;
       perms.reload();
+      report.reload();
     } catch (e) {
       fail(e);
     }
@@ -112,42 +115,50 @@ export function AdminPermissions() {
           </div>
         </>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Papel</th>
-              <th>Descrição</th>
-              <th>Escopo</th>
-              <th>2FA obrigatório</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {roles.data?.roles.map((r: any) => (
-              <tr key={r._id}>
-                <td>
-                  <strong>{r._id}</strong> {r.protected && <span className="pill">sistema</span>}
-                </td>
-                <td>{r.description}</td>
-                <td>{r.scope === 'Users' ? 'Global' : 'Por sala'}</td>
-                <td>{r.mandatory2fa ? 'Sim' : 'Não'}</td>
-                <td className="row-actions">
-                  <button className="btn small" onClick={() => setUsersOf(r._id)}>
-                    Usuários
-                  </button>
-                  <button className="btn small" onClick={() => setEditRole(r)}>
-                    Editar
-                  </button>
-                  {!r.protected && (
-                    <button className="btn small danger" onClick={() => confirm(`Excluir o papel ${r._id}?`) && api.post('roles.delete', { roleId: r._id }).then(roles.reload).catch(fail)}>
-                      Excluir
-                    </button>
-                  )}
-                </td>
+        <>
+          <DirectReportCard state={report} />
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Papel</th>
+                <th>Descrição</th>
+                <th>Escopo</th>
+                <th>2FA obrigatório</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {roles.data?.roles.map((r: any) => (
+                <tr key={r._id}>
+                  <td>
+                    <strong>{r._id}</strong> {r.protected && <span className="pill">sistema</span>}{' '}
+                    {r.restrictDirect && (
+                      <span className="pill blocked" title="Restrito em conversas diretas">
+                        restrito
+                      </span>
+                    )}
+                  </td>
+                  <td>{r.description}</td>
+                  <td>{r.scope === 'Users' ? 'Global' : 'Por sala'}</td>
+                  <td>{r.mandatory2fa ? 'Sim' : 'Não'}</td>
+                  <td className="row-actions">
+                    <button className="btn small" onClick={() => setUsersOf(r._id)}>
+                      Usuários
+                    </button>
+                    <button className="btn small" onClick={() => setEditRole(r)}>
+                      Editar
+                    </button>
+                    {!r.protected && (
+                      <button className="btn small danger" onClick={() => confirm(`Excluir o papel ${r._id}?`) && api.post('roles.delete', { roleId: r._id }).then(roles.reload).catch(fail)}>
+                        Excluir
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
       )}
       {editRole && (
         <RoleForm
@@ -156,20 +167,23 @@ export function AdminPermissions() {
           onSaved={() => {
             roles.reload();
             perms.reload();
+            report.reload();
           }}
         />
       )}
-      {usersOf && <RoleUsers role={usersOf} onClose={() => setUsersOf(null)} />}
+      {usersOf && <RoleUsers role={usersOf} onClose={() => (setUsersOf(null), report.reload())} />}
     </>
   );
 }
 
 function RoleForm({ role, onClose, onSaved }: { role: any; onClose: () => void; onSaved: () => void }) {
-  const [f, setF] = useState({ name: role._id ?? role.name, description: role.description, scope: role.scope, mandatory2fa: role.mandatory2fa });
+  const [f, setF] = useState({ name: role._id ?? role.name, description: role.description, scope: role.scope, mandatory2fa: role.mandatory2fa, restrictDirect: !!role.restrictDirect });
   const save = async () => {
     try {
-      if (role.isNew) await api.post('roles.create', f);
-      else await api.post('roles.update', { roleId: role._id, description: f.description, mandatory2fa: f.mandatory2fa, scope: f.scope });
+      // Só papéis globais podem ser restritos (o servidor recusa o resto).
+      const restrictDirect = f.scope === 'Users' && f.restrictDirect;
+      if (role.isNew) await api.post('roles.create', { ...f, restrictDirect });
+      else await api.post('roles.update', { roleId: role._id, description: f.description, mandatory2fa: f.mandatory2fa, scope: f.scope, restrictDirect });
       onSaved();
       onClose();
     } catch (e) {
@@ -200,6 +214,14 @@ function RoleForm({ role, onClose, onSaved }: { role: any; onClose: () => void; 
           </select>
         </Field>
         <Toggle checked={f.mandatory2fa} onChange={(v) => setF({ ...f, mandatory2fa: v })} label="Exigir 2FA de quem tem este papel" />
+        {f.scope === 'Users' && (
+          <>
+            <Toggle checked={f.restrictDirect} onChange={(v) => setF({ ...f, restrictDirect: v })} label="Restrito em conversas diretas" />
+            <span className="field-hint opt-hint">
+              Quem tem este papel não pode iniciar conversas diretas nem chamadas com outras pessoas restritas. A exceção é quem tem a permissão start-dm-between-restricted.
+            </span>
+          </>
+        )}
       </div>
     </Modal>
   );
@@ -240,5 +262,62 @@ function RoleUsers({ role, onClose }: { role: string; onClose: () => void }) {
         </ul>
       )}
     </Modal>
+  );
+}
+
+const LOOPHOLE_ACTION: Record<string, string> = {
+  'create-p': 'criar grupos privados',
+  'create-team': 'criar times',
+  'start-discussion': 'criar discussões',
+  'start-discussion-other-user': 'criar discussões',
+};
+
+const people = (n: number) => `${n} ${n === 1 ? 'pessoa' : 'pessoas'}`;
+
+// Resumo da política de conversas diretas e das brechas (papéis que deixam pessoas restritas abrir salas privadas).
+function DirectReportCard({ state }: { state: { data: DirectRestrictionReport | null; loading: boolean; error: string | null } }) {
+  const { data: r, loading, error } = state;
+  if (loading && !r)
+    return (
+      <div className="card direct-report">
+        <Spinner />
+      </div>
+    );
+  if (error || !r) return <div className="card direct-report muted small">Não foi possível carregar o resumo das conversas diretas restritas{error ? `: ${error}` : '.'}</div>;
+  if (!r.restrictedRoles.length)
+    return (
+      <div className="card direct-report">
+        <h3>Conversas diretas restritas</h3>
+        <p className="muted">Nenhum papel está restrito em conversas diretas.</p>
+      </div>
+    );
+  // start-discussion e start-discussion-other-user dizem a mesma coisa: um aviso só.
+  const warnings = new Map<string, { users: number; viaRoles: Set<string>; sample: Map<string, string> }>();
+  for (const l of r.loopholes) {
+    const action = LOOPHOLE_ACTION[l.permission] ?? l.permission;
+    const w = warnings.get(action) ?? { users: 0, viaRoles: new Set<string>(), sample: new Map<string, string>() };
+    w.users = Math.max(w.users, l.users);
+    l.viaRoles.forEach((x) => w.viaRoles.add(x));
+    l.sample.forEach((u) => w.sample.size < 10 && w.sample.set(u._id, u.username));
+    warnings.set(action, w);
+  }
+  return (
+    <div className="card direct-report">
+      <h3>Conversas diretas restritas</h3>
+      <p>Papéis restritos: {r.restrictedRoles.map((x) => `${x._id} (${people(x.users)})`).join(', ')}.</p>
+      <p>{r.scope === 'same_role' ? 'Regra: pessoas com o mesmo papel restrito não conversam em particular.' : 'Regra: duas pessoas com papel restrito não conversam em particular.'}</p>
+      <p>Exceção (permissão start-dm-between-restricted): {r.exemptRoles.length ? r.exemptRoles.join(', ') : 'ninguém'}.</p>
+      {[...warnings].map(([action, w]) => (
+        <p key={action} className="warn-note">
+          ⚠ {people(w.users)} com papel restrito também {w.users === 1 ? 'pode' : 'podem'} {action} pelo papel {[...w.viaRoles].join(', ')}. Isso permite conversas particulares fora das mensagens diretas. Tire esse papel dessas pessoas ou essa permissão do papel.
+          <span className="sample">{[...w.sample.values()].map((u) => `@${u}`).join(', ')}</span>
+        </p>
+      ))}
+      {r.blockedDirects > 0 && (
+        <p className="muted small">
+          {r.blockedDirects === 1 ? '1 conversa direta antiga está bloqueada (o histórico continua disponível).' : `${r.blockedDirects} conversas diretas antigas estão bloqueadas (o histórico continua disponível).`}
+        </p>
+      )}
+    </div>
   );
 }

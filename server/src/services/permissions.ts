@@ -2,8 +2,8 @@ import type { Permission, Role } from '@shared/index';
 import { many, one, query } from '../db/pool';
 import { bus } from '../realtime/bus';
 
-// Papéis padrão. Papéis com escopo "Subscriptions" valem por sala (owner, moderator, leader).
-export const DEFAULT_ROLES: Omit<Role, 'name'>[] = [
+// Papéis padrão. Papéis com escopo "Subscriptions" valem por sala (owner, moderator, leader, publisher).
+export const DEFAULT_ROLES: Omit<Role, 'name' | 'restrictDirect'>[] = [
   { _id: 'admin', description: 'Administrador', scope: 'Users', protected: true, mandatory2fa: false },
   { _id: 'user', description: 'Usuário', scope: 'Users', protected: true, mandatory2fa: false },
   { _id: 'bot', description: 'Bot', scope: 'Users', protected: true, mandatory2fa: false },
@@ -18,6 +18,7 @@ export const DEFAULT_ROLES: Omit<Role, 'name'>[] = [
   { _id: 'owner', description: 'Dono da sala', scope: 'Subscriptions', protected: true, mandatory2fa: false },
   { _id: 'moderator', description: 'Moderador da sala', scope: 'Subscriptions', protected: true, mandatory2fa: false },
   { _id: 'leader', description: 'Líder da sala', scope: 'Subscriptions', protected: true, mandatory2fa: false },
+  { _id: 'publisher', description: 'Publicador da sala', scope: 'Subscriptions', protected: true, mandatory2fa: false },
 ];
 
 const A = 'admin';
@@ -97,6 +98,8 @@ export const DEFAULT_PERMISSIONS: [string, string, string[]][] = [
   ['set-owner', 'rooms', [A, O]],
   ['set-moderator', 'rooms', [A, O]],
   ['set-leader', 'rooms', [A, O]],
+  ['set-publisher', 'rooms', [A, O]],
+  ['start-dm-between-restricted', 'rooms', [A]],
   ['set-readonly', 'rooms', [A, O]],
   ['set-react-when-readonly', 'rooms', [A, O]],
   ['ban-user', 'rooms', [A, O, M]],
@@ -171,14 +174,25 @@ export const DEFAULT_PERMISSIONS: [string, string, string[]][] = [
   ['view-livechat-offline-messages', 'omnichannel', [A, 'livechat-manager']],
 ];
 
+// Papel "Operação" (criado pela migração 013): lê canais, participa e fala em DM com quem não é restrito.
+// Sem create-c/create-p/create-team/start-discussion: senão daria para abrir salas privadas entre operadores.
+export const OPERACAO_PERMISSIONS = ['create-d', 'view-c-room', 'view-p-room', 'view-d-room', 'view-joined-room', 'preview-c-room', 'view-outside-room', 'view-room-members', 'delete-own-message', 'view-message-read-receipts'];
+export const PUBLISHER_PERMISSIONS = ['post-readonly', 'mention-all', 'mention-here'];
+for (const p of DEFAULT_PERMISSIONS) {
+  if (OPERACAO_PERMISSIONS.includes(p[0])) p[2] = [...p[2], 'operacao'];
+  if (PUBLISHER_PERMISSIONS.includes(p[0])) p[2] = [...p[2], 'publisher'];
+}
+
 let permCache = new Map<string, Set<string>>();
 let roleScopes = new Map<string, Role['scope']>();
+let restrictedRoles = new Set<string>();
 
 export async function loadPermissions() {
   const rows = await many<{ id: string; roles: string[] }>('SELECT id, roles FROM permissions');
   permCache = new Map(rows.map((r) => [r.id, new Set(r.roles)]));
-  const roles = await many<{ id: string; scope: Role['scope'] }>('SELECT id, scope FROM roles');
+  const roles = await many<{ id: string; scope: Role['scope']; restrict_direct: boolean }>('SELECT id, scope, restrict_direct FROM roles');
   roleScopes = new Map(roles.map((r) => [r.id, r.scope]));
+  restrictedRoles = new Set(roles.filter((r) => r.restrict_direct && r.scope === 'Users').map((r) => r.id));
 }
 
 bus.onPermissions(() => void loadPermissions());
@@ -231,6 +245,15 @@ export async function hasRole(userId: string, role: string, rid?: string | null)
   return (await getUserRoles(userId, rid)).includes(role);
 }
 
+// Papéis globais marcados como "Restrito em conversas diretas".
+export function restrictedRoleIds(): string[] {
+  return [...restrictedRoles];
+}
+
+export function rolesWithPermission(permission: string): string[] {
+  return [...(permCache.get(permission) ?? [])];
+}
+
 export function permissionsForRoles(roles: string[]): string[] {
   const out: string[] = [];
   for (const [id, set] of permCache) if (roles.some((r) => set.has(r))) out.push(id);
@@ -258,7 +281,15 @@ export async function listRoles(): Promise<Role[]> {
 }
 
 export function mapRole(r: any): Role {
-  return { _id: r.id, name: r.id, description: r.description, scope: r.scope, protected: r.protected, mandatory2fa: r.mandatory_2fa };
+  return {
+    _id: r.id,
+    name: r.id,
+    description: r.description,
+    scope: r.scope,
+    protected: r.protected,
+    mandatory2fa: r.mandatory_2fa,
+    restrictDirect: !!r.restrict_direct,
+  };
 }
 
 export function roleScope(role: string) {

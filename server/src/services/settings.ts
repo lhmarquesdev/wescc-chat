@@ -1,14 +1,39 @@
+import cron from 'node-cron';
 import type { Setting, SettingType } from '@shared/index';
 import { many, query } from '../db/pool';
 import { bus } from '../realtime/bus';
 
-type Def = Omit<Setting, '_id' | 'value'> & { default: unknown };
+// validate devolve o texto do erro (mostrado ao administrador) ou null quando o valor serve.
+type Def = Omit<Setting, '_id' | 'value'> & { default: unknown; validate?: (value: unknown) => string | null };
 
 const defs = new Map<string, Def>();
 let sorter = 0;
 
 function add(group: string, section: string, id: string, type: SettingType, def: unknown, opts: Partial<Def> = {}) {
   defs.set(id, { group, section, type, default: def, public: false, sorter: sorter++, label: id, ...opts });
+}
+
+function validateCron(v: unknown): string | null {
+  const expr = String(v ?? '').trim();
+  if (!expr || cron.validate(expr)) return null;
+  return 'Expressão cron inválida. Exemplo: */15 * * * * (a cada 15 minutos).';
+}
+
+// Mapas do LDAP: {"chave": "valor"} ou {"chave": ["valor", ...]}.
+function validateLdapMap(v: unknown): string | null {
+  let map: unknown;
+  try {
+    map = JSON.parse(String(v || '{}'));
+  } catch {
+    return 'JSON inválido.';
+  }
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return 'O mapa deve ser um objeto JSON, por exemplo {"GG-Operacao": ["operacao"]}.';
+  for (const [k, val] of Object.entries(map)) {
+    if (!k.trim()) return 'As chaves do mapa não podem ser vazias.';
+    const ok = Array.isArray(val) ? val.every((x) => typeof x === 'string' && x.trim()) : typeof val === 'string' && val.trim();
+    if (!ok) return `Valor inválido para a chave "${k}": use um texto ou uma lista de textos.`;
+  }
+  return null;
 }
 
 // ---------- Geral ----------
@@ -53,6 +78,14 @@ add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Attempts', 'int', 10, { 
 add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Attempts_By_Ip', 'int', 50, { label: 'Bloquear o IP após N tentativas falhas (0 = nunca)' });
 add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Minutes', 'int', 5, { label: 'Minutos de bloqueio após tentativas falhas' });
 add('Accounts', 'Presence', 'Accounts_Default_Away_Minutes', 'int', 5, { public: true, label: 'Minutos de inatividade para "ausente"' });
+add('Accounts', 'Direct Messages', 'Direct_Restriction_Scope', 'select', 'any', {
+  public: true,
+  label: 'Bloqueio de conversas diretas entre pessoas com papel restrito',
+  values: [
+    { key: 'any', label: 'Entre quaisquer pessoas com papel restrito' },
+    { key: 'same_role', label: 'Só entre pessoas que têm o mesmo papel restrito' },
+  ],
+});
 
 // ---------- Mensagens ----------
 add('Message', 'Editing', 'Message_AllowEditing', 'boolean', true, { public: true, label: 'Permitir editar mensagens' });
@@ -114,26 +147,42 @@ add('Email', 'Notifications', 'Email_Notifications_Enabled', 'boolean', false, {
 add('LDAP', 'Connection', 'LDAP_Enable', 'boolean', false, { public: true, label: 'Ativar LDAP' });
 add('LDAP', 'Connection', 'LDAP_Url', 'string', 'ldap://localhost:389', { label: 'URL do servidor (ldap:// ou ldaps://)' });
 add('LDAP', 'Connection', 'LDAP_Reject_Unauthorized', 'boolean', true, { label: 'Rejeitar certificados inválidos' });
+add('LDAP', 'Connection', 'LDAP_CA_Certificate', 'multiline', '', { label: 'Certificado da autoridade certificadora (CA) do servidor, em PEM (opcional)' });
 add('LDAP', 'Authentication', 'LDAP_Authentication_UserDN', 'string', '', { label: 'DN do usuário de serviço' });
 add('LDAP', 'Authentication', 'LDAP_Authentication_Password', 'password', '', { label: 'Senha do usuário de serviço' });
 add('LDAP', 'Search', 'LDAP_BaseDN', 'string', '', { label: 'Base DN' });
 add('LDAP', 'Search', 'LDAP_User_Search_Filter', 'string', '(objectclass=*)', { label: 'Filtro de usuários' });
 add('LDAP', 'Search', 'LDAP_User_Search_Field', 'string', 'sAMAccountName,uid', { label: 'Campo de busca do login' });
+add('LDAP', 'Search', 'LDAP_Group_BaseDN', 'string', '', { label: 'Base DN dos grupos (vazio usa o Base DN)' });
 add('LDAP', 'Data Sync', 'LDAP_Username_Field', 'string', 'sAMAccountName', { label: 'Atributo do nome de usuário' });
 add('LDAP', 'Data Sync', 'LDAP_Name_Field', 'string', 'cn', { label: 'Atributo do nome' });
 add('LDAP', 'Data Sync', 'LDAP_Email_Field', 'string', 'mail', { label: 'Atributo do e-mail' });
 add('LDAP', 'Data Sync', 'LDAP_Unique_Identifier_Field', 'string', 'objectGUID,entryUUID', { label: 'Identificador único' });
-add('LDAP', 'Data Sync', 'LDAP_Login_Fallback', 'boolean', true, { label: 'Permitir login local se o LDAP falhar' });
+add('LDAP', 'Data Sync', 'LDAP_Login_Fallback', 'boolean', true, { label: 'Permitir login com a senha local quando o servidor LDAP estiver fora do ar' });
 add('LDAP', 'Data Sync', 'LDAP_Merge_Existing_Users', 'boolean', false, { label: 'Vincular a contas locais com o mesmo nome de usuário' });
+add('LDAP', 'Data Sync', 'LDAP_Sync_Avatar', 'boolean', true, { label: 'Usar a foto do diretório como avatar' });
+add('LDAP', 'Data Sync', 'LDAP_Avatar_Field', 'string', 'thumbnailPhoto,jpegPhoto', { label: 'Atributo da foto' });
 add('LDAP', 'Sync', 'LDAP_Background_Sync', 'boolean', false, { label: 'Sincronização em segundo plano' });
-add('LDAP', 'Sync', 'LDAP_Background_Sync_Interval', 'string', '0 */6 * * *', { label: 'Frequência (cron)' });
+add('LDAP', 'Sync', 'LDAP_Background_Sync_Interval', 'string', '*/15 * * * *', { label: 'Frequência (cron)', validate: validateCron });
 add('LDAP', 'Sync', 'LDAP_Background_Sync_Import_New_Users', 'boolean', true, { label: 'Importar novos usuários' });
 add('LDAP', 'Sync', 'LDAP_Sync_User_Active_State', 'boolean', true, { label: 'Desativar usuários removidos do LDAP' });
-add('LDAP', 'Sync Roles', 'LDAP_Enable_Role_Mapping', 'boolean', false, { label: 'Mapear grupos para papéis' });
-add('LDAP', 'Sync Roles', 'LDAP_Role_Mapping', 'code', '{}', { label: 'Mapa grupo LDAP → papéis (JSON)' });
+add('LDAP', 'Sync', 'LDAP_Sync_AD_Disabled', 'boolean', true, { label: 'Desativar contas desativadas no Active Directory (userAccountControl)' });
+add('LDAP', 'Sync', 'LDAP_Sync_Reactivate_Users', 'boolean', true, { label: 'Reativar contas que voltarem ao diretório ou forem reativadas no Active Directory' });
+add('LDAP', 'Sync', 'LDAP_Sync_Max_Deactivation_Percent', 'int', 50, { label: 'Não desativar ninguém se a sincronização for desativar mais que este % dos usuários do LDAP (0 = sem limite)' });
+add('LDAP', 'Sync Roles', 'LDAP_Enable_Role_Mapping', 'boolean', false, { label: 'Mapear grupos e OUs para papéis' });
+add('LDAP', 'Sync Roles', 'LDAP_Role_Mapping', 'code', '{}', { label: 'Mapa grupo/OU → papéis (JSON)', validate: validateLdapMap });
 add('LDAP', 'Sync Roles', 'LDAP_Group_Filter', 'string', '(&(objectclass=groupOfNames)(member=#{userdn}))', { label: 'Filtro de grupos' });
-add('LDAP', 'Sync Channels', 'LDAP_Enable_Channel_Mapping', 'boolean', false, { label: 'Mapear grupos para canais' });
-add('LDAP', 'Sync Channels', 'LDAP_Channel_Mapping', 'code', '{}', { label: 'Mapa grupo LDAP → canais (JSON)' });
+add('LDAP', 'Sync Roles', 'LDAP_Group_Nested', 'boolean', false, { label: 'Incluir grupos aninhados (Active Directory)' });
+add('LDAP', 'Sync Roles', 'LDAP_Default_Roles', 'string', 'user', { label: 'Papéis padrão de todo usuário do LDAP (separados por vírgula)' });
+add('LDAP', 'Sync Roles', 'LDAP_Default_Roles_Skip_Restricted', 'boolean', true, { label: 'Não dar os papéis padrão a quem recebe um papel restrito em conversas diretas' });
+add('LDAP', 'Sync Roles', 'LDAP_Roles_Auto_Remove', 'boolean', true, { label: 'Remover papéis mapeados de quem não está mais no grupo ou na OU' });
+add('LDAP', 'Sync Channels', 'LDAP_Enable_Channel_Mapping', 'boolean', false, { label: 'Mapear grupos e OUs para canais' });
+add('LDAP', 'Sync Channels', 'LDAP_Channel_Mapping', 'code', '{}', { label: 'Mapa grupo/OU → canais (JSON)', validate: validateLdapMap });
+add('LDAP', 'Sync Channels', 'LDAP_Channels_Auto_Remove', 'boolean', false, { label: 'Remover dos canais mapeados quem não está mais no grupo ou na OU' });
+add('LDAP', 'Sync Channels', 'LDAP_Channels_Admin', 'string', '', { label: 'Dono dos canais criados pelo mapeamento (nome de usuário; vazio = sem dono)' });
+add('LDAP', 'Sync Teams', 'LDAP_Enable_Team_Mapping', 'boolean', false, { label: 'Mapear grupos e OUs para times' });
+add('LDAP', 'Sync Teams', 'LDAP_Team_Mapping', 'code', '{}', { label: 'Mapa grupo/OU → times (JSON)', validate: validateLdapMap });
+add('LDAP', 'Sync Teams', 'LDAP_Teams_Auto_Remove', 'boolean', false, { label: 'Remover dos times mapeados quem não está mais no grupo ou na OU' });
 
 // ---------- SAML ----------
 add('SAML', 'Provider', 'SAML_Enable', 'boolean', false, { public: true, label: 'Ativar SAML' });
@@ -288,12 +337,19 @@ function coerce(def: Def, value: unknown): unknown {
 }
 
 export async function updateSettings(values: Record<string, unknown>) {
-  const changed: { _id: string; value: unknown }[] = [];
+  // Converte e valida tudo antes de gravar: um valor inválido não deixa a gravação pela metade.
+  const accepted: [string, unknown][] = [];
   for (const [id, raw] of Object.entries(values)) {
     const def = defs.get(id);
     if (!def) continue;
     if (def.type === 'password' && raw === '********') continue;
     const value = coerce(def, raw);
+    const err = def.validate?.(value);
+    if (err) throw new Error(`${def.label}: ${err}`);
+    accepted.push([id, value]);
+  }
+  const changed: { _id: string; value: unknown }[] = [];
+  for (const [id, value] of accepted) {
     await query(
       `INSERT INTO settings (id, value, updated_at) VALUES ($1, $2, now())
        ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
@@ -318,7 +374,7 @@ export function listSettings(opts: { publicOnly?: boolean } = {}): Setting[] {
     let value = getSetting(id);
     if (def.type === 'password' && opts.publicOnly) continue;
     if (def.type === 'password' && value) value = '********';
-    const { default: _d, ...rest } = def;
+    const { default: _d, validate: _v, ...rest } = def;
     out.push({ _id: id, value, ...rest });
   }
   return out;

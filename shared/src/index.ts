@@ -68,6 +68,9 @@ export interface Room {
   encrypted: boolean;
   broadcast: boolean;
   reactWhenReadOnly: boolean;
+  notice: boolean; // canal de avisos (implica ro)
+  noticeAck: boolean; // avisos podem pedir "Ciente"
+  direct?: RoomDirectPolicy; // só em rooms.info de mensagens diretas, calculado para quem pergunta
   teamId?: string | null;
   teamMain?: boolean;
   prid?: string | null; // sala pai (discussão)
@@ -81,6 +84,13 @@ export interface Room {
   retention?: RoomRetention | null;
   ts: string;
   _updatedAt: string;
+}
+
+export interface RoomDirectPolicy {
+  canSend: boolean;
+  canCall: boolean;
+  sendBlockedReason?: string;
+  callBlockedReason?: string;
 }
 
 export interface RoomRetention {
@@ -119,6 +129,7 @@ export interface Subscription {
   prid?: string | null;
   teamId?: string | null;
   teamMain?: boolean;
+  notice?: boolean; // a sala é um canal de avisos (ícone na barra lateral)
   notifications: SubscriptionNotifyPrefs;
   _updatedAt: string;
 }
@@ -189,9 +200,20 @@ export interface Message {
   editedAt?: string | null;
   editedBy?: UserRef | null;
   unread?: boolean; // read receipts: ainda não lida por todos
+  ackRequired?: boolean; // o aviso pede "Ciente"
+  ackCount?: number; // quantas pessoas confirmaram
   alias?: string;
   emoji?: string;
   avatar?: string;
+}
+
+export interface NoticeAcks {
+  messageId: string;
+  ackCount: number;
+  pendingCount: number;
+  acked: { user: UserRef; ackAt: string }[]; // quando status = 'acked'
+  pending: UserRef[]; // quando status = 'pending'
+  total: number; // tamanho da lista pedida
 }
 
 export interface Team {
@@ -212,6 +234,7 @@ export interface Role {
   scope: 'Users' | 'Subscriptions';
   protected: boolean;
   mandatory2fa: boolean;
+  restrictDirect: boolean; // "Restrito em conversas diretas" (só papéis globais)
 }
 
 export interface Permission {
@@ -378,6 +401,8 @@ export interface Call {
   endedAt: string | null;
   endedBy: string | null;
   duration: number | null; // segundos
+  canCall?: boolean; // só em calls.list
+  callBlockedReason?: string;
 }
 
 export type CallSignal = { sdp: { type: 'offer' | 'answer'; sdp: string } } | { candidate: Record<string, unknown> | null };

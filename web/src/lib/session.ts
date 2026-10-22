@@ -1,4 +1,4 @@
-import type { UserStatus } from '@shared/index';
+import type { Role, UserStatus } from '@shared/index';
 import { api, getCredentials, setCredentials, setUnauthorizedHandler } from './api';
 import { setCustomEmoji } from './emoji';
 import { syncPushSubscription, unsubscribeOnLogout } from './push';
@@ -17,8 +17,9 @@ export async function loadSubscriptions() {
 }
 
 export async function loadPermissionMap() {
-  const r = await api.get('permissions.listAll').catch(() => null);
+  const [r, roles] = await Promise.all([api.get('permissions.listAll').catch(() => null), api.get('roles.list').catch(() => null)]);
   if (r) useStore.setState({ permMap: Object.fromEntries(r.update.map((p: any) => [p._id, p.roles])) });
+  if (roles) useStore.setState({ restrictedRoles: (roles.roles as Role[]).filter((x) => x.restrictDirect).map((x) => x._id) });
 }
 
 export async function loadCustomEmoji() {
@@ -61,7 +62,9 @@ export async function startSession() {
   if (!started) {
     started = true;
     realtime.start(() => {
-      // Ao reconectar, recarrega o que pode ter mudado.
+      // Ao reconectar, recarrega o que pode ter mudado. Eventos "user" podem ter se perdido: os papéis anunciados
+      // deixam de valer por cima do que as telas buscam.
+      useStore.setState({ userRoles: {} });
       void loadSubscriptions();
       void loadPresence();
       void api.get('me').then((m) => useStore.getState().setMe(m));
@@ -73,6 +76,8 @@ export async function startSession() {
         void api.get('me').then((m) => useStore.getState().setMe(m));
         void loadPermissionMap();
       }
+      // Papéis trocados: me.permissions é calculado pelo servidor, então busca de novo.
+      if (ev.type === 'user' && ev.user.roles && ev.user._id === useStore.getState().me?._id) void api.get('me').then((m) => useStore.getState().setMe(m));
       if (ev.type === 'settings.changed' && ev.settings.some((s) => s._id === '__emoji')) void loadCustomEmoji();
     });
   }

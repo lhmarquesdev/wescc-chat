@@ -45,6 +45,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [create, setCreate] = useState<CreateKind | null>(null);
   const [onlyUnread, setOnlyUnread] = useState(false);
   const queueCount = useStore((st) => Object.keys(st.queue).length);
+  // O menu "Criar" mostra só o que a pessoa pode criar (quem é da operação, por exemplo, só abre mensagem direta).
+  const canDm = usePermission('create-d');
+  const canDiscussion = usePermission(['start-discussion', 'start-discussion-other-user']);
+  const canChannel = usePermission(['create-c', 'create-p']);
+  const canTeam = usePermission('create-team');
   const navigate = useNavigate();
 
   const groups = useMemo(() => {
@@ -122,16 +127,18 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               📞
             </button>
           )}
-          <Menu trigger={<button className="icon-btn" title="Criar">✎</button>}>
-            {(close) => (
-              <>
-                <button onClick={() => (setCreate('dm'), close())}>@ Mensagem direta</button>
-                <button onClick={() => (setCreate('discussion'), close())}>💬 Discussão</button>
-                <button onClick={() => (setCreate('channel'), close())}># Canal</button>
-                <button onClick={() => (setCreate('team'), close())}>👥 Time</button>
-              </>
-            )}
-          </Menu>
+          {(canDm || canDiscussion || canChannel || canTeam) && (
+            <Menu trigger={<button className="icon-btn" title="Criar">✎</button>}>
+              {(close) => (
+                <>
+                  {canDm && <button onClick={() => (setCreate('dm'), close())}>@ Mensagem direta</button>}
+                  {canDiscussion && <button onClick={() => (setCreate('discussion'), close())}>💬 Discussão</button>}
+                  {canChannel && <button onClick={() => (setCreate('channel'), close())}># Canal</button>}
+                  {canTeam && <button onClick={() => (setCreate('team'), close())}>👥 Time</button>}
+                </>
+              )}
+            </Menu>
+          )}
         </div>
       </div>
       {omni && isAgent && (

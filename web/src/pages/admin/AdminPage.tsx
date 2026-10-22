@@ -12,6 +12,7 @@ import { AdminIntegrations } from './AdminIntegrations';
 import { AdminOAuth } from './AdminOAuth';
 import { AdminOmnichannel } from './AdminOmnichannel';
 import { AdminImport } from './import';
+import { AdminLdap } from './ldap';
 
 export function AdminPage() {
   const { section = 'info' } = useParams();
@@ -30,6 +31,7 @@ export function AdminPage() {
     { id: 'emoji', label: '😀 Emojis', perm: ['manage-emoji'] },
     { id: 'invites', label: '🔗 Convites', perm: ['view-room-administration'] },
     { id: 'import', label: '📥 Importação', perm: ['run-import', 'view-import-operations'] },
+    { id: 'ldap', label: '🗂 LDAP / AD', perm: ['view-privileged-setting'] },
     { id: 'settings', label: '⚙️ Configurações', perm: ['view-privileged-setting'] },
   ];
   return (
@@ -55,6 +57,7 @@ export function AdminPage() {
         {section === 'emoji' && <AdminEmoji />}
         {section === 'invites' && <AdminInvites />}
         {section === 'import' && <AdminImport />}
+        {section === 'ldap' && <AdminLdap />}
         {section === 'settings' && <AdminSettings />}
       </div>
     </div>

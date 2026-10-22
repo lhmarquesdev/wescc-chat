@@ -32,6 +32,7 @@ export function Composer({
   setQuoting,
   onEditLast,
   canned,
+  ackOption,
 }: {
   rid: string;
   tmid?: string;
@@ -45,6 +46,8 @@ export function Composer({
   onEditLast?: () => void;
   // Atendimento: respostas prontas com "!atalho" e variáveis do contato/agente.
   canned?: { contactName: string; contactEmail?: string; agentName: string };
+  // Canal de avisos com "Ciente": quem publica escolhe se o aviso pede confirmação.
+  ackOption?: boolean;
 }) {
   const me = useStore((s) => s.me)!;
   const sendOnEnter = me.preferences?.sendOnEnter !== false;
@@ -58,6 +61,7 @@ export function Composer({
   const [alsoChannel, setAlsoChannel] = useState(false);
   const [pending, setPending] = useState<File[]>([]);
   const [fileDesc, setFileDesc] = useState('');
+  const [askAck, setAskAck] = useState(true);
   const ta = useRef<HTMLTextAreaElement>(null);
   const typingRef = useRef<{ on: boolean; timer: number | null }>({ on: false, timer: null });
   const draftKey = `wescc.draft.${rid}${tmid ? `.${tmid}` : ''}`;
@@ -198,7 +202,8 @@ export function Composer({
         setEditing(null);
       } else {
         const attachments = quoting ? [{ text: quoting.msg, author_name: quoting.u.username, ts: quoting.ts, message_link: `?msg=${quoting._id}` }] : undefined;
-        await api.post('chat.sendMessage', { message: { rid, msg, tmid, tshow: tmid ? alsoChannel || undefined : undefined, attachments } });
+        const ackRequired = ackOption && askAck && !tmid ? true : undefined;
+        await api.post('chat.sendMessage', { message: { rid, msg, tmid, tshow: tmid ? alsoChannel || undefined : undefined, attachments, ackRequired } });
         if (quoting) setQuoting(null);
       }
       setText('');
@@ -367,6 +372,11 @@ export function Composer({
         )}
         <span className="spacer" />
         <span className={`counter ${text.length > maxSize ? 'over' : ''}`}>{text.length > maxSize * 0.8 ? `${text.length}/${maxSize}` : ''}</span>
+        {ackOption && !editing && !tmid && (
+          <button type="button" className={`chip selectable ${askAck ? 'on' : 'off'}`} aria-pressed={askAck} aria-label="Pedir “Ciente”" title="Os membros confirmam que leram este aviso." onClick={() => setAskAck(!askAck)}>
+            ✔ <span className="pill-label">Pedir </span>“Ciente”
+          </button>
+        )}
         <button className="btn primary send" onClick={send} disabled={!text.trim()}>
           {editing ? 'Salvar' : 'Enviar'}
         </button>

@@ -2,16 +2,25 @@ import type { FastifyInstance } from 'fastify';
 import { many, one, query } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
 import { audit, listAuditLog } from '../services/audit';
+import { directRestrictionReport } from '../services/direct';
 import { withExtra } from '../services/messages';
 import { listPermissions, listRoles, mapRole, setPermissionRoles, hasPermission, loadPermissions, roleScope } from '../services/permissions';
-import { isKnownSetting, isSecretSetting, listSettings, updateSettings } from '../services/settings';
+import { getSetting, isKnownSetting, isSecretSetting, listSettings, updateSettings } from '../services/settings';
 import { engagementChannels, engagementMessages, engagementUsers, workspaceStatistics } from '../services/stats';
 import { runRetention } from '../services/retention';
+import { notifySubscription } from '../services/rooms';
 import { mapUser } from '../services/mappers';
 import { actorOf, invalidateMandatory2faCache } from '../services/users';
 import { bus } from '../realtime/bus';
-import { b, paging, q, route, str, strArray } from './http';
+import { b, bool, paging, q, route, str, strArray } from './http';
 import { resolveUserParam } from './users';
+
+const RESTRICT_GLOBAL_ONLY = 'Só papéis globais podem ser restritos em conversas diretas.';
+
+// A web recarrega "me" (e as permissões) ao ver os papéis mudarem; as outras telas atualizam a política de DM.
+function publishRoles(user: { id: string; username: string }, roles: string[] | undefined) {
+  if (roles) bus.publish({ all: true }, { type: 'user', action: 'updated', user: { _id: user.id, username: user.username, roles } });
+}
 
 export function adminRoutes(app: FastifyInstance) {
   // ---------- Informações públicas ----------
@@ -57,11 +66,14 @@ export function adminRoutes(app: FastifyInstance) {
     if (!/^[a-zA-Z0-9 _.-]+$/.test(name)) throw badRequest('error-invalid-role-name', 'Nome de papel inválido.');
     if (await one('SELECT 1 FROM roles WHERE lower(id) = lower($1)', [name])) throw badRequest('error-duplicate-role-names-not-allowed', 'Já existe um papel com esse nome.');
     const scope = body.scope === 'Subscriptions' ? 'Subscriptions' : 'Users';
-    const row = await one('INSERT INTO roles (id, description, scope, protected, mandatory_2fa) VALUES ($1,$2,$3,false,$4) RETURNING *', [
+    const restrictDirect = !!bool(body.restrictDirect);
+    if (restrictDirect && scope !== 'Users') throw badRequest('error-invalid-params', RESTRICT_GLOBAL_ONLY);
+    const row = await one('INSERT INTO roles (id, description, scope, protected, mandatory_2fa, restrict_direct) VALUES ($1,$2,$3,false,$4,$5) RETURNING *', [
       name,
       String(body.description ?? ''),
       scope,
       !!body.mandatory2fa,
+      restrictDirect,
     ]);
     await loadPermissions();
     bus.permissionsChanged();
@@ -73,16 +85,20 @@ export function adminRoutes(app: FastifyInstance) {
     const id = str(body.roleId, 'roleId');
     const existing = await one('SELECT * FROM roles WHERE id = $1', [id]);
     if (!existing) throw notFound('error-invalid-roleId', 'Papel não encontrado.');
-    const row = await one('UPDATE roles SET description = COALESCE($2, description), mandatory_2fa = COALESCE($3, mandatory_2fa), scope = CASE WHEN protected THEN scope ELSE COALESCE($4, scope) END WHERE id = $1 RETURNING *', [
-      id,
-      body.description ?? null,
-      body.mandatory2fa ?? null,
-      body.scope ?? null,
-    ]);
+    // Vale também para papéis protegidos (ex.: restringir o papel user numa instalação só de operação).
+    const restrictDirect = bool(body.restrictDirect);
+    const scope = existing.protected ? existing.scope : (body.scope ?? existing.scope);
+    if ((restrictDirect ?? existing.restrict_direct) && scope !== 'Users') throw badRequest('error-invalid-params', RESTRICT_GLOBAL_ONLY);
+    const row = await one(
+      `UPDATE roles SET description = COALESCE($2, description), mandatory_2fa = COALESCE($3, mandatory_2fa), scope = CASE WHEN protected THEN scope ELSE COALESCE($4, scope) END,
+         restrict_direct = COALESCE($5, restrict_direct)
+       WHERE id = $1 RETURNING *`,
+      [id, body.description ?? null, body.mandatory2fa ?? null, body.scope ?? null, restrictDirect ?? null],
+    );
     invalidateMandatory2faCache();
     await loadPermissions();
     bus.permissionsChanged();
-    await audit(actorOf(ctx), 'role.updated', { role: id });
+    await audit(actorOf(ctx), 'role.updated', { role: id }, { fields: Object.keys(body) });
     return { role: mapRole(row) };
   });
   route(app, 'POST', 'roles.delete', { permissions: ['access-permissions', 'manage-roles'] }, async (req, _rep, ctx) => {
@@ -106,9 +122,13 @@ export function adminRoutes(app: FastifyInstance) {
     if (role === 'admin' && !(await hasPermission(ctx.userId, 'assign-admin-role'))) throw forbidden();
     const user = await resolveUserParam(body);
     if (roleScope(role) === 'Subscriptions' && body.roomId) {
+      // Como em channels.addOwner e afins: numa DM ninguém é dono, moderador ou publicador.
+      if ((await one('SELECT t FROM rooms WHERE id = $1', [body.roomId]))?.t === 'd') throw badRequest('error-not-allowed', 'Mensagens diretas não têm papéis de sala.');
       await query('UPDATE subscriptions SET roles = array_append(array_remove(roles, $3), $3), updated_at = now() WHERE room_id = $1 AND user_id = $2', [body.roomId, user.id, role]);
+      await notifySubscription(user.id, body.roomId, 'updated');
     } else {
-      await query('UPDATE users SET roles = array_append(array_remove(roles, $2), $2), updated_at = now() WHERE id = $1', [user.id, role]);
+      const row = await one('UPDATE users SET roles = array_append(array_remove(roles, $2), $2), updated_at = now() WHERE id = $1 RETURNING roles', [user.id, role]);
+      publishRoles(user, row?.roles);
     }
     await audit(actorOf(ctx), 'role.user.added', { role, userId: user.id, roomId: body.roomId });
     return { role: { _id: role } };
@@ -121,8 +141,13 @@ export function adminRoutes(app: FastifyInstance) {
       const n = await one(`SELECT count(*)::int AS n FROM users WHERE 'admin' = ANY(roles) AND active`);
       if (n.n <= 1 && user.roles.includes('admin')) throw badRequest('error-action-not-allowed', 'Não é possível remover o último administrador.');
     }
-    if (body.roomId) await query('UPDATE subscriptions SET roles = array_remove(roles, $3), updated_at = now() WHERE room_id = $1 AND user_id = $2', [body.roomId, user.id, role]);
-    else await query('UPDATE users SET roles = array_remove(roles, $2), updated_at = now() WHERE id = $1', [user.id, role]);
+    if (body.roomId) {
+      await query('UPDATE subscriptions SET roles = array_remove(roles, $3), updated_at = now() WHERE room_id = $1 AND user_id = $2', [body.roomId, user.id, role]);
+      await notifySubscription(user.id, body.roomId, 'updated');
+    } else {
+      const row = await one('UPDATE users SET roles = array_remove(roles, $2), updated_at = now() WHERE id = $1 RETURNING roles', [user.id, role]);
+      publishRoles(user, row?.roles);
+    }
     await audit(actorOf(ctx), 'role.user.removed', { role, userId: user.id, roomId: body.roomId });
     return {};
   });
@@ -138,6 +163,8 @@ export function adminRoutes(app: FastifyInstance) {
       : await many(`SELECT *, count(*) OVER() AS total FROM users WHERE $1 = ANY(roles) ORDER BY username LIMIT ${p.count} OFFSET ${p.offset}`, [role]);
     return { users: rows.map((r) => mapUser(r, { full: true })), total: Number(rows[0]?.total ?? 0) };
   });
+  // Diagnóstico das conversas diretas restritas: papéis, exceções, brechas por outras permissões e DMs bloqueadas.
+  route(app, 'GET', 'directRestriction.report', { permissions: ['access-permissions'] }, async () => ({ report: await directRestrictionReport() }));
 
   // ---------- Estatísticas e dashboard de engajamento ----------
   route(app, 'GET', 'statistics', { permissions: ['view-statistics'] }, async () => workspaceStatistics());
@@ -214,10 +241,15 @@ export function adminRoutes(app: FastifyInstance) {
     }
   });
   route(app, 'POST', 'ldap.syncNow', { permissions: ['edit-privileged-setting'] }, async (_req, _rep, ctx) => {
+    if (!getSetting('LDAP_Enable')) throw badRequest('error-ldap-disabled', 'Ative o LDAP antes de sincronizar.');
     const { ldapSync } = await import('../ldap/ldap');
-    const r = await ldapSync();
-    await audit(actorOf(ctx), 'ldap.sync.manual', {}, r);
-    return { message: `Importados: ${r.imported}, atualizados: ${r.updated}, desativados: ${r.deactivated}`, ...r };
+    // A própria sincronização grava o histórico e a auditoria (ldap.sync), em nome de quem pediu.
+    const r = await ldapSync({ startedBy: ctx.userId });
+    if (r.status === 'failed') throw badRequest('error-ldap-sync-failed', `A sincronização falhou: ${r.error ?? 'erro desconhecido'}`);
+    const counts = `Importados: ${r.imported}, atualizados: ${r.updated}, desativados: ${r.deactivated}, reativados: ${r.reactivated}`;
+    const issues = r.errors ? `${r.errors} ${r.errors === 1 ? 'erro' : 'erros'}` : 'avisos';
+    const message = r.status === 'partial' ? `Sincronização concluída com ${issues}. ${counts}. Veja os detalhes em LDAP / AD › Sincronização.` : `Sincronização concluída. ${counts}.`;
+    return { message, ...r };
   });
 
   // ---------- Moderação ----------

@@ -7,9 +7,25 @@ export interface PickedUser {
   _id: string;
   username: string;
   name?: string;
+  roles?: string[]; // papéis globais (users.autocomplete)
 }
 
-export function UserPicker({ value, onChange, placeholder = 'Buscar pessoas', single, rid }: { value: PickedUser[]; onChange: (v: PickedUser[]) => void; placeholder?: string; single?: boolean; rid?: string }) {
+export function UserPicker({
+  value,
+  onChange,
+  placeholder = 'Buscar pessoas',
+  single,
+  rid,
+  itemDisabled,
+}: {
+  value: PickedUser[];
+  onChange: (v: PickedUser[]) => void;
+  placeholder?: string;
+  single?: boolean;
+  rid?: string;
+  // Motivo para não deixar escolher a pessoa (aparece na sugestão, desativada).
+  itemDisabled?: (item: PickedUser & { roles?: string[] }) => string | undefined;
+}) {
   const [term, setTerm] = useState('');
   const [items, setItems] = useState<PickedUser[]>([]);
   useEffect(() => {
@@ -36,18 +52,33 @@ export function UserPicker({ value, onChange, placeholder = 'Buscar pessoas', si
       </div>
       {items.length > 0 && (
         <div className="picker-list">
-          {items.map((u) => (
-            <button
-              key={u._id}
-              type="button"
-              onClick={() => {
-                onChange(single ? [u] : [...value, u]);
-                setTerm('');
-              }}
-            >
-              <Avatar username={u.username} size={22} /> <strong>{u.name}</strong> <span className="muted">@{u.username}</span>
-            </button>
-          ))}
+          {items.map((u) => {
+            const reason = itemDisabled?.(u);
+            if (reason)
+              return (
+                <button key={u._id} type="button" className="blocked" aria-disabled="true" title={reason}>
+                  <Avatar username={u.username} size={22} />
+                  <span className="picker-item">
+                    <span>
+                      <strong>{u.name}</strong> <span className="muted">@{u.username}</span>
+                    </span>
+                    <span className="picker-reason">{reason}</span>
+                  </span>
+                </button>
+              );
+            return (
+              <button
+                key={u._id}
+                type="button"
+                onClick={() => {
+                  onChange(single ? [u] : [...value, u]);
+                  setTerm('');
+                }}
+              >
+                <Avatar username={u.username} size={22} /> <strong>{u.name}</strong> <span className="muted">@{u.username}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

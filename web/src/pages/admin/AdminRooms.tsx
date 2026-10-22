@@ -77,6 +77,8 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
     roomAnnouncement: room.announcement ?? '',
     roomType: room.t,
     readOnly: room.ro,
+    notice: !!room.notice,
+    broadcast: !!room.broadcast,
     default: room.default,
     featured: room.featured,
   });
@@ -87,6 +89,12 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
       if (room.t === 'd') {
         delete body.roomName;
         delete body.roomType;
+      }
+      // Canal de avisos é sempre somente leitura: o servidor cuida de ro (e recusa readOnly false junto).
+      if (f.notice) delete body.readOnly;
+      if (room.t !== 'c' && room.t !== 'p') {
+        delete body.notice;
+        delete body.broadcast;
       }
       await api.post('rooms.saveRoomSettings', body);
       for (const u of add) await api.post('rooms.adminRooms.addUser', { roomId: room._id, userId: u._id });
@@ -138,7 +146,22 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
         {room.t !== 'd' && (
           <>
             <Toggle checked={f.roomType === 'p'} onChange={(v) => setF({ ...f, roomType: v ? 'p' : 'c' })} label="Privada" />
-            <Toggle checked={f.readOnly} onChange={(v) => setF({ ...f, readOnly: v })} label="Somente leitura" />
+            {(room.t === 'c' || room.t === 'p') && (
+              <>
+                {/* Desligar um canal de avisos libera a escrita e mostra os membros (dá para religar aqui); numa sala que não
+                    era de avisos, ligar e desligar antes de salvar volta ao que estava. */}
+                <Toggle
+                  checked={f.notice}
+                  onChange={(v) => {
+                    const leaving = !v && !!room.notice;
+                    setF({ ...f, notice: v, readOnly: leaving ? false : f.readOnly, broadcast: leaving ? false : !!room.broadcast });
+                  }}
+                  label="Canal de avisos"
+                />
+                {(f.notice || room.broadcast) && <Toggle checked={f.broadcast} onChange={(v) => setF({ ...f, broadcast: v })} label="Ocultar a lista de membros" />}
+              </>
+            )}
+            {!f.notice && <Toggle checked={f.readOnly} onChange={(v) => setF({ ...f, readOnly: v })} label="Somente leitura" />}
             <Toggle checked={f.default} onChange={(v) => setF({ ...f, default: v })} label="Padrão para novos usuários" />
             <Toggle checked={f.featured} onChange={(v) => setF({ ...f, featured: v })} label="Destaque" />
           </>
