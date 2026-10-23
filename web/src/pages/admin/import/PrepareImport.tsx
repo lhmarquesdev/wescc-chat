@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError, errorMessage } from '../../../lib/api';
+import { roomIconName } from '../../../lib/format';
 import { usePermission, useSetting } from '../../../lib/store';
-import { Empty, Spinner } from '../../../components/ui';
+import { Icon } from '../../../components/Icon';
+import { Empty, SkeletonTable } from '../../../components/ui';
 import { fail, ImportTitle, isImporting, isReading, isWaiting, num, ok, plural, ProgressBar, ST, Stat, StatusPill, statusLabel, useImportEvents, usePolling, Warnings } from './common';
 import type { ImportFileData, ImportOperation, SelectionChannel, SelectionContact, SelectionUser, ShortSelectionPart } from './types';
 
@@ -75,13 +77,7 @@ export function PrepareImport() {
     return (
       <>
         <ImportTitle title="Importação" />
-        {loadError ? (
-          <div className="form-error imp-block">
-            Não foi possível carregar a importação: {loadError}
-          </div>
-        ) : (
-          <Spinner />
-        )}
+        {loadError ? <div className="form-error imp-block">Não foi possível carregar a importação: {loadError}</div> : <SkeletonTable rows={4} cols={3} />}
       </>
     );
   }
@@ -112,7 +108,8 @@ export function PrepareImport() {
     );
   }
 
-  if (data && op.status === ST.userSelection) return <Selection data={data} op={op} onCancel={() => void cancel('Descartar esta importação? Os dados lidos do arquivo são apagados; nada foi importado ainda.')} />;
+  if (data && op.status === ST.userSelection)
+    return <Selection data={data} op={op} onCancel={() => void cancel('Descartar esta importação? Os dados lidos do arquivo são apagados; nada foi importado ainda.')} />;
 
   if (op.importerKey === 'api' && op.status === ST.new) {
     return (
@@ -200,9 +197,18 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
     try {
       await api.post('startImport', {
         input: {
-          users: part(users.map((u) => u.user_id), selUsers),
-          channels: part(channels.map((c) => c.channel_id), selChannels),
-          contacts: part(contacts.map((c) => c.id), selContacts),
+          users: part(
+            users.map((u) => u.user_id),
+            selUsers,
+          ),
+          channels: part(
+            channels.map((c) => c.channel_id),
+            selChannels,
+          ),
+          contacts: part(
+            contacts.map((c) => c.id),
+            selContacts,
+          ),
         },
         options: { sendPasswordEmails: sendEmails },
       });
@@ -231,7 +237,10 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
         {op.file ? ` · ${op.file}` : ''}. Tudo começa selecionado: desmarque o que não deve entrar. As mensagens entram junto com os canais escolhidos.
       </p>
       {retention && (
-        <div className="callout warn">A política de retenção está ativa: mensagens importadas mais antigas que o prazo configurado podem ser apagadas na próxima limpeza.</div>
+        <div className="callout warn">
+          <Icon name="warning" />
+          <span>A política de retenção está ativa: mensagens importadas mais antigas que o prazo configurado podem ser apagadas na próxima limpeza.</span>
+        </div>
       )}
       <Warnings list={op.warnings} />
       <div className="tabs" role="tablist">
@@ -321,8 +330,8 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
           row={(c) => (
             <>
               <td>
-                <span className="imp-strong">
-                  {c.channel_id === DIRECT_MESSAGES_ID ? '@ ' : c.is_private ? '🔒 ' : '# '}
+                <span className="imp-strong imp-room">
+                  <Icon name={c.channel_id === DIRECT_MESSAGES_ID ? 'room-direct' : roomIconName({ t: c.is_private ? 'p' : 'c' })} size={16} />
                   {channelLabel(c)}
                 </span>
               </td>
@@ -386,14 +395,12 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
             Enviar e-mail para os novos usuários definirem a senha
           </label>
           <p className="field-hint">
-            Precisa do envio de e-mail (SMTP) configurado em Configurações → E-mail. Vale só para contas novas e ativas que tenham e-mail; sem isso, a pessoa define a senha em "Esqueci minha senha".
+            Precisa do envio de e-mail (SMTP) configurado em Configurações › E-mail. Vale só para contas novas e ativas que tenham e-mail; sem isso, a pessoa define a senha em "Esqueci minha senha".
           </p>
         </div>
       )}
       <div className="imp-actionbar">
-        <span className="small muted imp-summary">
-          {nothing ? 'Nada selecionado.' : `Para importar: ${joinList(summary)}.`}
-        </span>
+        <span className="small muted imp-summary">{nothing ? 'Nada selecionado.' : `Para importar: ${joinList(summary)}.`}</span>
         <span className="spacer" />
         <button className="btn danger" disabled={starting} onClick={onCancel}>
           Cancelar
@@ -551,11 +558,11 @@ function SelectTable<T>({
           <span className="small muted nowrap">
             {num(from + 1)}–{num(Math.min(from + size, shown.length))} de {num(shown.length)}
           </span>
-          <button className="btn small" disabled={p === 0} onClick={() => setPage(p - 1)} aria-label="Página anterior">
-            ‹
+          <button className="btn small icon-only" disabled={p === 0} onClick={() => setPage(p - 1)} aria-label="Página anterior">
+            <Icon name="prev" />
           </button>
-          <button className="btn small" disabled={p >= pages - 1} onClick={() => setPage(p + 1)} aria-label="Próxima página">
-            ›
+          <button className="btn small icon-only" disabled={p >= pages - 1} onClick={() => setPage(p + 1)} aria-label="Próxima página">
+            <Icon name="next" />
           </button>
         </div>
       )}

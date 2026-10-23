@@ -1,13 +1,31 @@
-import { Component, createContext, memo, useContext, useState, type ReactNode } from 'react';
+import {
+  Component,
+  createContext,
+  Fragment,
+  isValidElement,
+  memo,
+  useCallback,
+  useContext,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type PointerEvent as ReactPointerEvent,
+  type ReactElement,
+  type ReactNode,
+  type TouchEvent as ReactTouchEvent,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Attachment, Message } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
-import { formatBytes, formatDateTime, formatRelative, formatTime, roomPath, systemText } from '../lib/format';
+import { startCall } from '../lib/calls';
+import { formatBytes, formatDateTime, formatDuration, formatRelative, formatTime, nameList, plural, roomPath, systemIcon, systemText } from '../lib/format';
 import { resolveEmoji } from '../lib/emoji';
 import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
-import { useSetting, useStore } from '../lib/store';
-import { EmojiPicker } from './EmojiPicker';
-import { Avatar, Menu, Modal, useAsync } from './ui';
+import { avatarBust, useSetting, useStore } from '../lib/store';
+import { EmojiPicker, recentEmoji } from './EmojiPicker';
+import { Icon, type IconName } from './Icon';
+import { Portal, Sheet, useEscape, useFocusTrap, useMedia, useScrollLock } from './overlay';
+import { Avatar, confirmDialog, Empty, Field, Menu, Modal, SkeletonList, useAsync } from './ui';
 
 export interface MessageActions {
   onReplyThread?: (m: Message) => void;
@@ -33,6 +51,102 @@ export type MessageGate = Pick<MessageActions, 'canReact' | 'canReply' | 'canDis
 // O que vier em actions tem prioridade.
 export const MessageGateContext = createContext<MessageGate>({});
 
+// ---------- Mensagem em edição (marcada na lista com .editing) ----------
+
+let editingId: string | null = null;
+const editingListeners = new Set<() => void>();
+const subscribeEditing = (l: () => void) => {
+  editingListeners.add(l);
+  return () => {
+    editingListeners.delete(l);
+  };
+};
+
+// O compositor avisa qual mensagem está editando; só a linha dela renderiza de novo.
+export function setEditingMessage(id: string | null) {
+  if (editingId === id) return;
+  editingId = id;
+  for (const l of editingListeners) l();
+}
+
+const useIsEditing = (id: string) => useSyncExternalStore(subscribeEditing, () => editingId === id);
+
+// ---------- Arquivos: tipo, ícone e cor do quadradinho ----------
+
+export type FileKind = 'pdf' | 'doc' | 'sheet' | 'image' | 'video' | 'audio' | 'archive' | 'code' | 'other';
+
+const EXT_KIND: Record<string, FileKind> = {
+  pdf: 'pdf',
+  doc: 'doc',
+  docx: 'doc',
+  odt: 'doc',
+  txt: 'doc',
+  rtf: 'doc',
+  md: 'doc',
+  xls: 'sheet',
+  xlsx: 'sheet',
+  csv: 'sheet',
+  ods: 'sheet',
+  png: 'image',
+  jpg: 'image',
+  jpeg: 'image',
+  gif: 'image',
+  webp: 'image',
+  svg: 'image',
+  mp4: 'video',
+  webm: 'video',
+  mov: 'video',
+  mp3: 'audio',
+  ogg: 'audio',
+  wav: 'audio',
+  m4a: 'audio',
+  zip: 'archive',
+  rar: 'archive',
+  '7z': 'archive',
+  tar: 'archive',
+  gz: 'archive',
+  json: 'code',
+  js: 'code',
+  ts: 'code',
+  xml: 'code',
+  html: 'code',
+  sql: 'code',
+};
+
+const KIND_ICON: Record<FileKind, IconName> = {
+  pdf: 'file-doc',
+  doc: 'file-doc',
+  sheet: 'file-sheet',
+  image: 'file-image',
+  video: 'file-video',
+  audio: 'file-audio',
+  archive: 'file-archive',
+  code: 'file-code',
+  other: 'file',
+};
+
+export function fileKind(name?: string, mime?: string): FileKind {
+  const ext = name?.includes('.') ? name.split('.').pop()!.toLowerCase() : '';
+  if (EXT_KIND[ext]) return EXT_KIND[ext];
+  if (mime?.startsWith('image/')) return 'image';
+  if (mime?.startsWith('video/')) return 'video';
+  if (mime?.startsWith('audio/')) return 'audio';
+  if (mime === 'application/pdf') return 'pdf';
+  return 'other';
+}
+
+export const fileIconName = (name?: string, mime?: string): IconName => KIND_ICON[fileKind(name, mime)];
+
+// Quadradinho do tipo de arquivo (cartão do anexo, lista de arquivos, importação): 36px ou 28px.
+export function FileTile({ name, mime, size = 36 }: { name?: string; mime?: string; size?: 28 | 36 }) {
+  const k = fileKind(name, mime);
+  return (
+    <span className={size === 28 ? 'att-tile sm' : 'att-tile'} data-kind={k} aria-hidden="true">
+      <Icon name={KIND_ICON[k]} size={size === 28 ? 16 : 18} />
+    </span>
+  );
+}
+
 // Só links http(s) ou do próprio servidor (o servidor já filtra; aqui é a segunda barreira).
 const safeHref = (url?: string) => (url && /^(https?:\/\/|\/(?!\/))/i.test(url) ? url : undefined);
 
@@ -47,56 +161,125 @@ function attachmentColor(c?: string) {
   return undefined;
 }
 
-function ZoomImage({ src, alt, className, download }: { src: string; alt?: string; className: string; download?: string }) {
-  const [zoom, setZoom] = useState(false);
+// ---------- Imagens e visualizador ----------
+
+function Lightbox({ src, title, download, m, onClose }: { src: string; title?: string; download?: string; m?: Message; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEscape(true, onClose);
+  useScrollLock(true);
+  useFocusTrap(ref, true);
+  const name = m ? m.alias || m.u.name || m.u.username : '';
   return (
-    <>
-      <img className={className} src={src} alt={alt ?? ''} loading="lazy" onClick={() => setZoom(true)} />
-      {zoom && (
-        <div className="lightbox" onClick={() => setZoom(false)}>
-          <img src={src} alt={alt ?? ''} />
-          {download && (
-            <a href={`${download}?download`} onClick={(e) => e.stopPropagation()} className="btn">
-              ⬇ Baixar
+    <Portal>
+      <div
+        ref={ref}
+        className="lightbox"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title || 'Imagem'}
+        tabIndex={-1}
+        onClick={(e) => {
+          if (!(e.target as HTMLElement).closest('.lightbox-img, .lightbox-bar a, .lightbox-bar button')) onClose();
+        }}
+      >
+        <img className="lightbox-img" src={src} alt={title ?? ''} />
+        <div className="lightbox-bar">
+          <div className="lightbox-who">
+            {m && (
+              <>
+                <Avatar username={m.u.username} size={32} />
+                <span className="lightbox-meta">
+                  <span className="lightbox-name">{name}</span>
+                  <span className="lightbox-time">{formatDateTime(m.ts)}</span>
+                </span>
+              </>
+            )}
+          </div>
+          <div className="lightbox-file">{title}</div>
+          <div className="lightbox-actions">
+            {download && (
+              <a className="lightbox-btn" href={`${download}?download`} title="Baixar" aria-label="Baixar">
+                <Icon name="download" size={20} />
+              </a>
+            )}
+            <a className="lightbox-btn" href={src} target="_blank" rel="noreferrer" title="Abrir em nova aba" aria-label="Abrir em nova aba">
+              <Icon name="open-external" size={20} />
             </a>
-          )}
+            <button type="button" className="lightbox-btn" onClick={onClose} title="Fechar" aria-label="Fechar">
+              <Icon name="close" size={20} />
+            </button>
+          </div>
         </div>
-      )}
-    </>
+      </div>
+    </Portal>
   );
 }
 
-// Arquivo enviado pelo chat (type 'file'): imagem, vídeo, áudio ou link de download.
-function FileAttachment({ a }: { a: Attachment }) {
+// Imagem do anexo: caixa reservada (esqueleto até carregar), ampliar e baixar no hover, abre no visualizador.
+function ImageView({ src, title, download, m, thumb }: { src: string; title?: string; download?: string; m?: Message; thumb?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const done = () => setLoaded(true);
+  return (
+    <span className={`${thumb ? 'att-thumb-box' : 'att-image-box'}${loaded ? ' loaded' : ''}`}>
+      <button type="button" className="att-image-open" onClick={() => setOpen(true)} aria-label={title ? `Ampliar ${title}` : 'Ampliar imagem'}>
+        <img className={thumb ? 'att-thumb' : 'att-image'} src={src} alt={title ?? ''} loading="lazy" onLoad={done} onError={done} />
+      </button>
+      {!thumb && (
+        <span className="att-image-actions">
+          <button type="button" className="glass-btn" title="Ampliar" aria-label="Ampliar" tabIndex={-1} onClick={() => setOpen(true)}>
+            <Icon name="expand" size={16} />
+          </button>
+          {download && (
+            <a className="glass-btn" href={`${download}?download`} title="Baixar" aria-label="Baixar">
+              <Icon name="download" size={16} />
+            </a>
+          )}
+        </span>
+      )}
+      {open && <Lightbox src={src} title={title} download={download} m={m} onClose={() => setOpen(false)} />}
+    </span>
+  );
+}
+
+// ---------- Anexos ----------
+
+// Arquivo enviado pelo chat (type 'file'): imagem, vídeo, áudio ou cartão de download.
+function FileAttachment({ a, m }: { a: Attachment; m?: Message }) {
   const link = safeHref(a.title_link);
   const image = safeHref(a.image_url);
   if (image)
     return (
-      <div className="att">
-        <ZoomImage className="att-image" src={image} alt={a.title} download={link} />
+      <div className="att att-media">
+        <ImageView src={image} title={a.title} download={link} m={m} />
         {a.description && <div className="att-desc">{a.description}</div>}
       </div>
     );
   if (a.video_url) return <video className="att-video" src={safeHref(a.video_url)} controls preload="metadata" />;
   if (a.audio_url) return <audio className="att-audio" src={safeHref(a.audio_url)} controls preload="metadata" />;
-  if (link)
+  if (link) {
+    const meta = [a.format?.toUpperCase(), formatBytes(a.size)].filter(Boolean).join(' · ');
     return (
-      <a className="att-file" href={`${link}?download`} target="_blank" rel="noreferrer">
-        <span className="att-icon">📄</span>
-        <span>
-          <strong>{a.title}</strong>
-          <span className="muted">
-            {a.format} {formatBytes(a.size)}
+      <div className="att">
+        <a className="att-file" href={`${link}?download`} target="_blank" rel="noreferrer" title={a.title ? `Baixar ${a.title}` : 'Baixar'}>
+          <FileTile name={a.title} />
+          <span className="att-file-meta">
+            <strong className="att-file-name">{a.title}</strong>
+            {meta && <span className="att-file-size">{meta}</span>}
           </span>
-          {a.description && <span className="att-desc">{a.description}</span>}
-        </span>
-      </a>
+          <span className="att-file-dl" aria-hidden="true">
+            <Icon name="download" size={16} />
+          </span>
+        </a>
+        {a.description && <div className="att-desc">{a.description}</div>}
+      </div>
     );
+  }
   return null;
 }
 
 // Anexo de integração ou de mensagem importada, no formato do Slack.
-function RichAttachment({ a }: { a: Attachment }) {
+function RichAttachment({ a, m }: { a: Attachment; m?: Message }) {
   const color = attachmentColor(a.color);
   const titleLink = safeHref(a.title_link);
   const authorLink = safeHref(a.author_link);
@@ -145,7 +328,7 @@ function RichAttachment({ a }: { a: Attachment }) {
               ))}
             </div>
           )}
-          {image && <ZoomImage className="att-image" src={image} alt={a.title} />}
+          {image && <ImageView src={image} title={a.title} m={m} />}
           {a.video_url && <video className="att-video" src={safeHref(a.video_url)} controls preload="metadata" />}
           {a.audio_url && <audio className="att-audio" src={safeHref(a.audio_url)} controls preload="metadata" />}
           {(a.footer || ts) && (
@@ -156,18 +339,20 @@ function RichAttachment({ a }: { a: Attachment }) {
             </div>
           )}
         </div>
-        {thumb && <ZoomImage className="att-thumb" src={thumb} alt={a.title} />}
+        {thumb && <ImageView src={thumb} title={a.title} m={m} thumb />}
       </div>
     </div>
   );
 }
 
-function AttachmentView({ a }: { a: Attachment }) {
+function AttachmentView({ a, m }: { a: Attachment; m?: Message }) {
   if (a.message_link) {
     return (
       <div className="quote-att">
         <div className="quote-head">
-          <strong>{a.author_name}</strong> <span className="muted">{a.ts ? formatDateTime(a.ts) : ''}</span>
+          {a.author_name && <Avatar username={a.author_name} size={16} />}
+          <strong>{a.author_name}</strong>
+          {a.ts && <time className="muted">{formatDateTime(a.ts)}</time>}
         </div>
         <div className="quote-body">{renderMarkdown(a.text ?? '')}</div>
       </div>
@@ -178,46 +363,73 @@ function AttachmentView({ a }: { a: Attachment }) {
   if (a.pendingFileId)
     return (
       <div className="att-pending" title="Arquivo de uma mensagem importada, ainda na origem da importação">
-        {a.text || `📎 ${a.title || 'arquivo'} — arquivo ainda não baixado`}
+        <Icon name="attach" size={14} />
+        <span>{a.text || `${a.title || 'arquivo'} — arquivo ainda não baixado`}</span>
       </div>
     );
   // Anexos de arquivos sempre têm type 'file'; o link /file-upload/ cobre mensagens antigas.
-  if (a.type === 'file' || a.title_link?.startsWith('/file-upload/')) return <FileAttachment a={a} />;
-  return <RichAttachment a={a} />;
+  if (a.type === 'file' || a.title_link?.startsWith('/file-upload/')) return <FileAttachment a={a} m={m} />;
+  return <RichAttachment a={a} m={m} />;
 }
 
-function Reactions({ m, canReact }: { m: Message; canReact: boolean }) {
+// ---------- Reações ----------
+
+function EmojiGlyph({ code }: { code: string }) {
+  const e = resolveEmoji(code);
+  if (e?.unicode) return <>{e.unicode}</>;
+  if (e?.url) return <img className="emoji custom" src={e.url} alt={code} />;
+  return <>{code}</>;
+}
+
+function Reactions({ m, canReact, onAdd }: { m: Message; canReact: boolean; onAdd: (anchor: HTMLElement) => void }) {
   const me = useStore((s) => s.me);
   const entries = Object.entries(m.reactions ?? {});
   if (!entries.length) return null;
   const toggle = (code: string) => api.post('chat.react', { messageId: m._id, emoji: code }).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
   return (
-    <div className="reactions">
-      {entries.map(([code, r]) => {
-        const e = resolveEmoji(code);
-        const mine = r.usernames.includes(me?.username ?? '');
-        const title = `${r.usernames.join(', ')} reagiu com ${code}`;
-        const content = (
-          <>
-            {e?.unicode ?? (e?.url ? <img src={e.url} alt={code} /> : code)} <span>{r.usernames.length}</span>
-          </>
-        );
-        // Onde reagir é recusado, as reações antigas continuam visíveis, mas não são botões.
-        if (!canReact)
-          return (
-            <span key={code} className={`reaction ${mine ? 'mine' : ''}`} title={title}>
-              {content}
-            </span>
+    <div className="reactions-row">
+      <div className="reactions">
+        {entries.map(([code, r]) => {
+          const mine = r.usernames.includes(me?.username ?? '');
+          const title = `${nameList(r.usernames)} ${r.usernames.length === 1 ? 'reagiu' : 'reagiram'} com ${code}`;
+          const content = (
+            <>
+              <span className="reaction-emoji">
+                <EmojiGlyph code={code} />
+              </span>{' '}
+              <span className="n">{r.usernames.length}</span>
+            </>
           );
-        return (
-          <button key={code} className={`reaction ${mine ? 'mine' : ''}`} title={title} onClick={() => toggle(code)}>
-            {content}
-          </button>
-        );
-      })}
+          // Onde reagir é recusado, as reações antigas continuam visíveis, mas não são botões.
+          if (!canReact)
+            return (
+              <span key={code} className={`reaction ${mine ? 'mine' : ''}`} title={title}>
+                {content}
+              </span>
+            );
+          return (
+            <button key={code} type="button" className={`reaction ${mine ? 'mine' : ''}`} title={title} aria-pressed={mine} onClick={() => toggle(code)}>
+              {content}
+            </button>
+          );
+        })}
+      </div>
+      {canReact && (
+        <button type="button" className="reaction-add" title="Adicionar reação" aria-label="Adicionar reação" onClick={(e) => onAdd(e.currentTarget)}>
+          <Icon name="react" size={14} />
+        </button>
+      )}
     </div>
   );
 }
+
+// As três reações rápidas da barra: as mais recentes de quem usa, completadas com as de sempre.
+const QUICK_DEFAULT = ['+1', 'white_check_mark', 'eyes', 'joy', 'tada', 'pray'];
+function quickReactions(n: number) {
+  return [...new Set([...recentEmoji(), ...QUICK_DEFAULT])].filter((c) => resolveEmoji(c)).slice(0, n);
+}
+
+// ---------- Modais ----------
 
 function ReadReceipts({ m, onClose }: { m: Message; onClose: () => void }) {
   const { data, error } = useAsync(() => api.get('chat.getMessageReadReceipts', { messageId: m._id }), [m._id]);
@@ -227,14 +439,19 @@ function ReadReceipts({ m, onClose }: { m: Message; onClose: () => void }) {
       {error ? (
         <div className="form-error">{error}</div>
       ) : !list ? (
-        'Carregando…'
+        <SkeletonList n={4} />
       ) : list.length === 0 ? (
-        <div className="muted">Ninguém leu ainda.</div>
+        <Empty>Ninguém leu ainda.</Empty>
       ) : (
-        <ul className="plain-list">
+        <ul className="plain-list receipt-list">
           {list.map((r) => (
             <li key={r._id}>
-              <Avatar username={r.user.username} size={24} /> <strong>{r.user.name}</strong> <span className="muted">@{r.user.username} · {formatDateTime(r.ts)}</span>
+              <Avatar username={r.user.username} size={32} />
+              <span className="receipt-who">
+                <strong>{r.user.name}</strong>
+                <span className="muted">@{r.user.username}</span>
+              </span>
+              <time className="muted">{formatDateTime(r.ts)}</time>
             </li>
           ))}
         </ul>
@@ -245,28 +462,177 @@ function ReadReceipts({ m, onClose }: { m: Message; onClose: () => void }) {
 
 function ReportModal({ m, onClose }: { m: Message; onClose: () => void }) {
   const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const send = () => {
+    setBusy(true);
+    api
+      .post('chat.reportMessage', { messageId: m._id, description: text })
+      .then(() => (useStore.getState().toast('Denúncia enviada aos moderadores.', 'success'), onClose()))
+      .catch((e) => (useStore.getState().toast(errorMessage(e), 'error'), setBusy(false)));
+  };
   return (
     <Modal
       title="Denunciar mensagem"
+      description="Os moderadores recebem a mensagem e o motivo."
       onClose={onClose}
       footer={
-        <button
-          className="btn danger"
-          onClick={() =>
-            api
-              .post('chat.reportMessage', { messageId: m._id, description: text })
-              .then(() => (useStore.getState().toast('Denúncia enviada aos moderadores.'), onClose()))
-              .catch((e) => useStore.getState().toast(errorMessage(e), 'error'))
-          }
-        >
-          Denunciar
-        </button>
+        <>
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Cancelar
+          </button>
+          <button type="button" className="btn danger solid" disabled={busy} onClick={send}>
+            Denunciar
+          </button>
+        </>
       }
     >
-      <textarea rows={4} placeholder="Descreva o motivo" value={text} onChange={(e) => setText(e.target.value)} />
+      <Field label="Motivo">
+        <textarea rows={4} placeholder="Descreva o motivo" value={text} onChange={(e) => setText(e.target.value)} />
+      </Field>
     </Modal>
   );
 }
+
+// ---------- Linhas especiais ----------
+
+// Linha de sistema: ícone na calha, texto em uma linha e a hora depois de " · ".
+export function SystemLine({ id, icon, ts, children, className }: { id?: string; icon: IconName | null; ts: string; children: ReactNode; className?: string }) {
+  return (
+    <div className={className ? `msg system ${className}` : 'msg system'} id={id}>
+      <div className="msg-left">{icon && <Icon name={icon} size={14} />}</div>
+      <div className="msg-main">
+        <span className="sys-text">{children}</span>
+        <span className="sys-time">
+          {' · '}
+          <time className="msg-time" dateTime={ts} title={formatDateTime(ts)}>
+            {formatTime(ts)}
+          </time>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const CALL_WHY: Record<string, string> = { missed: 'não atendida', declined: 'recusada', canceled: 'cancelada', busy: 'ocupado' };
+
+// Registro de chamada (call_ended / call_missed): cartão sob o nome de quem ligou, com "Ligar de volta".
+function CallCard({ m }: { m: Message & Record<string, any> }) {
+  const meId = useStore((s) => s.me?._id);
+  const room = useStore((s) => s.rooms[m.rid]);
+  const callsOn = useSetting<boolean>('Calls_Enabled');
+  const c = (m.call ?? {}) as { kind?: string; status?: string; duration?: number };
+  const video = c.kind === 'video';
+  const missed = m.t === 'call_missed';
+  const caller = m.u._id === meId;
+  const status = c.status ?? 'missed';
+  const title = !missed
+    ? video
+      ? 'Chamada de vídeo'
+      : 'Chamada de voz'
+    : status === 'declined'
+      ? 'Chamada recusada'
+      : caller
+        ? status === 'canceled'
+          ? 'Chamada cancelada'
+          : 'Chamada não atendida'
+        : 'Chamada perdida';
+  const kind = video ? 'Vídeo' : 'Voz';
+  const meta = missed ? `${kind} · ${formatTime(m.ts)} · ${CALL_WHY[status] ?? 'não atendida'}` : `${kind} · ${formatDuration(c.duration ?? 0)} · ${formatTime(m.ts)}`;
+  const canCall = !!callsOn && room?.t === 'd' && room.uids?.length === 2 && room.direct?.canCall !== false;
+  return (
+    <div className={missed ? 'call-card missed' : 'call-card'}>
+      <span className="call-card-tile" aria-hidden="true">
+        <Icon name={missed ? 'call-missed' : video ? 'call-video' : 'call-audio'} size={18} />
+      </span>
+      <span className="call-card-text">
+        <span className="call-card-title">{title}</span>
+        <span className="call-card-meta">{meta}</span>
+      </span>
+      {canCall && (
+        <button type="button" className="btn small" onClick={() => void startCall(m.rid, video ? 'video' : 'audio')}>
+          {missed && !caller ? 'Ligar de volta' : 'Ligar de novo'}
+          <Icon name={video ? 'call-video' : 'call-audio'} size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Copia para a área de transferência e confirma só depois que deu certo.
+function copyText(text: string, done: string) {
+  const { toast } = useStore.getState();
+  if (!navigator.clipboard) return toast('Não foi possível copiar.', 'error');
+  navigator.clipboard.writeText(text).then(
+    () => toast(done, 'success'),
+    () => toast('Não foi possível copiar.', 'error'),
+  );
+}
+
+// Blocos de código ganham "Copiar" (renderMarkdown devolve os <pre> no primeiro nível).
+function withCopy(nodes: ReactNode): ReactNode {
+  if (!Array.isArray(nodes)) return nodes;
+  return nodes.map((n) => {
+    if (!isValidElement(n) || n.type !== 'pre') return n;
+    const code = (n.props as { children?: ReactElement<{ children?: string }> }).children?.props.children ?? '';
+    return (
+      <div key={n.key} className="md-pre-wrap">
+        {n}
+        <button
+          type="button"
+          className="btn ghost small md-copy"
+          onClick={() => copyText(code, 'Código copiado.')}
+        >
+          <Icon name="copy" size={14} />
+          Copiar
+        </button>
+      </div>
+    );
+  });
+}
+
+// Quem respondeu no tópico: nomes tirados das mensagens já carregadas (sem lista nova a cada leitura do estado).
+function useReplyFaces(m: Message) {
+  const ids = (m.replies ?? []).slice(0, 3);
+  const key = useStore((s) => {
+    if (!ids.length) return '';
+    const known = new Map<string, string>();
+    for (const x of s.threads[m._id] ?? []) known.set(x.u._id, x.u.username);
+    for (const x of s.messages[m.rid]?.list ?? []) if (!known.has(x.u._id)) known.set(x.u._id, x.u.username);
+    return ids
+      .map((id) => known.get(id))
+      .filter(Boolean)
+      .join(' ');
+  });
+  return key ? key.split(' ') : [];
+}
+
+// "Última há 3 min", "Última em 16/10"; "agora" e "ontem" pedem o substantivo: "Última resposta agora".
+function lastReply(ts: string) {
+  const rel = formatRelative(ts);
+  return /^(há|em) /.test(rel) ? `Última ${rel}` : `Última resposta ${rel}`;
+}
+
+function ThreadSummary({ m, onOpen }: { m: Message; onOpen: () => void }) {
+  const faces = useReplyFaces(m);
+  const unread = useStore((s) => !!s.subscriptions[m.rid]?.tunread?.includes(m._id));
+  const n = m.tcount ?? 0;
+  return (
+    <button type="button" className="thread-summary" onClick={onOpen}>
+      {faces.length > 0 && (
+        <span className="avatar-stack" aria-hidden="true">
+          {faces.map((u) => (
+            <img key={u} className="avatar mini-follow" src={`/avatar/${encodeURIComponent(u)}?v=${avatarBust[u] ?? ''}`} width={20} height={20} alt="" loading="lazy" />
+          ))}
+        </span>
+      )}
+      <span className="replies">{plural(n, 'resposta', 'respostas')}</span>
+      {m.tlm && <span className="thread-last">{lastReply(m.tlm)}</span>}
+      {unread && <span className="badge dot" role="img" aria-label="Respostas não lidas" />}
+    </button>
+  );
+}
+
+// ---------- A mensagem ----------
 
 interface MessageItemProps {
   m: Message & Record<string, any>;
@@ -274,6 +640,12 @@ interface MessageItemProps {
   actions: MessageActions;
   inThread?: boolean;
   canModerate: boolean;
+  // Chegou agora (tempo real, com a lista no fim): entra com uma animação curta.
+  arrive?: boolean;
+  // Destino de um link para a mensagem (?msg=): destaque que some sozinho.
+  highlight?: boolean;
+  // Rodapé do cartão de aviso (o "Ciente").
+  footer?: ReactNode;
 }
 
 // Uma mensagem que falha ao renderizar vira um aviso só no lugar dela. Sem isto o erro sobe até a raiz e o React
@@ -294,7 +666,12 @@ class MessageBoundary extends Component<{ m: Message; children: ReactNode }, { f
     if (!this.state.failed) return this.props.children;
     return (
       <div className="msg system" id={this.props.m?._id ? `msg-${this.props.m._id}` : undefined}>
-        <span className="sys-text">Não foi possível exibir esta mensagem.</span>
+        <div className="msg-left">
+          <Icon name="warning" size={14} />
+        </div>
+        <div className="msg-main">
+          <span className="sys-text">Não foi possível exibir esta mensagem.</span>
+        </div>
       </div>
     );
   }
@@ -308,18 +685,47 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
   );
 });
 
-function MessageView({ m, grouped, actions, inThread, canModerate }: MessageItemProps) {
+// Aviso que começa com uma linha só de título (# Título ou *Título*): ela vira o título do cartão e sai do corpo.
+function noticeTitle(msg: string): { title: string; rest: string } | null {
+  const nl = msg.indexOf('\n');
+  const first = (nl < 0 ? msg : msg.slice(0, nl)).trim();
+  const h = first.match(/^#{1,4}\s+(\S.*)$/) ?? first.match(/^\*\*([^*\n]+)\*\*$/) ?? first.match(/^\*([^*\s][^*\n]*)\*$/);
+  if (!h) return null;
+  return { title: h[1].trim(), rest: nl < 0 ? '' : msg.slice(nl + 1).replace(/^\s*\n/, '') };
+}
+
+// Mensagens com o mesmo cartão de sempre (as outras de sistema viram uma linha).
+const CARD_TYPES = new Set(['rm', 'discussion-created', 'message_pinned', 'call_ended', 'call_missed']);
+
+// Toque longo nestes elementos abre o menu do sistema, e não a folha de ações.
+const NATIVE_PRESS = 'a, img, video, audio, .md-pre';
+
+interface MenuItem {
+  key: string;
+  icon: IconName;
+  label: string;
+  run: () => void;
+  danger?: boolean;
+}
+
+function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highlight, footer }: MessageItemProps) {
   const me = useStore((s) => s.me)!;
   const navigate = useNavigate();
-  const [picker, setPicker] = useState(false);
+  const [picker, setPicker] = useState<{ anchor: HTMLElement | null; bar?: boolean } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sheet, setSheet] = useState(false);
   const [receipts, setReceipts] = useState(false);
   const [report, setReport] = useState(false);
+  const editing = useIsEditing(m._id);
+  const coarse = useMedia('(hover: none)');
+  const press = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
   const allowEdit = useSetting<boolean>('Message_AllowEditing');
   const allowDelete = useSetting<boolean>('Message_AllowDeleting');
   const allowPin = useSetting<boolean>('Message_AllowPinning');
   const allowStar = useSetting<boolean>('Message_AllowStarring');
   const receiptsOn = useSetting<boolean>('Message_Read_Receipt_Enabled');
   const showEdited = useSetting<boolean>('Message_ShowEditedStatus');
+  const closePicker = useCallback(() => setPicker(null), []);
   const own = m.u._id === me._id;
   const perms = me.permissions;
   const gate = useContext(MessageGateContext);
@@ -329,35 +735,211 @@ function MessageView({ m, grouped, actions, inThread, canModerate }: MessageItem
   const limited = !!gate.receiptsLimited || !!m.ackRequired;
   const showReceipts = receiptsOn && gate.canSeeReceipts !== false && (own || !limited || !!gate.canSeeLimitedReceipts);
 
-  if (m.t && m.t !== 'rm' && m.t !== 'discussion-created' && m.t !== 'message_pinned') {
+  if (m.t && !CARD_TYPES.has(m.t)) {
     return (
-      <div className="msg system" id={`msg-${m._id}`}>
-        <span className="sys-text">{systemText(m)}</span>
-        <span className="msg-time">{formatTime(m.ts)}</span>
-      </div>
+      <SystemLine id={`msg-${m._id}`} icon={systemIcon(m)} ts={m.ts}>
+        {systemText(m)}
+      </SystemLine>
     );
   }
 
   const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
+  const react = (code: string) => api.post('chat.react', { messageId: m._id, emoji: code }).catch(fail);
+  const call = m.t === 'call_ended' || m.t === 'call_missed';
+  const notice = !!m.ackRequired && !m.t;
+  const lifted = notice ? noticeTitle(m.msg) : null;
+  const text = lifted ? lifted.rest : m.msg;
   const starred = m.starred?.some((s) => s._id === me._id);
+  const bot = !!m.alias || !!m.bot;
   const copyLink = () => {
     const url = `${location.origin}${location.pathname.split('/thread/')[0]}?msg=${m._id}`;
-    void navigator.clipboard?.writeText(url);
-    useStore.getState().toast('Link copiado.');
+    copyText(url, 'Link copiado.');
   };
-  const del = () => {
-    if (confirm('Apagar esta mensagem? Esta ação não pode ser desfeita.')) api.post('chat.delete', { msgId: m._id, roomId: m.rid }).catch(fail);
+  const del = async () => {
+    const ok = await confirmDialog({ title: 'Apagar esta mensagem?', body: 'Esta ação não pode ser desfeita.', confirmLabel: 'Apagar', danger: true });
+    if (ok) api.post('chat.delete', { msgId: m._id, roomId: m.rid }).catch(fail);
   };
 
-  const body = m.t === 'rm' ? <em className="muted">Mensagem removida</em> : m.t === 'message_pinned' ? <em className="muted">{systemText(m)}</em> : m.t === 'discussion-created' ? null : renderMarkdown(m.msg, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick });
+  // Itens do "Mais" (e da folha do toque longo), em grupos separados por linha.
+  const canEdit = !m.t && canReply && ((own && allowEdit) || (!own && perms.includes('edit-message') && canModerate));
+  const opt = (on: unknown, item: MenuItem) => (on ? item : null);
+  const groups = [
+    [
+      opt(canEdit, { key: 'edit', icon: 'edit', label: 'Editar', run: () => actions.onEdit?.(m) }),
+      opt(!m.drid && !inThread && actions.onDiscussion && canDiscuss, { key: 'disc', icon: 'start-discussion', label: 'Iniciar discussão', run: () => actions.onDiscussion?.(m) }),
+    ],
+    [
+      opt(allowPin, {
+        key: 'pin',
+        icon: m.pinned ? 'unpin' : 'pin',
+        label: m.pinned ? 'Desafixar' : 'Fixar',
+        run: () => void api.post(m.pinned ? 'chat.unPinMessage' : 'chat.pinMessage', { messageId: m._id }).catch(fail),
+      }),
+      opt(allowStar, {
+        key: 'star',
+        icon: starred ? 'unstar' : 'star',
+        label: starred ? 'Remover dos favoritos' : 'Favoritar',
+        run: () => void api.post(starred ? 'chat.unStarMessage' : 'chat.starMessage', { messageId: m._id }).catch(fail),
+      }),
+      { key: 'link', icon: 'copy-link', label: 'Copiar link', run: copyLink } as MenuItem,
+      { key: 'text', icon: 'copy', label: 'Copiar texto', run: () => copyText(m.msg, 'Texto copiado.') } as MenuItem,
+      opt(!own, { key: 'unread', icon: 'mark-unread', label: 'Marcar como não lida', run: () => void api.post('subscriptions.unread', { firstUnreadMessage: { _id: m._id } }).catch(fail) }),
+      opt(showReceipts, { key: 'receipts', icon: 'receipts', label: 'Confirmações de leitura', run: () => setReceipts(true) }),
+    ],
+    [opt(!own, { key: 'report', icon: 'report', label: 'Denunciar', run: () => setReport(true) })],
+    [opt(own ? allowDelete : canModerate || perms.includes('delete-message'), { key: 'del', icon: 'delete', label: 'Apagar', run: () => void del(), danger: true })],
+  ]
+    .map((g) => g.filter((x): x is MenuItem => !!x))
+    .filter((g) => g.length);
+  const renderItems = (close: () => void, sheetRole?: boolean) =>
+    groups.map((g, i) => (
+      <Fragment key={i}>
+        {i > 0 && <hr />}
+        {g.map((it) => (
+          <button
+            key={it.key}
+            type="button"
+            role={sheetRole ? 'menuitem' : undefined}
+            className={it.danger ? 'danger' : undefined}
+            onClick={() => {
+              close();
+              it.run();
+            }}
+          >
+            <Icon name={it.icon} size={16} />
+            {it.label}
+          </button>
+        ))}
+      </Fragment>
+    ));
+
+  const actionable = m.t !== 'rm' && !call;
+
+  // A barra fica 16px acima da linha; na primeira linha visível ela entraria embaixo do cabeçalho: desce para dentro.
+  const placeToolbar = (e: { currentTarget: HTMLDivElement }) => {
+    const el = e.currentTarget;
+    const top = el.closest('.messages, .panel-body')?.getBoundingClientRect().top ?? 0;
+    const gap = el.getBoundingClientRect().top - top;
+    el.toggleAttribute('data-tb-in', gap < 20);
+    // Linha meio escondida sob o cabeçalho: a barra desce até a parte visível.
+    el.style.setProperty('--tb-top', `${Math.max(4, 4 - gap)}px`);
+  };
+
+  // Toque longo (celular): a folha de ações no lugar da barra que aparece no hover.
+  const onPointerDown = (e: ReactPointerEvent) => {
+    if (e.pointerType !== 'touch' || !actionable) return;
+    if ((e.target as HTMLElement).closest(`button, input, textarea, .att-image-box, ${NATIVE_PRESS}`)) return;
+    const timer = window.setTimeout(() => {
+      if (press.current) press.current.fired = true;
+      navigator.vibrate?.(10);
+      setSheet(true);
+    }, 450);
+    press.current = { timer, x: e.clientX, y: e.clientY, fired: false };
+  };
+  const onPointerMove = (e: ReactPointerEvent) => {
+    const p = press.current;
+    if (p && !p.fired && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 8) {
+      clearTimeout(p.timer);
+      press.current = null;
+    }
+  };
+  const endPress = () => {
+    const p = press.current;
+    if (p && !p.fired) {
+      clearTimeout(p.timer);
+      press.current = null;
+    }
+  };
+  // O toque que abriu a folha não pode virar clique no fundo dela (e fechá-la).
+  const onTouchEnd = (e: ReactTouchEvent) => {
+    if (press.current?.fired) {
+      e.preventDefault();
+      press.current = null;
+    }
+  };
+
+  const body =
+    m.t === 'rm' ? (
+      <em className="muted">Mensagem removida</em>
+    ) : m.t === 'message_pinned' ? (
+      <em className="muted">{systemText(m)}</em>
+    ) : m.t === 'discussion-created' || call ? null : (
+      withCopy(renderMarkdown(text, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick }))
+    );
   const name = m.alias || m.u.name || m.u.username;
-  const mentioned = m.mentions?.some((x) => x._id === me._id || x._id === 'all' || (x._id === 'here' && true));
+  const mentioned = m.mentions?.some((x) => x._id === me._id || x._id === 'all' || x._id === 'here');
+  const edited =
+    m.editedAt && showEdited && m.t !== 'rm' ? (
+      <span className="edited" title={`Editada por ${m.editedBy?.username} em ${formatDateTime(m.editedAt)}`}>
+        editada
+      </span>
+    ) : null;
+  const receipt =
+    receiptsOn && own && !m.t ? (
+      <span className={`receipt ${m.unread ? '' : 'read'}`} title={m.unread ? 'Enviada' : 'Lida por todos'} role="img" aria-label={m.unread ? 'Enviada' : 'Lida por todos'}>
+        <Icon name={m.unread ? 'sent' : 'read'} size={14} />
+      </span>
+    ) : null;
+  const content = (
+    <>
+      {!call && (text || !lifted) && (
+        <div className={`msg-body ${isEmojiOnly(text) ? 'big-emoji' : ''}`}>
+          {body}
+          {grouped && edited}
+        </div>
+      )}
+      {m.attachments?.map((a, i) => (
+        <AttachmentView key={i} a={a} m={m} />
+      ))}
+    </>
+  );
+
+  const cls = [
+    'msg',
+    grouped && 'grouped',
+    mentioned && !own && 'mentioned',
+    m.pinned && 'pinned',
+    arrive && 'arrive',
+    highlight && 'highlight',
+    editing && 'editing',
+    (menuOpen || picker) && 'menu-open',
+    notice && 'notice',
+    call && 'call',
+    bot && 'bot',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <div className={`msg ${grouped ? 'grouped' : ''} ${mentioned && !own ? 'mentioned' : ''} ${m.pinned ? 'pinned' : ''}`} id={`msg-${m._id}`}>
+    <div
+      className={cls}
+      id={`msg-${m._id}`}
+      onPointerDown={coarse ? onPointerDown : undefined}
+      onPointerMove={coarse ? onPointerMove : undefined}
+      onPointerUp={coarse ? endPress : undefined}
+      onPointerCancel={coarse ? endPress : undefined}
+      onTouchEnd={coarse ? onTouchEnd : undefined}
+      onMouseEnter={actionable ? placeToolbar : undefined}
+      onFocus={actionable ? placeToolbar : undefined}
+      onContextMenu={
+        coarse && actionable
+          ? (e) => {
+              // Em links, imagens, código e mídia fica o menu do sistema (abrir, copiar, compartilhar, salvar).
+              if ((e.target as HTMLElement).closest(NATIVE_PRESS)) return;
+              e.preventDefault();
+              if (!sheet) setSheet(true);
+            }
+          : undefined
+      }
+    >
       <div className="msg-left">
         {grouped ? (
-          <span className="msg-time-hover">{formatTime(m.ts)}</span>
+          <>
+            <time className="msg-time-hover" dateTime={m.ts} title={formatDateTime(m.ts)} tabIndex={-1}>
+              {formatTime(m.ts)}
+            </time>
+            {receipt && <span className="msg-gutter-receipt">{receipt}</span>}
+          </>
         ) : m.avatar ? (
           <img className="avatar" src={m.avatar} width={36} height={36} alt="" />
         ) : (
@@ -369,117 +951,165 @@ function MessageView({ m, grouped, actions, inThread, canModerate }: MessageItem
       <div className="msg-main">
         {!grouped && (
           <div className="msg-head">
-            <span className="msg-name clickable" onClick={() => actions.onUserClick?.(m.u.username)}>
+            <button type="button" className="msg-name clickable" onClick={() => actions.onUserClick?.(m.u.username)}>
               {m.emoji ? `${resolveEmoji(m.emoji)?.unicode ?? ''} ` : ''}
               {name}
-            </span>
+            </button>
             {name !== m.u.username && <span className="msg-username">@{m.u.username}</span>}
-            <span className="msg-time" title={formatDateTime(m.ts)}>
+            {bot && <span className="pill msg-bot">Bot</span>}
+            <time className="msg-time" dateTime={m.ts} title={formatDateTime(m.ts)}>
               {formatTime(m.ts)}
-            </span>
-            {m.pinned && <span className="msg-flag" title="Fixada">📌</span>}
-            {starred && <span className="msg-flag" title="Favoritada">⭐</span>}
+            </time>
+            {edited}
+            {m.pinned && (
+              <span className="msg-flag pin" title="Fixada" role="img" aria-label="Fixada">
+                <Icon name="pin" size={12} />
+              </span>
+            )}
+            {starred && (
+              <span className="msg-flag star" title="Favoritada" role="img" aria-label="Favoritada">
+                <Icon name="star" size={12} fill />
+              </span>
+            )}
+            {receipt}
           </div>
         )}
-        {m.tmid && !inThread && m.tshow && <div className="muted small">respondeu em uma thread</div>}
-        <div className={`msg-body ${isEmojiOnly(m.msg) ? 'big-emoji' : ''}`}>
-          {body}
-          {m.editedAt && showEdited && m.t !== 'rm' && (
-            <span className="edited" title={`Editada por ${m.editedBy?.username} em ${formatDateTime(m.editedAt)}`}>
-              (editada)
-            </span>
-          )}
-        </div>
-        {m.attachments?.map((a, i) => (
-          <AttachmentView key={i} a={a} />
-        ))}
-        <Reactions m={m} canReact={canReact} />
-        {!inThread && (m.tcount ?? 0) > 0 && (
-          <button className="thread-summary" onClick={() => actions.onReplyThread?.(m)}>
-            <span className="replies">
-              💬 {m.tcount} {m.tcount === 1 ? 'resposta' : 'respostas'}
-            </span>
-            <span className="muted">última {formatRelative(m.tlm)}</span>
-            {(m.replies ?? []).slice(0, 4).map((id) => (
-              <span key={id} className="mini-follow" />
-            ))}
-          </button>
+        {m.tmid && !inThread && m.tshow && <div className="muted small msg-thread-hint">respondeu em um tópico</div>}
+        {notice ? (
+          <div className="notice-card">
+            <div className="notice-card-head">
+              <span className="notice-card-tile" aria-hidden="true">
+                <Icon name="notice" size={16} />
+              </span>
+              <span className="notice-card-titles">
+                <span className="notice-card-title">
+                  {lifted ? renderMarkdown(lifted.title, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick }) : 'Aviso'}
+                </span>
+                <span className="notice-card-meta">Leitura obrigatória</span>
+              </span>
+            </div>
+            {content}
+            {footer && <div className="notice-card-foot">{footer}</div>}
+          </div>
+        ) : (
+          content
         )}
+        {call && <CallCard m={m} />}
+        <Reactions m={m} canReact={canReact} onAdd={(anchor) => setPicker({ anchor })} />
+        {!inThread && (m.tcount ?? 0) > 0 && <ThreadSummary m={m} onOpen={() => actions.onReplyThread?.(m)} />}
         {m.drid && (
-          <button className="thread-summary" onClick={() => navigate(roomPath({ _id: m.drid!, t: 'c' }))}>
-            <span className="replies">🗨 Discussão{m.t === 'discussion-created' ? `: ${m.msg}` : ''}</span>
-            <span className="muted">{m.dcount ? `${m.dcount} mensagens` : 'sem mensagens'}</span>
+          <button type="button" className="thread-summary discussion" onClick={() => navigate(roomPath({ _id: m.drid!, t: 'c' }))}>
+            <Icon name="room-discussion" size={14} />
+            <span className="replies">Discussão{m.t === 'discussion-created' ? `: ${m.msg}` : ''}</span>
+            <span className="thread-last">{m.dcount ? plural(m.dcount, 'mensagem', 'mensagens') : 'sem mensagens'}</span>
           </button>
         )}
       </div>
-      {receiptsOn && own && !m.t && (
-        <span className={`receipt ${m.unread ? '' : 'read'}`} title={m.unread ? 'Enviada' : 'Lida por todos'}>
-          {m.unread ? '✓' : '✓✓'}
-        </span>
-      )}
-      {m.t !== 'rm' && (
-        <div className="msg-toolbar">
+      {actionable && (
+        <div className="msg-toolbar" role="toolbar" aria-label="Ações da mensagem">
+          {canReact &&
+            quickReactions(3).map((code) => (
+              <button key={code} type="button" className="tb-btn quick" title={`:${code}:`} aria-label={`Reagir com :${code}:`} onClick={() => void react(code)}>
+                <EmojiGlyph code={code} />
+              </button>
+            ))}
+          {canReact && <span className="tb-sep" aria-hidden="true" />}
           {canReact && (
-            <button title="Reagir" onClick={() => setPicker(true)}>
-              😊
+            <button
+              type="button"
+              className="tb-btn"
+              title="Reagir"
+              aria-label="Reagir"
+              aria-haspopup="dialog"
+              aria-expanded={!!picker?.bar}
+              onClick={(e) => setPicker(picker ? null : { anchor: e.currentTarget, bar: true })}
+            >
+              <Icon name="react" size={16} />
             </button>
           )}
           {!inThread && canReply && (
-            <button title="Responder em thread" onClick={() => actions.onReplyThread?.(m)}>
-              💬
+            <button type="button" className="tb-btn" title="Responder no tópico" aria-label="Responder no tópico" onClick={() => actions.onReplyThread?.(m)}>
+              <Icon name="reply-thread" size={16} />
             </button>
           )}
           {canReply && (
-            <button title="Citar" onClick={() => actions.onQuote?.(m)}>
-              ❝
+            <button type="button" className="tb-btn" title="Citar" aria-label="Citar" onClick={() => actions.onQuote?.(m)}>
+              <Icon name="quote" size={16} />
             </button>
           )}
-          <Menu trigger={<button title="Mais">⋯</button>}>
-            {(close) => (
-              <>
-                {/* Editar segue as regras de envio da sala: o servidor recusa a edição onde não dá para escrever. */}
-                {own && allowEdit && canReply && !m.t && (
-                  <button onClick={() => (actions.onEdit?.(m), close())}>✏️ Editar</button>
-                )}
-                {!own && perms.includes('edit-message') && canModerate && canReply && !m.t && <button onClick={() => (actions.onEdit?.(m), close())}>✏️ Editar</button>}
-                {!m.drid && !inThread && actions.onDiscussion && canDiscuss && <button onClick={() => (actions.onDiscussion?.(m), close())}>🗨 Iniciar discussão</button>}
-                {allowPin && (
-                  <button onClick={() => (api.post(m.pinned ? 'chat.unPinMessage' : 'chat.pinMessage', { messageId: m._id }).catch(fail), close())}>
-                    📌 {m.pinned ? 'Desafixar' : 'Fixar'}
-                  </button>
-                )}
-                {allowStar && (
-                  <button onClick={() => (api.post(starred ? 'chat.unStarMessage' : 'chat.starMessage', { messageId: m._id }).catch(fail), close())}>
-                    ⭐ {starred ? 'Remover dos favoritos' : 'Favoritar'}
-                  </button>
-                )}
-                <button onClick={() => (copyLink(), close())}>🔗 Copiar link</button>
-                <button onClick={() => (void navigator.clipboard?.writeText(m.msg), close())}>📋 Copiar texto</button>
-                {!own && (
-                  <button onClick={() => (api.post('subscriptions.unread', { firstUnreadMessage: { _id: m._id } }).catch(fail), close())}>● Marcar como não lida</button>
-                )}
-                {showReceipts && <button onClick={() => (setReceipts(true), close())}>👁 Confirmações de leitura</button>}
-                {(own ? allowDelete : canModerate || perms.includes('delete-message')) && (
-                  <button className="danger" onClick={() => (del(), close())}>
-                    🗑 Apagar
-                  </button>
-                )}
-                {!own && <button onClick={() => (setReport(true), close())}>🚩 Denunciar</button>}
-              </>
-            )}
+          <Menu
+            label="Ações da mensagem"
+            onOpenChange={setMenuOpen}
+            trigger={
+              <button type="button" className="tb-btn" title="Mais" aria-label="Mais">
+                <Icon name="more" size={16} />
+              </button>
+            }
+          >
+            {(close) => renderItems(close)}
           </Menu>
         </div>
       )}
+      {sheet && (
+        <Sheet onClose={() => setSheet(false)} className="menu msg-sheet" role="menu" label="Ações da mensagem">
+          <div className="sheet-scroll">
+            {canReact && (
+              <div className="msg-sheet-quick">
+                {quickReactions(6).map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    className="msg-sheet-emoji"
+                    aria-label={`Reagir com :${code}:`}
+                    onClick={() => {
+                      setSheet(false);
+                      void react(code);
+                    }}
+                  >
+                    <EmojiGlyph code={code} />
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="msg-sheet-emoji more"
+                  aria-label="Mais emojis"
+                  onClick={() => {
+                    setSheet(false);
+                    setPicker({ anchor: null });
+                  }}
+                >
+                  <Icon name="react" size={20} />
+                </button>
+              </div>
+            )}
+            {canReply && (
+              <>
+                {!inThread && (
+                  <button type="button" role="menuitem" onClick={() => (setSheet(false), actions.onReplyThread?.(m))}>
+                    <Icon name="reply-thread" size={16} />
+                    Responder no tópico
+                  </button>
+                )}
+                <button type="button" role="menuitem" onClick={() => (setSheet(false), actions.onQuote?.(m))}>
+                  <Icon name="quote" size={16} />
+                  Citar
+                </button>
+                <hr />
+              </>
+            )}
+            {renderItems(() => setSheet(false), true)}
+          </div>
+        </Sheet>
+      )}
       {picker && (
-        <div className="picker-anchor">
-          <EmojiPicker
-            onClose={() => setPicker(false)}
-            onPick={(code) => {
-              setPicker(false);
-              api.post('chat.react', { messageId: m._id, emoji: code }).catch(fail);
-            }}
-          />
-        </div>
+        <EmojiPicker
+          anchor={picker.anchor}
+          onClose={closePicker}
+          onPick={(code) => {
+            setPicker(null);
+            void react(code);
+          }}
+        />
       )}
       {receipts && <ReadReceipts m={m} onClose={() => setReceipts(false)} />}
       {report && <ReportModal m={m} onClose={() => setReport(false)} />}

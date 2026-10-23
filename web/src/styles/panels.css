@@ -1,0 +1,1298 @@
+/* ---------- Moldura da sala (dono 4b) ----------
+   Cabeçalho da sala, painéis laterais, tópico, cartão de usuário e canais de avisos.
+   Especificidade: no máximo 2 classes + 1 elemento ou pseudo-classe. */
+
+@keyframes panel-slide {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+@keyframes panel-push {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes typing-dot {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ---------- Sala ---------- */
+.room {
+  height: 100%;
+  min-height: 0;
+}
+/* O avatar de sala (.avatar.room) não vira flex. */
+.room:where(:not(.avatar)) {
+  display: flex;
+}
+.room.center {
+  align-items: center;
+  justify-content: center;
+}
+.room-error {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  overflow-y: auto;
+}
+.room-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-canvas);
+}
+/* Carregando: a mesma altura do cabeçalho, sem ser um .room-header (os testes esperam o de verdade). */
+.room-head-skeleton {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--header-h);
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+.room-head-skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---------- Cabeçalho da sala ---------- */
+.room-header {
+  container: roomhead / inline-size;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--header-h);
+  padding: 0 var(--space-3) 0 var(--space-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-canvas);
+  --ring-offset: var(--bg-canvas);
+}
+.room-icon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.room-title {
+  flex: 1;
+  min-width: 0;
+}
+.room-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-16);
+  line-height: 22px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.room-name-text {
+  min-width: 3ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.room-name .pill {
+  flex-shrink: 0;
+  letter-spacing: 0;
+}
+.room-fav {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--warn-solid);
+  cursor: pointer;
+}
+.room-fav:hover {
+  background: var(--bg-hover);
+}
+.room-mark {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--fg-muted);
+}
+.pill.clickable {
+  border: 0;
+  cursor: pointer;
+  transition: background-color var(--dur-1) linear;
+}
+.pill.clickable:hover {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+.room-topic {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-topic:empty {
+  display: none;
+}
+.room-topic p {
+  display: inline;
+  margin: 0;
+}
+.room-topic.clickable {
+  cursor: pointer;
+}
+.room-topic.clickable:hover {
+  color: var(--fg-2);
+}
+.room-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--fg-muted);
+}
+.room-actions .icon-btn {
+  width: 36px;
+  height: 36px;
+}
+.room-actions .with-count {
+  width: auto;
+  min-width: 36px;
+  padding: 0 var(--space-2);
+}
+.room-actions .count {
+  margin-left: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.room-actions-sep {
+  flex-shrink: 0;
+  width: 1px;
+  height: 20px;
+  margin: 0 6px;
+  background: var(--border);
+}
+
+/* Anúncio da sala: uma linha, "Ver mais" quando não cabe. */
+.announcement {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: var(--space-2) var(--space-5);
+  background: var(--accent-soft);
+  color: var(--fg);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  --ring-offset: var(--accent-soft);
+}
+.announcement > .icon {
+  flex-shrink: 0;
+  color: var(--accent-text);
+}
+.announcement-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.announcement p {
+  margin: 0;
+  display: inline;
+}
+.announcement.open {
+  align-items: flex-start;
+}
+.announcement:where(.open) > .icon {
+  margin-top: 1px;
+}
+.announcement:where(.open) .announcement-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.announcement-more {
+  flex-shrink: 0;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+}
+
+/* Prévia de canal: entrar. */
+.join-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  min-height: 64px;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--fg-2);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  text-align: center;
+  --ring-offset: var(--bg-subtle);
+}
+
+/* Quem digita: a linha fica sobre o fim da lista, sem ocupar espaço quando ninguém digita. */
+.typing {
+  position: relative;
+  height: 0;
+  z-index: var(--z-raised);
+}
+.typing-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 var(--space-5);
+  background: linear-gradient(to top, var(--bg-canvas) 65%, transparent);
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  pointer-events: none;
+}
+.typing-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.typing-text strong {
+  color: var(--fg-2);
+  font-weight: var(--fw-semibold);
+}
+.typing .dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.dots > i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: typing-dot 1.2s var(--ease-in-out) infinite;
+}
+.dots > i:nth-child(2) {
+  animation-delay: 160ms;
+}
+.dots > i:nth-child(3) {
+  animation-delay: 320ms;
+}
+
+/* ---------- Painéis ---------- */
+.panel {
+  width: var(--panel-w);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-canvas);
+  --ring-offset: var(--bg-canvas);
+  --ring-surface: var(--bg-canvas);
+  animation: panel-slide var(--dur-3) var(--ease-out);
+}
+.panel-scrim {
+  display: none;
+}
+.panel-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--header-h);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.panel-head h2,
+.panel-head h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-16);
+  line-height: 22px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+}
+.panel-title-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel-head .sub {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0;
+  color: var(--fg-muted);
+}
+.panel-head :where(.sub) .link {
+  font-size: inherit;
+  line-height: inherit;
+}
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-4);
+  min-height: 0;
+}
+/* Todo campo do painel ocupa a largura toda. */
+.panel-body :where(input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']), select, textarea) {
+  width: 100%;
+}
+.panel-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.panel-filters > .search-field {
+  margin-bottom: 0;
+}
+/* Filtro segmentado do painel: ocupa a largura toda, em partes iguais. */
+.panel-filters > .seg-nav {
+  display: flex;
+  flex-wrap: nowrap;
+  margin-bottom: 0;
+}
+.panel-filters .seg-nav > button {
+  flex: 1;
+  justify-content: center;
+}
+.panel-add {
+  margin-bottom: var(--space-4);
+}
+.panel-cta {
+  width: 100%;
+}
+
+/* Resultados (busca, fixadas, tópicos, discussões): o estilo da linha de mensagem em 13/18. */
+.result {
+  display: block;
+  width: calc(100% + 16px);
+  margin: 0 -8px;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  --ring-surface: var(--bg-canvas);
+  transition: background-color var(--dur-1) linear;
+}
+.result + .result {
+  margin-top: 2px;
+}
+.result:hover {
+  background: var(--bg-hover);
+  --ring-surface: var(--bg-hover);
+}
+.result-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.result-head strong {
+  font-weight: var(--fw-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.result-head .muted {
+  flex-shrink: 0;
+  font-size: var(--fs-12);
+}
+.result-head > .icon {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.result-head .avatar {
+  display: inline-block;
+}
+.result-body {
+  margin-top: var(--space-1);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  overflow-wrap: anywhere;
+}
+.result-body p {
+  margin: 0;
+}
+.result-body.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.result-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.result-count {
+  color: var(--accent-text);
+  font-weight: var(--fw-semibold);
+}
+.results-count {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+::highlight(search-hit) {
+  background-color: var(--highlight);
+  color: var(--fg);
+}
+.search-help {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.search-help kbd {
+  font-family: var(--font-mono);
+}
+
+/* Membros */
+.member-group + .member-group {
+  margin-top: var(--space-4);
+}
+.group-label {
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-muted);
+}
+.member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: calc(100% + 16px);
+  min-height: 44px;
+  margin: 0 -8px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  --ring-surface: var(--bg-canvas);
+  transition: background-color var(--dur-1) linear;
+}
+.member:hover {
+  background: var(--bg-hover);
+  --ring-surface: var(--bg-hover);
+}
+.member-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.member-name,
+.member-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.member-name {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+}
+.member-sub {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+.member .pill {
+  flex-shrink: 0;
+}
+.member-muted {
+  padding: 0 6px;
+}
+
+/* Arquivos */
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 52px;
+  margin: 0 -8px;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--fg);
+  transition: background-color var(--dur-1) linear;
+}
+.file-row:hover {
+  background: var(--bg-hover);
+  --ring-offset: var(--bg-hover);
+}
+.file-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 6px 0;
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+}
+.file-row-main:hover {
+  text-decoration: none;
+}
+.file-row img {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  background: var(--bg-muted);
+}
+.file-row .att-tile {
+  width: 40px;
+  height: 40px;
+}
+.file-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.file-row-name,
+.file-row-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-row-name {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+}
+.file-row-meta {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.file-row-download {
+  opacity: 0;
+  transition: opacity var(--dur-1) linear;
+}
+.file-row:hover .file-row-download,
+.file-row-download:focus-visible {
+  opacity: 1;
+}
+
+/* Canais do time */
+.team-row {
+  gap: var(--space-2);
+  min-height: 52px;
+  padding-block: 6px;
+}
+.team-room {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--fg);
+  text-align: left;
+}
+.team-room:hover {
+  text-decoration: none;
+}
+.team-room > .icon {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.team-room-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.team-room-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+}
+.team-room:hover .team-room-name {
+  text-decoration: underline;
+}
+.team-room-text > .small {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  white-space: nowrap;
+}
+.team-row > .btn,
+.team-row > .menu-wrap {
+  flex-shrink: 0;
+}
+
+/* Informações da sala */
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.info-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  text-align: center;
+}
+/* O ícone do tipo vai junto da primeira linha do nome, mesmo quando o nome quebra em várias. */
+.info-hero h2 {
+  max-width: 100%;
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-18);
+  line-height: var(--lh-18);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+  text-align: center;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+.info-hero h2 > .icon {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -2px;
+  color: var(--fg-muted);
+}
+.info-topic {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+.info-topic p {
+  margin: 0;
+}
+/* Colunas iguais, na largura do rótulo mais longo ("Notificações"). */
+.info-tiles {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: var(--space-2);
+  width: max-content;
+  max-width: 100%;
+  margin-inline: auto;
+}
+.info-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 72px;
+  height: 64px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-subtle);
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-medium);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+.info-tile:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.info section {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  overflow-wrap: anywhere;
+}
+.info section h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg-muted);
+}
+.info :where(section) p {
+  margin: 0;
+}
+.info :where(section) p + p {
+  margin-top: var(--space-2);
+}
+.info-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--fg-muted);
+}
+.info .info-meta {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+}
+/* Grupo do formulário (Política de retenção): o rótulo de seção do painel no lugar da moldura do navegador. */
+.panel fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.panel legend {
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-muted);
+}
+.info-retention {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.info-retention > .icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.info-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 -10px;
+}
+.info-actions > .btn {
+  justify-content: flex-start;
+  padding: 0 10px;
+}
+.info-actions .icon {
+  color: var(--fg-muted);
+}
+.info-image {
+  display: flex;
+}
+.danger-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--danger-soft);
+  border-radius: var(--radius-lg);
+}
+.danger-zone > p {
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+
+/* Tópico (thread) */
+.thread-panel .panel-body {
+  padding: 0 0 var(--space-2);
+}
+.thread-panel .msg {
+  padding-left: var(--space-4);
+  padding-right: var(--space-4);
+}
+.thread-root {
+  margin: var(--space-3) var(--space-4);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--bg-subtle);
+  --ring-surface: var(--bg-subtle);
+  --ring-offset: var(--bg-subtle);
+}
+.thread-root .msg {
+  padding: 0;
+}
+.thread-root .msg:hover {
+  background: none;
+}
+.day-sep.thread-sep {
+  position: static;
+  margin: var(--space-1) 0 var(--space-2);
+}
+.thread-panel .composer {
+  margin: 0 var(--space-4) var(--space-4);
+}
+
+/* ---------- Cartão do usuário (popover; no celular, folha) ---------- */
+.user-card-pop {
+  --ring-offset: var(--bg-raised);
+  --ring-surface: var(--bg-raised);
+  position: fixed;
+  z-index: var(--z-popover);
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-raised);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2), var(--highlight-top);
+  outline: none;
+  animation: pop-in var(--dur-2) var(--ease-out);
+}
+.user-card-pop:focus-visible {
+  box-shadow: var(--shadow-2), var(--highlight-top);
+}
+.user-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.user-card-sheet .user-card {
+  padding: var(--space-2) var(--space-5) var(--space-5);
+  overflow-y: auto;
+}
+/* Nome longo quebra em várias linhas: o avatar fica no alto, alinhado com a primeira. */
+.user-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.user-card-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.user-card h2 {
+  margin: 0;
+  font-size: var(--fs-18);
+  line-height: 24px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.user-card-handle {
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+.user-card-status {
+  color: var(--fg-2);
+}
+.user-card .chips {
+  gap: var(--space-1);
+}
+.bio {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+.bio p {
+  margin: 0;
+}
+.user-card-meta {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--fg-2);
+}
+.user-card-meta li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.user-card-meta .icon {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.user-card-meta a {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-card .row-actions {
+  gap: var(--space-2);
+}
+.user-card :where(.row-actions) > .primary {
+  flex: 1;
+}
+.user-card-more {
+  width: var(--control-md);
+  padding: 0;
+}
+.user-card.loading {
+  pointer-events: none;
+}
+
+/* ---------- Canais de avisos e "Ciente" ---------- */
+.pill.notice {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.pill.blocked {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.pill.notice,
+.pill.blocked {
+  white-space: nowrap;
+}
+/* Faixa do canal de avisos */
+.notice-bar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  --ring-offset: var(--bg-subtle);
+}
+.notice-bar strong {
+  color: var(--fg);
+  font-weight: var(--fw-semibold);
+}
+.notice-bar-text {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.notice-bar-text > .icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--accent-text);
+}
+.notice-bar-pending {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding-left: var(--space-1);
+  color: var(--fg);
+  font-weight: var(--fw-medium);
+}
+.notice-bar-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.notice-bar-pending .link {
+  margin-left: var(--space-2);
+  white-space: nowrap;
+}
+
+/* "Ciente" abaixo do aviso (alinhado com o corpo da mensagem) */
+.ack-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 2px 20px 8px 68px;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.ack-ask {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px var(--space-2);
+}
+.ack-bar .link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+}
+.ack-count {
+  margin-left: auto;
+}
+/* Lista do diálogo de confirmações: altura fixa, rola por dentro. */
+.ack-body {
+  height: min(296px, 50dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ack-person {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Compositor de um canal de avisos: "Pedir Ciente" (as cores ligado/desligado vêm de .chip.selectable). */
+.composer-tools > button.chip {
+  width: auto;
+  height: 28px;
+  margin-right: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+.composer-tools > .off:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+/* "Pedir “Ciente”" cabe inteiro no celular; só numa tela muito estreita fica o ícone (o texto segue no aria-label). */
+@media (max-width: 359px) {
+  .composer-tools > button.chip {
+    font-size: 0;
+    gap: 0;
+  }
+}
+
+/* Painel da sala: quem publica */
+.notice-info h4 > .icon {
+  color: var(--accent-text);
+}
+.notice-info ul {
+  margin: var(--space-2) 0 0;
+}
+.notice-info p {
+  margin: var(--space-1) 0 0;
+}
+
+/* ---------- Tela larga ---------- */
+@media (min-width: 1440px) {
+  .thread-panel {
+    width: var(--panel-w-wide);
+  }
+}
+
+/* ---------- Tablet: o painel cobre a sala pela direita, com fundo escurecido ---------- */
+@media (max-width: 1199px) {
+  .room {
+    position: relative;
+  }
+  .panel {
+    position: absolute;
+    inset-block: 0;
+    right: 0;
+    z-index: var(--z-panel);
+    width: min(var(--panel-w), 100% - 48px);
+    box-shadow: var(--shadow-3);
+    animation: panel-push var(--dur-4) var(--ease-out);
+  }
+  .panel-scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: var(--z-panel);
+    background: rgb(0 0 0 / 0.24);
+    animation: fade-in var(--dur-4) var(--ease-out);
+  }
+}
+
+/* ---------- Celular ---------- */
+@media (max-width: 760px) {
+  .room-header {
+    gap: var(--space-2);
+    height: calc(var(--header-h) + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) var(--space-1) 0;
+  }
+  .room-back {
+    width: var(--touch);
+    height: var(--touch);
+    margin-right: -4px;
+  }
+  .room-header .room-icon {
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--bg-muted);
+    color: var(--fg-2);
+  }
+  .room-topic {
+    font-size: var(--fs-12);
+    line-height: var(--lh-12);
+  }
+  .room-actions-sep {
+    margin: 0 2px;
+  }
+  .announcement,
+  .notice-bar {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+  .join-bar {
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+  }
+  .typing-row {
+    padding: 0 var(--space-4);
+  }
+  /* Painéis: tela cheia, empurrados da direita; a sala embaixo recua 20%. */
+  .panel {
+    inset: 0;
+    width: 100%;
+    border-left: 0;
+    box-shadow: none;
+  }
+  .panel-scrim {
+    display: none;
+  }
+  .with-panel > .room-main {
+    transform: translateX(-20%);
+    transition: transform var(--dur-4) var(--ease-out);
+  }
+  .panel-head {
+    height: calc(var(--header-h) + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) var(--space-3) 0 var(--space-1);
+  }
+  .panel-back {
+    width: var(--touch);
+    height: var(--touch);
+  }
+  /* Alinhado com as respostas (16px) e acima da área segura de baixo. */
+  .thread-panel .composer {
+    margin: 0 var(--space-4) calc(var(--space-2) + env(safe-area-inset-bottom));
+  }
+  .ack-bar {
+    margin-left: 60px;
+    margin-right: 12px;
+  }
+}
+
+/* ---------- Cabeçalho estreito (o painel aberto também o estreita) ---------- */
+/* Abaixo de 720px o nome da sala tem prioridade: as pílulas ficam só com o ícone. */
+@container roomhead (max-width: 720px) {
+  /* Só o ícone das pílulas; o texto continua para leitores de tela e no title. */
+  .room-name .pill-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .room-name .pill {
+    padding: 0 6px;
+  }
+}
+
+/* ---------- Toque ---------- */
+@media (pointer: coarse) {
+  .room-actions .icon-btn {
+    width: var(--touch);
+    height: var(--touch);
+  }
+  .room-actions .with-count {
+    width: auto;
+    min-width: var(--touch);
+  }
+  /* Estrela e "Pedir Ciente" mantêm o tamanho à vista; a área de toque cresce para 44px por baixo. */
+  .room-fav {
+    position: relative;
+    width: 32px;
+    height: 32px;
+  }
+  .room-fav::after {
+    content: '';
+    position: absolute;
+    inset: -6px;
+  }
+  .composer-tools > button.chip {
+    height: 28px;
+  }
+  /* O ::after parte de dentro da borda (26px): 26 + 2 x 9 = 44px. */
+  .composer-tools > .chip::after {
+    content: '';
+    position: absolute;
+    inset: -9px 0;
+  }
+  .info-tile {
+    min-width: 80px;
+    height: 72px;
+  }
+  .file-row-download {
+    opacity: 1;
+  }
+  .user-card-more {
+    width: var(--touch);
+  }
+  .ack-ask > .btn {
+    min-height: var(--touch);
+  }
+  /* Links soltos na faixa e no "Ciente": a área de toque cresce para 44px sem mudar a altura da linha. */
+  .notice-bar-pending .link,
+  .ack-bar .link {
+    padding-block: 13px;
+    margin-block: -13px;
+  }
+}
+@media (hover: none) {
+  .file-row-download {
+    opacity: 1;
+  }
+}

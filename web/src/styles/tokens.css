@@ -1,0 +1,272 @@
+/* ==========================================================================
+   Tokens do design system (v1). Primeiro arquivo de estilo de main.tsx.
+   Uma fonte única: toda cor com tema é light-dark(CLARO, ESCURO).
+   Os seletores de tema só trocam color-scheme (mais os --side-*, que mudam
+   por tema e não por color-scheme).
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Superfícies ---- */
+  --bg-canvas: light-dark(#ffffff, #14171c);   /* área principal, páginas */
+  --bg-surface: light-dark(#ffffff, #181b21);  /* cards, painéis, tabelas */
+  --bg-raised: light-dark(#ffffff, #1e222a);   /* menus, popovers, modais, barra da mensagem */
+  --bg-subtle: light-dark(#f7f8fa, #1a1e25);   /* áreas secundárias, hover da mensagem */
+  --bg-muted: light-dark(#eff1f4, #222731);    /* pills, skeleton, preenchimentos neutros */
+  --bg-hover: light-dark(#f2f4f7, #1f232b);    /* hover sobre canvas/surface */
+  --bg-active: light-dark(#e9ecf0, #262b35);   /* pressionado, selecionado neutro */
+  --bg-input: light-dark(#ffffff, #1a1e25);
+  --bg-inverse: light-dark(#1c2028, #2a303a);  /* toasts, tooltips */
+
+  /* ---- Texto ---- */
+  --fg: light-dark(#1a1e26, #e6e9ee);
+  --fg-2: light-dark(#4a5261, #b9c0cb);
+  --fg-muted: light-dark(#646c7b, #8e97a6);
+  --fg-placeholder: light-dark(#6f7786, #7d8696);
+  --fg-disabled: light-dark(#a3aab6, #596170);
+  --fg-on-accent: #ffffff;
+  --fg-inverse: light-dark(#f3f4f6, #e6e9ee);
+
+  /* ---- Linhas ---- */
+  --border: light-dark(#e3e6eb, #2b313c);
+  --border-subtle: light-dark(#eef0f3, #222731);
+  --border-strong: light-dark(#cdd2da, #3a4250);
+  --border-hover: light-dark(#aeb5c0, #4a5363);
+  --control-border: light-dark(#848c9a, #6b7485); /* checkbox, rádio, toggle desligado: >= 3:1 */
+
+  /* ---- Destaque (índigo) ---- */
+  --accent: light-dark(#4453db, #4f5ee4);
+  --accent-hover: light-dark(#3a48c8, #5a68ea);
+  --accent-active: light-dark(#3240b5, #4554d8);
+  --accent-soft: light-dark(#edeffc, #1f2448);
+  --accent-soft-hover: light-dark(#e2e6fa, #262c58);
+  --accent-text: light-dark(#3a48c8, #8c99ff);
+  --accent-ring: light-dark(rgb(68 83 219 / 0.28), rgb(140 153 255 / 0.35));
+  --focus: light-dark(#4453db, #8c99ff);
+
+  /* ---- Semânticas (base = texto e ícone, -solid = preenchimento, -soft = fundo suave) ---- */
+  --ok: light-dark(#157f3c, #4cc97a);
+  --ok-solid: light-dark(#15803d, #1a7f45);
+  --ok-soft: light-dark(#e8f5ec, #15291e);
+  --warn: light-dark(#9a5b00, #f5b84a);
+  --warn-solid: #f5a524;
+  --warn-on-solid: #1c1400;
+  --warn-soft: light-dark(#fff4db, #2b2414);
+  --danger: light-dark(#c8283a, #ff7a85);
+  --danger-solid: light-dark(#c8283a, #c42b3a);
+  --danger-hover: light-dark(#b02233, #d63240);
+  --danger-soft: light-dark(#fdecee, #2a1a1e);
+  --info: var(--accent-text);
+  --info-soft: var(--accent-soft);
+
+  /* ---- Presença (preenchimento do ponto; offline é um anel) ---- */
+  --presence-online: light-dark(#1fa463, #2bb673);
+  --presence-away: #f5a524;
+  --presence-busy: #e5484d;
+  --presence-offline: light-dark(#8b93a1, #7d8796);
+  --ring-surface: var(--bg-canvas); /* redefinido pelos contêineres (barra lateral, linhas) */
+
+  /* ---- Menções e destaques ---- */
+  --mention-row: light-dark(#fef6e9, #2a251d);
+  --mention-bar: #f5a524;
+  --mention-me-bg: light-dark(#ffe7ad, #45361a);
+  --mention-me-fg: light-dark(#6b4100, #ffd27a);
+  --mention-other-bg: var(--accent-soft);
+  --mention-other-fg: var(--accent-text);
+  --highlight: light-dark(#ffeead, #4a3f12);
+
+  /* ---- Código ---- */
+  --code-bg: light-dark(#f3f4f7, #1e222a);
+  --code-fg: var(--fg);
+
+  /* ---- Diversos ---- */
+  --skeleton: light-dark(#eef0f3, #222731);
+  --skeleton-shine: light-dark(rgb(255 255 255 / 0.6), rgb(255 255 255 / 0.05));
+  --scrim: light-dark(rgb(12 14 18 / 0.48), rgb(0 0 0 / 0.64));
+  --shadow-color: light-dark(rgb(16 24 40 / 0.1), rgb(0 0 0 / 0.5));
+  --shadow-color-strong: light-dark(rgb(16 24 40 / 0.18), rgb(0 0 0 / 0.6));
+
+  /* ---- Marca (gradiente do logo padrão; troque junto com public/favicon.svg) ---- */
+  --brand-from: #5b6bf0;
+  --brand-to: #3240b5;
+
+  /* ---- Barra lateral (escura nos dois temas; veja os blocos de tema abaixo) ---- */
+  --side-bg: #13161c;
+  --side-hover: #1e232b;
+  --side-active: #262c36;
+  --side-border: transparent;
+  --side-fg: #b4bcc8;
+  --side-fg-strong: #ffffff;
+  --side-fg-muted: #7d8796;
+  --side-input-bg: rgb(255 255 255 / 0.06);
+  --side-input-border: rgb(255 255 255 / 0.08);
+
+  /* ---- Palco da chamada (sempre escuro) ---- */
+  --call-bg: #0b0d11;
+  --call-control: rgb(255 255 255 / 0.12);
+  --call-control-hover: rgb(255 255 255 / 0.18);
+  --call-fg: #e6e9ee;
+  --call-fg-muted: #9aa3b2;
+  --call-accept: #1fa463;
+  --call-hang: #e5484d;
+
+  /* ---- Gráficos (paleta de referência, validada sobre #ffffff / #1a1e25) ---- */
+  --s1: light-dark(#2a78d6, #3987e5);
+  --s2: light-dark(#eb6834, #d95926);
+  --s3: light-dark(#1baf7a, #199e70);
+  --s4: light-dark(#eda100, #c98500);
+  --s5: light-dark(#e87ba4, #d55181);
+  --s6: #008300;
+  --s7: light-dark(#6250d6, #9085e9);
+  --s8: light-dark(#e34948, #e66767);
+  --chart-grid: light-dark(#eceef2, #262b35);
+  --chart-axis: light-dark(#cdd2da, #3a4250);
+
+  /* ---- Seta do select (#8a92a0 funciona nos dois temas: 3.1:1 / 5:1) ---- */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a92a0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+
+  /* ---- Tipografia ---- */
+  --font-sans: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace;
+  --fs-11: 11px; --lh-11: 16px;
+  --fs-12: 12px; --lh-12: 16px;
+  --fs-13: 13px; --lh-13: 18px;
+  --fs-14: 14px; --lh-14: 20px;
+  --fs-15: 15px; --lh-15: 22px;
+  --fs-16: 16px; --lh-16: 24px;
+  --fs-18: 18px; --lh-18: 26px;
+  --fs-22: 22px; --lh-22: 28px;
+  --fs-28: 28px; --lh-28: 34px;
+  --fs-36: 36px; --lh-36: 44px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* ---- Espaço (grade de 4px) ---- */
+  --space-half: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ---- Tamanhos ---- */
+  --control-sm: 28px;
+  --control-md: 36px;
+  --control-lg: 44px;
+  --touch: 44px;
+  --side-w: 272px;
+  --panel-w: 380px;
+  --panel-w-wide: 420px;
+  --header-h: 56px;
+  --tabbar-h: 56px;
+
+  /* ---- Raios ---- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 999px;
+
+  /* ---- Elevação ---- */
+  --shadow-1: 0 1px 2px var(--shadow-color);
+  --shadow-2: 0 4px 12px -2px var(--shadow-color), 0 2px 4px -2px var(--shadow-color);
+  --shadow-3: 0 24px 48px -12px var(--shadow-color-strong), 0 8px 16px -8px var(--shadow-color);
+  --highlight-top: inset 0 1px 0 light-dark(transparent, rgb(255 255 255 / 0.04));
+
+  /* ---- Foco ----
+     Uso: box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus).
+     Os contêineres redefinem --ring-offset (.sidebar usa --side-bg). Não junte
+     num token só: var() é resolvido onde é declarado. */
+  --ring-offset: var(--bg-canvas);
+  --focus-ring-input: 0 0 0 3px var(--accent-ring);
+
+  /* ---- Movimento ---- */
+  --dur-1: 80ms;   /* hover, pressionar */
+  --dur-2: 120ms;  /* menus, tooltips, barra da mensagem */
+  --dur-3: 180ms;  /* modais, painéis, toasts, chegada de mensagem */
+  --dur-4: 240ms;  /* gaveta, página, pulo do contador */
+  --dur-5: 320ms;  /* folhas no celular */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* ---- Camadas ---- */
+  --z-raised: 1;
+  --z-sticky: 10;
+  --z-toolbar: 20;
+  --z-panel: 40;
+  --z-tabbar: 60;
+  --z-drawer-scrim: 80;
+  --z-drawer: 90;
+  --z-popover: 300;
+  --z-modal: 400;
+  --z-lightbox: 450;
+  --z-toast: 500;
+  --z-call: 600;
+  --z-call-incoming: 700;
+
+  /* ---- Nomes antigos: todo token antigo continua valendo (CSS customizado do admin) ---- */
+  --bg: var(--bg-canvas);
+  --bg-2: var(--bg-subtle);
+  --bg-3: var(--bg-muted);
+  --primary: var(--accent);
+  --primary-fg: var(--fg-on-accent);
+  --primary-soft: var(--accent-soft);
+  --success: var(--ok);
+  --warning: var(--warn-solid);
+  --mention-bg: var(--mention-row);
+  --shadow: var(--shadow-2);
+  --radius: var(--radius-md);
+  /* --fg, --fg-muted, --border, --danger, --danger-soft, --code-bg, --side-*,
+     --s1..--s3, --ok e --warn mantêm o nome e recebem os valores acima. */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --side-bg: #0e1014;
+    --side-hover: #191c22;
+    --side-active: #222731;
+    --side-border: #1f232b;
+  }
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --side-bg: #0e1014;
+  --side-hover: #191c22;
+  --side-active: #222731;
+  --side-border: #1f232b;
+}
+
+/* Navegadores sem light-dark() (Chrome < 123, Firefox < 120, Safari < 17.5)
+   ficam no tema claro. Conferido por scripts/check-tokens.mjs: estes valores
+   têm de ser iguais ao primeiro argumento de cada light-dark() acima. */
+@supports not (color: light-dark(#fff, #000)) {
+  :root {
+    --bg-canvas: #ffffff; --bg-surface: #ffffff; --bg-raised: #ffffff; --bg-subtle: #f7f8fa;
+    --bg-muted: #eff1f4; --bg-hover: #f2f4f7; --bg-active: #e9ecf0; --bg-input: #ffffff; --bg-inverse: #1c2028;
+    --fg: #1a1e26; --fg-2: #4a5261; --fg-muted: #646c7b; --fg-placeholder: #6f7786; --fg-disabled: #a3aab6; --fg-inverse: #f3f4f6;
+    --border: #e3e6eb; --border-subtle: #eef0f3; --border-strong: #cdd2da; --border-hover: #aeb5c0; --control-border: #848c9a;
+    --accent: #4453db; --accent-hover: #3a48c8; --accent-active: #3240b5; --accent-soft: #edeffc; --accent-soft-hover: #e2e6fa;
+    --accent-text: #3a48c8; --accent-ring: rgb(68 83 219 / 0.28); --focus: #4453db;
+    --ok: #157f3c; --ok-solid: #15803d; --ok-soft: #e8f5ec; --warn: #9a5b00; --warn-soft: #fff4db;
+    --danger: #c8283a; --danger-solid: #c8283a; --danger-hover: #b02233; --danger-soft: #fdecee;
+    --presence-online: #1fa463; --presence-offline: #8b93a1;
+    --mention-row: #fef6e9; --mention-me-bg: #ffe7ad; --mention-me-fg: #6b4100; --highlight: #ffeead; --code-bg: #f3f4f7;
+    --skeleton: #eef0f3; --skeleton-shine: rgb(255 255 255 / 0.6); --scrim: rgb(12 14 18 / 0.48);
+    --shadow-color: rgb(16 24 40 / 0.1); --shadow-color-strong: rgb(16 24 40 / 0.18); --highlight-top: inset 0 0 0 transparent;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s7: #6250d6; --s8: #e34948;
+    --chart-grid: #eceef2; --chart-axis: #cdd2da;
+  }
+}

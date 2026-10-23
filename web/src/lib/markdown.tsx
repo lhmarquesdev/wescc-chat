@@ -83,7 +83,7 @@ function inline(text: string, o: Opts, keyBase: string): ReactNode[] {
       const known = name === 'all' || name === 'here' || o.mentions?.some((x) => x.username.toLowerCase() === name.toLowerCase());
       if (!known) out.push(mention);
       else {
-        const cls = name === o.me ? 'mention me' : name === 'all' || name === 'here' ? 'mention group' : 'mention';
+        const cls = name === o.me ? 'mention me' : name === 'all' || name === 'here' ? `mention group ${name}` : 'mention';
         out.push(
           <span key={k} className={cls} onClick={() => name !== 'all' && name !== 'here' && o.onUserClick?.(name)}>
             @{name}

@@ -2,8 +2,10 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ImportProgress } from '@shared/index';
 import { errorMessage } from '../../../lib/api';
+import { plural } from '../../../lib/format';
 import { realtime } from '../../../lib/realtime';
 import { useStore } from '../../../lib/store';
+import { Icon } from '../../../components/Icon';
 import type { ImportCounts, ImportOperation } from './types';
 
 export const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
@@ -109,9 +111,8 @@ export function operationPath(op: ImportOperation | null | undefined): string | 
 
 export const processed = (c: ImportCounts) => c.completed + c.error + c.skipped;
 
-export function plural(n: number, one: string, many: string) {
-  return `${n.toLocaleString('pt-BR')} ${n === 1 ? one : many}`;
-}
+// O plural agora mora em lib/format; fica reexportado para as telas da importação.
+export { plural };
 
 export const num = (n: number | undefined) => (n ?? 0).toLocaleString('pt-BR');
 
@@ -187,10 +188,10 @@ export function Stat({ label, value, tone }: { label: string; value: ReactNode; 
 export function ImportTitle({ title, back = true, children }: { title: ReactNode; back?: boolean; children?: ReactNode }) {
   const navigate = useNavigate();
   return (
-    <div className="page-title-row">
+    <div className="page-title-row page-head imp-head">
       {back && (
         <button className="icon-btn" title="Voltar para o histórico" aria-label="Voltar para o histórico" onClick={() => navigate('/admin/import')}>
-          ←
+          <Icon name="back" />
         </button>
       )}
       <h1>{title}</h1>
@@ -210,7 +211,8 @@ export function Warnings({ list, open }: { list: string[]; open?: boolean }) {
   return (
     <details className="imp-warnings" open={open}>
       <summary>
-        ⚠ {plural(warningCount(list), 'aviso', 'avisos')} na leitura do arquivo
+        <Icon name="warning" size={16} />
+        {plural(warningCount(list), 'aviso', 'avisos')} na leitura do arquivo
       </summary>
       <ul>
         {list.map((w, i) => (

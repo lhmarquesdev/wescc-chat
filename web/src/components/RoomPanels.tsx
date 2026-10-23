@@ -1,21 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Message, Room, Subscription } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
 import { partyOf, useDirect } from '../lib/direct';
-import { formatBytes, formatDateTime, formatRelative, roleLabel, roomIcon, roomPath } from '../lib/format';
+import { formatBytes, formatDateTime, formatRelative, plural, roleLabel, roomDisplayName, roomIconName, roomPath, STATUS_LABEL } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
 import { canWithRoles, useStore } from '../lib/store';
+import { Icon, type IconName } from './Icon';
 import { LivechatInfoPanel } from './LivechatPanel';
+import { FileTile } from './MessageItem';
+import { useEscape, useIsPhone } from './overlay';
 import { UserPicker, type PickedUser } from './Pickers';
-import { Avatar, Empty, Field, Spinner, Toggle, UserAvatar, useAsync } from './ui';
+import { Avatar, Empty, Field, Menu, Segmented, SearchInput, SkeletonList, Toggle, UserAvatar, confirmDialog, useAsync } from './ui';
 
 export type PanelId = 'livechat' | 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune';
 
 const TITLES: Record<PanelId, string> = {
   livechat: 'Atendimento',
   info: 'Informações da sala',
-  threads: 'Threads',
+  threads: 'Tópicos',
   discussions: 'Discussões',
   team: 'Canais do time',
   members: 'Membros',
@@ -30,27 +33,80 @@ const TITLES: Record<PanelId, string> = {
 };
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
-const ok = (t: string) => useStore.getState().toast(t);
+const ok = (t: string) => useStore.getState().toast(t, 'success');
 
 interface Props {
   id: PanelId;
   room: Room & Record<string, any>;
   sub?: Subscription;
   roles: string[];
+  // Painéis disponíveis nesta sala (os atalhos de Informações só levam a eles).
+  available: PanelId[];
+  onPanel: (p: PanelId | null) => void;
   onClose: () => void;
   onChanged: () => void;
   onUserClick: (u: string) => void;
 }
 
-export function RoomPanel(p: Props) {
+// Antes de fechar, o foco que está no painel vai para o botão que o abriu no cabeçalho (ou para o compositor):
+// sem isso ele cai no <body> quando o painel sai da tela.
+export function refocusRoom() {
+  const a = document.activeElement;
+  if (!(a instanceof HTMLElement) || !a.closest('.panel')) return;
+  (document.querySelector<HTMLElement>('.room-actions button.on') ?? document.querySelector<HTMLElement>('.room-main .composer textarea'))?.focus({ preventScroll: true });
+}
+
+// Esc fecha o painel enquanto o foco está nele (campos de texto ficam com o próprio Esc).
+export function usePanelEscape(onClose: () => void) {
+  const [inside, setInside] = useState(false);
+  useEscape(inside, () => {
+    const a = document.activeElement;
+    if (a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement || a instanceof HTMLSelectElement) return;
+    refocusRoom();
+    onClose();
+  });
+  return {
+    onFocus: () => setInside(true),
+    onBlur: (e: FocusEvent<HTMLElement>) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setInside(false);
+    },
+  };
+}
+
+// Cabeçalho comum dos painéis: título (e subtítulo), ações à direita e fechar; no celular, voltar à esquerda.
+export function PanelHead({ title, sub, actions, onClose }: { title: string; sub?: ReactNode; actions?: ReactNode; onClose: () => void }) {
+  const phone = useIsPhone();
+  const close = () => {
+    refocusRoom();
+    onClose();
+  };
   return (
-    <aside className="panel">
-      <div className="panel-head">
-        <h3>{TITLES[p.id]}</h3>
-        <button className="icon-btn" onClick={p.onClose}>
-          ✕
+    <div className="panel-head">
+      {phone && (
+        <button type="button" className="icon-btn panel-back" title="Voltar" aria-label="Voltar" onClick={close}>
+          <Icon name="back" size={20} />
         </button>
-      </div>
+      )}
+      <h2 className="panel-title">
+        <span className="panel-title-text">{title}</span>
+        {sub && <span className="sub">{sub}</span>}
+      </h2>
+      {actions}
+      {!phone && (
+        <button type="button" className="icon-btn panel-close" title="Fechar" aria-label="Fechar" onClick={close}>
+          <Icon name="close" size={18} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function RoomPanel(p: Props) {
+  const esc = usePanelEscape(p.onClose);
+  const sub = p.id === 'members' && p.room.usersCount ? plural(p.room.usersCount, 'pessoa', 'pessoas') : undefined;
+  return (
+    <aside className={`panel panel-${p.id}`} aria-label={TITLES[p.id]} {...esc}>
+      <PanelHead title={TITLES[p.id]} sub={sub} onClose={p.onClose} />
       <div className="panel-body">
         {p.id === 'livechat' && <LivechatInfoPanel rid={p.room._id} />}
         {p.id === 'info' && <InfoPanel {...p} />}
@@ -71,14 +127,21 @@ export function RoomPanel(p: Props) {
 
 const hasPerm = (perm: string, roles: string[]) => canWithRoles(perm, roles);
 
+// Corpo de um resultado com as menções destacadas como na conversa (sem links de canal: o resultado já é um botão).
+function resultBody(m: Message) {
+  return renderMarkdown(m.msg, { me: useStore.getState().me?.username, mentions: m.mentions });
+}
+
 function MessageResult({ m }: { m: Message }) {
   const navigate = useNavigate();
   return (
-    <button className="result" onClick={() => navigate(`${location.pathname.split('/thread/')[0]}?msg=${m._id}`)}>
+    <button type="button" className="result" onClick={() => navigate(`${location.pathname.split('/thread/')[0]}?msg=${m._id}`)}>
       <div className="result-head">
-        <Avatar username={m.u.username} size={20} /> <strong>{m.u.username}</strong> <span className="muted">{formatDateTime(m.ts)}</span>
+        <Avatar username={m.u.username} size={20} />
+        <strong title={`@${m.u.username}`}>{m.u.name || m.u.username}</strong>
+        <span className="muted">{formatDateTime(m.ts)}</span>
       </div>
-      <div className="result-body">{renderMarkdown(m.msg)}</div>
+      <div className="result-body">{resultBody(m)}</div>
     </button>
   );
 }
@@ -104,10 +167,17 @@ function roomForm(room: Room & Record<string, any>) {
   };
 }
 
-function InfoPanel({ room, sub, roles, onChanged }: Props) {
+const INFO_TILES: { id: PanelId; icon: IconName; label: string }[] = [
+  { id: 'members', icon: 'panel-members', label: 'Membros' },
+  { id: 'files', icon: 'panel-files', label: 'Arquivos' },
+  { id: 'notifications', icon: 'panel-notifications', label: 'Notificações' },
+];
+
+function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   const navigate = useNavigate();
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState<any>({});
+  const imageRef = useRef<HTMLInputElement>(null);
   const canEdit = hasPerm('edit-room', roles);
   const canSetRO = hasPerm('set-readonly', roles);
   const canSetReact = hasPerm('set-react-when-readonly', roles);
@@ -177,9 +247,9 @@ function InfoPanel({ room, sub, roles, onChanged }: Props) {
                     const leaving = !v && room.notice;
                     setF({ ...f, notice: v, readOnly: leaving ? false : f.readOnly, broadcast: leaving ? false : !!room.broadcast });
                   }}
-                  label="📢 Canal de avisos"
+                  label="Canal de avisos"
+                  description="Só donos, moderadores e publicadores escrevem; todos leem."
                 />
-                <span className="field-hint opt-hint">Só donos, moderadores e publicadores escrevem; todos leem.</span>
                 {f.notice ? (
                   <div className="notice-opts">
                     {canSetReact && <Toggle checked={f.reactWhenReadOnly} onChange={(v) => setF({ ...f, reactWhenReadOnly: v })} label="Permitir reações aos avisos" />}
@@ -204,7 +274,7 @@ function InfoPanel({ room, sub, roles, onChanged }: Props) {
             )}
             {isAdmin && (
               <>
-                <Toggle checked={f.default} onChange={(v) => setF({ ...f, default: v })} label="Sala padrão (novos usuários entram automaticamente)" />
+                <Toggle checked={f.default} onChange={(v) => setF({ ...f, default: v })} label="Sala padrão" description="Novos usuários entram automaticamente." />
                 <Toggle checked={f.featured} onChange={(v) => setF({ ...f, featured: v })} label="Destaque no diretório" />
               </>
             )}
@@ -226,39 +296,82 @@ function InfoPanel({ room, sub, roles, onChanged }: Props) {
             )}
           </fieldset>
         )}
-        <label className="btn">
-          🖼 Trocar imagem da sala
-          <input type="file" accept="image/*" hidden onChange={(e) => e.target.files?.[0] && setAvatar(e.target.files[0])} />
-        </label>
+        <div className="info-image">
+          <input
+            ref={imageRef}
+            type="file"
+            accept="image/*"
+            tabIndex={-1}
+            className="visually-hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) void setAvatar(file);
+            }}
+          />
+          <button type="button" className="btn" onClick={() => imageRef.current?.click()}>
+            <Icon name="image-change" />
+            Trocar imagem da sala
+          </button>
+        </div>
         <div className="row-actions">
-          <button className="btn" onClick={() => setEdit(false)}>
+          <button type="button" className="btn" onClick={() => setEdit(false)}>
             Cancelar
           </button>
-          <button className="btn primary" onClick={save}>
+          <button type="button" className="btn primary" onClick={save}>
             Salvar
           </button>
         </div>
       </div>
     );
 
+  const name = roomDisplayName(sub, room);
+  const tiles = INFO_TILES.filter((t) => available.includes(t.id));
+  const canDelete = hasPerm(room.t === 'c' ? 'delete-c' : room.t === 'p' ? 'delete-p' : 'delete-d', roles);
+  const toTeam = room.t !== 'd' && !room.teamMain && !room.prid && !room.teamId && hasPerm('create-team', roles) && canEdit;
+  const toChannel = room.teamMain && hasPerm('edit-team', roles);
+  const canArchive = room.t !== 'd' && hasPerm('archive-room', roles);
+  const convert = async (team: boolean) => {
+    const yes = await confirmDialog(
+      team
+        ? { title: 'Converter em time?', body: 'A sala vira um time, que pode reunir outros canais.', confirmLabel: 'Converter em time' }
+        : { title: 'Converter em canal?', body: 'O time vira um canal comum.', confirmLabel: 'Converter em canal' },
+    );
+    if (!yes) return;
+    (team ? api.post('rooms.convertToTeam', { roomId: room._id }) : api.post('teams.convertToChannel', { teamId: room.teamId })).then(onChanged).catch(fail);
+  };
+  const remove = async () => {
+    const yes = await confirmDialog({ title: `Excluir ${room.t === 'd' || room.prid ? name : `#${name}`}?`, body: 'A sala e todas as mensagens dela serão apagadas. Isso não pode ser desfeito.', confirmLabel: 'Excluir sala', danger: true });
+    if (!yes) return;
+    const call = room.teamMain ? api.post('teams.delete', { teamId: room.teamId }) : api.post('rooms.delete', { roomId: room._id });
+    call.then(() => navigate('/home')).catch(fail);
+  };
+
   return (
     <div className="info">
       <div className="info-hero">
-        {room.t === 'd' && sub ? <Avatar username={sub.name.split(',')[0]} size={96} /> : <Avatar rid={room._id} size={96} etag={(room as any).avatarETag} />}
+        {room.t === 'd' && sub ? <Avatar username={sub.name.split(',')[0]} size={72} /> : <Avatar rid={room._id} size={72} etag={(room as any).avatarETag} />}
         <h2>
-          {roomIcon(room)} {sub?.fname || room.fname || room.name}
+          <Icon name={roomIconName(room)} size={18} />
+          <span>{name}</span>
         </h2>
+        {/* O tópico aparece só aqui, sob o nome (não se repete numa seção abaixo). */}
+        {room.topic && <div className="info-topic">{renderMarkdown(room.topic)}</div>}
       </div>
+      {tiles.length > 0 && (
+        <div className="info-tiles">
+          {tiles.map((t) => (
+            <button key={t.id} type="button" className="info-tile" onClick={() => onPanel(t.id)}>
+              <Icon name={t.icon} size={18} />
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {room.description && (
         <section>
           <h4>Descrição</h4>
           {renderMarkdown(room.description)}
-        </section>
-      )}
-      {room.topic && (
-        <section>
-          <h4>Tópico</h4>
-          {renderMarkdown(room.topic)}
         </section>
       )}
       {room.announcement && (
@@ -268,44 +381,54 @@ function InfoPanel({ room, sub, roles, onChanged }: Props) {
         </section>
       )}
       {room.notice && <NoticeInfo room={room} />}
-      <section className="muted small">
-        Criada em {formatDateTime(room.ts)} · {room.usersCount} membros · {room.msgs} mensagens
-        {room.retention?.overrideGlobal && room.retention.enabled && <div>🧹 Mensagens com mais de {room.retention.maxAgeDays} dias são apagadas automaticamente.</div>}
+      <section className="info-meta">
+        <p>
+          Criada em {formatDateTime(room.ts)} · {plural(room.usersCount ?? 0, 'membro', 'membros')} · {plural(room.msgs ?? 0, 'mensagem', 'mensagens')}
+        </p>
+        {room.retention?.overrideGlobal && room.retention.enabled && (
+          <p className="info-retention">
+            <Icon name="retention" size={14} />
+            Mensagens com mais de {room.retention.maxAgeDays} dias são apagadas automaticamente.
+          </p>
+        )}
       </section>
-      <div className="row-actions wrap">
-        {canEdit && room.t !== 'd' && (
-          <button className="btn" onClick={() => setEdit(true)}>
-            ✏️ Editar
+      {(canEdit && room.t !== 'd') || toTeam || toChannel || canArchive ? (
+        <div className="info-actions">
+          {canEdit && room.t !== 'd' && (
+            <button type="button" className="btn ghost" onClick={() => setEdit(true)}>
+              <Icon name="edit" />
+              Editar
+            </button>
+          )}
+          {toTeam && (
+            <button type="button" className="btn ghost" onClick={() => void convert(true)}>
+              <Icon name="room-team" />
+              Converter em time
+            </button>
+          )}
+          {toChannel && (
+            <button type="button" className="btn ghost" onClick={() => void convert(false)}>
+              <Icon name="room-channel" />
+              Converter em canal
+            </button>
+          )}
+          {canArchive && (
+            <button type="button" className="btn ghost" onClick={() => api.post(room.archived ? 'channels.unarchive' : 'channels.archive', { roomId: room._id }).then(onChanged).catch(fail)}>
+              <Icon name={room.archived ? 'unarchive' : 'archive'} />
+              {room.archived ? 'Desarquivar' : 'Arquivar'}
+            </button>
+          )}
+        </div>
+      ) : null}
+      {canDelete && (
+        <div className="danger-zone">
+          <p>Excluir apaga a sala e todas as mensagens. Não dá para desfazer.</p>
+          <button type="button" className="btn danger" onClick={() => void remove()}>
+            <Icon name="delete" />
+            Excluir sala
           </button>
-        )}
-        {room.t !== 'd' && !room.teamMain && !room.prid && !room.teamId && hasPerm('create-team', roles) && canEdit && (
-          <button className="btn" onClick={() => confirm('Converter esta sala em um time?') && api.post('rooms.convertToTeam', { roomId: room._id }).then(onChanged).catch(fail)}>
-            👥 Converter em time
-          </button>
-        )}
-        {room.teamMain && hasPerm('edit-team', roles) && (
-          <button className="btn" onClick={() => confirm('Converter o time em canal comum?') && api.post('teams.convertToChannel', { teamId: room.teamId }).then(onChanged).catch(fail)}>
-            # Converter em canal
-          </button>
-        )}
-        {room.t !== 'd' && hasPerm('archive-room', roles) && (
-          <button className="btn" onClick={() => api.post(room.archived ? 'channels.unarchive' : 'channels.archive', { roomId: room._id }).then(onChanged).catch(fail)}>
-            🗄 {room.archived ? 'Desarquivar' : 'Arquivar'}
-          </button>
-        )}
-        {hasPerm(room.t === 'c' ? 'delete-c' : room.t === 'p' ? 'delete-p' : 'delete-d', roles) && (
-          <button
-            className="btn danger"
-            onClick={() => {
-              if (!confirm('Excluir a sala e todas as mensagens? Isso não pode ser desfeito.')) return;
-              const call = room.teamMain ? api.post('teams.delete', { teamId: room.teamId }) : api.post('rooms.delete', { roomId: room._id });
-              call.then(() => navigate('/home')).catch(fail);
-            }}
-          >
-            🗑 Excluir
-          </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -324,10 +447,13 @@ function NoticeInfo({ room }: { room: Room }) {
     .sort((a, b) => PUBLISHER_ROLES.indexOf(a.roles[0]) - PUBLISHER_ROLES.indexOf(b.roles[0]) || a.u.username.localeCompare(b.u.username, 'pt-BR'));
   return (
     <section className="notice-info">
-      <h4>📢 Canal de avisos</h4>
+      <h4>
+        <Icon name="notice" size={14} />
+        Canal de avisos
+      </h4>
       <p>Quem publica: donos, moderadores e publicadores da sala, além de quem tem permissão para publicar em salas somente leitura.</p>
       {loading ? (
-        <Spinner />
+        <SkeletonList n={2} />
       ) : error ? (
         <p className="muted small">{error}</p>
       ) : (
@@ -340,7 +466,7 @@ function NoticeInfo({ room }: { room: Room }) {
                   <strong>{p.u.name || p.u.username}</strong> <span className="muted">@{p.u.username}</span>
                 </span>
                 {p.roles.map((r) => (
-                  <span key={r} className="pill">
+                  <span key={r} className={r === 'owner' ? 'pill accent' : 'pill'}>
                     {roleLabel(r)}
                   </span>
                 ))}
@@ -356,29 +482,51 @@ function NoticeInfo({ room }: { room: Room }) {
   );
 }
 
+type ThreadFilter = 'all' | 'following' | 'unread';
+const THREAD_EMPTY: Record<ThreadFilter, [string, string]> = {
+  all: ['Nenhum tópico', 'Use “Responder no tópico” em uma mensagem para começar um.'],
+  following: ['Nenhum tópico seguido', 'Os tópicos em que você responde ou que você segue aparecem aqui.'],
+  unread: ['Tudo lido', 'Não há tópicos com respostas novas.'],
+};
+
 function ThreadsPanel({ room }: Props) {
-  const [type, setType] = useState<'all' | 'following' | 'unread'>('all');
+  const [type, setType] = useState<ThreadFilter>('all');
   const navigate = useNavigate();
   const { data, loading } = useAsync(() => api.get('chat.getThreadsList', { rid: room._id, type, count: 50 }), [room._id, type]);
   return (
     <>
-      <select value={type} onChange={(e) => setType(e.target.value as any)}>
-        <option value="all">Todas</option>
-        <option value="following">Seguindo</option>
-        <option value="unread">Não lidas</option>
-      </select>
+      <div className="panel-filters">
+        <Segmented
+          value={type}
+          onChange={setType}
+          label="Filtrar tópicos"
+          items={[
+            { id: 'all', label: 'Todos' },
+            { id: 'following', label: 'Seguindo' },
+            { id: 'unread', label: 'Não lidos' },
+          ]}
+        />
+      </div>
       {loading ? (
-        <Spinner />
+        <SkeletonList />
       ) : !data?.threads.length ? (
-        <Empty>Nenhuma thread.</Empty>
+        <Empty icon="panel-threads" title={THREAD_EMPTY[type][0]}>
+          {THREAD_EMPTY[type][1]}
+        </Empty>
       ) : (
         data.threads.map((m: Message) => (
-          <button key={m._id} className="result" onClick={() => navigate(`${roomPath(room)}/thread/${m._id}`)}>
+          <button key={m._id} type="button" className="result thread-row" onClick={() => navigate(`${roomPath(room)}/thread/${m._id}`)}>
             <div className="result-head">
-              <Avatar username={m.u.username} size={20} /> <strong>{m.u.username}</strong> <span className="muted">{formatRelative(m.tlm)}</span>
+              <Avatar username={m.u.username} size={20} />
+              <strong title={`@${m.u.username}`}>{m.u.name || m.u.username}</strong>
+              <span className="muted">{formatRelative(m.ts)}</span>
             </div>
-            <div className="result-body ellipsis">{m.msg}</div>
-            <div className="muted small">💬 {m.tcount} respostas</div>
+            <div className="result-body clamp">{resultBody(m)}</div>
+            <div className="result-foot">
+              <Icon name="panel-threads" size={14} />
+              <span className="result-count">{plural(m.tcount ?? 0, 'resposta', 'respostas')}</span>
+              {m.tlm && <span className="muted">· última {formatRelative(m.tlm)}</span>}
+            </div>
           </button>
         ))
       )}
@@ -389,15 +537,21 @@ function ThreadsPanel({ room }: Props) {
 function DiscussionsPanel({ room }: Props) {
   const navigate = useNavigate();
   const { data, loading } = useAsync(() => api.get('rooms.getDiscussions', { roomId: room._id, count: 100 }), [room._id]);
-  if (loading) return <Spinner />;
-  if (!data?.discussions.length) return <Empty>Nenhuma discussão.</Empty>;
+  if (loading) return <SkeletonList />;
+  if (!data?.discussions.length)
+    return (
+      <Empty icon="panel-discussions" title="Nenhuma discussão">
+        Inicie uma discussão pelo menu ⋯ de uma mensagem.
+      </Empty>
+    );
   return data.discussions.map((d: Room) => (
-    <button key={d._id} className="result" onClick={() => navigate(roomPath(d))}>
+    <button key={d._id} type="button" className="result" onClick={() => navigate(roomPath(d))}>
       <div className="result-head">
-        🗨 <strong>{d.fname}</strong>
+        <Icon name="room-discussion" />
+        <strong>{d.fname}</strong>
       </div>
-      <div className="muted small">
-        {d.msgs} mensagens · {formatRelative(d.lm ?? d.ts)}
+      <div className="result-foot muted">
+        {plural(d.msgs ?? 0, 'mensagem', 'mensagens')} · {formatRelative(d.lm ?? d.ts)}
       </div>
     </button>
   ));
@@ -410,64 +564,133 @@ function TeamPanel({ room, roles }: Props) {
   const [name, setName] = useState('');
   const [priv, setPriv] = useState(false);
   const canAdd = hasPerm('create-team-channel', roles) || hasPerm('add-team-channel', roles);
+  const canEditRooms = hasPerm('edit-team-channel', roles);
+  const canRemoveRooms = hasPerm('remove-team-channel', roles);
   return (
     <>
       {canAdd && !adding && (
-        <button className="btn" onClick={() => setAdding(true)}>
-          ＋ Criar canal no time
+        <button type="button" className="btn primary panel-cta" onClick={() => setAdding(true)}>
+          <Icon name="add" />
+          Criar canal no time
         </button>
       )}
       {adding && (
-        <div className="form">
-          <input placeholder="nome-do-canal" value={name} onChange={(e) => setName(e.target.value.replace(/\s/g, '-'))} />
+        <div className="form panel-add">
+          <input placeholder="nome-do-canal" aria-label="Nome do canal" value={name} onChange={(e) => setName(e.target.value.replace(/\s/g, '-'))} />
           <Toggle checked={priv} onChange={setPriv} label="Privado" />
           <div className="row-actions">
-            <button className="btn" onClick={() => setAdding(false)}>
+            <button type="button" className="btn" onClick={() => setAdding(false)}>
               Cancelar
             </button>
-            <button className="btn primary" onClick={() => api.post('teams.createRoom', { teamId: room.teamId, name, type: priv ? 'p' : 'c' }).then(() => (setAdding(false), setName(''), reload())).catch(fail)}>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => api.post('teams.createRoom', { teamId: room.teamId, name, type: priv ? 'p' : 'c' }).then(() => (setAdding(false), setName(''), reload())).catch(fail)}
+            >
               Criar
             </button>
           </div>
         </div>
       )}
       {loading ? (
-        <Spinner />
+        <SkeletonList />
       ) : !data?.rooms.length ? (
-        <Empty>Nenhum canal no time.</Empty>
+        <Empty icon="panel-team" title="Nenhum canal no time">
+          Crie canais para separar os assuntos do time.
+        </Empty>
       ) : (
-        data.rooms.map((r: any) => (
-          <div key={r._id} className="list-row">
-            <button className="link" onClick={() => navigate(roomPath(r))}>
-              {roomIcon(r)} {r.fname || r.name}
-            </button>
-            <span className="muted small">{r.usersCount} membros</span>
-            {r.teamDefault && <span className="pill">padrão</span>}
-            {!r.isMember && r.t === 'c' && (
-              <button className="btn small" onClick={() => api.post('channels.join', { roomId: r._id }).then(reload).catch(fail)}>
-                Entrar
+        data.rooms.map((r: any) => {
+          const label = r.fname || r.name;
+          // Nome longo: uma linha com reticências; membros e "padrão" na linha de baixo, ações no menu.
+          return (
+            <div key={r._id} className="list-row team-row">
+              <button type="button" className="link team-room" title={label} onClick={() => navigate(roomPath(r))}>
+                <Icon name={roomIconName(r)} />
+                <span className="team-room-text">
+                  <span className="team-room-name">{label}</span>
+                  <span className="muted small">
+                    {plural(r.usersCount ?? 0, 'membro', 'membros')}
+                    {r.teamDefault && ' · padrão'}
+                  </span>
+                </span>
               </button>
-            )}
-            {hasPerm('edit-team-channel', roles) && (
-              <button className="btn small" title="Novos membros do time entram automaticamente" onClick={() => api.post('teams.updateRoom', { roomId: r._id, isDefault: !r.teamDefault }).then(reload).catch(fail)}>
-                {r.teamDefault ? 'Tirar padrão' : 'Tornar padrão'}
-              </button>
-            )}
-            {hasPerm('remove-team-channel', roles) && (
-              <button className="btn small" onClick={() => api.post('teams.removeRoom', { teamId: room.teamId, roomId: r._id }).then(reload).catch(fail)}>
-                Remover
-              </button>
-            )}
-          </div>
-        ))
+              {!r.isMember && r.t === 'c' && (
+                <button type="button" className="btn small" onClick={() => api.post('channels.join', { roomId: r._id }).then(reload).catch(fail)}>
+                  Entrar
+                </button>
+              )}
+              {(canEditRooms || canRemoveRooms) && (
+                <Menu
+                  label={`Ações de ${label}`}
+                  trigger={
+                    <button type="button" className="icon-btn team-room-more" title="Mais ações" aria-label="Mais ações">
+                      <Icon name="more" size={16} />
+                    </button>
+                  }
+                >
+                  {(close) => (
+                    <>
+                      {canEditRooms && (
+                        <button
+                          title="Novos membros do time entram automaticamente"
+                          onClick={() => (close(), api.post('teams.updateRoom', { roomId: r._id, isDefault: !r.teamDefault }).then(reload).catch(fail))}
+                        >
+                          <Icon name={r.teamDefault ? 'unpin' : 'pin'} />
+                          {r.teamDefault ? 'Tirar padrão' : 'Tornar padrão'}
+                        </button>
+                      )}
+                      {canRemoveRooms && (
+                        <button className="danger" onClick={() => (close(), api.post('teams.removeRoom', { teamId: room.teamId, roomId: r._id }).then(reload).catch(fail))}>
+                          <Icon name="team-remove-room" />
+                          Remover do time
+                        </button>
+                      )}
+                    </>
+                  )}
+                </Menu>
+              )}
+            </div>
+          );
+        })
       )}
     </>
+  );
+}
+
+// Dono primeiro; o resto na ordem do servidor.
+const ROLE_ORDER = ['owner', 'moderator', 'leader', 'publisher'];
+
+function MemberRow({ m, muted, onClick }: { m: any; muted: boolean; onClick: () => void }) {
+  const roles = [...(m.roles as string[])].sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b));
+  const statusText = m.statusText || (m.status && m.status !== 'offline' ? STATUS_LABEL[m.status] : '');
+  return (
+    <button type="button" className="member" onClick={onClick}>
+      <UserAvatar username={m.username} size={32} status={m.status} />
+      <span className="member-who">
+        <span className="member-name">{m.name || m.username}</span>
+        <span className="member-sub">
+          @{m.username}
+          {statusText && ` · ${statusText}`}
+        </span>
+      </span>
+      {muted && (
+        <span className="pill member-muted" title="Silenciado" aria-label="Silenciado">
+          <Icon name="muted-user" size={12} />
+        </span>
+      )}
+      {roles.map((r) => (
+        <span key={r} className={r === 'owner' ? 'pill accent' : 'pill'}>
+          {roleLabel(r)}
+        </span>
+      ))}
+    </button>
   );
 }
 
 function MembersPanel({ room, roles, onUserClick }: Props) {
   const [filter, setFilter] = useState('');
   const [onlineOnly, setOnlineOnly] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [adding, setAdding] = useState<PickedUser[]>([]);
   // "Ocultar a lista de membros": sem view-broadcast-member-list o servidor recusa a lista.
   const hidden = !!room.broadcast && !hasPerm('view-broadcast-member-list', roles);
@@ -479,78 +702,180 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
   const direct = useDirect();
   // Grupo privado ou canal de um time privado: só os membros leem.
   const isPrivate = room.t === 'p' || (room.t === 'c' && !room.teamMain && (room as any).team?.type === 1);
-  const members = (data?.members ?? []).filter((m: any) => !onlineOnly || m.status !== 'offline');
-  if (hidden) return <Empty>A lista de membros deste canal está oculta: só donos e moderadores veem quem participa.</Empty>;
+  const all: any[] = data?.members ?? [];
+  const online = all.filter((m) => m.status && m.status !== 'offline');
+  const offline = onlineOnly ? [] : all.filter((m) => !m.status || m.status === 'offline');
+  if (hidden)
+    return (
+      <Empty icon="panel-members" title="Lista de membros oculta">
+        Só donos e moderadores veem quem participa deste canal.
+      </Empty>
+    );
+  const invite = () =>
+    api
+      .post(
+        room.teamMain ? 'teams.addMembers' : room.t === 'p' ? 'groups.invite' : 'channels.invite',
+        room.teamMain ? { teamId: room.teamId, members: adding.map((u) => ({ userId: u._id })) } : { roomId: room._id, userIds: adding.map((u) => u._id) },
+      )
+      .then(() => (setAdding([]), setPicking(false), reload()))
+      .catch(fail);
+  const group = (title: string, list: any[]) =>
+    list.length > 0 && (
+      <div className="member-group" role="group" aria-label={title}>
+        <h4 className="group-label">
+          {title} · {list.length.toLocaleString('pt-BR')}
+        </h4>
+        {list.map((m) => (
+          <MemberRow key={m._id} m={m} muted={!!room.muted?.includes(m.username)} onClick={() => onUserClick(m.username)} />
+        ))}
+      </div>
+    );
   return (
     <>
-      <input placeholder="Filtrar membros" value={filter} onChange={(e) => setFilter(e.target.value)} />
-      <Toggle checked={onlineOnly} onChange={setOnlineOnly} label="Somente online" />
       {canAdd && room.t !== 'd' && (
-        <div className="form">
-          <UserPicker
-            value={adding}
-            onChange={setAdding}
-            placeholder="Adicionar pessoas"
-            itemDisabled={isPrivate ? (u) => direct.bringIn(adding.map(partyOf), partyOf(u)) : undefined}
-          />
-          {adding.length > 0 && (
-            <button
-              className="btn primary"
-              onClick={() =>
-                api
-                  .post(room.teamMain ? 'teams.addMembers' : room.t === 'p' ? 'groups.invite' : 'channels.invite', room.teamMain ? { teamId: room.teamId, members: adding.map((u) => ({ userId: u._id })) } : { roomId: room._id, userIds: adding.map((u) => u._id) })
-                  .then(() => (setAdding([]), reload()))
-                  .catch(fail)
-              }
-            >
-              Adicionar {adding.length}
+        <div className="panel-add">
+          {!picking ? (
+            <button type="button" className="btn primary panel-cta" onClick={() => setPicking(true)}>
+              <Icon name="add-people" />
+              Adicionar pessoas
             </button>
+          ) : (
+            <div className="form">
+              <UserPicker
+                value={adding}
+                onChange={setAdding}
+                placeholder="Buscar pessoas para adicionar"
+                itemDisabled={isPrivate ? (u) => direct.bringIn(adding.map(partyOf), partyOf(u)) : undefined}
+              />
+              <div className="row-actions">
+                <button type="button" className="btn" onClick={() => (setPicking(false), setAdding([]))}>
+                  Cancelar
+                </button>
+                <button type="button" className="btn primary" disabled={!adding.length} onClick={invite}>
+                  {adding.length ? `Adicionar ${adding.length}` : 'Adicionar'}
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}
-      {loading ? (
-        <Spinner />
+      <div className="panel-filters">
+        <SearchInput value={filter} onChange={setFilter} placeholder="Filtrar membros" />
+        <Toggle checked={onlineOnly} onChange={setOnlineOnly} label="Somente online" />
+      </div>
+      {loading && !data ? (
+        <SkeletonList />
       ) : error ? (
         <div className="form-error">{error}</div>
+      ) : !online.length && !offline.length ? (
+        <Empty icon="panel-members" title={filter ? `Ninguém encontrado para "${filter}"` : 'Ninguém online agora'}>
+          {filter ? 'Confira a grafia ou busque por outro nome.' : 'Desligue "Somente online" para ver todos os membros.'}
+        </Empty>
       ) : (
         <>
-          <div className="muted small">{data?.total} membros</div>
-          {members.map((m: any) => (
-            <button key={m._id} className="member" onClick={() => onUserClick(m.username)}>
-              <UserAvatar username={m.username} size={28} status={m.status} />
-              <span>
-                <strong>{m.name || m.username}</strong> <span className="muted">@{m.username}</span>
-              </span>
-              {m.roles.map((r: string) => (
-                <span key={r} className="pill">
-                  {roleLabel(r)}
-                </span>
-              ))}
-              {room.muted?.includes(m.username) && <span className="pill">🔇</span>}
-            </button>
-          ))}
+          {group('Online', online)}
+          {group('Offline', offline)}
         </>
       )}
     </>
   );
 }
 
+// Termos a destacar nos resultados: sem operadores (from:, has:…) nem /regex/; aspas viram uma frase.
+function searchTerms(q: string) {
+  return [...q.matchAll(/"([^"]+)"|(\S+)/g)]
+    .map((m) => (m[1] ?? m[2]).toLowerCase())
+    .filter((t) => t.length > 1 && !/^[a-z]+:/i.test(t) && !/^\/.*\/[a-z]*$/i.test(t));
+}
+
+// Destaque com a CSS Custom Highlight API: não mexe no DOM que o React desenha. Sem suporte, fica sem destaque.
+function useHighlight(ref: RefObject<HTMLElement | null>, terms: string[], key: unknown) {
+  useLayoutEffect(() => {
+    const reg = (globalThis.CSS as any)?.highlights;
+    const H = (globalThis as any).Highlight;
+    const root = ref.current;
+    if (!reg || !H || !root || !terms.length) return;
+    const ranges: Range[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!n.parentElement?.closest('.result-body')) continue;
+      const text = (n.textContent ?? '').toLowerCase();
+      for (const t of terms) {
+        for (let i = text.indexOf(t); i >= 0; i = text.indexOf(t, i + t.length)) {
+          const r = document.createRange();
+          r.setStart(n, i);
+          r.setEnd(n, i + t.length);
+          ranges.push(r);
+        }
+      }
+    }
+    reg.set('search-hit', new H(...ranges));
+    return () => reg.delete('search-hit');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+}
+
 function SearchPanel({ room }: Props) {
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
+  const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const t = setTimeout(() => setQ(text), 300);
+    const t = setTimeout(() => setQ(text.trim()), 300);
     return () => clearTimeout(t);
   }, [text]);
   const { data, loading, error } = useAsync(() => (q ? api.get('chat.search', { roomId: room._id, searchText: q, count: 50 }) : Promise.resolve(null)), [q, room._id]);
+  const terms = searchTerms(q);
+  useHighlight(list, terms, data);
   return (
     <>
-      <input autoFocus placeholder="Buscar (ex.: relatório from:@ana has:file)" value={text} onChange={(e) => setText(e.target.value)} />
-      <div className="muted small">Operadores: from:@usuário, has:file, has:link, is:pinned, is:starred, is:thread, before:AAAA-MM-DD, after:AAAA-MM-DD, /regex/</div>
+      <div className="panel-filters">
+        <SearchInput autoFocus value={text} onChange={setText} placeholder="Buscar mensagens" />
+        <ul className="search-help" aria-label="Operadores de busca">
+          <li>
+            <kbd>from:@pessoa</kbd> <kbd>has:file</kbd> <kbd>has:link</kbd>
+          </li>
+          <li>
+            <kbd>is:pinned</kbd> <kbd>is:starred</kbd> <kbd>is:thread</kbd>
+          </li>
+          <li>
+            <kbd>before:AAAA-MM-DD</kbd> <kbd>after:AAAA-MM-DD</kbd> <kbd>/regex/</kbd> <kbd>"frase exata"</kbd>
+          </li>
+        </ul>
+      </div>
       {error && <div className="form-error">{error}</div>}
-      {loading && q ? <Spinner /> : data && (data.messages.length ? data.messages.map((m: Message) => <MessageResult key={m._id} m={m} />) : <Empty>Nada encontrado.</Empty>)}
+      {!q ? (
+        <Empty icon="search" title="Buscar nesta sala">
+          Digite acima para procurar nas mensagens desta sala.
+        </Empty>
+      ) : loading ? (
+        <div role="status" aria-label="Buscando…">
+          <SkeletonList n={5} delay={0} />
+        </div>
+      ) : (
+        data &&
+        (data.messages.length ? (
+          <div className="results" ref={list}>
+            <p className="results-count">{plural(data.messages.length, 'resultado', 'resultados')}</p>
+            {data.messages.map((m: Message) => (
+              <MessageResult key={m._id} m={m} />
+            ))}
+          </div>
+        ) : (
+          <Empty icon="search" title={`Nada encontrado para "${q}"`}>
+            Confira a grafia ou tente outros termos.
+          </Empty>
+        ))
+      )}
     </>
   );
+}
+
+const dayMonth = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' });
+
+// "PDF", "PNG"…: a extensão do nome, ou o subtipo do MIME.
+function fileType(f: { name?: string; type?: string }) {
+  const ext = f.name?.match(/\.([a-z0-9]{1,5})$/i)?.[1];
+  return (ext ?? f.type?.split('/')[1] ?? 'arquivo').toUpperCase();
 }
 
 function FilesPanel({ room }: Props) {
@@ -559,47 +884,80 @@ function FilesPanel({ room }: Props) {
   const { data, loading } = useAsync(() => api.get('rooms.files', { roomId: room._id, name, typeGroup: type, count: 100 }), [room._id, name, type]);
   return (
     <>
-      <input placeholder="Filtrar por nome" value={name} onChange={(e) => setName(e.target.value)} />
-      <select value={type} onChange={(e) => setType(e.target.value)}>
-        <option value="">Todos os tipos</option>
-        <option value="image/*">Imagens</option>
-        <option value="video/*">Vídeos</option>
-        <option value="audio/*">Áudios</option>
-        <option value="application/*">Documentos</option>
-        <option value="text/*">Texto</option>
-      </select>
-      {loading ? (
-        <Spinner />
+      <div className="panel-filters">
+        <SearchInput value={name} onChange={setName} placeholder="Filtrar por nome" />
+        <select value={type} aria-label="Tipo de arquivo" onChange={(e) => setType(e.target.value)}>
+          <option value="">Todos os tipos</option>
+          <option value="image/*">Imagens</option>
+          <option value="video/*">Vídeos</option>
+          <option value="audio/*">Áudios</option>
+          <option value="application/*">Documentos</option>
+          <option value="text/*">Texto</option>
+        </select>
+      </div>
+      {loading && !data ? (
+        <SkeletonList />
       ) : !data?.files.length ? (
-        <Empty>Nenhum arquivo.</Empty>
+        name || type ? (
+          <Empty icon="panel-files" title={name ? `Nada encontrado para "${name}"` : 'Nenhum arquivo deste tipo'}>
+            Confira o nome ou escolha outro tipo.
+          </Empty>
+        ) : (
+          <Empty icon="panel-files" title="Nenhum arquivo">
+            Os arquivos enviados nesta sala aparecem aqui.
+          </Empty>
+        )
       ) : (
         data.files.map((f: any) => (
-          <a key={f._id} className="file-row" href={`${f.url}?download`} target="_blank" rel="noreferrer">
-            {f.type.startsWith('image/') ? <img src={f.url} alt="" /> : <span className="att-icon">📄</span>}
-            <span>
-              <strong>{f.name}</strong>
-              <span className="muted small">
-                {formatBytes(f.size)} · @{f.user.username} · {formatDateTime(f.uploadedAt)}
+          <div key={f._id} className="file-row">
+            <a className="file-row-main" href={f.url} target="_blank" rel="noreferrer">
+              {f.type?.startsWith('image/') ? <img src={f.url} alt="" loading="lazy" /> : <FileTile name={f.name} mime={f.type} />}
+              <span className="file-row-text">
+                <span className="file-row-name">{f.name}</span>
+                <span className="file-row-meta">
+                  {fileType(f)} · {formatBytes(f.size)} · @{f.user?.username} · {f.uploadedAt ? dayMonth.format(new Date(f.uploadedAt)) : ''}
+                </span>
               </span>
-            </span>
-          </a>
+            </a>
+            <a className="icon-btn file-row-download" href={`${f.url}?download`} download={f.name} title="Baixar" aria-label={`Baixar ${f.name}`}>
+              <Icon name="download" />
+            </a>
+          </div>
         ))
       )}
     </>
   );
 }
 
+const FLAG_EMPTY: Record<'pinned' | 'starred' | 'mentions', [IconName, string, string]> = {
+  pinned: ['panel-pinned', 'Nenhuma mensagem fixada', 'Fixe mensagens pelo menu ⋯ de cada mensagem.'],
+  starred: ['panel-starred', 'Nenhuma mensagem favorita', 'Marque mensagens como favoritas pelo menu ⋯ de cada mensagem.'],
+  mentions: ['panel-mentions', 'Nenhuma menção', 'Quando alguém mencionar você nesta sala, a mensagem aparece aqui.'],
+};
+
 function FlagPanel({ id, room }: Props) {
   const path = id === 'pinned' ? 'chat.getPinnedMessages' : id === 'starred' ? 'chat.getStarredMessages' : 'chat.getMentionedMessages';
   const { data, loading } = useAsync(() => api.get(path, { roomId: room._id, count: 100 }), [room._id, id]);
-  if (loading) return <Spinner />;
-  if (!data?.messages.length) return <Empty>Nenhuma mensagem.</Empty>;
+  if (loading) return <SkeletonList />;
+  if (!data?.messages.length) {
+    const [icon, title, text] = FLAG_EMPTY[id as keyof typeof FLAG_EMPTY];
+    return (
+      <Empty icon={icon} title={title}>
+        {text}
+      </Empty>
+    );
+  }
   return data.messages.map((m: Message) => <MessageResult key={m._id} m={m} />);
 }
 
 function NotificationsPanel({ room, sub }: Props) {
   const [n, setN] = useState<any>(sub?.notifications ?? {});
-  if (!sub) return <Empty>Entre na sala para configurar notificações.</Empty>;
+  if (!sub)
+    return (
+      <Empty icon="panel-notifications" title="Você não participa desta sala">
+        Entre na sala para configurar as notificações.
+      </Empty>
+    );
   const save = (patch: any) => {
     const next = { ...n, ...patch };
     setN(next);
@@ -633,6 +991,12 @@ function InvitePanel({ room }: Props) {
   const [days, setDays] = useState(7);
   const [maxUses, setMaxUses] = useState(0);
   const [link, setLink] = useState('');
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
   const gen = async () => {
     try {
       const r = await api.post('findOrCreateInvite', { rid: room._id, days, maxUses });
@@ -641,6 +1005,11 @@ function InvitePanel({ room }: Props) {
       fail(e);
     }
   };
+  const copy = () =>
+    navigator.clipboard?.writeText(link).then(
+      () => setCopied(true),
+      () => fail(new Error('Não foi possível copiar. Selecione o link e copie.')),
+    );
   return (
     <div className="form">
       <Field label="Expira em">
@@ -662,14 +1031,16 @@ function InvitePanel({ room }: Props) {
           ))}
         </select>
       </Field>
-      <button className="btn primary" onClick={gen}>
+      <button type="button" className="btn primary" onClick={gen}>
+        <Icon name="link" />
         Gerar link
       </button>
       {link && (
         <div className="copy-box">
-          <input readOnly value={link} onFocus={(e) => e.target.select()} />
-          <button className="btn" onClick={() => (navigator.clipboard?.writeText(link), ok('Link copiado.'))}>
-            Copiar
+          <input readOnly value={link} aria-label="Link de convite" onFocus={(e) => e.target.select()} />
+          <button type="button" className="btn" onClick={copy} aria-live="polite">
+            <Icon name={copied ? 'check' : 'copy'} />
+            {copied ? 'Copiado' : 'Copiar'}
           </button>
         </div>
       )}
@@ -685,7 +1056,13 @@ function PrunePanel({ room }: Props) {
   const [filesOnly, setFilesOnly] = useState(false);
   const [users, setUsers] = useState<PickedUser[]>([]);
   const run = async () => {
-    if (!confirm('Apagar as mensagens do período escolhido? Isso não pode ser desfeito.')) return;
+    const yes = await confirmDialog({
+      title: 'Limpar o histórico?',
+      body: 'As mensagens do período escolhido serão apagadas. Isso não pode ser desfeito.',
+      confirmLabel: 'Limpar histórico',
+      danger: true,
+    });
+    if (!yes) return;
     try {
       const r = await api.post('rooms.cleanHistory', {
         roomId: room._id,
@@ -696,7 +1073,7 @@ function PrunePanel({ room }: Props) {
         filesOnly,
         users: users.map((u) => u.username),
       });
-      ok(`${r.count} itens removidos.`);
+      ok(`${plural(r.count ?? 0, 'item removido', 'itens removidos')}.`);
     } catch (e) {
       fail(e);
     }
@@ -714,7 +1091,8 @@ function PrunePanel({ room }: Props) {
       </Field>
       <Toggle checked={excludePinned} onChange={setExcludePinned} label="Manter mensagens fixadas" />
       <Toggle checked={filesOnly} onChange={setFilesOnly} label="Apagar só os arquivos" />
-      <button className="btn danger" onClick={run}>
+      <button type="button" className="btn danger" onClick={run}>
+        <Icon name="panel-prune" />
         Limpar histórico
       </button>
     </div>

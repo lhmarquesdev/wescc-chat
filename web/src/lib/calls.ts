@@ -143,6 +143,11 @@ const ENDED_TEXT: Record<string, string> = {
   ended: 'Chamada encerrada.',
 };
 
+// Compartilhar a tela: só com getDisplayMedia e fora de telas de toque (navegadores de celular não compartilham).
+export function canShareScreen() {
+  return 'getDisplayMedia' in (navigator.mediaDevices ?? {}) && !matchMedia('(pointer: coarse)').matches;
+}
+
 // ---------- Ações ----------
 
 export async function startCall(rid: string, kind: CallKind) {
@@ -277,7 +282,11 @@ async function onCall(call: Call) {
       useCalls.setState({ incoming: call });
       startRing('incoming');
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-        const n = new Notification(call.caller.name || call.caller.username, { body: call.kind === 'video' ? '🎥 Chamada de vídeo' : '📞 Chamada de voz', tag: `call-${call._id}` });
+        const n = new Notification(call.caller.name || call.caller.username, {
+          body: call.kind === 'video' ? 'Chamada de vídeo' : 'Chamada de voz',
+          icon: '/icons/icon-192.png',
+          tag: `call-${call._id}`,
+        });
         n.onclick = () => (window.focus(), n.close());
       }
     }

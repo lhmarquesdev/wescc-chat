@@ -1,5 +1,8 @@
 import { Fragment, type ReactNode } from 'react';
 import { ouLabel, type LdapMappingTest } from '@shared/ldap';
+import { roleLabel } from '../../../lib/format';
+import { Icon } from '../../../components/Icon';
+import { Avatar } from '../../../components/ui';
 import { originOf } from './mapping-model';
 
 const ACTION: Record<LdapMappingTest['account']['action'], string> = {
@@ -9,12 +12,13 @@ const ACTION: Record<LdapMappingTest['account']['action'], string> = {
   conflict: 'Conflito',
 };
 
-function List({ items, prefix = '', cls = '', empty = '—' }: { items: string[]; prefix?: string; cls?: string; empty?: string }) {
+function List({ items, prefix = '', cls = '', empty = '—', team }: { items: string[]; prefix?: string; cls?: string; empty?: string; team?: boolean }) {
   if (!items.length) return <span className="muted">{empty}</span>;
   return (
     <span className="chips">
       {items.map((i) => (
         <span key={i} className={`chip ldap-chip ${cls}`}>
+          {team && <Icon name="room-team" size={14} />}
           {prefix}
           {i}
         </span>
@@ -65,7 +69,8 @@ export function TestResult({ r, draft }: { r: LdapMappingTest; draft: boolean })
     return (
       <div className="ldap-result">
         <div className="callout warn ldap-result-wide">
-          <span>⚠ {r.message ?? `Nenhuma entrada encontrada para "${r.login}".`}</span>
+          <Icon name="warning" />
+          <span>{r.message ?? `Nenhuma entrada encontrada para "${r.login}".`}</span>
         </div>
         {r.warnings.length > 0 && <Warnings list={r.warnings} />}
       </div>
@@ -82,7 +87,13 @@ export function TestResult({ r, draft }: { r: LdapMappingTest; draft: boolean })
 
       <Section title="Entrada">
         <div className="ldap-entry">
-          {e.photo ? <img className="ldap-photo" src={e.photo} alt="" width={56} height={56} /> : <span className="ldap-photo none">{(e.name || e.username).slice(0, 1).toUpperCase()}</span>}
+          {e.photo ? (
+            <img className="ldap-photo" src={e.photo} alt="" width={56} height={56} />
+          ) : (
+            <span className="ldap-photo none">
+              <Avatar username={e.username} size={56} />
+            </span>
+          )}
           <div className="ldap-entry-main">
             <strong>{e.name}</strong>
             <span className="muted">@{e.username}</span>
@@ -108,7 +119,8 @@ export function TestResult({ r, draft }: { r: LdapMappingTest; draft: boolean })
           <div className="chips">
             {r.groups.map((g) => (
               <span key={g.dn} className="chip ldap-chip" title={g.dn}>
-                👥 {g.cn}
+                <Icon name="ldap-group" size={14} />
+                {g.cn}
               </span>
             ))}
           </div>
@@ -127,12 +139,13 @@ export function TestResult({ r, draft }: { r: LdapMappingTest; draft: boolean })
               return (
                 <li key={m.key}>
                   <span className="ldap-matched-origin" title={o.title}>
-                    {o.icon} <strong>{o.label}</strong>
+                    <Icon name={o.icon} size={16} />
+                    <strong>{o.label}</strong>
                   </span>
                   <span className="ldap-matched-values">
                     {m.roles.length > 0 && <List items={m.roles} />}
                     {m.channels.length > 0 && <List items={m.channels} prefix="#" />}
-                    {m.teams.length > 0 && <List items={m.teams} prefix="👥 " />}
+                    {m.teams.length > 0 && <List items={m.teams} team />}
                   </span>
                 </li>
               );
@@ -158,22 +171,22 @@ export function TestResult({ r, draft }: { r: LdapMappingTest; draft: boolean })
 
       <Section title="Papéis">
         <div className="ldap-roles-change">
-          <List items={r.roles.before} empty="nenhum" />
-          <span className="muted" aria-label="passa a ser">
-            →
+          <List items={r.roles.before.map(roleLabel)} empty="nenhum" />
+          <span className="muted ldap-arrow" role="img" aria-label="passa a ser">
+            <Icon name="changes-to" size={16} />
           </span>
-          <List items={r.roles.after} empty="nenhum" />
+          <List items={r.roles.after.map(roleLabel)} empty="nenhum" />
         </div>
         {(r.roles.added.length > 0 || r.roles.removed.length > 0) && (
           <div className="chips ldap-diff">
             {r.roles.added.map((x) => (
               <span key={`+${x}`} className="chip ldap-chip add">
-                +{x}
+                +{roleLabel(x)}
               </span>
             ))}
             {r.roles.removed.map((x) => (
               <span key={`-${x}`} className="chip ldap-chip del">
-                −{x}
+                −{roleLabel(x)}
               </span>
             ))}
           </div>
@@ -227,7 +240,10 @@ function Warnings({ list }: { list: string[] }) {
       {list.length ? (
         <ul className="ldap-warnings">
           {list.map((w, i) => (
-            <li key={i}>⚠ {w}</li>
+            <li key={i}>
+              <Icon name="warning" size={14} />
+              {w}
+            </li>
           ))}
         </ul>
       ) : (

@@ -1,5 +1,7 @@
 import { NavLink, useParams } from 'react-router-dom';
 import { usePermission } from '../../lib/store';
+import { Icon, type IconName } from '../../components/Icon';
+import { SideFoot, TakeoverBack } from '../../components/Sidebar';
 import { AdminInfo } from './AdminInfo';
 import { AdminUsers } from './AdminUsers';
 import { AdminRooms } from './AdminRooms';
@@ -13,34 +15,38 @@ import { AdminOAuth } from './AdminOAuth';
 import { AdminOmnichannel } from './AdminOmnichannel';
 import { AdminImport } from './import';
 import { AdminLdap } from './ldap';
+import { useActiveNavInView } from './parts';
 
 export function AdminPage() {
   const { section = 'info' } = useParams();
-  const items = [
-    { id: 'info', label: '📊 Informações', perm: ['view-statistics'] },
-    { id: 'engagement', label: '📈 Engajamento', perm: ['view-engagement-dashboard'] },
-    { id: 'users', label: '👤 Usuários', perm: ['view-user-administration'] },
-    { id: 'rooms', label: '# Salas', perm: ['view-room-administration'] },
-    { id: 'permissions', label: '🛡 Papéis e permissões', perm: ['access-permissions'] },
-    { id: 'devices', label: '💻 Dispositivos', perm: ['view-device-management'] },
-    { id: 'audit', label: '🔎 Auditoria', perm: ['can-audit', 'can-audit-log'] },
-    { id: 'moderation', label: '🚩 Moderação', perm: ['view-moderation-console'] },
-    { id: 'integrations', label: '🔌 Integrações', perm: ['manage-integrations', 'manage-own-integrations'] },
-    { id: 'oauth', label: '🔑 OAuth', perm: ['manage-oauth-apps'] },
-    { id: 'omnichannel', label: '🎧 Omnichannel', perm: ['view-livechat-manager'] },
-    { id: 'emoji', label: '😀 Emojis', perm: ['manage-emoji'] },
-    { id: 'invites', label: '🔗 Convites', perm: ['view-room-administration'] },
-    { id: 'import', label: '📥 Importação', perm: ['run-import', 'view-import-operations'] },
-    { id: 'ldap', label: '🗂 LDAP / AD', perm: ['view-privileged-setting'] },
-    { id: 'settings', label: '⚙️ Configurações', perm: ['view-privileged-setting'] },
+  const navRef = useActiveNavInView(section);
+  const items: { id: string; icon: IconName; label: string; perm: string[] }[] = [
+    { id: 'info', icon: 'admin-info', label: 'Informações', perm: ['view-statistics'] },
+    { id: 'engagement', icon: 'admin-engagement', label: 'Engajamento', perm: ['view-engagement-dashboard'] },
+    { id: 'users', icon: 'admin-users', label: 'Usuários', perm: ['view-user-administration'] },
+    { id: 'rooms', icon: 'room-channel', label: 'Salas', perm: ['view-room-administration'] },
+    { id: 'permissions', icon: 'admin-permissions', label: 'Papéis e permissões', perm: ['access-permissions'] },
+    { id: 'devices', icon: 'devices', label: 'Dispositivos', perm: ['view-device-management'] },
+    { id: 'audit', icon: 'admin-audit', label: 'Auditoria', perm: ['can-audit', 'can-audit-log'] },
+    { id: 'moderation', icon: 'report', label: 'Moderação', perm: ['view-moderation-console'] },
+    { id: 'integrations', icon: 'admin-integrations', label: 'Integrações', perm: ['manage-integrations', 'manage-own-integrations'] },
+    { id: 'oauth', icon: 'tokens', label: 'OAuth', perm: ['manage-oauth-apps'] },
+    { id: 'omnichannel', icon: 'nav-omnichannel', label: 'Omnichannel', perm: ['view-livechat-manager'] },
+    { id: 'emoji', icon: 'emoji', label: 'Emojis', perm: ['manage-emoji'] },
+    { id: 'invites', icon: 'panel-invite', label: 'Convites', perm: ['view-room-administration'] },
+    { id: 'import', icon: 'admin-import', label: 'Importação', perm: ['run-import', 'view-import-operations'] },
+    { id: 'ldap', icon: 'admin-ldap', label: 'LDAP / AD', perm: ['view-privileged-setting'] },
+    { id: 'settings', icon: 'admin', label: 'Configurações', perm: ['view-privileged-setting'] },
   ];
   return (
-    <div className="page with-nav">
-      <nav className="page-nav">
+    <div className="page with-nav takeover admin-page">
+      <nav className="page-nav" aria-label="Administração" ref={navRef}>
+        <TakeoverBack />
         <h2>Administração</h2>
         {items.map((i) => (
-          <AdminLink key={i.id} id={i.id} label={i.label} perm={i.perm} />
+          <AdminLink key={i.id} id={i.id} icon={i.icon} label={i.label} perm={i.perm} />
         ))}
+        <SideFoot />
       </nav>
       <div className="page-body">
         {section === 'info' && <AdminInfo />}
@@ -64,8 +70,13 @@ export function AdminPage() {
   );
 }
 
-function AdminLink({ id, label, perm }: { id: string; label: string; perm: string[] }) {
+function AdminLink({ id, icon, label, perm }: { id: string; icon: IconName; label: string; perm: string[] }) {
   const ok = usePermission(perm);
   if (!ok) return null;
-  return <NavLink to={`/admin/${id}`}>{label}</NavLink>;
+  return (
+    <NavLink to={`/admin/${id}`}>
+      <Icon name={icon} />
+      {label}
+    </NavLink>
+  );
 }

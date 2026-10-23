@@ -1,0 +1,1672 @@
+/* ---------- Primitivos (dono 2) ----------
+   Botões, pills, badges, chips, avatares e presença, formulários, cards, tabelas, abas.
+   Especificidade: no máximo 2 classes + 1 elemento ou pseudo-classe. Variantes ficam em (0,2,0) e o
+   estado desabilitado vem por último, para vencer todas sem :not(:disabled) nos seletores. */
+
+/* ---------- Botões ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-md);
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--fg);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--dur-1) linear,
+    border-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+.btn:hover {
+  text-decoration: none;
+}
+.btn:where(:hover:not(:disabled)) {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+.btn:where(:active:not(:disabled)) {
+  background: var(--bg-active);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--fg-on-accent);
+  box-shadow: var(--shadow-1);
+}
+.btn.primary:where(:hover:not(:disabled)) {
+  background: var(--accent-hover);
+}
+.btn.primary:where(:active:not(:disabled)) {
+  background: var(--accent-active);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-2);
+}
+.btn.ghost:where(:hover:not(:disabled)) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+/* Destrutivo comum (Excluir, Encerrar, Remover): secundário com texto vermelho, sem contorno gritando. */
+.btn.danger {
+  color: var(--danger);
+}
+.btn.danger:where(:hover:not(:disabled)) {
+  background: var(--danger-soft);
+  border-color: var(--danger-soft);
+}
+.btn.danger:where(.ghost) {
+  border-color: transparent;
+}
+/* Só no botão de confirmar de um diálogo destrutivo. */
+.btn.danger:where(.solid) {
+  background: var(--danger-solid);
+  border-color: transparent;
+  color: var(--fg-on-accent);
+}
+.btn.danger:where(.solid:hover:not(:disabled)) {
+  background: var(--danger-hover);
+}
+.btn.small {
+  min-height: var(--control-sm);
+  padding: 0 10px;
+  gap: var(--space-1-5);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.btn.lg {
+  min-height: var(--control-lg);
+  padding: 0 18px;
+  border-radius: 10px;
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+}
+.btn.full,
+.btn.block {
+  width: 100%;
+  justify-content: center;
+}
+.btn[aria-busy='true'] {
+  pointer-events: none;
+  cursor: progress;
+}
+/* Desabilitado sem opacidade: o botão principal desabilitado não parece quebrado. */
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  background: var(--bg-muted);
+  border-color: transparent;
+  color: var(--fg-disabled);
+  box-shadow: none;
+  opacity: 1;
+  cursor: not-allowed;
+}
+.btn:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+}
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  font-size: 16px;
+  flex-shrink: 0;
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+/* :where() deixa a cor do contexto (barra lateral, ilhas escuras) vencer no hover. */
+.icon-btn:where(:hover) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.icon-btn.on {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.icon-btn:disabled {
+  background: transparent;
+  color: var(--fg-disabled);
+  opacity: 1;
+}
+/* Com contador (Membros 12). */
+.icon-btn.with-count {
+  width: auto;
+  padding: 0 var(--space-2);
+}
+.icon-btn .count {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-2);
+}
+.link {
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  padding: 0;
+  font: inherit;
+  border-radius: var(--radius-xs);
+}
+.link:hover {
+  text-decoration: underline;
+}
+.row-actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+.row-actions.wrap,
+.wrap {
+  flex-wrap: wrap;
+}
+.danger {
+  color: var(--danger);
+}
+.spin {
+  animation: spin 0.7s linear infinite;
+}
+
+/* ---------- Pills, badges, chips ---------- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 20px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--bg-muted);
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.pill.accent {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.pill.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.pill.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.pill.err {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.pill.busy {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.pill.dot::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--fg-muted);
+  color: var(--fg-on-accent);
+  /* No escuro o cinza é claro: o número fica escuro (branco daria 2,9:1). */
+  color: light-dark(var(--fg-on-accent), var(--bg-canvas));
+  font-size: var(--fs-11);
+  line-height: 1;
+  font-weight: var(--fw-semibold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* A classe .mention do markdown também casa aqui: as cores e a forma do contador são declaradas de novo. */
+.badge.mention {
+  background: var(--danger-solid);
+  color: var(--fg-on-accent);
+  padding: 0 5px;
+  border-radius: 9px;
+  font-weight: var(--fw-semibold);
+  cursor: inherit;
+}
+.badge.group {
+  background: var(--warn-solid);
+  color: var(--warn-on-solid);
+}
+.badge.thread {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+/* Não lida sem contagem. */
+.badge.dot {
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--danger-solid);
+}
+.badge.bump {
+  animation: badge-bump var(--dur-4) var(--ease-out);
+}
+@keyframes badge-bump {
+  40% {
+    transform: scale(1.18);
+  }
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  height: 28px;
+  padding: 0 var(--space-1) 0 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-muted);
+  color: var(--fg);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  max-width: 100%;
+}
+.chip:has(> .avatar:first-child),
+.chip:has(> .icon:first-child) {
+  padding-left: var(--space-1);
+}
+.chip .avatar {
+  width: 20px;
+  height: 20px;
+}
+.chip button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--fg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.chip button:hover {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+/* Escolha liga/desliga (papéis, filtros por tipo). */
+.chip.selectable {
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--dur-1) linear,
+    border-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+/* No toque o :hover gruda e parece um terceiro estado: lá o chip só reage enquanto está pressionado. */
+@media (hover: hover) {
+  .chip.selectable:hover {
+    background: var(--bg-hover);
+    color: var(--fg);
+  }
+}
+.chip.selectable:active {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.chip.selectable.on {
+  padding-left: var(--space-2);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent-text);
+}
+.chip.on:where(.selectable)::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.chip.selectable:has(:focus-visible) {
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+}
+/* O checkbox some da vista mas fica no Tab, mesmo com o atributo hidden: Espaço liga e desliga, e o anel acima aparece. */
+.chip.selectable {
+  position: relative;
+}
+.chip.selectable > input {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  min-width: 0;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---------- Avatares e presença ---------- */
+.avatar {
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--skeleton);
+  display: block;
+  outline: 1px solid light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.06));
+  outline-offset: -1px;
+}
+.avatar.room {
+  border-radius: 25%;
+}
+.avatar[data-loaded='fade'] {
+  animation: fade-in var(--dur-2) var(--ease-out);
+}
+.avatar-wrap {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+  --dot: 10px;
+}
+.status-dot {
+  display: inline-block;
+  width: var(--dot, 10px);
+  height: var(--dot, 10px);
+  border-radius: 50%;
+  background: var(--presence-offline);
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.avatar-wrap .status-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  box-shadow: 0 0 0 2px var(--ring-surface);
+}
+.status-dot.online {
+  background: var(--presence-online);
+}
+/* Ausente: meio preenchido (canto superior esquerdo) com anel âmbar. */
+.status-dot.away {
+  background: linear-gradient(135deg, var(--presence-away) 50%, transparent 50%);
+  box-shadow: inset 0 0 0 1.5px var(--presence-away);
+}
+.avatar-wrap .status-dot.away {
+  background-color: var(--ring-surface);
+  box-shadow:
+    inset 0 0 0 1.5px var(--presence-away),
+    0 0 0 2px var(--ring-surface);
+}
+/* Ocupado: ponto vermelho com uma barra branca. */
+.status-dot.busy {
+  background: var(--presence-busy) linear-gradient(#fff, #fff) center / 50% 2px no-repeat;
+}
+/* Offline: anel vazado. */
+.status-dot.offline {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--presence-offline);
+}
+.avatar-wrap .status-dot.offline {
+  background: var(--ring-surface);
+  box-shadow:
+    inset 0 0 0 2px var(--presence-offline),
+    0 0 0 2px var(--ring-surface);
+}
+.avatar-wrap[data-big] .status-dot {
+  right: 2px;
+  bottom: 2px;
+  box-shadow: 0 0 0 3px var(--ring-surface);
+}
+/* Pilha de avatares (resumo do tópico, prévia de membros). */
+.avatar-stack {
+  display: inline-flex;
+  align-items: center;
+}
+.avatar-stack .avatar {
+  box-shadow: 0 0 0 2px var(--ring-surface);
+}
+.avatar-stack > * + * {
+  margin-left: -6px;
+}
+.avatar-stack .more {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: var(--bg-muted);
+  color: var(--fg-2);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 2px var(--ring-surface);
+}
+
+/* ---------- Campos ----------
+   Os seletores de elemento ficam em (0,0,1) ou abaixo (:where), para qualquer regra de componente vencer. */
+:where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='submit'], [type='button'], [type='reset'], [type='image'])),
+select,
+textarea {
+  font: inherit;
+  font-size: var(--fs-14);
+  color: var(--fg);
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 0 12px;
+  min-width: 0;
+  transition:
+    border-color var(--dur-1) linear,
+    box-shadow var(--dur-1) linear;
+}
+:where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='submit'], [type='button'], [type='reset'], [type='image'])),
+select {
+  height: var(--control-md);
+}
+textarea {
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: var(--lh-14);
+}
+textarea:where(:not([rows])) {
+  min-height: 88px;
+}
+select {
+  appearance: none;
+  padding-right: 32px;
+  background: var(--bg-input) var(--chevron) no-repeat right 10px center / 16px;
+  cursor: pointer;
+}
+select:where([multiple], [size]:not([size='1'])) {
+  height: auto;
+  padding: 4px;
+  background-image: none;
+}
+:where(input, select, textarea):hover {
+  border-color: var(--border-hover);
+}
+/* O contorno do bloco Base sai; o foco do campo é a borda de destaque com o anel suave. O compositor,
+   a busca da barra lateral e a do seletor de emoji desenham o foco deles. */
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+}
+/* Caixa de seleção e rádio ficam com o anel global de base.css: o halo suave não chega a 3:1 em volta deles. */
+:where(input:not([type='checkbox'], [type='radio']), select, textarea):where(:not(.composer *, .side-search *, .emoji-picker *)):focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring-input);
+}
+:where(input, select, textarea)[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+:where(input, select, textarea)[aria-invalid='true']:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+:where(input, select, textarea):disabled {
+  background-color: var(--bg-subtle);
+  color: var(--fg-disabled);
+  border-color: var(--border);
+  cursor: not-allowed;
+}
+:where(input, textarea):read-only:not([type='checkbox'], [type='radio']) {
+  background-color: var(--bg-subtle);
+}
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'],
+input[type='month'] {
+  font-variant-numeric: tabular-nums;
+}
+input[type='search']::-webkit-search-decoration {
+  appearance: none;
+}
+
+/* Caixa e rádio desenhados (o nativo destoa nos dois temas). Sem display aqui: o atributo hidden continua valendo. */
+input[type='checkbox'],
+input[type='radio'] {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+  vertical-align: middle;
+  border: 1.5px solid var(--control-border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-input) no-repeat center / 12px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) linear,
+    border-color var(--dur-1) linear;
+}
+input[type='radio'] {
+  border-radius: 50%;
+}
+input[type='checkbox']:hover,
+input[type='radio']:hover {
+  border-color: var(--accent);
+}
+input[type='checkbox']:checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
+}
+input[type='checkbox']:indeterminate {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='4' y='7' width='8' height='2' rx='1' fill='%23fff'/%3E%3C/svg%3E");
+}
+input[type='radio']:checked {
+  border-color: var(--accent);
+  background-image: radial-gradient(circle closest-side, var(--accent) 0 46%, transparent 54%);
+  background-size: 100%;
+}
+input[type='checkbox']:disabled,
+input[type='radio']:disabled {
+  border-color: var(--fg-disabled);
+  background-color: var(--bg-subtle);
+  cursor: not-allowed;
+}
+input[type='checkbox']:checked:where(:disabled) {
+  background-color: var(--fg-disabled);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 640px;
+}
+.modal .form,
+.panel .form {
+  max-width: none;
+}
+.form.narrow,
+.narrow {
+  max-width: 560px;
+}
+/* Seções de um formulário: título 16/600 e descrição curta, 32px entre seções. */
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.form-section + .form-section {
+  margin-top: var(--space-4);
+}
+.form-section-title {
+  margin: 0;
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+  font-weight: var(--fw-semibold);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+.field-label {
+  font-weight: var(--fw-medium);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-2);
+}
+.field-required {
+  margin-left: 2px;
+  color: var(--danger);
+}
+.field-hint {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.field-hint.neg,
+.field-error {
+  color: var(--danger);
+}
+.field-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+}
+.form-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  cursor: pointer;
+  color: var(--fg);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+  border: 0;
+}
+.toggle-track {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--control-border);
+  position: relative;
+  flex-shrink: 0;
+  transition: background-color var(--dur-2) linear;
+}
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: transform 160ms var(--ease-out);
+}
+.toggle-track:where(:checked + *) {
+  background: var(--accent);
+}
+.toggle-track:where(:checked + *)::after {
+  transform: translateX(16px);
+}
+.toggle-track:where(:focus-visible + *) {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+}
+.toggle-track:where(:disabled + *) {
+  background: var(--bg-active);
+}
+.toggle-track:where(:disabled + *)::after {
+  opacity: 0.6;
+  box-shadow: none;
+}
+.toggle.disabled {
+  color: var(--fg-disabled);
+  cursor: not-allowed;
+}
+.toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.toggle-desc {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+
+.filters {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.filters input {
+  flex: 1;
+  min-width: 180px;
+}
+.filters select {
+  flex: 0 0 auto;
+  min-width: 180px;
+}
+/* Lupa desenhada no fundo: vale para todo .search-input, com ou sem o componente SearchInput. */
+.search-input {
+  width: 100%;
+  margin-bottom: var(--space-3);
+  padding-left: 34px;
+  background: var(--bg-input) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a92a0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.34-4.34'/%3E%3C/svg%3E") no-repeat 10px center / 16px;
+}
+.search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-bottom: var(--space-3);
+}
+.search-field > .icon {
+  position: absolute;
+  left: 10px;
+  color: var(--fg-muted);
+  pointer-events: none;
+}
+.search-field .search-input {
+  margin: 0;
+  padding-right: 36px;
+  background-image: none;
+}
+.search-field .search-input::-webkit-search-cancel-button {
+  display: none;
+}
+.search-clear {
+  position: absolute;
+  right: 4px;
+}
+.search-field .search-clear {
+  width: 28px;
+  height: 28px;
+}
+.copy-box {
+  display: flex;
+  gap: var(--space-2);
+}
+.copy-box input {
+  flex: 1;
+}
+/* Botão de arquivo (FileButton). */
+.file-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  min-width: 0;
+}
+.file-name {
+  min-width: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Sem arquivo: data-empty, não .empty (a classe do estado vazio tem padding de 32px). */
+.file-name[data-empty] {
+  color: var(--fg-muted);
+}
+.codes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-1) var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  background: var(--code-bg);
+  border: 1px solid var(--border-subtle);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+}
+/* QR sempre escuro no branco, nos dois temas. */
+.qr {
+  background: #fff;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: inline-block;
+}
+.danger-zone {
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border));
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+/* ---------- Cards, tabelas, abas ---------- */
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  margin-bottom: var(--space-4);
+}
+.card > h2 {
+  margin-bottom: var(--space-3);
+}
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.card-head > h2 {
+  margin: 0;
+}
+.card-desc {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+.card.action {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  text-align: left;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  margin: 0;
+  transition:
+    border-color var(--dur-1) linear,
+    box-shadow var(--dur-1) linear;
+}
+.card.action:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-1);
+}
+.card.action:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+}
+.card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.grid-2 {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.grid-2 > .card {
+  margin: 0;
+}
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+.table td {
+  height: 48px;
+}
+/* Cabeçalho em sentence case (sem caixa alta), fixo no topo de quem rola. */
+.table th {
+  height: 36px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-muted);
+  border-bottom-color: var(--border);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: var(--z-raised);
+  background: var(--bg-canvas);
+}
+.card .table th {
+  background: var(--bg-surface);
+}
+.modal .table th {
+  background: var(--bg-raised);
+}
+.table tr.clickable {
+  cursor: pointer;
+}
+/* No toque o :hover gruda depois do toque: lá a linha só reage enquanto está pressionada. */
+@media (hover: hover) {
+  .table tr:where(.clickable:hover) td {
+    background: var(--bg-hover);
+  }
+}
+.table tr:where(.clickable:active) td {
+  background: var(--bg-hover);
+}
+.table td.center {
+  text-align: center;
+}
+.ellipsis-cell {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Pessoa ou sala numa célula: avatar e nome alinhados, @usuário embaixo. */
+.cell-entity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.cell-entity > div,
+.cell-entity > span:not(.avatar-wrap) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.cell-name {
+  font-weight: var(--fw-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cell-sub {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Ações da linha aparecem no hover e no foco (sempre visíveis no toque). */
+@media (hover: hover) and (pointer: fine) {
+  .table td .row-actions {
+    opacity: 0;
+    transition: opacity var(--dur-1) linear;
+  }
+  .table tr:where(:hover, :focus-within) .row-actions {
+    opacity: 1;
+  }
+}
+
+.tabs {
+  display: flex;
+  gap: 0;
+  height: 40px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-4);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+/* Abas escondidas de um lado: borda esmaecida (24px). */
+.tabs[data-fade='end'] {
+  mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+}
+.tabs[data-fade='start'] {
+  mask-image: linear-gradient(90deg, transparent, #000 24px);
+}
+.tabs[data-fade='both'] {
+  mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+.tabs button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  height: 100%;
+  border: 0;
+  background: none;
+  padding: 0 var(--space-3);
+  color: var(--fg-muted);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: color var(--dur-1) linear;
+}
+.tabs button:hover {
+  color: var(--fg);
+}
+.tabs button.active {
+  color: var(--fg);
+}
+.tabs button:where(.active)::after {
+  content: '';
+  position: absolute;
+  left: var(--space-3);
+  right: var(--space-3);
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.tabs button:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+/* Configurações (14 abas) até virar o submenu: fichas de 28px que quebram linha. */
+.tabs.wrap {
+  height: auto;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  overflow: visible;
+  border-bottom: 0;
+  mask-image: none;
+}
+.tabs.wrap button {
+  height: 28px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  font-size: var(--fs-13);
+}
+.tabs.wrap button:where(.active) {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent-text);
+}
+.tabs.wrap :where(button)::after {
+  display: none;
+}
+
+.empty {
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+  color: var(--fg-muted);
+}
+.empty.small {
+  padding: var(--space-4);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+/* Estado vazio completo: ícone num círculo, título, descrição e ação. */
+.empty.full {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 360px;
+  margin: 0 auto;
+  padding: var(--space-12) var(--space-6);
+}
+.empty-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--bg-subtle);
+  background: light-dark(var(--bg-subtle), var(--bg-muted));
+  color: var(--fg-muted);
+}
+.empty.danger .empty-icon {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.empty-title {
+  margin: var(--space-4) 0 0;
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+  font-weight: var(--fw-semibold);
+  color: var(--fg);
+}
+.empty-desc {
+  margin-top: var(--space-1);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  color: var(--fg-muted);
+  text-wrap: balance;
+}
+.empty-action {
+  margin-top: var(--space-4);
+  display: flex;
+  gap: var(--space-2);
+  justify-content: center;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+.pager .btn.small {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 6px;
+}
+.pager-range {
+  white-space: nowrap;
+  font-size: var(--fs-13);
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+  padding: 0 var(--space-1);
+}
+.pager-size {
+  width: auto;
+  min-height: 32px;
+  margin-left: var(--space-2);
+  font-size: var(--fs-13);
+}
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.plain-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+.plain-list li > div {
+  flex: 1 1 100%;
+}
+.plain-list li > div:where(:only-child) {
+  flex: 1;
+}
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
+  width: 100%;
+  background: none;
+  color: var(--fg);
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  text-align: left;
+}
+.link-row {
+  transition: background-color var(--dur-1) linear;
+}
+.link-row:hover {
+  background: var(--bg-hover);
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+/* Rótulo primeiro (13/500), valor grande embaixo. */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  padding: var(--space-4);
+  min-width: 0;
+}
+.stat-value {
+  font-size: var(--fs-28);
+  line-height: var(--lh-28);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.02em;
+  color: var(--fg);
+}
+.stat-label {
+  order: -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  color: var(--fg-muted);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-medium);
+}
+
+/* ---------- Carregamento (esqueletos) ---------- */
+.skeleton {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--skeleton);
+  flex-shrink: 0;
+}
+.skeleton.circle {
+  border-radius: 50%;
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--skeleton-shine), transparent);
+  animation: shine 1.4s linear infinite;
+}
+@keyframes table-fade {
+  0%,
+  99% {
+    mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+  }
+  100% {
+    mask-image: none;
+  }
+}
+@keyframes shine {
+  to {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    display: none;
+  }
+}
+.skeleton-group {
+  min-height: 1px;
+}
+.sk-messages {
+  padding: var(--space-4) 0;
+}
+.sk-messages .sk-row {
+  display: flex;
+  gap: var(--space-3);
+  padding: 0 var(--space-5);
+  margin-bottom: var(--space-4);
+}
+.sk-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: 4px;
+}
+.sk-list .sk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+}
+.sk-table .sk-row {
+  display: grid;
+  gap: var(--space-6);
+  align-items: center;
+  height: 48px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.sk-tile {
+  border-radius: var(--radius-lg);
+}
+
+/* ---------- Controle segmentado ---------- */
+.seg-nav {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px;
+  margin-bottom: var(--space-4);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.seg-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+.seg-nav button:hover {
+  color: var(--fg);
+}
+.seg-nav button.on {
+  background: var(--bg-raised);
+  color: var(--fg);
+  box-shadow: var(--shadow-1);
+}
+.seg-nav button.on:where(:focus-visible) {
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+}
+.check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow: auto;
+  padding: var(--space-1-5) var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+}
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  cursor: pointer;
+}
+.check input {
+  width: 16px;
+}
+.code-block {
+  background: var(--code-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font: 13px/20px var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.pre-wrap {
+  white-space: pre-wrap;
+}
+.table th.num,
+.table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.table tr.clickable:where(:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  box-shadow: none;
+}
+
+/* ---------- Avisos (callouts) ---------- */
+.callout {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) 14px;
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-subtle);
+  color: var(--fg);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+.callout > span {
+  flex: 1;
+  min-width: 200px;
+}
+.callout > .icon:first-child {
+  width: 18px;
+  height: 18px;
+  color: var(--fg-muted);
+}
+/* .info também é o painel de informações da sala (coluna): o aviso volta a ser uma linha. */
+.callout.info {
+  flex-direction: row;
+  gap: var(--space-3);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-soft);
+}
+.callout.info > .icon:where(:first-child) {
+  color: var(--accent-text);
+}
+.callout.warn {
+  border-color: color-mix(in srgb, var(--warn-solid) 45%, transparent);
+  background: var(--warn-soft);
+}
+.callout.warn > .icon:where(:first-child) {
+  color: var(--warn);
+}
+.callout.ok {
+  border-color: color-mix(in srgb, var(--ok) 35%, transparent);
+  background: var(--ok-soft);
+}
+.callout.ok > .icon:where(:first-child) {
+  color: var(--ok);
+}
+.callout.err {
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-soft);
+}
+.callout.err > .icon:where(:first-child) {
+  color: var(--danger);
+}
+.form .callout {
+  margin-bottom: 0;
+}
+
+/* ---------- Toque: alvos de 44px ---------- */
+@media (pointer: coarse) {
+  .icon-btn {
+    width: var(--touch);
+    height: var(--touch);
+  }
+  .btn {
+    min-height: var(--touch);
+  }
+  .btn.small {
+    min-height: 36px;
+  }
+  .pager .btn.small {
+    min-width: var(--touch);
+    min-height: var(--touch);
+  }
+  /* Botão pequeno, X da busca e X do chip mantêm o tamanho à vista; a área de toque cresce por baixo
+     (o mesmo recurso das reações em room.css). :where() deixa vencer quem já posiciona o botão. */
+  :where(.btn.small, .chip button) {
+    position: relative;
+  }
+  .btn.small::after,
+  .search-field .search-clear::after,
+  .chip button::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--touch));
+    height: max(100%, var(--touch));
+    transform: translate(-50%, -50%);
+  }
+  /* O X do chip não avança sobre o campo ao lado: só cresce na altura. */
+  .chip button::after {
+    width: max(100%, 32px);
+  }
+  .search-field .search-clear {
+    right: var(--space-2);
+  }
+  .search-field .search-input {
+    padding-right: var(--touch);
+  }
+  :where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='submit'], [type='button'], [type='reset'], [type='image'])),
+  select {
+    height: var(--touch);
+  }
+  .toggle,
+  .check {
+    min-height: var(--touch);
+  }
+  .chip.selectable,
+  .tabs.wrap button,
+  .seg-nav button {
+    height: var(--touch);
+  }
+  .chip.selectable {
+    min-width: var(--touch);
+    justify-content: center;
+  }
+  /* 44px de alvo mais a borda de baixo. */
+  .tabs {
+    height: calc(var(--touch) + 1px);
+  }
+  .list-row {
+    min-height: var(--touch);
+  }
+}
+/* iOS amplia a tela ao focar campo com fonte menor que 16px. */
+@supports (-webkit-touch-callout: none) {
+  @media (pointer: coarse) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+}
+
+@media (max-width: 760px) {
+  .grid-2,
+  .two-col {
+    grid-template-columns: 1fr;
+  }
+  .table {
+    display: block;
+    overflow-x: auto;
+  }
+  /* Tabela que rola: a primeira coluna fica presa e a borda direita esmaece enquanto há colunas escondidas. */
+  .table:where(:not(.stack)) :where(th, td):first-child {
+    position: sticky;
+    left: 0;
+    z-index: var(--z-raised);
+    background: var(--bg-canvas);
+    /* Avatar e nome na mesma linha; a tabela já rola para o lado. */
+    white-space: nowrap;
+  }
+  .card .table :where(th, td):where(:first-child) {
+    background: var(--bg-surface);
+  }
+  .modal .table :where(th, td):where(:first-child) {
+    background: var(--bg-raised);
+  }
+  @supports (animation-timeline: scroll()) {
+    .table:where(:not(.stack)) {
+      animation: table-fade linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+  /* .table.stack (opcional): cada linha vira um bloco; as células mostram o data-label antes do valor. */
+  .table.stack,
+  .table.stack tbody,
+  .table.stack tr,
+  .table.stack td {
+    display: block;
+    width: 100%;
+  }
+  .table.stack thead {
+    display: none;
+  }
+  .table.stack tr {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .table.stack td {
+    height: auto;
+    padding: 2px 0;
+    border: 0;
+  }
+  /* O cartão inteiro reage, e não cada célula (cada uma tem sua largura e o recuo da linha ficava de fora). */
+  .table.stack :where(tr.clickable:hover, tr.clickable:active) td {
+    background: transparent;
+  }
+  .table.stack tr:where(.clickable:active) {
+    background: var(--bg-hover);
+  }
+  @media (hover: hover) {
+    .table.stack tr:where(.clickable:hover) {
+      background: var(--bg-hover);
+    }
+  }
+  .table.stack td:where(:first-child) {
+    padding-bottom: var(--space-1-5);
+  }
+  .table.stack :where(td[data-label])::before {
+    content: attr(data-label);
+    display: block;
+    font-size: var(--fs-12);
+    line-height: var(--lh-12);
+    color: var(--fg-muted);
+  }
+  .table.stack .row-actions {
+    opacity: 1;
+    justify-content: flex-start;
+    padding-top: var(--space-1-5);
+  }
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .stat-value {
+    font-size: var(--fs-22);
+    line-height: var(--lh-22);
+  }
+  .pager {
+    justify-content: center;
+  }
+  /* Busca na linha inteira; os selects dividem a linha de baixo em vez de empilhar com 180px. */
+  .filters input {
+    min-width: 0;
+  }
+  .filters select {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+}

@@ -1,54 +1,29 @@
 import { useState } from 'react';
 import { api } from '../../lib/api';
-import { Spinner, Tabs, useAsync } from '../../components/ui';
+import { useStore } from '../../lib/store';
+import { roomIconName } from '../../lib/format';
+import { Icon } from '../../components/Icon';
+import { Empty, SkeletonStats, SkeletonTable, Tabs, useAsync } from '../../components/ui';
+import { BarChart, LineChart } from './charts';
+import { PageHead, RoomCell, TableWrap, UserCell, num } from './parts';
+
+// A análise do Omnichannel usa o mesmo gráfico de barras.
+export { BarChart as Bars } from './charts';
 
 const WEEKDAYS = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 const TYPE_LABEL: Record<string, string> = { c: 'Canais públicos', p: 'Grupos privados', d: 'Mensagens diretas', l: 'Atendimentos' };
+const TYPE_ICON: Record<string, 'room-channel' | 'room-private' | 'room-direct' | 'room-livechat'> = { c: 'room-channel', p: 'room-private', d: 'room-direct', l: 'room-livechat' };
+const HINT = 'Escolha outro período.';
 
-export function Bars({ data, height = 140, label }: { data: { x: string; y: number }[]; height?: number; label?: (d: { x: string; y: number }) => string }) {
-  const max = Math.max(1, ...data.map((d) => d.y));
-  const w = 100 / Math.max(1, data.length);
-  return (
-    <div className="chart">
-      <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" width="100%" height={height} role="img">
-        {data.map((d, i) => {
-          const h = (d.y / max) * (height - 4);
-          return (
-            <rect key={i} x={i * w + w * 0.15} y={height - h} width={w * 0.7} height={h} rx={0.6} className="bar">
-              <title>{label ? label(d) : `${d.x}: ${d.y}`}</title>
-            </rect>
-          );
-        })}
-      </svg>
-      <div className="chart-axis">
-        <span>{data[0]?.x}</span>
-        <span>{data[Math.floor(data.length / 2)]?.x}</span>
-        <span>{data[data.length - 1]?.x}</span>
-      </div>
-    </div>
-  );
-}
+// "2026-10-22" → "22/10".
+const dayLabel = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
-function Lines({ series, height = 160 }: { series: { name: string; cls: string; values: number[] }[]; height?: number }) {
-  const max = Math.max(1, ...series.flatMap((s) => s.values));
-  const n = series[0]?.values.length ?? 0;
-  const pt = (v: number, i: number) => `${(i / Math.max(1, n - 1)) * 100},${height - (v / max) * (height - 6) - 3}`;
-  return (
-    <div className="chart">
-      <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" width="100%" height={height}>
-        {series.map((s) => (
-          <polyline key={s.name} className={`line ${s.cls}`} fill="none" vectorEffect="non-scaling-stroke" points={s.values.map(pt).join(' ')} />
-        ))}
-      </svg>
-      <div className="legend">
-        {series.map((s) => (
-          <span key={s.name} className={`legend-item ${s.cls}`}>
-            {s.name}: <strong>{s.values[s.values.length - 1] ?? 0}</strong>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
+// O painel só traz o tipo da sala; o que o cliente já conhece (avisos, time, discussão) completa o ícone:
+// a assinatura vale para as salas em que a pessoa está, a sala carregada para as que ela já abriu.
+function useRoomIcon() {
+  const subs = useStore((s) => s.subscriptions);
+  const known = useStore((s) => s.rooms);
+  return (r: { _id: string; t: string; teamMain?: boolean }) => roomIconName({ ...subs[r._id], ...known[r._id], ...r });
 }
 
 export function AdminEngagement() {
@@ -58,14 +33,13 @@ export function AdminEngagement() {
   const start = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
   return (
     <>
-      <div className="page-title-row">
-        <h1>Dashboard de engajamento</h1>
-        <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+      <PageHead title="Engajamento">
+        <select className="head-select" aria-label="Período" value={days} onChange={(e) => setDays(Number(e.target.value))}>
           <option value={7}>Últimos 7 dias</option>
           <option value={30}>Últimos 30 dias</option>
           <option value={90}>Últimos 90 dias</option>
         </select>
-      </div>
+      </PageHead>
       <Tabs
         value={tab}
         onChange={setTab}
@@ -82,44 +56,88 @@ export function AdminEngagement() {
   );
 }
 
+function Loading() {
+  return (
+    <>
+      <SkeletonStats n={3} />
+      <SkeletonTable rows={6} cols={3} />
+    </>
+  );
+}
+
 function UsersTab({ start, end }: { start: string; end: string }) {
   const { data, loading } = useAsync(() => api.get('engagement-dashboard/users', { start, end }), [start, end]);
-  if (loading || !data) return <Spinner />;
+  if (loading || !data) return <Loading />;
   const newUsers = data.daily.reduce((n: number, d: any) => n + d.newUsers, 0);
+  const last = data.daily[data.daily.length - 1];
   return (
     <>
       <div className="stats">
         <div className="stat">
-          <div className="stat-value">{data.activeUsers}</div>
-          <div className="stat-label">Usuários ativos no período</div>
+          <div className="stat-value">{num(data.activeUsers)}</div>
+          <div className="stat-label">
+            <Icon name="admin-users" />
+            Ativos no período
+          </div>
         </div>
         <div className="stat">
-          <div className="stat-value">{newUsers}</div>
-          <div className="stat-label">Novos usuários</div>
+          <div className="stat-value">{num(newUsers)}</div>
+          <div className="stat-label">
+            <Icon name="add-people" />
+            Novos usuários
+          </div>
+        </div>
+        <div className="stat">
+          <div className="stat-value">{num(last?.dau)}</div>
+          <div className="stat-label">
+            <Icon name="admin-engagement" />
+            Ativos hoje
+          </div>
         </div>
       </div>
-      <div className="card">
-        <h3>Usuários ativos (diário, semanal, mensal)</h3>
-        <Lines
+      <div className="card chart-card">
+        <div className="card-head">
+          <div>
+            <h2>Usuários ativos</h2>
+            <p className="card-desc">Pessoas que usaram o chat em cada dia, nos últimos 7 e nos últimos 30 dias.</p>
+          </div>
+        </div>
+        <LineChart
+          x={data.daily.map((d: any) => dayLabel(d.day))}
+          emptyHint={HINT}
           series={[
-            { name: 'DAU', cls: 's1', values: data.daily.map((d: any) => d.dau) },
-            { name: 'WAU', cls: 's2', values: data.daily.map((d: any) => d.wau) },
-            { name: 'MAU', cls: 's3', values: data.daily.map((d: any) => d.mau) },
+            { name: 'No dia', values: data.daily.map((d: any) => d.dau) },
+            { name: 'Em 7 dias', values: data.daily.map((d: any) => d.wau) },
+            { name: 'Em 30 dias', values: data.daily.map((d: any) => d.mau) },
           ]}
         />
       </div>
-      <div className="card">
-        <h3>Novos usuários por dia</h3>
-        <Bars data={data.daily.map((d: any) => ({ x: d.day.slice(5), y: d.newUsers }))} />
+      <div className="card chart-card">
+        <div className="card-head">
+          <h2>Novos usuários por dia</h2>
+        </div>
+        <BarChart data={data.daily.map((d: any) => ({ x: dayLabel(d.day), y: d.newUsers }))} unit={['novo usuário', 'novos usuários']} emptyHint={HINT} />
       </div>
       <div className="grid-2">
-        <div className="card">
-          <h3>Horários mais movimentados</h3>
-          <Bars data={Array.from({ length: 24 }, (_, h) => ({ x: `${h}h`, y: data.busiestHours.find((b: any) => b.hour === h)?.messages ?? 0 }))} />
+        <div className="card chart-card">
+          <div className="card-head">
+            <h2>Horários mais movimentados</h2>
+          </div>
+          <BarChart
+            data={Array.from({ length: 24 }, (_, h) => ({ x: `${h}h`, y: data.busiestHours.find((b: any) => b.hour === h)?.messages ?? 0 }))}
+            unit={['mensagem', 'mensagens']}
+            emptyHint={HINT}
+          />
         </div>
-        <div className="card">
-          <h3>Dias da semana</h3>
-          <Bars data={Array.from({ length: 7 }, (_, i) => ({ x: WEEKDAYS[i + 1], y: data.weekdays.find((w: any) => w.weekday === i + 1)?.messages ?? 0 }))} />
+        <div className="card chart-card">
+          <div className="card-head">
+            <h2>Dias da semana</h2>
+          </div>
+          <BarChart
+            data={Array.from({ length: 7 }, (_, i) => ({ x: WEEKDAYS[i + 1], y: data.weekdays.find((w: any) => w.weekday === i + 1)?.messages ?? 0 }))}
+            unit={['mensagem', 'mensagens']}
+            emptyHint={HINT}
+          />
         </div>
       </div>
     </>
@@ -128,90 +146,148 @@ function UsersTab({ start, end }: { start: string; end: string }) {
 
 function MessagesTab({ start, end }: { start: string; end: string }) {
   const { data, loading } = useAsync(() => api.get('engagement-dashboard/messages', { start, end }), [start, end]);
-  if (loading || !data) return <Spinner />;
+  const iconOf = useRoomIcon();
+  if (loading || !data) return <Loading />;
   return (
     <>
       <div className="stats">
         <div className="stat">
-          <div className="stat-value">{data.total}</div>
-          <div className="stat-label">Mensagens no período</div>
+          <div className="stat-value">{num(data.total)}</div>
+          <div className="stat-label">
+            <Icon name="nav-chats" />
+            Mensagens no período
+          </div>
         </div>
         {data.byRoomType.map((t: any) => (
           <div key={t.t} className="stat">
-            <div className="stat-value">{t.messages}</div>
-            <div className="stat-label">{TYPE_LABEL[t.t] ?? t.t}</div>
+            <div className="stat-value">{num(t.messages)}</div>
+            <div className="stat-label">
+              <Icon name={TYPE_ICON[t.t] ?? 'room-channel'} />
+              {TYPE_LABEL[t.t] ?? t.t}
+            </div>
           </div>
         ))}
       </div>
-      <div className="card">
-        <h3>Mensagens por dia</h3>
-        <Bars data={data.daily.map((d: any) => ({ x: d.day.slice(5), y: d.messages }))} />
+      <div className="card chart-card">
+        <div className="card-head">
+          <h2>Mensagens por dia</h2>
+        </div>
+        <BarChart data={data.daily.map((d: any) => ({ x: dayLabel(d.day), y: d.messages }))} unit={['mensagem', 'mensagens']} emptyHint={HINT} />
       </div>
       <div className="grid-2">
         <div className="card">
-          <h3>Salas mais ativas</h3>
-          <table className="table">
-            <tbody>
-              {data.topRooms.map((r: any) => (
-                <tr key={r._id}>
-                  <td>
-                    {r.t === 'p' ? '🔒' : '#'} {r.name}
-                  </td>
-                  <td>{r.messages}</td>
+          <div className="card-head">
+            <h2>Salas mais ativas</h2>
+          </div>
+          {data.topRooms.length ? (
+            <table className="table rank-table">
+              <thead>
+                <tr>
+                  <th>Sala</th>
+                  <th className="num">Mensagens</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.topRooms.map((r: any) => (
+                  <tr key={r._id}>
+                    <td>
+                      <RoomCell icon={<Icon name={iconOf(r)} />} name={r.fname || r.name} />
+                    </td>
+                    <td className="num">{num(r.messages)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <Empty>Nenhuma mensagem no período.</Empty>
+          )}
         </div>
         <div className="card">
-          <h3>Pessoas mais ativas</h3>
-          <table className="table">
-            <tbody>
-              {data.topUsers.map((u: any) => (
-                <tr key={u._id}>
-                  <td>@{u.username}</td>
-                  <td>{u.messages}</td>
+          <div className="card-head">
+            <h2>Pessoas mais ativas</h2>
+          </div>
+          {data.topUsers.length ? (
+            <table className="table rank-table">
+              <thead>
+                <tr>
+                  <th>Pessoa</th>
+                  <th className="num">Mensagens</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.topUsers.map((u: any) => (
+                  <tr key={u._id}>
+                    <td>
+                      <UserCell username={u.username} name={u.name} />
+                    </td>
+                    <td className="num">{num(u.messages)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <Empty>Nenhuma mensagem no período.</Empty>
+          )}
         </div>
       </div>
     </>
   );
 }
 
+function Trend({ value }: { value: number }) {
+  if (!value) return <span className="trend">0</span>;
+  return (
+    <span className={value > 0 ? 'trend up' : 'trend down'}>
+      <Icon name={value > 0 ? 'trend-up' : 'trend-down'} size={12} />
+      {num(Math.abs(value))}
+    </span>
+  );
+}
+
 function ChannelsTab({ start, end }: { start: string; end: string }) {
   const { data, loading } = useAsync(() => api.get('engagement-dashboard/channels', { start, end, count: 100 }), [start, end]);
-  if (loading || !data) return <Spinner />;
+  const iconOf = useRoomIcon();
+  if (loading || !data) return <SkeletonTable rows={8} cols={5} />;
+  if (!data.channels.length)
+    return (
+      <Empty icon="room-channel" title="Nenhum canal com mensagens">
+        Os canais aparecem aqui quando recebem mensagens no período.
+      </Empty>
+    );
   return (
-    <div className="card">
-      <table className="table">
+    <TableWrap>
+      <table className="table stack kv">
         <thead>
           <tr>
             <th>Canal</th>
-            <th>Membros</th>
-            <th>Mensagens</th>
-            <th>Período anterior</th>
-            <th>Variação</th>
+            <th className="num">Membros</th>
+            <th className="num">Mensagens</th>
+            <th className="num">Período anterior</th>
+            <th className="num">Variação</th>
           </tr>
         </thead>
         <tbody>
           {data.channels.map((c: any) => (
             <tr key={c.room._id}>
               <td>
-                {c.room.t === 'p' ? '🔒' : '#'} {c.room.fname || c.room.name}
+                <RoomCell icon={<Icon name={iconOf(c.room)} />} name={c.room.fname || c.room.name} />
               </td>
-              <td>{c.room.usersCount}</td>
-              <td>{c.messages}</td>
-              <td>{c.lastWeekMessages}</td>
-              <td className={c.diffFromLastWeek >= 0 ? 'pos' : 'neg'}>
-                {c.diffFromLastWeek >= 0 ? '▲' : '▼'} {Math.abs(c.diffFromLastWeek)}
+              <td className="num" data-label="Membros">
+                {num(c.room.usersCount)}
+              </td>
+              <td className="num" data-label="Mensagens">
+                {num(c.messages)}
+              </td>
+              <td className="num" data-label="Período anterior">
+                {num(c.lastWeekMessages)}
+              </td>
+              <td className="num" data-label="Variação">
+                <Trend value={c.diffFromLastWeek} />
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
+    </TableWrap>
   );
 }

@@ -2,9 +2,16 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { Role } from '@shared/index';
 import type { LdapDirectoryItem } from '@shared/ldap';
 import { api, errorMessage } from '../../../lib/api';
-import { roomIcon } from '../../../lib/format';
+import { roleLabel, roomIconName } from '../../../lib/format';
+import { Icon, type IconName } from '../../../components/Icon';
 import { Field, Modal } from '../../../components/ui';
 import { channelName, keyFor, sameOrigin, targetOf, type GroupIdentity, type MappingRow, type RuleTarget } from './mapping-model';
+
+// Dica do chip de papel: o id (o que vai para o mapa) e, se houver, a restrição ou a descrição.
+export function roleChipTitle(r: Role) {
+  const extra = r.restrictDirect ? 'Restrito em conversas diretas' : r.description;
+  return extra && extra !== r._id ? `${r._id} · ${extra}` : r._id;
+}
 
 export interface MappingData {
   roles: Role[] | null; // papéis globais (roles.list)
@@ -91,15 +98,18 @@ export function RuleModal({ row, others, data, onSave, onClose }: { row: Mapping
           <div className="ldap-choices three">
             {(
               [
-                ['group', '👥 Um grupo do AD', 'Membros do grupo.'],
-                ['ou', '📁 Uma unidade organizacional (OU)', 'Quem está na OU ou abaixo dela.'],
-                ['all', '🌐 Todos os usuários sincronizados', 'Vale para todo mundo que vem do AD.'],
-              ] as [RuleTarget, string, string][]
-            ).map(([id, title, hint]) => (
+                ['group', 'ldap-group', 'Um grupo do AD', 'Membros do grupo.'],
+                ['ou', 'ldap-ou', 'Uma unidade organizacional (OU)', 'Quem está na OU ou abaixo dela.'],
+                ['all', 'ldap-all', 'Todos os usuários sincronizados', 'Vale para todo mundo que vem do AD.'],
+              ] as [RuleTarget, IconName, string, string][]
+            ).map(([id, icon, title, hint]) => (
               <label key={id} className={`ldap-choice ${target === id ? 'on' : ''}`}>
                 <input type="radio" name="ldap-rule-target" checked={target === id} onChange={() => changeTarget(id)} />
                 <span>
-                  <strong>{title}</strong>
+                  <strong className="ldap-choice-title">
+                    <Icon name={icon} size={16} />
+                    {title}
+                  </strong>
                   <span className="field-hint">{hint}</span>
                 </span>
               </label>
@@ -154,22 +164,26 @@ export function RuleModal({ row, others, data, onSave, onClose }: { row: Mapping
           ) : (
             <div className="chips">
               {globalRoles.map((r) => (
-                <label key={r._id} className={`chip selectable ${roles.includes(r._id) ? 'on' : ''}`} title={r.restrictDirect ? 'Restrito em conversas diretas' : r.description || undefined}>
+                <label key={r._id} className={`chip selectable ${roles.includes(r._id) ? 'on' : ''}`} title={roleChipTitle(r)}>
                   <input type="checkbox" hidden checked={roles.includes(r._id)} onChange={() => toggleRole(r._id)} />
-                  {r.restrictDirect ? `🚫 ${r._id}` : r._id}
+                  {r.restrictDirect && <Icon name="direct-blocked" size={14} />}
+                  {roleLabel(r._id)}
                 </label>
               ))}
               {unknownRoles.map((r) => (
                 <span key={r} className="chip ldap-chip bad" title="Papel inexistente ou de sala: a sincronização ignora.">
                   {r}
                   <button type="button" aria-label={`Remover ${r}`} onClick={() => toggleRole(r)}>
-                    ✕
+                    <Icon name="close" size={12} />
                   </button>
                 </span>
               ))}
             </div>
           )}
-          <span className="field-hint">🚫 marca papéis restritos em conversas diretas.</span>
+          <span className="field-hint ldap-hint-icon">
+            <Icon name="direct-blocked" size={14} />
+            marca papéis restritos em conversas diretas.
+          </span>
         </div>
 
         <Field label="Canais" hint="Canais que não existirem serão criados como grupos privados.">
@@ -179,7 +193,7 @@ export function RuleModal({ row, others, data, onSave, onClose }: { row: Mapping
             prefix="#"
             placeholder="Buscar canal ou digitar um nome novo"
             allowFree
-            options={data.rooms?.map((r) => ({ value: r.name, label: r.fname || r.name, icon: roomIcon(r) })) ?? null}
+            options={data.rooms?.map((r) => ({ value: r.name, label: r.fname || r.name, icon: roomIconName(r) })) ?? null}
             missing={(v) => (data.rooms && !findRoom(data, v) ? 'será criado' : undefined)}
             normalize={channelName}
           />
@@ -191,7 +205,7 @@ export function RuleModal({ row, others, data, onSave, onClose }: { row: Mapping
             onChange={setTeams}
             placeholder="Buscar time"
             allowFree={!data.teams}
-            options={data.teams?.map((t) => ({ value: t.name, label: t.name, icon: '👥' })) ?? null}
+            options={data.teams?.map((t) => ({ value: t.name, label: t.name, icon: 'room-team' as const })) ?? null}
             missing={(v) => (data.teams && !findTeam(data, v) ? 'não existe' : undefined)}
             missingBad
           />
@@ -241,7 +255,9 @@ function DirectorySearch({ kind, selectedDn, onPick }: { kind: 'group' | 'ou'; s
       {armed && (
         <div className="ldap-dir" aria-live="polite">
           {state.error ? (
-            <div className="ldap-dir-msg neg">Não foi possível buscar no AD: {state.error} Você ainda pode digitar {kind === 'group' ? 'o nome ou o DN' : 'o DN'} abaixo.</div>
+            <div className="ldap-dir-msg neg">
+              Não foi possível buscar no AD: {state.error} Você ainda pode digitar {kind === 'group' ? 'o nome ou o DN' : 'o DN'} abaixo.
+            </div>
           ) : state.loading && !state.items ? (
             <div className="ldap-dir-msg muted">Buscando…</div>
           ) : state.items && !state.items.length ? (
@@ -251,7 +267,8 @@ function DirectorySearch({ kind, selectedDn, onPick }: { kind: 'group' | 'ou'; s
               {state.items?.map((i) => (
                 <button key={i.dn} type="button" className={i.dn === selectedDn ? 'on' : ''} onClick={() => onPick(i)}>
                   <span className="ldap-dir-name">
-                    {kind === 'group' ? '👥' : '📁'} <strong>{i.name}</strong>
+                    <Icon name={kind === 'group' ? 'ldap-group' : 'ldap-ou'} size={16} />
+                    <strong>{i.name}</strong>
                     {i.description && <span className="muted"> · {i.description}</span>}
                   </span>
                   <span className="mono small muted ldap-dir-dn">{i.dn}</span>
@@ -269,7 +286,7 @@ function DirectorySearch({ kind, selectedDn, onPick }: { kind: 'group' | 'ou'; s
 interface Option {
   value: string;
   label: string;
-  icon?: string;
+  icon?: IconName;
 }
 
 // Lista de nomes com sugestões locais; com allowFree aceita um nome que ainda não existe.
@@ -347,7 +364,7 @@ function NamePicker({
               {v}
               {m && <span className="ldap-chip-note">({m})</span>}
               <button type="button" aria-label={`Remover ${v}`} onClick={() => onChange(value.filter((x) => x !== v))}>
-                ✕
+                <Icon name="close" size={12} />
               </button>
             </span>
           );
@@ -369,7 +386,9 @@ function NamePicker({
         <div className="picker-list" onMouseDown={(e) => e.preventDefault()}>
           {free && (
             <button type="button" onClick={() => add(free)}>
-              ＋ Usar <strong>
+              <Icon name="add" size={14} />
+              Usar{' '}
+              <strong>
                 {prefix}
                 {free}
               </strong>
@@ -378,7 +397,7 @@ function NamePicker({
           )}
           {suggestions.map((o) => (
             <button key={o.value} type="button" onClick={() => add(o.value)}>
-              {o.icon && <span>{o.icon}</span>}
+              {o.icon && <Icon name={o.icon} size={16} />}
               <strong>{o.label}</strong>
               {o.label !== o.value && <span className="muted">{o.value}</span>}
             </button>

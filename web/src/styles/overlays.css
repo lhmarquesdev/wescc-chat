@@ -1,0 +1,781 @@
+/* ---------- Camadas flutuantes (dono 2) ----------
+   Menus, modais, folhas, popovers, toasts e spinner, renderizados no portal (#overlay-root, no fim do <body>).
+   Nada aqui depende de quem abriu a camada: a cor, o overflow e o transform do pai não chegam mais. */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+@keyframes pop-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Camadas elevadas ----------
+   No escuro, --bg-hover, --bg-active e --bg-muted ficam a 1–5 níveis de --bg-raised: o hover, o item
+   ativo e o botão desabilitado sumiam em menus, listas e modais. Dentro das camadas esses tokens sobem
+   um degrau a partir do próprio fundo; no claro continuam os mesmos. */
+@supports (color: light-dark(white, black)) {
+  :where(.menu, .picker-list, .modal, .sheet) {
+    --raised-surface: light-dark(var(--bg-surface), color-mix(in srgb, var(--fg) 5%, var(--bg-raised)));
+    --raised-muted: light-dark(var(--bg-muted), color-mix(in srgb, var(--fg) 7%, var(--bg-raised)));
+    --raised-hover: light-dark(var(--bg-hover), color-mix(in srgb, var(--fg) 8%, var(--bg-raised)));
+    --raised-active: light-dark(var(--bg-active), color-mix(in srgb, var(--fg) 12%, var(--bg-raised)));
+  }
+  /* Nos filhos e não na própria camada: assim a lista do seletor dentro do modal não vira um ciclo. */
+  :where(.menu, .picker-list, .modal, .sheet) > :where(:not(.menu, .picker-list, .modal, .sheet)) {
+    --bg-muted: var(--raised-muted);
+    --bg-hover: var(--raised-hover);
+    --bg-active: var(--raised-active);
+  }
+  /* Botão secundário um pouco acima do fundo do modal, e não um buraco nele. */
+  :where(.menu, .modal, .sheet) .btn {
+    --bg-surface: var(--raised-surface);
+  }
+}
+
+/* ---------- Modal ---------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+  padding: var(--space-8) var(--space-4);
+  animation: fade-in var(--dur-3) var(--ease-out);
+}
+.modal {
+  --ring-offset: var(--bg-raised);
+  --ring-surface: var(--bg-raised);
+  position: relative;
+  background: var(--bg-raised);
+  color: var(--fg);
+  border: 1px solid light-dark(transparent, var(--border));
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-3), var(--highlight-top);
+  width: 480px;
+  max-width: 100%;
+  max-height: calc(100dvh - 64px);
+  display: flex;
+  flex-direction: column;
+  outline: none;
+  animation: modal-in var(--dur-3) var(--ease-out);
+}
+.modal.sm {
+  width: 400px;
+}
+.modal.lg {
+  width: 640px;
+}
+.modal.wide {
+  width: 760px;
+}
+.modal:focus-visible {
+  box-shadow: var(--shadow-3), var(--highlight-top);
+}
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6) var(--space-2);
+  flex-shrink: 0;
+}
+/* A primeira linha do título fica centrada no X (32px; 44px no toque). */
+.modal-titles {
+  flex: 1;
+  min-width: 0;
+  padding-top: calc((var(--close-size, 32px) - var(--title-lh, var(--lh-18))) / 2);
+}
+.modal-head h2 {
+  margin: 0;
+  font-size: var(--fs-18);
+  line-height: var(--lh-18);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.modal-desc {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  color: var(--fg-muted);
+}
+.modal-head .icon-btn {
+  margin: 0 calc(var(--space-2) * -1) 0 0;
+}
+.modal-body {
+  padding: var(--space-2) var(--space-6) var(--space-5);
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-6) var(--space-5);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+/* Ação destrutiva secundária (Excluir) fica na ponta esquerda; o "Excluir" do diálogo de confirmação (.solid) não. */
+.modal-foot > .danger:where(:not(.solid)) {
+  margin-right: auto;
+}
+.confirm-body {
+  margin: 0;
+  color: var(--fg-2);
+}
+.modal.confirm .modal-body {
+  padding-bottom: var(--space-2);
+}
+@media (pointer: coarse) {
+  .modal-head {
+    --close-size: var(--touch);
+  }
+}
+
+/* ---------- Folha (celular) ---------- */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: var(--scrim);
+  display: flex;
+  align-items: flex-end;
+  animation: fade-in var(--dur-3) var(--ease-out);
+}
+.sheet {
+  --ring-offset: var(--bg-raised);
+  --ring-surface: var(--bg-raised);
+  width: 100%;
+  max-height: 85dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  color: var(--fg);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-3), var(--highlight-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  outline: none;
+  animation: sheet-in var(--dur-5) var(--ease-sheet);
+  transition: transform var(--dur-3) var(--ease-sheet);
+}
+.sheet:focus-visible {
+  box-shadow: var(--shadow-3), var(--highlight-top);
+}
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  flex-shrink: 0;
+  margin: var(--space-2) auto 0;
+  border-radius: 2px;
+  background: var(--border-strong);
+  touch-action: none;
+}
+.sheet-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---------- Menu ---------- */
+.menu-wrap {
+  position: relative;
+  display: inline-block;
+}
+.menu {
+  --ring-offset: var(--bg-raised);
+  --ring-surface: var(--bg-raised);
+  position: fixed;
+  z-index: var(--z-popover);
+  min-width: 220px;
+  max-width: 320px;
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-raised);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2), var(--highlight-top);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  text-align: left;
+  outline: none;
+}
+/* Entra só depois de posicionado (data-side), a partir do canto da âncora. */
+.menu[data-side] {
+  animation: pop-in var(--dur-2) var(--ease-out);
+}
+.menu[data-side='top'] {
+  animation-name: pop-in-up;
+}
+.menu[data-state='closed'] {
+  animation: fade-out 80ms var(--ease-in) forwards;
+  pointer-events: none;
+}
+.menu:focus-visible {
+  box-shadow: var(--shadow-2), var(--highlight-top);
+}
+.menu button,
+.menu a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background-color var(--dur-1) linear;
+}
+.menu button .icon,
+.menu a .icon {
+  color: var(--fg-muted);
+}
+.menu button:hover,
+.menu a:hover {
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+.menu button:where(:hover, :focus-visible) .icon,
+.menu a:where(:hover, :focus-visible) .icon {
+  color: var(--fg);
+}
+.menu button:focus-visible,
+.menu a:focus-visible {
+  outline: none;
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+.menu button:disabled {
+  background: none;
+  color: var(--fg-disabled);
+  opacity: 1;
+  cursor: not-allowed;
+}
+/* O ícone do item destrutivo acompanha o texto também no hover e no foco: (0,3,0) vence o (0,2,1) acima. */
+.menu button.danger,
+.menu .danger .icon {
+  color: var(--danger);
+}
+.menu button.danger:where(:hover, :focus-visible) {
+  background: var(--danger-soft);
+}
+/* O ponto de status ocupa a largura de um ícone: os rótulos ficam na mesma coluna. */
+.menu :where(button, a) > .status-dot {
+  margin-inline: calc((16px - var(--dot, 10px)) / 2);
+}
+.menu hr {
+  height: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: var(--space-1) calc(var(--space-1) * -1);
+  flex-shrink: 0;
+}
+.menu-label {
+  padding: var(--space-2) 10px var(--space-1);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-medium);
+  color: var(--fg-muted);
+}
+/* Cabeçalho do menu do usuário: nome em cima, @usuário embaixo (com avatar, os dois ao lado dele). */
+.menu-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) 10px 10px;
+  margin: 0 calc(var(--space-1) * -1) var(--space-1);
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+.menu-title:has(> .avatar, > .avatar-wrap) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: center;
+}
+.menu-title > .avatar,
+.menu-title > .avatar-wrap {
+  grid-row: span 2;
+}
+.menu-title strong {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-title span:where(:not(.avatar-wrap, .status-dot)) {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Partes opcionais de um item: marca de escolhido, descrição em segunda linha.
+   A marca é um .icon dentro do botão: (0,2,1) e depois das regras de ícone, para não ficar cinza. */
+.menu button .menu-check,
+.menu a .menu-check {
+  margin-left: auto;
+  color: var(--accent-text);
+}
+.menu-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  white-space: normal;
+}
+.menu-desc {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+/* Aberto de dentro de um modal ou folha: fica acima dele. */
+.menu[data-layer='modal'],
+.picker-list[data-layer='modal'],
+.tooltip[data-layer='modal'] {
+  z-index: calc(var(--z-modal) + 10);
+}
+
+@media (pointer: coarse) {
+  .menu button,
+  .menu a {
+    min-height: var(--touch);
+  }
+}
+/* Menu no celular: folha que sobe de baixo, itens de 48px com ícones de 20px. */
+.menu.sheet {
+  position: static;
+  min-width: 0;
+  max-width: none;
+  max-height: 85dvh;
+  padding: 0 var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-3), var(--highlight-top);
+  overflow: hidden;
+  animation: sheet-in var(--dur-5) var(--ease-sheet);
+}
+.menu.sheet .sheet-handle {
+  margin-bottom: var(--space-2);
+}
+.menu.sheet button,
+.menu.sheet a {
+  min-height: 48px;
+  padding: var(--space-2) var(--space-3);
+  gap: var(--space-3);
+  font-size: var(--fs-15);
+  border-radius: var(--radius-md);
+}
+.menu.sheet :where(button, a) .icon {
+  width: 20px;
+  height: 20px;
+}
+.menu.sheet :where(button, a) > .status-dot {
+  margin-inline: calc((20px - var(--dot, 10px)) / 2);
+}
+.menu.sheet hr {
+  margin: var(--space-1) 0;
+}
+.menu.sheet .menu-title {
+  margin: 0 0 var(--space-1);
+  padding: var(--space-1) var(--space-3) var(--space-3);
+}
+
+/* ---------- Dica (tooltip) ---------- */
+.tooltip-anchor {
+  display: inline-flex;
+  vertical-align: middle;
+}
+.tooltip {
+  position: fixed;
+  z-index: calc(var(--z-toast) + 10);
+  max-width: 280px;
+  padding: var(--space-1-5) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inverse);
+  color: var(--fg-inverse);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  box-shadow: var(--shadow-2);
+  pointer-events: none;
+  animation: fade-in var(--dur-2) var(--ease-out);
+}
+.tooltip kbd {
+  margin-left: var(--space-1-5);
+  border-color: rgb(255 255 255 / 0.18);
+  background: transparent;
+  color: inherit;
+}
+
+/* ---------- Toasts ---------- */
+/* No topo, centralizados: nunca cobrem o compositor nem o "Enviar".
+   O DOM fica em ordem de chegada (.toast:last-child é o mais novo); a tela mostra o mais novo em cima. */
+.toasts {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  translate: -50% 0;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--space-2);
+  width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-inverse);
+  color: var(--fg-inverse);
+  border: 1px solid light-dark(transparent, var(--border-strong));
+  box-shadow: var(--shadow-3);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  max-width: 100%;
+  animation: toast-in var(--dur-3) var(--ease-out);
+}
+/* .info também é o painel de informações da sala (coluna): o toast informativo continua em linha. */
+.toast.info {
+  flex-direction: row;
+  gap: 10px;
+}
+.toast[data-state='closed'] {
+  animation: toast-out var(--dur-2) var(--ease-in) forwards;
+}
+.toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* O fundo é escuro nos dois temas: os ícones e a ação usam os valores do tema escuro. */
+.toast-icon,
+.toast-action {
+  color-scheme: dark;
+}
+.toast .toast-icon {
+  color: var(--info);
+}
+.toast.success .toast-icon {
+  color: var(--ok);
+}
+.toast.warning .toast-icon {
+  color: var(--warn);
+}
+.toast.error .toast-icon {
+  color: var(--danger);
+}
+.toast-action {
+  border: 0;
+  background: none;
+  padding: var(--space-1) var(--space-1-5);
+  border-radius: var(--radius-sm);
+  color: var(--accent-text);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  flex-shrink: 0;
+}
+.toast-action:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+.toast .toast-close {
+  width: 28px;
+  height: 28px;
+  color: var(--call-fg-muted);
+  --ring-offset: var(--bg-inverse);
+}
+.toast .toast-close:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: var(--fg-inverse);
+}
+
+/* ---------- Spinner ---------- */
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--bg-muted);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin: var(--space-6) auto;
+  flex-shrink: 0;
+}
+.spinner.sm {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+.spinner.lg {
+  width: 28px;
+  height: 28px;
+  border-width: 2.5px;
+}
+.btn .spinner {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  border-color: color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+}
+.fullscreen-center {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+/* ---------- Listas de sugestão (UserPicker, RoomPicker) ---------- */
+.picker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+.picker input {
+  width: 100%;
+}
+/* Pessoas escolhidas e a busca na mesma caixa, como um campo. */
+.picker > .chips {
+  align-items: center;
+  min-height: var(--control-md);
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  transition:
+    border-color var(--dur-1) linear,
+    box-shadow var(--dur-1) linear;
+}
+.picker > .chips:hover {
+  border-color: var(--border-hover);
+}
+.picker > .chips:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring-input);
+}
+.picker > .chips > input {
+  flex: 1;
+  width: auto;
+  min-width: 120px;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.picker-list {
+  position: fixed;
+  z-index: var(--z-popover);
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-1);
+  background: var(--bg-raised);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2), var(--highlight-top);
+  --ring-surface: var(--bg-raised);
+}
+.picker-list[data-side] {
+  animation: pop-in var(--dur-2) var(--ease-out);
+}
+.picker-list[data-side='top'] {
+  animation-name: pop-in-up;
+}
+.picker-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  padding: var(--space-1) 10px;
+}
+.picker-list button .icon {
+  color: var(--fg-muted);
+}
+.picker-list button strong {
+  font-weight: var(--fw-medium);
+}
+.picker-list button:hover,
+.picker-list button.active {
+  background: var(--bg-hover);
+}
+.picker-list button.selectable:where(:hover) {
+  background: var(--bg-hover);
+}
+/* Escolhido pelas setas (o foco continua no campo): o mesmo anel do item de menu focado pelo teclado. */
+.picker-list:where([data-nav='key']) button.active {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+@media (pointer: coarse) {
+  .picker-list button,
+  .picker > .chips {
+    min-height: var(--touch);
+  }
+  .picker > .chips {
+    padding: 1px 3px;
+  }
+  .picker > .chips > input {
+    height: 40px;
+  }
+}
+
+@media (max-width: 760px) {
+  .toasts {
+    top: calc(8px + env(safe-area-inset-top));
+  }
+  /* Modal no celular: folha que sobe de baixo (confirmações, listas) ou tela cheia (formulários). */
+  .modal-backdrop[data-kind='sheet'] {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .modal.sheet {
+    width: 100%;
+    max-width: none;
+    max-height: 85dvh;
+    border: 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: sheet-in var(--dur-5) var(--ease-sheet);
+    transition: transform var(--dur-3) var(--ease-sheet);
+  }
+  .modal.sheet .modal-head {
+    padding: var(--space-3) var(--space-5) var(--space-2);
+    touch-action: none;
+  }
+  .modal:where(.sheet, .fullscreen) .modal-head {
+    --title-lh: var(--lh-16);
+  }
+  .modal:where(.sheet, .fullscreen) .modal-head h2 {
+    font-size: var(--fs-16);
+    line-height: var(--title-lh);
+  }
+  .modal.sheet .modal-body {
+    padding: var(--space-2) var(--space-5) var(--space-4);
+  }
+  .modal.sheet .modal-foot {
+    padding: var(--space-3) var(--space-5) var(--space-4);
+  }
+  .modal:where(.sheet, .fullscreen) .modal-foot > .btn {
+    flex: 1;
+  }
+  .modal-backdrop[data-kind='fullscreen'] {
+    padding: 0;
+    align-items: stretch;
+  }
+  .modal.fullscreen {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    animation: sheet-in var(--dur-4) var(--ease-sheet);
+  }
+  /* Barra de 56px: fechar à esquerda, título no centro. */
+  .modal.fullscreen .modal-head {
+    align-items: center;
+    min-height: calc(var(--header-h) + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) var(--space-1) 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal:where(.fullscreen) .modal-head .icon-btn {
+    order: -1;
+    margin: 0;
+  }
+  .modal:where(.fullscreen) .modal-head::after {
+    content: '';
+    width: var(--touch);
+    flex-shrink: 0;
+  }
+  .modal.fullscreen .modal-titles {
+    padding: 0;
+    text-align: center;
+  }
+  .modal.fullscreen .modal-desc {
+    font-size: var(--fs-12);
+    line-height: var(--lh-12);
+  }
+  .modal.fullscreen .modal-body {
+    padding: var(--space-4);
+  }
+  .modal.fullscreen .modal-foot {
+    padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+  }
+}

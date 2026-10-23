@@ -397,7 +397,8 @@ export function usersRoutes(app: FastifyInstance) {
   });
 }
 
-const COLORS = ['#1d74f5', '#2de0a5', '#f5455c', '#ffd21f', '#9f22c7', '#f38c39', '#10529e', '#158d65', '#cd1f35', '#5c1a7c'];
+// Fundo do avatar com iniciais: todas as 12 cores passam de 4.99:1 com as iniciais brancas (Inter 600 a 40% do quadro).
+const COLORS = ['#4453db', '#0e7490', '#047857', '#b45309', '#be185d', '#6d28d9', '#475569', '#c2410c', '#0369a1', '#a21caf', '#b91c1c', '#4d7c0f'];
 
 export function initialsSvg(name: string) {
   const clean = name.trim() || '?';
@@ -407,5 +408,5 @@ export function initialsSvg(name: string) {
   for (const ch of clean) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   const color = COLORS[h % COLORS.length];
   const esc = initials.replace(/[<>&"']/g, '');
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"><rect width="64" height="64" fill="${color}"/><text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="600" fill="#fff">${esc}</text></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"><rect width="64" height="64" fill="${color}"/><text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="25.6" font-weight="600" fill="#fff">${esc}</text></svg>`;
 }

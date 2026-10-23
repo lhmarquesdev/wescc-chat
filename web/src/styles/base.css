@@ -1,0 +1,270 @@
+/* ---------- Base global (dono 1) ----------
+   Regras de elemento e utilitários que valem para o app inteiro. Vêm antes dos
+   arquivos de componentes (primitives.css em diante), que podem sobrescrevê-las. */
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  /* 20px no corpo de 14px; sem unidade para quem ainda não tem altura de linha própria escalar com o tamanho */
+  font: 400 14px/1.4286 var(--font-sans);
+  font-optical-sizing: auto;
+  /* l com cauda e I com serifa: separam Il1 em usuários, códigos de fila e protocolos */
+  font-feature-settings: 'cv05' 1, 'cv08' 1;
+  -webkit-font-smoothing: antialiased;
+  background: var(--bg);
+  color: var(--fg);
+}
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+/* Sublinhado só no link comum: qualquer classe que defina text-decoration ganha, sem !important. */
+a:where(:hover) {
+  text-decoration: underline;
+}
+/* Títulos sem margem: o espaço vem do layout de cada tela. */
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+}
+h1 {
+  font-size: var(--fs-18);
+  line-height: var(--lh-18);
+  letter-spacing: -0.01em;
+}
+h2 {
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+  letter-spacing: -0.01em;
+}
+h3 {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+/* Só a herança: caixa, borda, fundo e espaçamento dos campos são de primitives.css. */
+:where(input, select, textarea) {
+  font: inherit;
+  color: inherit;
+  min-width: 0;
+}
+textarea {
+  resize: vertical;
+}
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+blockquote {
+  margin: 4px 0;
+  padding: 2px 12px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--fg-2);
+}
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+.muted {
+  color: var(--fg-muted);
+}
+.small {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.nowrap {
+  white-space: nowrap;
+}
+.center {
+  text-align: center;
+}
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  min-width: 0;
+}
+.clickable {
+  cursor: pointer;
+}
+.spacer {
+  flex: 1;
+}
+.pos {
+  color: var(--ok);
+}
+.neg {
+  color: var(--danger);
+}
+
+/* Utilitários. */
+.block {
+  display: block;
+}
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* Aparecem só no layout de celular (shell.css). */
+.mobile-only,
+.mobile-nav-btn {
+  display: none !important;
+}
+
+/* Seletor de cor (cor dos botões OAuth): primitives.css só desenha os campos de texto. */
+:where(input[type='color']) {
+  height: var(--control-md);
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  cursor: pointer;
+}
+:where(input[type='color'])::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+:where(input[type='color'])::-webkit-color-swatch {
+  border: 0;
+  border-radius: var(--radius-xs);
+}
+:where(input[type='color'])::-moz-color-swatch {
+  border: 0;
+  border-radius: var(--radius-xs);
+}
+
+/* Toque no celular: sem o flash cinza do Android e sem o iOS aumentar o texto ao girar a tela. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Barras de rolagem finas. Declarado em cada elemento para a cor sair do color-scheme dele
+   (na barra lateral escura a barra também fica escura). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::selection {
+  background: var(--accent-ring);
+}
+
+/* Sem 700 na interface: o negrito do markdown também sai em 600. */
+b,
+strong {
+  font-weight: 600;
+}
+
+::placeholder {
+  color: var(--fg-placeholder);
+  opacity: 1;
+}
+
+hr {
+  height: 0;
+  margin: var(--space-4) 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* Atalhos ("Ctrl K", "Esc") e operadores da busca. */
+kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+  font: 500 11px/16px var(--font-sans);
+  text-align: center;
+}
+
+/* Termo encontrado na busca. */
+mark {
+  border-radius: 2px;
+  background: var(--highlight);
+  color: inherit;
+}
+
+/* Emoji do conteúdo: a fonte colorida do sistema, igual em todos os navegadores. */
+.emoji {
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+}
+
+/* Foco visível só pelo teclado. Campos de texto mantêm a borda de foco deles. */
+:focus-visible:where(:not(textarea, select, input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='button'], [type='submit'], [type='reset']))) {
+  outline: 2px solid transparent; /* aparece no alto contraste do Windows */
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+}
+
+/* Ícones do componente <Icon>. */
+.icon {
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+/* A marca (BrandMark): o raio e o símbolo acompanham o tamanho (8px e 16px na marca de 28px). */
+.brand-mark {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 28.57%;
+  background: linear-gradient(135deg, var(--brand-from), var(--brand-to));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18);
+}
+.brand-mark svg {
+  width: 57.14%;
+  height: 57.14%;
+}
+
+/* Números que se alinham ou mudam (horas, contadores, tabelas). */
+.num,
+time,
+.msg-time,
+.badge,
+.counter,
+.stat-value,
+.imp-pct {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .spinner,
+  .loader {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
+}

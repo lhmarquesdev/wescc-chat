@@ -1,6 +1,7 @@
 import { useSearchParams } from 'react-router-dom';
 import type { Room } from '@shared/index';
 import { useAcks } from '../lib/acks';
+import { Icon } from './Icon';
 import './notices.css';
 
 // Faixa no topo de um canal de avisos: quem escreve aqui e, para quem lê, os avisos que esperam o "Ciente".
@@ -17,17 +18,21 @@ export function NoticeBar({ room, canPost }: { room: Room; canPost: boolean }) {
   };
   return (
     <div className="notice-bar" role="note">
-      <div>
-        <strong>📢 Canal de avisos</strong> · {text}
+      <div className="notice-bar-text">
+        <Icon name="notice" />
+        <span>
+          <strong>Canal de avisos</strong> · {text}
+        </span>
       </div>
       {n > 0 && (
         <div className="notice-bar-pending">
+          <span className="notice-bar-dot" aria-hidden="true" />
           <span>
             Você tem {n} {n === 1 ? 'aviso' : 'avisos'} aguardando seu “Ciente”.
+            <button type="button" className="link" onClick={showOldest}>
+              Ver o mais antigo
+            </button>
           </span>
-          <button className="link" onClick={showOldest}>
-            Ver o mais antigo
-          </button>
         </div>
       )}
     </div>

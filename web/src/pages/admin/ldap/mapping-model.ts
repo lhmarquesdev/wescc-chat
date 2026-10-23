@@ -103,20 +103,23 @@ export function canonicalMap(json: string): string {
 
 export const mapHasRules = (json: string) => Object.keys(parseMap(json).map ?? {}).length > 0;
 
+// Ícone da origem da regra (chaves do registro de ícones).
+export type OriginIcon = 'ldap-all' | 'ldap-ou' | 'ldap-group';
+
 export interface Origin {
   kind: LdapRuleKind;
   value: string;
-  icon: string;
+  icon: OriginIcon;
   label: string; // sem o ícone
   title?: string; // DN completo
 }
 
 export function originOf(key: string): Origin {
   const k = parseLdapKey(key);
-  if (k.kind === 'all') return { kind: 'all', value: '*', icon: '🌐', label: 'Todos os usuários' };
-  if (k.kind === 'ou') return { kind: 'ou', value: k.value, icon: '📁', label: `OU ${ouLabel(k.value) || k.value}`, title: k.value };
-  if (k.kind === 'group-dn') return { kind: 'group-dn', value: k.value, icon: '👥', label: `Grupo ${rdnValue(k.value) || k.value}`, title: k.value };
-  return { kind: 'group', value: k.value, icon: '👥', label: `Grupo ${k.value}` };
+  if (k.kind === 'all') return { kind: 'all', value: '*', icon: 'ldap-all', label: 'Todos os usuários' };
+  if (k.kind === 'ou') return { kind: 'ou', value: k.value, icon: 'ldap-ou', label: `OU ${ouLabel(k.value) || k.value}`, title: k.value };
+  if (k.kind === 'group-dn') return { kind: 'group-dn', value: k.value, icon: 'ldap-group', label: `Grupo ${rdnValue(k.value) || k.value}`, title: k.value };
+  return { kind: 'group', value: k.value, icon: 'ldap-group', label: `Grupo ${k.value}` };
 }
 
 // Duas chaves escritas de jeitos diferentes ("GG-X" e "group:gg-x") são a mesma origem.

@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import type { Message, NoticeAcks } from '@shared/index';
 import { markAcked, useAcks } from '../lib/acks';
 import { api, errorMessage } from '../lib/api';
-import { formatDateTime } from '../lib/format';
+import { formatDateTime, plural } from '../lib/format';
 import { useStore } from '../lib/store';
-import { Avatar, Empty, Modal, Pager, Spinner, Tabs, useAsync } from './ui';
+import { Icon } from './Icon';
+import { Avatar, Empty, Modal, Pager, SkeletonList, Tabs, useAsync } from './ui';
 
 const COUNT = 50;
 
-const confirmedLabel = (n: number) => `✔ ${n} ${n === 1 ? 'pessoa confirmou' : 'pessoas confirmaram'} · ver quem`;
+const confirmedLabel = (n: number) => `${plural(n, 'pessoa confirmou', 'pessoas confirmaram')} · ver quem`;
 
 // Linha do "Ciente" logo abaixo de um aviso que pede confirmação.
 export function AckBar({ m, rid, canPost, member }: { m: Message; rid: string; canPost: boolean; member: boolean }) {
@@ -39,17 +40,22 @@ export function AckBar({ m, rid, canPost, member }: { m: Message; rid: string; c
     <div className="ack-bar">
       {reader &&
         (acks.acked.has(m._id) ? (
-          <span className="pill ok">✔ Você confirmou a leitura</span>
+          <span className="pill ok">
+            <Icon name="acked" size={12} />
+            Você confirmou a leitura
+          </span>
         ) : (
           <span className="ack-ask">
-            <button className="btn small primary" disabled={busy} onClick={ack}>
-              ✔ Ciente
+            <button type="button" className="btn small primary" disabled={busy} aria-busy={busy || undefined} onClick={ack}>
+              <Icon name="ack" size={14} />
+              Ciente
             </button>
             <span className="muted small">Confirme que você leu este aviso.</span>
           </span>
         ))}
       {counter && (
-        <button className="link small" onClick={() => setOpen(true)}>
+        <button type="button" className="link small ack-count" onClick={() => setOpen(true)}>
+          <Icon name="ack-count" size={14} />
           {confirmedLabel(m.ackCount ?? 0)}
         </button>
       )}
@@ -71,7 +77,7 @@ export function AckModal({ m, onClose }: { m: Message; onClose: () => void }) {
   const rows = !data ? [] : tab === 'acked' ? data.acked.map((a) => ({ user: a.user, at: a.ackAt })) : data.pending.map((user) => ({ user, at: null }));
 
   return (
-    <Modal title="Confirmações do aviso" onClose={onClose}>
+    <Modal title="Confirmações do aviso" onClose={onClose} className="ack-modal">
       <Tabs
         value={tab}
         onChange={(v) => (setTab(v), setOffset(0))}
@@ -80,25 +86,36 @@ export function AckModal({ m, onClose }: { m: Message; onClose: () => void }) {
           { id: 'pending', label: counts.pending === null ? 'Pendentes' : `Pendentes (${counts.pending})` },
         ]}
       />
-      {loading ? (
-        <Spinner />
-      ) : error ? (
-        <div className="form-error">{error}</div>
-      ) : !rows.length ? (
-        <Empty>{tab === 'acked' ? 'Ninguém confirmou ainda.' : 'Todos já confirmaram.'}</Empty>
-      ) : (
-        <ul className="plain-list ack-list">
-          {rows.map(({ user, at }) => (
-            <li key={user._id}>
-              <Avatar username={user.username} size={28} />
-              <span className="ack-person">
-                <strong>{user.name || user.username}</strong> <span className="muted">@{user.username}</span>
-              </span>
-              {at && <span className="muted small">{formatDateTime(at)}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* Altura fixa com rolagem: trocar de aba não muda o tamanho do diálogo nem tira as abas do lugar. */}
+      <div className="ack-body">
+        {loading && !data ? (
+          <SkeletonList n={5} />
+        ) : error ? (
+          <div className="form-error">{error}</div>
+        ) : !rows.length ? (
+          tab === 'acked' ? (
+            <Empty icon="ack-count" title="Ninguém confirmou ainda">
+              As confirmações aparecem aqui assim que as pessoas lerem o aviso.
+            </Empty>
+          ) : (
+            <Empty icon="all-done" title="Todos já confirmaram">
+              Ninguém está com este aviso pendente.
+            </Empty>
+          )
+        ) : (
+          <ul className="plain-list ack-list">
+            {rows.map(({ user, at }) => (
+              <li key={user._id}>
+                <Avatar username={user.username} size={28} />
+                <span className="ack-person">
+                  <strong>{user.name || user.username}</strong> <span className="muted">@{user.username}</span>
+                </span>
+                {at && <span className="muted small">{formatDateTime(at)}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       {data && <Pager offset={offset} count={COUNT} total={data.total} onChange={setOffset} />}
     </Modal>
   );

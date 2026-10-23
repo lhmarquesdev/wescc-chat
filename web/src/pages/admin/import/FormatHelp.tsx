@@ -40,7 +40,7 @@ export function FormatHelp({ importerKey, canUsePath }: { importerKey: string; c
         <>
           <h3>Exportação do Slack</h3>
           <ol className="imp-help-list">
-            <li>No Slack, abra as configurações do espaço de trabalho e vá em Importar/exportar dados → Exportar.</li>
+            <li>No Slack, abra as configurações do espaço de trabalho e vá em Importar/exportar dados › Exportar.</li>
             <li>Baixe o .zip e envie aqui sem descompactar.</li>
           </ol>
           <ul className="imp-help-list">
@@ -55,7 +55,7 @@ export function FormatHelp({ importerKey, canUsePath }: { importerKey: string; c
         <>
           <h3>Lista de membros do Slack</h3>
           <ul className="imp-help-list">
-            <li>No Slack: Gerenciar membros → Exportar lista de membros. Envie o .csv como veio.</li>
+            <li>No Slack: Gerenciar membros › Exportar lista de membros. Envie o .csv como veio.</li>
             <li>Colunas usadas: username, email, status, fullname e displayname.</li>
             <li>Status "Admin" vira administrador (só em conta nova, e se você pode dar esse papel), "Bot" vira bot e "Deactivated" cria a conta desativada.</li>
             <li>Linhas sem e-mail são ignoradas.</li>
@@ -70,7 +70,7 @@ export function FormatHelp({ importerKey, canUsePath }: { importerKey: string; c
             <li>A primeira linha é o cabeçalho.</li>
             <li>Vários e-mails ou telefones vão separados por ponto e vírgula.</li>
             <li>manager é o nome de usuário de quem cuida do contato; id é opcional.</li>
-            <li>As outras colunas viram campos personalizados do contato, se existirem em Omnichannel → Campos personalizados.</li>
+            <li>As outras colunas viram campos personalizados do contato, se existirem em Omnichannel › Campos personalizados.</li>
             <li>Um contato com o mesmo e-mail de um já existente completa o cadastro dele, sem duplicar.</li>
           </ul>
         </>

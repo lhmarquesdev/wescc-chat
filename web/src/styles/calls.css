@@ -1,0 +1,1668 @@
+/* ---------- Chamadas e Atendimento (dono 5) ----------
+   Janela e tela de chamada, página de chamadas e telas do agente de atendimento. */
+
+/* ---------- Chamadas ---------- */
+
+/* Ilhas escuras nos dois temas: os tokens light-dark() aqui dentro resolvem para o valor escuro. */
+.call-incoming,
+.call-window {
+  color-scheme: dark;
+  color: var(--call-fg);
+  /* Tamanho dos controles: cada modo troca só estas variáveis. */
+  --ctl: 48px;
+  --hang-w: 64px;
+}
+
+/* Controle redondo (microfone, câmera, tela, desligar) e o rótulo embaixo, quando há. */
+.call-ctl {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+.call-btn {
+  position: relative;
+  width: var(--ctl);
+  height: var(--ctl);
+  padding: 0;
+  border-radius: var(--radius-full);
+  border: 0;
+  background: var(--call-control);
+  color: var(--fg-on-accent);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+.call-btn.accept {
+  background: var(--call-accept);
+  color: var(--fg-on-accent);
+}
+/* Desligar é uma pílula mais larga: não se confunde com os outros controles. */
+.call-btn.hang {
+  width: var(--hang-w);
+  background: var(--call-hang);
+  color: var(--fg-on-accent);
+}
+/* Microfone ou câmera desligados: o ícone cortado em vermelho e um contorno, sem o preenchimento branco. */
+.call-btn.off {
+  background: var(--call-control);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--danger) 55%, transparent);
+}
+.call-btn.off:focus-visible {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--danger) 55%, transparent),
+    0 0 0 2px var(--ring-offset),
+    0 0 0 4px var(--focus);
+}
+.call-btn.on {
+  background: var(--accent);
+  color: var(--fg-on-accent);
+}
+/* Hover só com mouse: no toque ele fica preso depois do toque. */
+@media (hover: hover) {
+  .call-btn:hover {
+    background: var(--call-control-hover);
+  }
+  .call-btn.accept:hover {
+    background: color-mix(in srgb, var(--call-accept) 88%, var(--fg-on-accent));
+  }
+  .call-btn.hang:hover {
+    background: color-mix(in srgb, var(--call-hang) 88%, var(--fg-on-accent));
+  }
+  .call-btn.off:hover {
+    background: var(--call-control-hover);
+  }
+  .call-btn.on:hover {
+    background: var(--accent-hover);
+  }
+  .call-pill-main:hover {
+    background: var(--call-control);
+  }
+}
+.call-btn-label {
+  font-size: var(--fs-11);
+  line-height: var(--lh-11);
+  font-weight: var(--fw-medium);
+  color: var(--call-fg);
+  white-space: nowrap;
+}
+
+.call-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.call-who strong {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-semibold);
+  color: var(--call-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.call-status {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--call-fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.call-buttons {
+  display: flex;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+/* Anel do avatar enquanto toca (verde) ou enquanto chama (azul). Sem animação fica um anel fixo de 4px. */
+.call-ring {
+  --ring: color-mix(in srgb, var(--call-accept) 45%, transparent);
+  display: inline-flex;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px var(--ring);
+  animation: call-halo 1.6s var(--ease-out) infinite;
+}
+.call-ring.out {
+  --ring: var(--accent-ring);
+}
+.call-ring.idle {
+  box-shadow: none;
+  animation: none;
+}
+@keyframes call-halo {
+  from {
+    box-shadow: 0 0 0 0 var(--ring);
+  }
+  to {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+
+/* ---------- Chamada recebida (computador): cartão no alto, à direita ---------- */
+.call-incoming {
+  --ring-offset: var(--bg-raised);
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: var(--z-call-incoming);
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-3), var(--highlight-top);
+  animation: call-drop var(--dur-3) var(--ease-out);
+}
+.call-incoming-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.call-incoming-head strong {
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+}
+.call-kind {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--call-fg-muted);
+}
+.call-incoming > .call-buttons {
+  justify-content: space-around;
+  padding-top: var(--space-4);
+}
+/* O atender pulsa de leve enquanto toca. Quem pulsa é o disco (::before), não o botão: a caixa do botão
+   fica parada, e quem clica (inclusive o Playwright dos testes) não espera a animação acabar. */
+.call-incoming .accept {
+  isolation: isolate;
+  background: transparent;
+}
+.call-incoming .accept::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--call-accept);
+  animation: call-accept 1.2s var(--ease-in-out) infinite;
+  transition: background-color var(--dur-1) linear;
+}
+:where(.call-incoming) .accept:hover::before {
+  background: color-mix(in srgb, var(--call-accept) 88%, var(--fg-on-accent));
+}
+@keyframes call-accept {
+  50% {
+    transform: scale(1.06);
+  }
+}
+@keyframes call-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+/* ---------- Chamada recebida (celular): tela cheia ---------- */
+.call-incoming.full {
+  --ctl: 64px;
+  --hang-w: 64px;
+  --ring-offset: var(--call-bg);
+  inset: 0;
+  width: auto;
+  max-width: none;
+  align-items: center;
+  padding: 0 var(--space-6) calc(env(safe-area-inset-bottom) + 48px);
+  border: 0;
+  border-radius: 0;
+  background: radial-gradient(120% 80% at 50% 0%, var(--accent-soft) 0%, var(--call-bg) 60%);
+  box-shadow: none;
+  animation: call-fade var(--dur-3) var(--ease-out);
+}
+.call-brand {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 32px);
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+  color: var(--call-fg-muted);
+}
+/* O avatar fica centrado a 30% da altura. */
+.call-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  min-height: 0;
+  padding-top: calc(30dvh - 60px);
+  text-align: center;
+}
+.call-rings {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin-bottom: 52px;
+}
+.call-rings > .avatar {
+  position: relative;
+}
+.call-rings > i {
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--call-accept) 40%, transparent);
+  background: color-mix(in srgb, var(--call-accept) 5%, transparent);
+  opacity: 0.6;
+  animation: call-ripple 1.6s var(--ease-in-out) infinite;
+}
+.call-rings > i:nth-child(2) {
+  inset: -24px;
+  animation-delay: 0.4s;
+}
+.call-rings > i:nth-child(3) {
+  inset: -36px;
+  animation-delay: 0.8s;
+}
+@keyframes call-ripple {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+.call-name {
+  max-width: 100%;
+  font-size: var(--fs-28);
+  line-height: var(--lh-28);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+  color: var(--fg-on-accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:where(.call-incoming.full) .call-kind {
+  margin-top: var(--space-1);
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+  gap: var(--space-2);
+}
+/* A última mensagem de quem liga, quando acabou de chegar. */
+.call-quote {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 100%;
+  margin-top: var(--space-6);
+  padding: var(--space-2) var(--space-4);
+  border-radius: 20px;
+  background: var(--call-control);
+  color: var(--call-fg);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  text-align: left;
+}
+.call-quote > .icon {
+  margin-top: 3px;
+  color: var(--call-fg-muted);
+}
+.call-quote > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.call-answer {
+  margin-top: auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+}
+.call-audio-only {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--touch);
+  padding: 0 var(--space-5);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--call-control);
+  color: var(--call-fg);
+  font: inherit;
+  font-size: var(--fs-15);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  transition: background-color var(--dur-1) linear;
+}
+.call-audio-only:hover {
+  background: var(--call-control-hover);
+}
+.call-answer > .call-buttons {
+  width: 100%;
+  max-width: 280px;
+  justify-content: space-between;
+}
+.call-answer .call-btn-label {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+@keyframes call-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---------- Janela da chamada (flutuante) ----------
+   Presa a um canto da área principal: abaixo do cabeçalho ou acima do compositor (posição em style). */
+.call-window {
+  --ring-offset: var(--call-bg);
+  position: fixed;
+  top: 72px;
+  right: 16px;
+  z-index: var(--z-call);
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: var(--call-bg);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow:
+    var(--shadow-3),
+    0 0 0 1px rgb(255 255 255 / 0.06);
+  display: flex;
+  flex-direction: column;
+  transition: transform var(--dur-4) var(--ease-out);
+  animation: call-rise var(--dur-3) var(--ease-out);
+}
+@keyframes call-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+/* Arrastando: segue o ponteiro sem atraso; ao soltar, encaixa no canto com a transição acima. */
+.call-window[data-drag] {
+  transition: none;
+  cursor: grabbing;
+  user-select: none;
+}
+:where(.call-window:not(.big, .phone)) .call-stage {
+  cursor: grab;
+  touch-action: none;
+}
+.call-stage {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--call-bg);
+  overflow: hidden;
+}
+.call-remote {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.call-remote.contain {
+  position: relative;
+  object-fit: contain;
+}
+.call-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(32px) brightness(0.45);
+  transform: scale(1.2);
+  pointer-events: none;
+}
+.call-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  text-align: center;
+  /* Cor sólida levemente tingida: degradê só nas telas de chamada recebida (spec 1.1). */
+  background: color-mix(in srgb, var(--accent) 10%, var(--call-bg));
+}
+.call-placeholder .call-name {
+  margin-top: var(--space-5);
+  font-size: var(--fs-22);
+  line-height: var(--lh-22);
+}
+.call-placeholder > .call-status {
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+}
+.call-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+/* Sua câmera (espelhada) ou a tela que você compartilha. */
+.call-local {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 30%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 1px rgb(255 255 255 / 0.16);
+  transform: scaleX(-1);
+}
+.call-local.screen {
+  transform: none;
+  object-fit: contain;
+}
+/* Câmera desligada na ampliada: seu avatar no lugar da prévia. */
+.call-self {
+  position: absolute;
+  right: 16px;
+  bottom: 96px;
+  width: 240px;
+  height: 135px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 1px rgb(255 255 255 / 0.08);
+}
+.call-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-4);
+}
+.call-bar .muted {
+  color: var(--call-fg-muted);
+}
+.call-bar-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-left: var(--space-1);
+}
+.call-bar > .call-buttons {
+  justify-content: center;
+}
+.call-tools {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.call-tool {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--call-fg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+.call-tool:hover {
+  background: var(--call-control);
+  color: var(--call-fg);
+}
+
+/* ---------- Ampliada: ocupa a área principal (a barra lateral continua usável) ---------- */
+.call-window.big {
+  inset: 0;
+  width: auto;
+  max-width: none;
+  border-radius: 0;
+  box-shadow: none;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+.call-window.idle {
+  cursor: none;
+}
+:where(.call-window.big) .call-stage {
+  grid-area: 1 / 1;
+  aspect-ratio: auto;
+  height: 100%;
+  min-height: 0;
+}
+:where(.call-window.big) .call-placeholder {
+  gap: var(--space-1);
+}
+:where(.call-window.big) .call-local {
+  right: 16px;
+  bottom: 96px;
+  width: 240px;
+  height: 135px;
+  border-radius: var(--radius-lg);
+}
+/* Controles centrados numa faixa de 72px com degradê; somem depois de 3 s parados. */
+:where(.call-window.big) .call-bar {
+  /* Item de grade com z-index: fica acima do palco (posicionado) sem virar o bloco de contenção do chip. */
+  z-index: var(--z-raised);
+  grid-area: 1 / 1;
+  align-self: end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  min-height: 72px;
+  padding: var(--space-8) var(--space-4) var(--space-3);
+  background: linear-gradient(to top, rgb(0 0 0 / 0.6), transparent);
+  transition: opacity var(--dur-4) var(--ease-out);
+}
+:where(.call-window.big) .call-bar-head {
+  display: contents;
+}
+:where(.call-window.big) .call-buttons {
+  grid-area: 1 / 2;
+}
+:where(.call-window.big) .call-tools {
+  grid-area: 1 / 3;
+  justify-self: end;
+  gap: var(--space-2);
+}
+:where(.call-window.big) .call-tool {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--call-control);
+  color: var(--call-fg);
+}
+:where(.call-window.big) .call-tool:hover {
+  background: var(--call-control-hover);
+}
+/* Nome de quem está do outro lado, no alto à esquerda sobre o vídeo. */
+.call-chip {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: var(--z-raised);
+  flex: none;
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--space-2);
+  max-width: calc(100% - 32px);
+  padding: var(--space-1-5) 10px;
+  border-radius: var(--radius-md);
+  background: rgb(0 0 0 / 0.5);
+  transition: opacity var(--dur-4) var(--ease-out);
+}
+.call-chip strong {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-medium);
+}
+:where(.call-window.idle) .call-bar,
+:where(.call-window.idle) .call-chip {
+  opacity: 0;
+}
+/* No toque, o primeiro toque só traz os controles de volta (não aperta um botão invisível).
+   Com mouse, o movimento já os traz antes do clique. */
+@media (pointer: coarse) {
+  :where(.call-window.idle) .call-bar {
+    pointer-events: none;
+  }
+}
+
+/* ---------- Celular: tela cheia enquanto a chamada está aberta ---------- */
+.call-window.phone {
+  --ctl: 56px;
+  --hang-w: 72px;
+  inset: 0;
+  width: auto;
+  max-width: none;
+  border-radius: 0;
+  box-shadow: none;
+  animation-name: call-fade;
+}
+:where(.call-window.phone) .call-bar {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-12) var(--space-4) calc(env(safe-area-inset-bottom) + 24px);
+}
+:where(.call-window.phone) .call-buttons {
+  gap: var(--space-5);
+}
+:where(.call-window.phone) .call-tools {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 8px);
+  left: 8px;
+}
+:where(.call-window.phone) .call-tool {
+  width: var(--touch);
+  height: var(--touch);
+}
+:where(.call-window.phone) .call-chip {
+  top: calc(env(safe-area-inset-top) + 14px);
+  left: 60px;
+  max-width: calc(100% - 188px);
+}
+:where(.call-window.phone) .call-local,
+:where(.call-window.phone) .call-self {
+  top: calc(env(safe-area-inset-top) + 16px);
+  right: 16px;
+  bottom: auto;
+  width: 96px;
+  height: 128px;
+  aspect-ratio: auto;
+}
+:where(.call-window.phone) .call-placeholder {
+  padding-bottom: 20dvh;
+}
+:where(.call-window.phone) .call-placeholder .call-name {
+  margin-top: 52px;
+  font-size: var(--fs-28);
+  line-height: var(--lh-28);
+}
+
+/* ---------- Pílula: a chamada recolhida (avatar, nome, tempo, microfone e desligar) ---------- */
+.call-pill {
+  --ctl: 40px;
+  --hang-w: 52px;
+  width: 300px;
+  height: 56px;
+  border-radius: var(--radius-full);
+  flex-direction: row;
+  align-items: center;
+}
+.call-pill .call-bar {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--space-2) 0 var(--space-1);
+}
+.call-pill-main {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 var(--space-2) 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-1) linear;
+}
+.call-pill .call-buttons {
+  gap: var(--space-1-5);
+}
+/* Na pílula não cabem os rótulos dos controles (o title e o aria-label continuam). */
+.call-pill .call-btn-label {
+  display: none;
+}
+/* No celular fica sob a barra de status e empurra a tela para baixo. */
+.call-pill.phone {
+  --ctl: 36px;
+  --hang-w: 48px;
+  inset: calc(env(safe-area-inset-top) + 4px) 8px auto;
+  width: auto;
+  height: 48px;
+  border-radius: var(--radius-full);
+  box-shadow:
+    var(--shadow-3),
+    0 0 0 1px rgb(255 255 255 / 0.06);
+  animation-name: call-drop;
+}
+:where(.call-pill.phone) .call-pill-main {
+  height: var(--touch);
+}
+/* Alvo de toque de 44px sem aumentar o botão. */
+:where(.call-pill.phone) .call-btn::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+
+/* ---------- Página de chamadas ---------- */
+.call-history {
+  max-width: 720px;
+}
+.call-history > .seg-nav {
+  margin-bottom: var(--space-4);
+}
+.call-day + .call-day {
+  margin-top: var(--space-5);
+}
+.call-day-title {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-raised);
+  margin: 0;
+  padding: var(--space-2) var(--space-1);
+  background: var(--bg-canvas);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-muted);
+}
+.call-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  overflow: clip;
+}
+.call-list li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 64px;
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background-color var(--dur-1) linear;
+}
+.call-list li:last-child {
+  border-bottom: 0;
+}
+/* Só com mouse: no toque o :hover gruda na linha depois do toque. */
+@media (hover: hover) {
+  .call-list li:hover {
+    background: var(--bg-hover);
+  }
+}
+/* A linha inteira abre a conversa: o botão estende a área de clique por cima dela. */
+.call-list-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.call-list-main::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* Arredondado como o cartão: o anel de foco não é cortado nos cantos da primeira e da última linha. */
+  border-radius: calc(var(--radius-lg) - 1px);
+}
+.call-list-main:focus-visible {
+  box-shadow: none;
+}
+.call-list-main:focus-visible::after {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+.call-list-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.call-list-name {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-semibold);
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:where(.call-list li.missed) .call-list-name {
+  color: var(--danger);
+}
+.call-list-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+:where(.call-list li.missed) .call-list-meta > .icon {
+  color: var(--danger);
+}
+.call-time {
+  flex-shrink: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+/* Vazio e erro no mesmo cartão das linhas, como nas telas do Atendimento. */
+.card.call-empty {
+  padding: var(--space-2);
+}
+.call-sk-day {
+  margin: var(--space-2) var(--space-1) var(--space-3);
+}
+.call-skeleton .sk-lines {
+  padding-top: 0;
+}
+.call-sk-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  overflow: clip;
+}
+.call-sk-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 64px;
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.call-sk-row:last-child {
+  border-bottom: 0;
+}
+.call-list-actions {
+  position: relative;
+  z-index: var(--z-raised);
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+/* Com mouse, as ações aparecem no lugar da hora ao passar sobre a linha. */
+@media (hover: hover) and (pointer: fine) {
+  .call-list-actions {
+    position: absolute;
+    top: 50%;
+    right: var(--space-3);
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity var(--dur-1) linear;
+  }
+  :where(.call-list li:hover, .call-list li:focus-within) .call-list-actions {
+    opacity: 1;
+  }
+  :where(.call-list li:hover, .call-list li:focus-within) .call-time {
+    visibility: hidden;
+  }
+}
+
+/* ---------- Atendimento: disponibilidade do agente ---------- */
+.agent-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-medium);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) linear,
+    border-color var(--dur-1) linear;
+}
+.agent-toggle:hover {
+  background: var(--bg-hover);
+}
+.agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1.5px var(--agent-off, var(--presence-offline));
+}
+:where(.agent-toggle.on) .agent-dot {
+  background: var(--presence-online);
+  box-shadow: none;
+}
+.agent-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:where(.agent-toggle.on) .toggle-track {
+  background: var(--accent);
+}
+:where(.agent-toggle.on) .toggle-track::after {
+  transform: translateX(16px);
+}
+/* Na barra lateral (ilha escura). */
+.side-omni .agent-toggle {
+  --agent-off: var(--side-fg-muted);
+  border-color: var(--side-input-border);
+  background: var(--side-input-bg);
+  color: var(--side-fg-strong);
+}
+.side-omni .agent-toggle:hover {
+  background: var(--side-hover);
+}
+/* No computador e no tablet a barra lateral já tem o interruptor; o do topo da fila é só do celular. */
+.omni-agent {
+  display: none;
+  margin: 0 0 var(--space-4);
+}
+
+/* ---------- Atendimento: páginas ---------- */
+/* Contagem junto do título; a ação (Nova resposta, filtros do período) vai para a direita. */
+:where(.omni-page) .page-title-row h1 {
+  flex: 0 1 auto;
+}
+:where(.omni-page) .page-title-row > :where(.btn, .filters) {
+  margin-left: auto;
+}
+/* Linhas de apoio que só aparecem quando o cartão estreita (somem as colunas que elas resumem). */
+.omni-narrow,
+.omni-mid,
+.omni-phone {
+  display: none;
+}
+/* Card que só contém a tabela ou a lista: sem padding, a tabela encosta nas bordas.
+   As colunas se reorganizam pela largura do cartão (container), não da janela: com a navegação do
+   Atendimento e a barra lateral, a 1440 o cartão tem uns 860px e a 1024, menos de 500. */
+.card.omni-flush {
+  padding: 0;
+  overflow: clip;
+  container: omnitable / inline-size;
+}
+.omni-flush > .card-head {
+  padding: var(--space-4) var(--space-5) 0;
+}
+.omni-flush :where(th, td):first-child {
+  padding-left: var(--space-5);
+}
+.omni-flush :where(th, td):last-child {
+  padding-right: var(--space-5);
+}
+.omni-flush :where(tr:last-child) > td {
+  border-bottom: 0;
+}
+.card.omni-empty {
+  padding: var(--space-2);
+}
+.omni-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-8) 0 var(--space-3);
+}
+.omni-section-head > :where(h2, h3) {
+  margin: 0;
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+  font-weight: var(--fw-semibold);
+}
+.modal .omni-section-head {
+  margin: var(--space-2) 0 0;
+}
+.omni-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.queue-pos {
+  width: 48px;
+  color: var(--fg-muted);
+}
+/* Colunas de texto livre dividem o que sobra (com max-width: 0 o texto longo não alarga a tabela e a
+   reticência age); as demais ficam do tamanho do conteúdo. Assim nada passa da borda do cartão. */
+/* O nome tem um mínimo para nomes comuns caberem inteiros; nomes longos ganham a reticência. */
+.table td.queue-who {
+  width: 40%;
+  min-width: 168px;
+  max-width: 0;
+}
+.table td.queue-msg {
+  width: 60%;
+  max-width: 0;
+  color: var(--fg-2);
+}
+.table td.omni-cut {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table td.omni-chats-who {
+  width: 100%;
+  max-width: 0;
+}
+.table td.omni-contacts-who,
+.omni-contacts td.omni-cut {
+  width: 50%;
+  max-width: 0;
+}
+/* 70% e não 100%: o resto vai para as tags, que assim cabem numa linha quando há espaço. */
+.table td.omni-canned-text {
+  width: 70%;
+  max-width: 0;
+}
+.table td.omni-canned-scope {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.omni-count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.omni-count > .icon {
+  display: none;
+}
+.queue-msg-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.queue-wait {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  color: var(--fg-2);
+}
+.queue-wait > .icon {
+  color: var(--fg-muted);
+}
+.queue-wait + .pill {
+  margin-top: var(--space-1);
+}
+.queue-table .row-actions {
+  justify-content: flex-end;
+}
+/* Assumir é a ação principal da tela: fica sempre visível, sem esperar o hover. */
+td.queue-act > .row-actions {
+  opacity: 1;
+}
+.omni-mine .list-row {
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-2) var(--space-5);
+}
+.omni-mine .list-row:last-child,
+.omni-history .list-row:last-child {
+  border-bottom: 0;
+}
+.omni-mine-name {
+  min-width: 0;
+  font-weight: var(--fw-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.omni-mine-go {
+  color: var(--fg-muted);
+}
+.omni-history {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: clip;
+}
+.omni-history .list-row {
+  gap: 10px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.omni-history .icon {
+  color: var(--fg-muted);
+}
+
+/* Filtros das conversas: busca em cima, seletores e período embaixo. */
+.omni-filters .search-field {
+  margin-bottom: var(--space-2);
+}
+.filters .omni-tags {
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+.omni-dates {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  color: var(--fg-muted);
+}
+.omni-dates input {
+  flex: 0 0 auto;
+  width: 150px;
+  min-width: 0;
+}
+.omni-hint {
+  margin: calc(var(--space-2) * -1) 0 var(--space-4);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+.omni-shortcut {
+  padding: 2px var(--space-1-5);
+  border-radius: var(--radius-xs);
+  background: var(--code-bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  white-space: nowrap;
+}
+
+/* Cartão médio (até ~1000px, o caso comum no computador): as colunas secundárias saem e o que elas
+   diziam vai para a linha de apoio sob o nome (departamento, prioridade, e-mail). */
+@container omnitable (max-width: 999px) {
+  .omni-flush .omni-wide,
+  .omni-flush .omni-wide-only {
+    display: none;
+  }
+  .omni-flush .omni-narrow,
+  .omni-flush .omni-mid {
+    display: block;
+  }
+  .table td.omni-contacts-who {
+    width: 100%;
+  }
+}
+/* Cartão estreito (computador a 1024, tablet e celular): cada linha vira um bloco compacto, como o
+   .table.stack do celular, mas pela largura do cartão. */
+@container omnitable (max-width: 679px) {
+  .omni-flush .stack,
+  .omni-flush .stack > tbody,
+  .omni-flush .stack tr,
+  .omni-flush .stack td {
+    display: block;
+    width: auto;
+    max-width: none;
+  }
+  .omni-flush .stack > thead,
+  .omni-flush td.omni-wide,
+  .omni-flush td.omni-col,
+  .omni-flush .omni-mid {
+    display: none;
+  }
+  .omni-flush .omni-phone {
+    display: block;
+  }
+  .omni-flush .stack tr {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 0;
+  }
+  .stack tr + tr {
+    border-top: 1px solid var(--border-subtle);
+  }
+  .omni-flush .stack td {
+    height: auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+  /* A linha inteira reage ao toque e ao mouse, não cada célula. */
+  .omni-flush .stack :where(tr:hover, tr:active) > td {
+    background: transparent;
+  }
+  .stack tr:where(.clickable:active) {
+    background: var(--bg-hover);
+  }
+  @media (hover: hover) {
+    .stack tr:where(.clickable:hover) {
+      background: var(--bg-hover);
+    }
+  }
+  /* Fila: quem e há quanto tempo, a mensagem, e as ações. */
+  .queue-table.stack tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'who since'
+      'msg msg'
+      'act act';
+    gap: var(--space-1-5) var(--space-3);
+  }
+  .stack td.queue-who {
+    grid-area: who;
+  }
+  .stack td.queue-since {
+    grid-area: since;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-1);
+  }
+  .queue-since > .pill {
+    margin: 0;
+  }
+  .stack td.queue-msg {
+    grid-area: msg;
+    padding-left: 38px;
+  }
+  /* As ações à direita; o justify vai na célula porque .table.stack .row-actions alinha à esquerda. */
+  .stack td.queue-act {
+    grid-area: act;
+    display: flex;
+    justify-content: flex-end;
+  }
+  .queue-table .row-actions {
+    padding-top: var(--space-1);
+  }
+  /* Conversas e contatos: visitante com o resumo e, à direita, a situação ou o número de conversas. */
+  .omni-chats.stack tr,
+  .omni-contacts.stack tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-3);
+  }
+  .omni-chats-st {
+    justify-self: end;
+  }
+  .omni-count {
+    height: 20px;
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-full);
+    background: var(--bg-muted);
+    color: var(--fg-2);
+    font-size: var(--fs-12);
+    line-height: var(--lh-12);
+    font-weight: var(--fw-medium);
+  }
+  .omni-count > .icon {
+    display: block;
+  }
+  /* Respostas prontas: o atalho e para quem vale, o texto em até duas linhas e as tags, se houver. */
+  .omni-canned.stack tr {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'code scope'
+      'text text'
+      'tags tags';
+    align-items: center;
+    gap: var(--space-1-5) var(--space-3);
+  }
+  .stack td.omni-canned-code {
+    grid-area: code;
+  }
+  .stack td.omni-canned-scope {
+    grid-area: scope;
+    justify-self: end;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-12);
+    line-height: var(--lh-12);
+    color: var(--fg-muted);
+  }
+  .stack td.omni-canned-text {
+    grid-area: text;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    color: var(--fg-2);
+  }
+  .stack td.omni-canned-tags {
+    grid-area: tags;
+  }
+  /* Relatórios: as colunas de números se aproximam (o espaço entre elas vem do padding da anterior)
+     para o nome do agente caber. */
+  .omni-report td.num,
+  .omni-report th.num {
+    padding-left: var(--space-1);
+  }
+  .omni-report td.ellipsis-cell {
+    padding-right: var(--space-1);
+  }
+}
+
+/* ---------- Atendimento: relatórios ---------- */
+.filters.omni-period {
+  margin-bottom: 0;
+}
+.omni-period select {
+  min-width: 0;
+}
+/* Agora (tempo real): um card à parte, com fundo sutil e o ponto ao vivo. */
+.card.omni-live {
+  background: var(--bg-subtle);
+}
+.omni-live > .card-head > h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+.omni-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  animation: omni-live 2s var(--ease-in-out) infinite alternate;
+}
+@keyframes omni-live {
+  from {
+    opacity: 0.4;
+  }
+}
+.omni-live-note {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.omni-live .stats {
+  margin-bottom: 0;
+}
+.omni-period-title {
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+  font-weight: var(--fw-semibold);
+}
+:where(.omni-page) .stat-value.muted {
+  color: var(--fg-muted);
+}
+/* Dois cartões por linha só quando cada um tem uns 360px, o que a tabela de agentes (nome e três números)
+   pede: a 1024 e a 1280, com a barra lateral e a navegação do Atendimento, eles ficam um embaixo do outro. */
+.grid-2.omni-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+}
+/* O nome cede a largura e corta com reticências: as colunas de números ficam inteiras mesmo no cartão
+   do celular (com o container do .omni-flush, a tabela de agentes passava 27px da borda). */
+.omni-report td.ellipsis-cell {
+  width: 100%;
+  max-width: 0;
+}
+
+/* ---------- Atendimento: cabeçalho e painel da conversa (visitante, contato e atendimento) ---------- */
+/* Encerrar: texto no computador, só o ícone no celular (o texto fica para leitores de tela). */
+.lc-close > .icon {
+  display: none;
+}
+/* Espera e transferência no topo do painel: só no celular, onde elas saem do cabeçalho. */
+.lc-actions {
+  display: none;
+}
+.visitor-avatar {
+  /* Flex centrado também quando a célula da tabela vira coluna (.cell-entity > span). */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bg-muted);
+  color: var(--fg-2);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.02em;
+  line-height: 1;
+  user-select: none;
+}
+.livechat-info .info-hero h3 {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+  font-weight: var(--fw-semibold);
+}
+.lc-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+.lc-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 24px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-muted);
+}
+.lc-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  overflow-wrap: anywhere;
+}
+.lc-line > .icon {
+  color: var(--fg-muted);
+}
+.lc-kv {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
+  gap: var(--space-1-5) var(--space-3);
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.lc-kv dt {
+  color: var(--fg-muted);
+}
+.lc-kv dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.lc-kv-row {
+  display: contents;
+}
+.lc-rating {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--fg-disabled);
+}
+.lc-rating .on {
+  color: var(--warn-solid);
+}
+.lc-rating > span {
+  margin-left: var(--space-1-5);
+  color: var(--fg-muted);
+}
+.lc-prev {
+  gap: var(--space-2);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.lc-prev > .icon {
+  color: var(--fg-muted);
+}
+.lc-foot {
+  padding-top: var(--space-1);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+  text-align: center;
+}
+
+/* ---------- Responsivo ---------- */
+@media (max-width: 760px) {
+  /* A pílula da chamada fica sob a barra de status: a tela desce para ela não cobrir o cabeçalho. */
+  .layout:has(> .call-pill) {
+    padding-top: calc(env(safe-area-inset-top) + 56px);
+  }
+  .call-history {
+    max-width: none;
+  }
+  .call-list li,
+  .call-sk-row {
+    padding: 0 var(--space-2) 0 var(--space-3);
+    gap: var(--space-2);
+  }
+  /* Filtros ocupam a largura, em partes iguais. */
+  .call-history > .seg-nav {
+    display: flex;
+    flex-wrap: nowrap;
+  }
+  :where(.call-history) .seg-nav button {
+    flex: 1;
+    justify-content: center;
+    padding: 0 var(--space-2);
+  }
+  /* O ícone e a cor já dizem se a chamada foi feita, recebida ou perdida: a palavra fica só para leitores de tela. */
+  .call-dir {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  /* Sem barra lateral na tela do Atendimento: o interruptor de disponibilidade fica no topo da fila. */
+  .omni-agent {
+    display: block;
+  }
+  /* Cabeçalho do atendimento: o nome do visitante tem prioridade sobre espera e transferência. */
+  .room-actions .lc-secondary {
+    display: none;
+  }
+  .btn.lc-close {
+    position: relative;
+    width: 32px;
+    min-height: 32px;
+    padding: 0;
+    justify-content: center;
+    border-color: transparent;
+  }
+  .lc-close > .icon {
+    display: block;
+  }
+  .lc-close-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .lc-actions {
+    display: flex;
+    gap: var(--space-2);
+  }
+  .lc-actions > .btn {
+    flex: 1;
+    justify-content: center;
+  }
+  .omni-filters select {
+    flex: 1 1 calc(50% - var(--space-1));
+    min-width: 0;
+    text-overflow: ellipsis;
+  }
+  .filters .omni-tags,
+  .omni-dates {
+    flex: 1 1 100%;
+  }
+  .omni-dates input {
+    flex: 1;
+    width: auto;
+  }
+  .omni-mine .list-row {
+    padding: var(--space-2) var(--space-4);
+  }
+  .filters.omni-period {
+    width: 100%;
+  }
+  /* Relatórios: dois blocos por linha; sem os ícones dos rótulos, os valores cabem numa linha. */
+  .card.omni-live {
+    padding: var(--space-3);
+  }
+  :where(.omni-page) .stat {
+    padding: var(--space-3);
+  }
+  :where(.omni-page) .stat-label > .icon {
+    display: none;
+  }
+  .omni-period select {
+    flex: 1 1 0;
+    text-overflow: ellipsis;
+  }
+}
+@media (max-width: 760px) and (pointer: coarse) {
+  .btn.lc-close {
+    width: var(--touch);
+    min-height: var(--touch);
+  }
+}
+@media (pointer: coarse) {
+  .call-tool {
+    width: var(--touch);
+    height: var(--touch);
+  }
+  :where(.call-history) .seg-nav button {
+    height: var(--touch);
+  }
+  .queue-act .btn {
+    min-height: var(--touch);
+    padding: 0 var(--space-4);
+  }
+  /* Alvos de 44px sem mudar a linha: o e-mail do contato e o campo das tags. */
+  .lc-line > a {
+    display: inline-block;
+    padding: 12px 0;
+    margin: -12px 0;
+  }
+  .lc-tags > .chips {
+    padding-block: 0;
+  }
+  .lc-tags .chips > input {
+    height: var(--touch);
+  }
+  .agent-toggle {
+    min-height: var(--touch);
+  }
+}

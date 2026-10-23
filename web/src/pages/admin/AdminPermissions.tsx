@@ -2,8 +2,12 @@ import { Fragment, useMemo, useState } from 'react';
 import type { DirectRestrictionReport } from '@shared/direct';
 import { api, errorMessage } from '../../lib/api';
 import { useStore } from '../../lib/store';
+import { roleLabel } from '../../lib/format';
 import { UserPicker, type PickedUser } from '../../components/Pickers';
-import { Field, Modal, Spinner, Tabs, Toggle, useAsync } from '../../components/ui';
+import { Icon } from '../../components/Icon';
+import { Empty, Field, Modal, SearchInput, SkeletonTable, Tabs, Toggle, confirmDialog, useAsync } from '../../components/ui';
+import { PageHead, RowMenu, TableWrap, UserCell } from './parts';
+import { permissionLabel } from './permissionLabels';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 
@@ -33,13 +37,20 @@ export function AdminPermissions() {
   const grouped = useMemo(() => {
     const out: Record<string, any[]> = {};
     for (const p of perms.data?.update ?? []) {
-      if (filter && !p._id.includes(filter.toLowerCase())) continue;
+      const q = filter.trim().toLowerCase();
+      if (q && !p._id.includes(q) && !permissionLabel(p._id).toLowerCase().includes(q)) continue;
       (out[p.group] ??= []).push(p);
     }
     return out;
   }, [perms.data, filter]);
 
-  if (perms.loading || roles.loading) return <Spinner />;
+  if ((perms.loading && !perms.data) || (roles.loading && !roles.data))
+    return (
+      <>
+        <PageHead title="Papéis e permissões" />
+        <SkeletonTable rows={10} cols={6} />
+      </>
+    );
   const roleList = (roles.data?.roles ?? []).filter((r: any) => scope === 'all' || r.scope === scope);
 
   const toggle = async (perm: any, role: string) => {
@@ -56,12 +67,12 @@ export function AdminPermissions() {
 
   return (
     <>
-      <div className="page-title-row">
-        <h1>Papéis e permissões</h1>
+      <PageHead title="Papéis e permissões">
         <button className="btn primary" onClick={() => setEditRole({ name: '', description: '', scope: 'Users', mandatory2fa: false, isNew: true })}>
-          ＋ Novo papel
+          <Icon name="add" />
+          Novo papel
         </button>
-      </div>
+      </PageHead>
       <Tabs
         value={tab}
         onChange={setTab}
@@ -72,9 +83,9 @@ export function AdminPermissions() {
       />
       {tab === 'permissions' ? (
         <>
-          <div className="filters">
-            <input placeholder="Filtrar permissões" value={filter} onChange={(e) => setFilter(e.target.value)} />
-            <select value={scope} onChange={(e) => setScope(e.target.value as any)}>
+          <div className="filters admin-filters">
+            <SearchInput value={filter} onChange={setFilter} placeholder="Filtrar permissões" />
+            <select aria-label="Papéis mostrados" value={scope} onChange={(e) => setScope(e.target.value as any)}>
               <option value="all">Todos os papéis</option>
               <option value="Users">Papéis globais</option>
               <option value="Subscriptions">Papéis de sala</option>
@@ -86,8 +97,9 @@ export function AdminPermissions() {
                 <tr>
                   <th>Permissão</th>
                   {roleList.map((r: any) => (
-                    <th key={r._id} title={r.description}>
-                      {r._id}
+                    <th key={r._id} title={r.description || undefined}>
+                      <span className="role-head">{roleLabel(r._id)}</span>
+                      <span className="role-head-id">{r._id}</span>
                     </th>
                   ))}
                 </tr>
@@ -96,14 +108,21 @@ export function AdminPermissions() {
                 {Object.entries(grouped).map(([g, list]) => (
                   <Fragment key={g}>
                     <tr className="group-row">
-                      <td colSpan={roleList.length + 1}>{GROUP_LABEL[g] ?? g}</td>
+                      <td colSpan={roleList.length + 1}>
+                        <span>{GROUP_LABEL[g] ?? g}</span>
+                      </td>
                     </tr>
                     {list.map((p) => (
                       <tr key={p._id}>
-                        <td className="mono">{p._id}</td>
+                        <td>
+                          <span className="perm-label">{permissionLabel(p._id)}</span>
+                          {permissionLabel(p._id) !== p._id && <span className="perm-id">{p._id}</span>}
+                        </td>
                         {roleList.map((r: any) => (
                           <td key={r._id} className="center">
-                            <input type="checkbox" checked={p.roles.includes(r._id)} onChange={() => toggle(p, r._id)} />
+                            <label className="check-cell" title={`${permissionLabel(p._id)} · ${roleLabel(r._id)}`}>
+                              <input type="checkbox" aria-label={`${permissionLabel(p._id)} para ${roleLabel(r._id)}`} checked={p.roles.includes(r._id)} onChange={() => toggle(p, r._id)} />
+                            </label>
                           </td>
                         ))}
                       </tr>
@@ -112,52 +131,94 @@ export function AdminPermissions() {
                 ))}
               </tbody>
             </table>
+            {!Object.keys(grouped).length && (
+              <Empty icon="search" title={`Nada encontrado para “${filter}”`}>
+                Busque pelo nome em português ou pelo id da permissão.
+              </Empty>
+            )}
           </div>
         </>
       ) : (
         <>
           <DirectReportCard state={report} />
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Papel</th>
-                <th>Descrição</th>
-                <th>Escopo</th>
-                <th>2FA obrigatório</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {roles.data?.roles.map((r: any) => (
-                <tr key={r._id}>
-                  <td>
-                    <strong>{r._id}</strong> {r.protected && <span className="pill">sistema</span>}{' '}
-                    {r.restrictDirect && (
-                      <span className="pill blocked" title="Restrito em conversas diretas">
-                        restrito
-                      </span>
-                    )}
-                  </td>
-                  <td>{r.description}</td>
-                  <td>{r.scope === 'Users' ? 'Global' : 'Por sala'}</td>
-                  <td>{r.mandatory2fa ? 'Sim' : 'Não'}</td>
-                  <td className="row-actions">
-                    <button className="btn small" onClick={() => setUsersOf(r._id)}>
-                      Usuários
-                    </button>
-                    <button className="btn small" onClick={() => setEditRole(r)}>
-                      Editar
-                    </button>
-                    {!r.protected && (
-                      <button className="btn small danger" onClick={() => confirm(`Excluir o papel ${r._id}?`) && api.post('roles.delete', { roleId: r._id }).then(roles.reload).catch(fail)}>
-                        Excluir
-                      </button>
-                    )}
-                  </td>
+          <TableWrap>
+            <table className="table stack kv">
+              <thead>
+                <tr>
+                  <th>Papel</th>
+                  <th>Descrição</th>
+                  <th>Escopo</th>
+                  <th>2FA</th>
+                  <th className="actions-col">
+                    <span className="visually-hidden">Ações</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {roles.data?.roles.map((r: any) => (
+                  <tr key={r._id}>
+                    <td>
+                      <div className="cell-entity">
+                        <span className="cell-icon">
+                          <Icon name="admin-permissions" />
+                        </span>
+                        <div>
+                          <span className="cell-name">
+                            {roleLabel(r._id)}
+                            {r.protected && <span className="pill tag">Sistema</span>}
+                            {r.restrictDirect && (
+                              <span className="pill warn tag blocked" title="Restrito em conversas diretas">
+                                <Icon name="direct-blocked" size={12} />
+                                Restrito
+                              </span>
+                            )}
+                          </span>
+                          <span className="cell-sub mono">{r._id}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className={roleDescription(r) ? 'role-desc' : 'role-desc empty'}>{roleDescription(r) || <span className="muted">—</span>}</td>
+                    <td data-label="Escopo">{r.scope === 'Users' ? 'Global' : 'Por sala'}</td>
+                    <td data-label="2FA">{r.mandatory2fa ? <span className="pill ok dot">Exigido</span> : <span className="muted">—</span>}</td>
+                    <td className="actions-col">
+                      <div className="row-actions">
+                        <button className="btn small ghost" onClick={() => setUsersOf(r._id)}>
+                          <Icon name="admin-users" />
+                          Usuários
+                        </button>
+                        <button className="btn small ghost" onClick={() => setEditRole(r)}>
+                          <Icon name="edit" />
+                          Editar
+                        </button>
+                        {!r.protected && (
+                          <RowMenu>
+                            {(close) => (
+                              <button
+                                className="danger"
+                                onClick={async () => {
+                                  close();
+                                  const yes = await confirmDialog({
+                                    title: `Excluir o papel ${roleLabel(r._id)}?`,
+                                    body: 'Quem tem este papel perde as permissões que vinham dele.',
+                                    confirmLabel: 'Excluir',
+                                    danger: true,
+                                  });
+                                  if (yes) api.post('roles.delete', { roleId: r._id }).then(roles.reload).catch(fail);
+                                }}
+                              >
+                                <Icon name="delete" />
+                                Excluir
+                              </button>
+                            )}
+                          </RowMenu>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableWrap>
         </>
       )}
       {editRole && (
@@ -192,16 +253,21 @@ function RoleForm({ role, onClose, onSaved }: { role: any; onClose: () => void; 
   };
   return (
     <Modal
-      title={role.isNew ? 'Novo papel' : `Papel ${role._id}`}
+      title={role.isNew ? 'Novo papel' : `Papel ${roleLabel(role._id)}`}
       onClose={onClose}
       footer={
-        <button className="btn primary" onClick={save}>
-          Salvar
-        </button>
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancelar
+          </button>
+          <button className="btn primary" onClick={save}>
+            Salvar
+          </button>
+        </>
       }
     >
       <div className="form">
-        <Field label="Nome">
+        <Field label="Nome" hint={role.isNew ? 'O id do papel, sem espaços (ex.: supervisor).' : undefined}>
           <input value={f.name} disabled={!role.isNew} onChange={(e) => setF({ ...f, name: e.target.value })} />
         </Field>
         <Field label="Descrição">
@@ -213,15 +279,22 @@ function RoleForm({ role, onClose, onSaved }: { role: any; onClose: () => void; 
             <option value="Subscriptions">Por sala</option>
           </select>
         </Field>
-        <Toggle checked={f.mandatory2fa} onChange={(v) => setF({ ...f, mandatory2fa: v })} label="Exigir 2FA de quem tem este papel" />
-        {f.scope === 'Users' && (
-          <>
-            <Toggle checked={f.restrictDirect} onChange={(v) => setF({ ...f, restrictDirect: v })} label="Restrito em conversas diretas" />
-            <span className="field-hint opt-hint">
-              Quem tem este papel não pode iniciar conversas diretas nem chamadas com outras pessoas restritas. A exceção é quem tem a permissão start-dm-between-restricted.
-            </span>
-          </>
-        )}
+        <div className="toggle-list">
+          <Toggle checked={f.mandatory2fa} onChange={(v) => setF({ ...f, mandatory2fa: v })} label="Exigir 2FA de quem tem este papel" />
+          {f.scope === 'Users' && (
+            <Toggle
+              checked={f.restrictDirect}
+              onChange={(v) => setF({ ...f, restrictDirect: v })}
+              label="Restrito em conversas diretas"
+              description={
+                <>
+                  Quem tem este papel não pode iniciar conversas diretas nem chamadas com outras pessoas restritas. A exceção é quem tem a permissão {permissionLabel(EXEMPT_PERMISSION)} (
+                  <code className="mono">{EXEMPT_PERMISSION}</code>).
+                </>
+              }
+            />
+          )}
+        </div>
       </div>
     </Modal>
   );
@@ -231,8 +304,8 @@ function RoleUsers({ role, onClose }: { role: string; onClose: () => void }) {
   const { data, loading, reload } = useAsync(() => api.get('roles.getUsersInRole', { role, count: 200 }), [role]);
   const [add, setAdd] = useState<PickedUser[]>([]);
   return (
-    <Modal title={`Usuários com o papel ${role}`} onClose={onClose}>
-      <div className="form">
+    <Modal title={`Usuários com o papel ${roleLabel(role)}`} onClose={onClose}>
+      <div className="form role-users-add">
         <UserPicker value={add} onChange={setAdd} />
         {add.length > 0 && (
           <button
@@ -247,14 +320,16 @@ function RoleUsers({ role, onClose }: { role: string; onClose: () => void }) {
           </button>
         )}
       </div>
-      {loading ? (
-        <Spinner />
+      {loading && !data ? (
+        <SkeletonTable rows={4} cols={2} />
+      ) : !data?.users.length ? (
+        <Empty>Ninguém tem este papel ainda.</Empty>
       ) : (
-        <ul className="plain-list">
-          {data?.users.map((u: any) => (
+        <ul className="session-list">
+          {data.users.map((u: any) => (
             <li key={u._id}>
-              @{u.username} — {u.name}
-              <button className="btn small" onClick={() => api.post('roles.removeUserFromRole', { roleId: role, userId: u._id }).then(reload).catch(fail)}>
+              <UserCell username={u.username} name={u.name} />
+              <button className="btn small ghost danger" onClick={() => api.post('roles.removeUserFromRole', { roleId: role, userId: u._id }).then(reload).catch(fail)}>
                 Remover
               </button>
             </li>
@@ -263,6 +338,14 @@ function RoleUsers({ role, onClose }: { role: string; onClose: () => void }) {
       )}
     </Modal>
   );
+}
+
+const EXEMPT_PERMISSION = 'start-dm-between-restricted';
+
+// Descrição que só repete o nome (ex.: "admin" / "Admin") não diz nada: a célula fica com o traço.
+function roleDescription(r: { _id: string; description?: string }) {
+  const d = (r.description ?? '').trim();
+  return [r._id, roleLabel(r._id)].some((x) => x.toLowerCase() === d.toLowerCase()) ? '' : d;
 }
 
 const LOOPHOLE_ACTION: Record<string, string> = {
@@ -280,7 +363,7 @@ function DirectReportCard({ state }: { state: { data: DirectRestrictionReport | 
   if (loading && !r)
     return (
       <div className="card direct-report">
-        <Spinner />
+        <SkeletonTable rows={3} cols={3} />
       </div>
     );
   if (error || !r) return <div className="card direct-report muted small">Não foi possível carregar o resumo das conversas diretas restritas{error ? `: ${error}` : '.'}</div>;
@@ -294,7 +377,7 @@ function DirectReportCard({ state }: { state: { data: DirectRestrictionReport | 
   // start-discussion e start-discussion-other-user dizem a mesma coisa: um aviso só.
   const warnings = new Map<string, { users: number; viaRoles: Set<string>; sample: Map<string, string> }>();
   for (const l of r.loopholes) {
-    const action = LOOPHOLE_ACTION[l.permission] ?? l.permission;
+    const action = LOOPHOLE_ACTION[l.permission] ?? permissionLabel(l.permission).toLowerCase();
     const w = warnings.get(action) ?? { users: 0, viaRoles: new Set<string>(), sample: new Map<string, string>() };
     w.users = Math.max(w.users, l.users);
     l.viaRoles.forEach((x) => w.viaRoles.add(x));
@@ -304,18 +387,26 @@ function DirectReportCard({ state }: { state: { data: DirectRestrictionReport | 
   return (
     <div className="card direct-report">
       <h3>Conversas diretas restritas</h3>
-      <p>Papéis restritos: {r.restrictedRoles.map((x) => `${x._id} (${people(x.users)})`).join(', ')}.</p>
+      <p>Papéis restritos: {r.restrictedRoles.map((x) => `${roleLabel(x._id)} (${people(x.users)})`).join(', ')}.</p>
       <p>{r.scope === 'same_role' ? 'Regra: pessoas com o mesmo papel restrito não conversam em particular.' : 'Regra: duas pessoas com papel restrito não conversam em particular.'}</p>
-      <p>Exceção (permissão start-dm-between-restricted): {r.exemptRoles.length ? r.exemptRoles.join(', ') : 'ninguém'}.</p>
+      <p>
+        Exceção (permissão {permissionLabel(EXEMPT_PERMISSION)}, <code className="mono">{EXEMPT_PERMISSION}</code>): {r.exemptRoles.length ? r.exemptRoles.map(roleLabel).join(', ') : 'ninguém'}.
+      </p>
       {[...warnings].map(([action, w]) => (
-        <p key={action} className="warn-note">
-          ⚠ {people(w.users)} com papel restrito também {w.users === 1 ? 'pode' : 'podem'} {action} pelo papel {[...w.viaRoles].join(', ')}. Isso permite conversas particulares fora das mensagens diretas. Tire esse papel dessas pessoas ou essa permissão do papel.
-          <span className="sample">{[...w.sample.values()].map((u) => `@${u}`).join(', ')}</span>
-        </p>
+        <div key={action} className="callout warn">
+          <Icon name="warning" />
+          <span>
+            {people(w.users)} com papel restrito também {w.users === 1 ? 'pode' : 'podem'} {action} pelo papel {[...w.viaRoles].map(roleLabel).join(', ')}. Isso permite conversas particulares fora das
+            mensagens diretas. Tire esse papel dessas pessoas ou essa permissão do papel.
+            <span className="callout-sample">{[...w.sample.values()].map((u) => `@${u}`).join(', ')}</span>
+          </span>
+        </div>
       ))}
       {r.blockedDirects > 0 && (
         <p className="muted small">
-          {r.blockedDirects === 1 ? '1 conversa direta antiga está bloqueada (o histórico continua disponível).' : `${r.blockedDirects} conversas diretas antigas estão bloqueadas (o histórico continua disponível).`}
+          {r.blockedDirects === 1
+            ? '1 conversa direta antiga está bloqueada (o histórico continua disponível).'
+            : `${r.blockedDirects} conversas diretas antigas estão bloqueadas (o histórico continua disponível).`}
         </p>
       )}
     </div>

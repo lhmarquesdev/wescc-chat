@@ -1,13 +1,14 @@
-import { useState } from 'react';
-import type { OAuthFieldMap, OAuthPreset, OAuthProvider, OAuthProviderType } from '@shared/index';
+import { Fragment, useState } from 'react';
+import type { OAuthFieldMap, OAuthPreset, OAuthProvider } from '@shared/index';
 import { api, errorMessage } from '../../lib/api';
 import { useSetting, useStore } from '../../lib/store';
-import { Empty, Field, Modal, Spinner, Tabs, Toggle, confirmAction, useAsync } from '../../components/ui';
+import { Icon } from '../../components/Icon';
+import { ProviderIcon } from '../../components/BrandIcons';
+import { Empty, Field, Modal, SkeletonTable, Tabs, Toggle, confirmDialog, useAsync } from '../../components/ui';
+import { ActivePill, PageHead, TableWrap } from './parts';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
-
-const TYPE_ICON: Record<OAuthProviderType, string> = { google: 'G', github: '🐙', gitlab: '🦊', microsoft: '⊞', custom: '🔑' };
 
 const FIELD_LABEL: Record<keyof OAuthFieldMap, string> = {
   id: 'Identificador único',
@@ -33,11 +34,22 @@ async function copyText(value: string) {
   ok('Copiado.');
 }
 
+// A URL só quebra depois de cada "/" (fora do "://"), nunca no meio de um nome.
+function breakAtSlashes(url: string) {
+  return url.split(/(?<=\/)(?!\/)/).map((part, i) => (
+    <Fragment key={i}>
+      {i > 0 && <wbr />}
+      {part}
+    </Fragment>
+  ));
+}
+
 function CopyBox({ value }: { value: string }) {
   return (
     <div className="copy-box">
       <input readOnly value={value} onFocus={(e) => e.target.select()} />
       <button type="button" className="btn" onClick={() => void copyText(value)}>
+        <Icon name="copy" />
         Copiar
       </button>
     </div>
@@ -60,65 +72,83 @@ export function AdminOAuth() {
   const providers: OAuthProvider[] = data?.providers ?? [];
   const presetList: OAuthPreset[] = presets.data?.presets ?? [];
   const presetOf = (t: string) => presetList.find((p) => p.type === t) ?? presetList[presetList.length - 1];
+  const newButton = (
+    <button className="btn primary" disabled={!presetList.length} onClick={() => setPicking(true)}>
+      <Icon name="add" />
+      Novo provedor
+    </button>
+  );
 
   return (
     <>
-      <div className="page-title-row">
-        <h1>OAuth</h1>
-        <button className="btn primary" disabled={!presetList.length} onClick={() => setPicking(true)}>
-          ＋ Novo provedor
-        </button>
-      </div>
-      <p className="muted">
-        Login com contas externas: Google, GitHub, GitLab, Microsoft ou qualquer servidor OAuth 2.0 / OpenID Connect. Cada provedor ativo vira um botão na tela de login, com
-        sincronização de papéis e canais pelos grupos do provedor.
+      <PageHead title="OAuth">{providers.length > 0 && newButton}</PageHead>
+      <p className="page-lead">
+        Login com contas externas: Google, GitHub, GitLab, Microsoft ou qualquer servidor OAuth 2.0 / OpenID Connect. Cada provedor ativo vira um botão na tela de login, com sincronização de papéis e
+        canais pelos grupos do provedor.
       </p>
-      {loading || presets.loading ? (
-        <Spinner />
+      {(loading && !data) || (presets.loading && !presets.data) ? (
+        <SkeletonTable rows={3} cols={4} />
       ) : !providers.length ? (
-        <Empty>Nenhum provedor configurado. Clique em “Novo provedor” para começar.</Empty>
+        <Empty icon="tokens" title="Nenhum provedor OAuth" action={newButton}>
+          Cada provedor ativo vira um botão “Entrar com…” na tela de login.
+        </Empty>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Botão</th>
-              <th>ID</th>
-              <th>Tipo</th>
-              <th>Status</th>
-              <th>URL de callback</th>
-            </tr>
-          </thead>
-          <tbody>
-            {providers.map((p) => (
-              <tr key={p._id} className="clickable" onClick={() => setEdit({ provider: p, preset: presetOf(p.type) })}>
-                <td>
-                  <ButtonPreview label={p.label} bg={p.buttonColor} fg={p.buttonTextColor} />
-                </td>
-                <td className="mono">{p._id}</td>
-                <td className="nowrap">
-                  {TYPE_ICON[p.type]} {presetOf(p.type)?.name ?? p.type}
-                </td>
-                <td>{p.enabled ? <span className="pill accent">ativo</span> : <span className="pill">desativado</span>}</td>
-                <td className="oauth-callback">
-                  <code className="small">{p.callbackUrl}</code>
-                  <button className="btn small" onClick={(e) => (e.stopPropagation(), void copyText(p.callbackUrl))}>
-                    Copiar
-                  </button>
-                </td>
+        <TableWrap>
+          <table className="table stack kv">
+            <thead>
+              <tr>
+                <th>Provedor</th>
+                <th>ID</th>
+                <th>Botão</th>
+                <th>Status</th>
+                <th>URL de callback</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {providers.map((p) => (
+                <tr key={p._id} className="clickable" onClick={() => setEdit({ provider: p, preset: presetOf(p.type) })}>
+                  <td>
+                    <div className="cell-entity">
+                      <span className="cell-icon provider">
+                        <ProviderIcon type={p.type} size={16} />
+                      </span>
+                      <span className="cell-name">{presetOf(p.type)?.name ?? p.type}</span>
+                    </div>
+                  </td>
+                  {/* td.mono com o id: o E2E do OAuth espera a linha por ele. */}
+                  <td className="mono muted" data-label="ID">
+                    {p._id}
+                  </td>
+                  <td data-label="Botão">
+                    <ButtonPreview label={p.label} bg={p.buttonColor} fg={p.buttonTextColor} />
+                  </td>
+                  <td data-label="Status">
+                    <ActivePill active={p.enabled} />
+                  </td>
+                  <td className="oauth-callback" data-label="Callback">
+                    <code className="small">{breakAtSlashes(p.callbackUrl)}</code>
+                    <button className="btn small ghost" title="Copiar URL de callback" aria-label="Copiar URL de callback" onClick={(e) => (e.stopPropagation(), void copyText(p.callbackUrl))}>
+                      <Icon name="copy" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
       )}
       {picking && (
         <Modal title="Novo provedor OAuth" onClose={() => setPicking(false)}>
           <div className="oauth-presets">
             {presetList.map((p) => (
-              <button key={p.type} className="card action" onClick={() => (setPicking(false), setEdit({ preset: p }))}>
-                <strong>
-                  {TYPE_ICON[p.type]} {p.name}
-                </strong>
-                <span className="muted small">{p.description}</span>
+              <button key={p.type} className="card action preset-card" onClick={() => (setPicking(false), setEdit({ preset: p }))}>
+                <span className="card-icon">
+                  <ProviderIcon type={p.type} size={20} />
+                </span>
+                <span className="preset-text">
+                  <strong>{p.name}</strong>
+                  <span className="muted small">{p.description}</span>
+                </span>
               </button>
             ))}
           </div>
@@ -235,7 +265,14 @@ function ProviderForm({ provider, preset, existingIds, onClose, onSaved }: { pro
   };
 
   const remove = async () => {
-    if (!provider || !confirmAction(`Excluir o provedor "${provider.label}"? As contas continuam existindo, mas não entram mais por este botão.`)) return;
+    if (!provider) return;
+    const yes = await confirmDialog({
+      title: `Excluir o provedor "${provider.label}"?`,
+      body: 'As contas continuam existindo, mas não entram mais por este botão.',
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!yes) return;
     try {
       await api.del(`oauth-providers/${encodeURIComponent(provider._id)}`);
       ok('Provedor excluído.');
@@ -250,15 +287,17 @@ function ProviderForm({ provider, preset, existingIds, onClose, onSaved }: { pro
     <Modal
       wide
       title={
-        <>
-          {TYPE_ICON[preset.type]} {isNew ? `Novo provedor: ${preset.name}` : provider.label}
-        </>
+        <span className="modal-title-icon">
+          <ProviderIcon type={preset.type} size={18} />
+          {isNew ? `Novo provedor: ${preset.name}` : provider.label}
+        </span>
       }
       onClose={onClose}
       footer={
         <>
           {!isNew && (
             <button className="btn danger" onClick={remove}>
+              <Icon name="delete" />
               Excluir
             </button>
           )}
@@ -305,7 +344,16 @@ function ProviderForm({ provider, preset, existingIds, onClose, onSaved }: { pro
           <Field label="Client ID">
             <input value={f.clientId} autoComplete="off" onChange={(e) => set({ clientId: e.target.value })} />
           </Field>
-          <Field label="Client secret" hint={secretSet ? 'Definido. Deixe em branco para manter o atual; ele nunca é exibido.' : clearSecret ? 'O segredo será removido ao salvar.' : 'Guardado só no servidor e nunca exibido depois de salvo.'}>
+          <Field
+            label="Client secret"
+            hint={
+              secretSet
+                ? 'Definido. Deixe em branco para manter o atual; ele nunca é exibido.'
+                : clearSecret
+                  ? 'O segredo será removido ao salvar.'
+                  : 'Guardado só no servidor e nunca exibido depois de salvo.'
+            }
+          >
             <div className="copy-box">
               <input
                 type="password"
@@ -336,8 +384,8 @@ function ProviderForm({ provider, preset, existingIds, onClose, onSaved }: { pro
           {!custom && <p className="muted small">Campos vazios usam os padrões do {preset.name}. Preencha só o que precisar sobrescrever.</p>}
           {!isNew && (
             <p className="muted small">
-              Trocar o servidor, o diretório ou as URLs desfaz os vínculos de contas deste provedor (o mesmo id pode ser outra pessoa em outro servidor). Cada usuário volta a ser
-              vinculado no próximo login, pelo e-mail confirmado, se a vinculação estiver ativa.
+              Trocar o servidor, o diretório ou as URLs desfaz os vínculos de contas deste provedor (o mesmo id pode ser outra pessoa em outro servidor). Cada usuário volta a ser vinculado no próximo
+              login, pelo e-mail confirmado, se a vinculação estiver ativa.
             </p>
           )}
           {preset.type === 'github' && (
@@ -426,21 +474,19 @@ function ProviderForm({ provider, preset, existingIds, onClose, onSaved }: { pro
         <div className="form">
           <Toggle checked={f.mergeUsers} onChange={(v) => set({ mergeUsers: v })} label="Vincular a contas existentes com o mesmo e-mail" />
           <p className="field-hint">
-            Só vincula quando o provedor confirma o e-mail (email_verified, ou o e-mail principal verificado no GitHub) e a conta existente também tem o e-mail confirmado
-            (Administração › Usuários › E-mail verificado). A conta vinculada mantém a origem e a senha. Sem a vinculação, um e-mail que já pertence a outra conta impede o login;
-            um nome de usuário já em uso recebe um sufixo, sem tocar na conta existente.
+            Só vincula quando o provedor confirma o e-mail (email_verified, ou o e-mail principal verificado no GitHub) e a conta existente também tem o e-mail confirmado (Administração › Usuários ›
+            E-mail verificado). A conta vinculada mantém a origem e a senha. Sem a vinculação, um e-mail que já pertence a outra conta impede o login; um nome de usuário já em uso recebe um sufixo,
+            sem tocar na conta existente.
           </p>
           {preset.type === 'microsoft' && (
             <p className="field-hint">
-              Microsoft: o Entra ID não envia email_verified. Para vincular contas, adicione o claim opcional xms_edov ao id_token (Registro de aplicativo › Configuração de token).
-              Com um diretório específico, o e-mail do diretório vale para os domínios permitidos de Contas.
+              Microsoft: o Entra ID não envia email_verified. Para vincular contas, adicione o claim opcional xms_edov ao id_token (Registro de aplicativo › Configuração de token). Com um diretório
+              específico, o e-mail do diretório vale para os domínios permitidos de Contas.
             </p>
           )}
           <Toggle checked={f.blockNewUsers} onChange={(v) => set({ blockNewUsers: v })} label="Bloquear criação de novos usuários" />
           <p className="field-hint">Com o bloqueio, só entra quem já tem conta vinculada (ou vinculável pelo e-mail).</p>
-          <p className="muted small">
-            Novos usuários seguem as regras de Contas: aprovação manual e domínios de e-mail permitidos. Usuários desativados não entram.
-          </p>
+          <p className="muted small">Novos usuários seguem as regras de Contas: aprovação manual e domínios de e-mail permitidos. Usuários desativados não entram.</p>
         </div>
       )}
       {tab === 'roles' && (
@@ -451,14 +497,20 @@ function ProviderForm({ provider, preset, existingIds, onClose, onSaved }: { pro
           <Toggle checked={f.syncRoles} onChange={(v) => set({ syncRoles: v })} label="Sincronizar papéis a cada login" />
           <Toggle checked={f.mergeRoles} onChange={(v) => set({ mergeRoles: v })} label="Mesclar papéis (manter os que não vêm do provedor)" />
           <p className="field-hint">
-            Mesclando, só os papéis gerenciados pelo provedor (os do mapa e os que ele concedeu antes) são adicionados ou removidos. Sem mesclar, os papéis do usuário passam a
-            ser exatamente os do provedor.
+            Mesclando, só os papéis gerenciados pelo provedor (os do mapa e os que ele concedeu antes) são adicionados ou removidos. Sem mesclar, os papéis do usuário passam a ser exatamente os do
+            provedor.
           </p>
           <Field
             label="Mapa valor do claim → papéis (JSON)"
             hint='Obrigatório para sincronizar: só os papéis listados aqui são concedidos (valores fora do mapa são ignorados). Só papéis existentes são aplicados e "user" é sempre mantido.'
           >
-            <textarea className="mono" rows={7} value={f.roleMapping} placeholder={'{\n  "chat-admins": ["admin"],\n  "suporte": ["livechat-agent"]\n}'} onChange={(e) => set({ roleMapping: e.target.value })} />
+            <textarea
+              className="mono"
+              rows={7}
+              value={f.roleMapping}
+              placeholder={'{\n  "chat-admins": ["admin"],\n  "suporte": ["livechat-agent"]\n}'}
+              onChange={(e) => set({ roleMapping: e.target.value })}
+            />
           </Field>
         </div>
       )}

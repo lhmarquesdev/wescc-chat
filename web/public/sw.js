@@ -18,7 +18,8 @@ self.addEventListener('push', (event) => {
       tag: data.tag || undefined,
       renotify: !!data.tag,
       icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
+      // Selo da barra de status do Android: só o alfa conta, por isso o símbolo branco sem fundo.
+      badge: '/icons/badge-96.png',
       data: { url },
     }),
   );
