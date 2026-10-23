@@ -1,0 +1,82 @@
+{
+  "issue": {
+    "id": "10004",
+    "key": "OPS-4",
+    "self": "https://explorer-teste.atlassian.net/rest/api/3/issue/10004",
+    "fields": {
+      "summary": "Migração dos ramais do andar 3",
+      "status": {
+        "self": "https://explorer-teste.atlassian.net/rest/api/3/status/3",
+        "name": "Em andamento",
+        "id": "3",
+        "statusCategory": {
+          "id": 4,
+          "key": "indeterminate",
+          "name": "Em andamento"
+        },
+        "iconUrl": "https://explorer-teste.atlassian.net/images/icons/status.png"
+      },
+      "issuetype": {
+        "self": "https://explorer-teste.atlassian.net/rest/api/3/issuetype/10002",
+        "id": "10002",
+        "name": "Tarefa",
+        "subtask": false,
+        "hierarchyLevel": 0,
+        "iconUrl": "https://explorer-teste.atlassian.net/icon/task.svg"
+      },
+      "priority": {
+        "self": "https://explorer-teste.atlassian.net/rest/api/3/priority/3",
+        "id": "3",
+        "name": "Média",
+        "iconUrl": "https://explorer-teste.atlassian.net/images/icons/priorities/medium.svg"
+      },
+      "assignee": null,
+      "reporter": {
+        "self": "https://explorer-teste.atlassian.net/rest/api/3/user?accountId=712020:00000000-0000-4000-8000-0000000000a1",
+        "accountId": "712020:00000000-0000-4000-8000-0000000000a1",
+        "displayName": "Ana Teste",
+        "active": true,
+        "timeZone": "America/Sao_Paulo",
+        "accountType": "atlassian"
+      },
+      "project": {
+        "self": "https://explorer-teste.atlassian.net/rest/api/3/project/10000",
+        "id": "10000",
+        "key": "OPS",
+        "name": "Operação",
+        "projectTypeKey": "software",
+        "avatarUrls": {
+          "48x48": "https://explorer-teste.atlassian.net/rest/api/3/universal_avatar/view/type/project/avatar/1"
+        }
+      },
+      "resolution": null,
+      "security": null,
+      "created": "2026-09-01T10:00:00.000-0300",
+      "updated": "2026-10-22T09:04:00.000-0300",
+      "labels": [],
+      "description": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "Descrição de teste."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "changelog": {
+      "startAt": 0,
+      "maxResults": 100,
+      "total": 250,
+      "histories": []
+    }
+  },
+  "total": 250,
+  "note": "O falso do Jira gera os 250 históricos: o mais novo muda o status no último minuto."
+}

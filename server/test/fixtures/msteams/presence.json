@@ -1,0 +1,8 @@
+{
+  "@odata.type": "#microsoft.graph.presence",
+  "id": "{{userId}}",
+  "availability": "{{availability}}",
+  "activity": "{{activity}}",
+  "statusMessage": null,
+  "outOfOfficeSettings": { "message": null, "isOutOfOffice": false }
+}

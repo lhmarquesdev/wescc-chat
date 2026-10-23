@@ -489,6 +489,11 @@ export async function syncEntry(s: SyncScope, entry: Entry): Promise<EntryOutcom
        WHERE id = $1 RETURNING *`,
       [user.id, name, newEmail, uid, entry.dn],
     );
+    // Integrações (Jira/Teams): e-mail que veio do diretório é confiável (reuniões e presença do Teams, D30).
+    if (row && email && newEmail && String(newEmail).toLowerCase() === email.toLowerCase() && !row.email_verified) {
+      await query('UPDATE users SET email_verified = true WHERE id = $1', [user.id]);
+      row.email_verified = true;
+    }
     if (name !== user.name) {
       await query('UPDATE messages SET user_name = $2 WHERE user_id = $1', [user.id, name]);
       publish = true;

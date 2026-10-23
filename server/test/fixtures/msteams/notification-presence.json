@@ -1,0 +1,13 @@
+{
+  "value": [
+    {
+      "subscriptionId": "{{subscriptionId}}",
+      "changeType": "updated",
+      "clientState": "{{clientState}}",
+      "subscriptionExpirationDateTime": "{{expires}}",
+      "resource": "communications/presences('{{userId}}')",
+      "resourceData": { "@odata.type": "#Microsoft.Graph.presence", "@odata.id": "communications/presences('{{userId}}')", "id": "{{userId}}" },
+      "tenantId": "{{tenantId}}"
+    }
+  ]
+}

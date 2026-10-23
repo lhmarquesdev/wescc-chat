@@ -4,6 +4,7 @@
 //   trava curta das entradas, sempre depois da trava da chamada)
 //   727111 figurinhas (limpeza diária)
 //   727120–727124 integrações Jira/Teams
+//   727125 integrações: reserva da fila de tarefas (pg_advisory_xact_lock, só na transação curta da reserva)
 import cron from 'node-cron';
 import { pool, query } from './db/pool';
 import { recoverInterrupted } from './importer/operations';
@@ -11,6 +12,7 @@ import { bus } from './realtime/bus';
 import { cleanupStaleConnections } from './realtime/ws';
 import { runRetention } from './services/retention';
 import { getSetting } from './services/settings';
+import { startIntegrationsRuntime } from './integrations/runtime'; // Integrações (Jira/Teams)
 
 // Tarefas periódicas. Cada tarefa usa um advisory lock para rodar em uma só instância.
 export async function withLock(key: number, fn: () => Promise<unknown>) {
@@ -78,6 +80,9 @@ export function startScheduler(log: (m: string) => void) {
     }).catch((e) => log(`limpeza de figurinhas falhou: ${e.message}`));
   tasks.push(cron.schedule('30 3 * * *', runStickersGc));
   const stickersBoot = setTimeout(runStickersGc, 60_000); // termina o que um desligamento deixou na lixeira
+
+  // Integrações (Jira/Teams)
+  tasks.push(startIntegrationsRuntime(log));
 
   let retentionExpr = '';
   let retentionTask: { stop(): void } | null = null;

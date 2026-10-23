@@ -1,0 +1,55 @@
+{
+  "id": "{{id}}",
+  "replyToId": null,
+  "etag": "{{id}}",
+  "messageType": "message",
+  "createdDateTime": "{{at}}",
+  "lastModifiedDateTime": "{{at}}",
+  "lastEditedDateTime": null,
+  "deletedDateTime": null,
+  "subject": null,
+  "summary": null,
+  "chatId": null,
+  "importance": "normal",
+  "locale": "pt-br",
+  "webUrl": "https://teams.microsoft.com/l/message/{{channelIdEnc}}/{{id}}?groupId={{teamId}}&tenantId={{tenantId}}&createdTime={{id}}&parentMessageId={{id}}",
+  "policyViolation": null,
+  "eventDetail": null,
+  "from": {
+    "application": null,
+    "device": null,
+    "user": {
+      "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+      "id": "{{authorId}}",
+      "displayName": "{{authorName}}",
+      "userIdentityType": "aadUser",
+      "tenantId": "{{tenantId}}"
+    }
+  },
+  "body": {
+    "contentType": "html",
+    "content": "<p><at id=\"0\">Bruno Teste</at>, a fila de <strong>retenção</strong> voltou ao normal. Painel: <a href=\"https://explorer.sharepoint.com/sites/ops/painel.aspx\" title=\"https://explorer.sharepoint.com/sites/ops/painel.aspx\">painel da operação</a> <emoji id=\"1f44d_thumbsup\" alt=\"👍\" title=\"Curtir\"></emoji></p>"
+  },
+  "channelIdentity": { "teamId": "{{teamId}}", "channelId": "{{channelId}}" },
+  "attachments": [],
+  "mentions": [
+    {
+      "id": 0,
+      "mentionText": "Bruno Teste",
+      "mentioned": {
+        "application": null,
+        "device": null,
+        "conversation": null,
+        "tag": null,
+        "user": {
+          "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+          "id": "00000000-0000-4000-8000-0000000000c2",
+          "displayName": "Bruno Teste",
+          "userIdentityType": "aadUser",
+          "tenantId": "{{tenantId}}"
+        }
+      }
+    }
+  ],
+  "reactions": []
+}

@@ -1,0 +1,9 @@
+{
+  "error": "invalid_grant",
+  "error_description": "AADSTS50173: The provided grant has expired due to it being revoked, a fresh auth token is needed. The user might have changed or reset their password. Trace ID: 00000000-0000-4000-8000-0000000000e3 Correlation ID: 00000000-0000-4000-8000-0000000000e4 Timestamp: 2026-10-22 12:00:00Z",
+  "error_codes": [50173],
+  "timestamp": "2026-10-22 12:00:00Z",
+  "trace_id": "00000000-0000-4000-8000-0000000000e3",
+  "correlation_id": "00000000-0000-4000-8000-0000000000e4",
+  "suberror": "bad_token"
+}

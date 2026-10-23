@@ -1,6 +1,8 @@
 // Tipos compartilhados entre servidor e cliente web.
 
 import type { MessageSticker } from './stickers';
+// Integrações (Jira/Teams)
+import type { EphemeralMessage, ExternalPresence, IntegrationAlert, MessageBridge, MessageJira, MessageMeeting } from './integrations';
 
 export type UserStatus = 'online' | 'away' | 'busy' | 'offline';
 export type RoomType = 'c' | 'p' | 'd' | 'l';
@@ -218,6 +220,11 @@ export interface Message {
   alias?: string;
   emoji?: string;
   avatar?: string;
+  // Integrações (Jira/Teams): conteúdo gerado pelo servidor (messages.extra)
+  jira?: MessageJira;
+  meeting?: MessageMeeting;
+  bridge?: MessageBridge;
+  jiraNoPreview?: boolean; // o autor removeu a prévia; edições não a recriam
 }
 
 export interface NoticeAcks {
@@ -389,6 +396,11 @@ export type ServerEvent =
   | { type: 'import.progress'; operation: ImportProgress }
   | { type: 'stickers.changed'; scope: 'org' | 'mine' }
   | { type: 'sticker.removed'; fileId: string }
+  // Integrações (Jira/Teams)
+  | { type: 'ephemeral'; message: EphemeralMessage }
+  | { type: 'integrations.changed'; scope: 'config' | 'account' }
+  | { type: 'presence.external'; userId: string; presence: ExternalPresence | null }
+  | { type: 'integrations.alert'; alert: IntegrationAlert }
   | { type: 'pong' };
 
 // ---------- Importação de dados ----------

@@ -1,0 +1,26 @@
+{
+  "messageType": "message",
+  "from": {
+    "application": {
+      "@odata.type": "#microsoft.graph.teamworkApplicationIdentity",
+      "id": "00000000-0000-4000-8000-0000000000f1",
+      "displayName": "Workflows",
+      "applicationIdentityType": "bot"
+    },
+    "device": null,
+    "user": null
+  },
+  "body": { "contentType": "html", "content": "<attachment id=\"a1b2c3d4e5f60718293a4b5c6d7e8f90\"></attachment>" },
+  "attachments": [
+    {
+      "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "contentUrl": null,
+      "content": "{\"type\":\"AdaptiveCard\",\"version\":\"1.4\",\"body\":[{\"type\":\"TextBlock\",\"text\":\"Cartão publicado pelo robô do Workflows\"}]}",
+      "name": null,
+      "thumbnailUrl": null
+    }
+  ],
+  "mentions": [],
+  "reactions": []
+}

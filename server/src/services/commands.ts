@@ -25,12 +25,19 @@ export interface SlashCommand {
   params: string;
   description: string;
   run(ctx: Ctx, room: any, args: string, tmid: string | null): Promise<unknown>;
+  // Integrações (Jira/Teams): esconde o comando da lista e da ajuda para quem não pode usá-lo.
+  visible?: (ctx: Ctx) => boolean | Promise<boolean>;
 }
 
 const commands = new Map<string, SlashCommand>();
 
 function reg(command: string, params: string, description: string, run: SlashCommand['run']) {
   commands.set(command, { command, params, description, run });
+}
+
+// Integrações (Jira/Teams): módulos registram os próprios comandos.
+export function registerCommand(cmd: SlashCommand) {
+  commands.set(cmd.command, cmd);
 }
 
 const usernames = (s: string) => [...s.matchAll(/@?([0-9a-zA-Z._-]+)/g)].map((m) => m[1]);
@@ -185,13 +192,18 @@ reg('jitsi', '', 'Link de videoconferência do Jitsi', async (ctx, room, _args, 
   return jitsiLink(ctx, room, tmid);
 });
 reg('help', '', 'Listar comandos', async (ctx) => {
-  const lines = [...commands.values()].map((c) => `/${c.command} ${c.params} — ${c.description}`);
+  const lines = (await listCommands(ctx)).map((c) => `/${c.command} ${c.params} — ${c.description}`);
   bus.publish({ user: ctx.userId }, { type: 'notification', rid: '', title: 'Comandos disponíveis', text: lines.join('\n'), messageId: '', sender: { _id: 'system', username: 'system' } });
   return ok('help');
 });
 
-export function listCommands() {
-  return [...commands.values()].map(({ command, params, description }) => ({ command, params, description }));
+export async function listCommands(ctx?: Ctx) {
+  const out = [];
+  for (const c of commands.values()) {
+    if (c.visible && (!ctx || !(await c.visible(ctx)))) continue;
+    out.push({ command: c.command, params: c.params, description: c.description });
+  }
+  return out;
 }
 
 // Retorna false quando não é um comando conhecido (a mensagem segue como texto).

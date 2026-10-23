@@ -1,0 +1,112 @@
+{
+  "timestamp": 1792670460000,
+  "webhookEvent": "jira:issue_updated",
+  "issue_event_type_name": "issue_generic",
+  "user": {
+    "self": "https://explorer-teste.atlassian.net/rest/api/3/user?accountId=712020:00000000-0000-4000-8000-0000000000b2",
+    "accountId": "712020:00000000-0000-4000-8000-0000000000b2",
+    "displayName": "Bruno Teste",
+    "active": true,
+    "timeZone": "America/Sao_Paulo",
+    "accountType": "atlassian"
+  },
+  "issue": {
+    "id": "10001",
+    "key": "OPS-1",
+    "self": "https://explorer-teste.atlassian.net/rest/api/3/issue/10001",
+    "fields": {
+      "summary": "Fila de atendimento parada no turno da noite",
+      "status": {
+        "self": "https://explorer-teste.atlassian.net/rest/api/3/status/10002",
+        "name": "Concluído",
+        "id": "10002",
+        "statusCategory": {
+          "id": 3,
+          "key": "done",
+          "name": "Itens concluídos"
+        },
+        "iconUrl": "https://explorer-teste.atlassian.net/images/icons/status.png"
+      },
+      "issuetype": {
+        "self": "https://explorer-teste.atlassian.net/rest/api/3/issuetype/10002",
+        "id": "10002",
+        "name": "Tarefa",
+        "subtask": false,
+        "hierarchyLevel": 0,
+        "iconUrl": "https://explorer-teste.atlassian.net/icon/task.svg"
+      },
+      "priority": {
+        "self": "https://explorer-teste.atlassian.net/rest/api/3/priority/3",
+        "id": "3",
+        "name": "Média",
+        "iconUrl": "https://explorer-teste.atlassian.net/images/icons/priorities/medium.svg"
+      },
+      "assignee": null,
+      "reporter": {
+        "self": "https://explorer-teste.atlassian.net/rest/api/3/user?accountId=712020:00000000-0000-4000-8000-0000000000a1",
+        "accountId": "712020:00000000-0000-4000-8000-0000000000a1",
+        "displayName": "Ana Teste",
+        "active": true,
+        "timeZone": "America/Sao_Paulo",
+        "accountType": "atlassian"
+      },
+      "project": {
+        "self": "https://explorer-teste.atlassian.net/rest/api/3/project/10000",
+        "id": "10000",
+        "key": "OPS",
+        "name": "Operação",
+        "projectTypeKey": "software",
+        "avatarUrls": {
+          "48x48": "https://explorer-teste.atlassian.net/rest/api/3/universal_avatar/view/type/project/avatar/1"
+        }
+      },
+      "resolution": {
+        "self": "https://explorer-teste.atlassian.net/rest/api/3/resolution/10000",
+        "id": "10000",
+        "name": "Feito"
+      },
+      "security": null,
+      "created": "2026-10-22T09:00:00.000-0300",
+      "updated": "2026-10-22T09:05:00.000-0300",
+      "labels": [],
+      "description": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "Descrição de teste."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "changelog": {
+    "id": "20001",
+    "items": [
+      {
+        "field": "resolution",
+        "fieldtype": "jira",
+        "fieldId": "resolution",
+        "from": null,
+        "fromString": null,
+        "to": "10000",
+        "toString": "Feito"
+      },
+      {
+        "field": "status",
+        "fieldtype": "jira",
+        "fieldId": "status",
+        "from": "3",
+        "fromString": "Em andamento",
+        "to": "10002",
+        "toString": "Concluído"
+      }
+    ]
+  }
+}

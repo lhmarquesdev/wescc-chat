@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import type { Setting, SettingType } from '@shared/index';
+import { jiraSiteAllowed, parseAllowedHosts } from '@shared/integrations';
 import { config } from '../config';
 import { many, query } from '../db/pool';
 import { bus } from '../realtime/bus';
@@ -383,6 +384,92 @@ add('Integrations', 'Scripts', 'Integrations_Scripts_Enabled', 'boolean', false,
   label: 'Permitir scripts nas integrações (código JavaScript escrito por administradores)',
 });
 add('Integrations', 'Outgoing', 'Integrations_Outgoing_Timeout', 'int', 10, { label: 'Tempo limite das chamadas de saída (segundos)' });
+
+// Integrações (Jira/Teams): telas próprias em Administração → Integrações. Segredos ficam em integration_secrets (cifrados).
+// Nenhuma destas configurações é pública (settings.public não pede login); o cliente logado usa integrations.me.
+// O host do Jira é conferido aqui, em jira.config.save e de novo a cada uso (D25).
+function validateSiteUrl(v: unknown): string | null {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+  const r = jiraSiteAllowed(s, parseAllowedHosts(process.env.INTEGRATIONS_ALLOWED_HOSTS));
+  return 'problem' in r ? r.problem : null;
+}
+function validateProjectKeys(v: unknown): string | null {
+  const keys = String(v ?? '').split(/[\s,;]+/).filter(Boolean);
+  if (keys.length > 50) return 'No máximo 50 projetos.';
+  const bad = keys.find((k) => !/^[A-Za-z][A-Za-z0-9_]{0,19}$/.test(k));
+  return bad ? `Chave de projeto inválida: ${bad}. Use as chaves, por exemplo OPS, SUP.` : null;
+}
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const validateGuid = (v: unknown) => (!String(v ?? '').trim() || GUID.test(String(v).trim()) ? null : 'Use o ID no formato 00000000-0000-0000-0000-000000000000.');
+
+add('Jira', 'Conexão', 'Jira_Enabled', 'boolean', false, { label: 'Ativar a integração com o Jira' });
+add('Jira', 'Conexão', 'Jira_Site_Url', 'string', '', { label: 'Endereço do Jira', validate: validateSiteUrl });
+add('Jira', 'Conexão', 'Jira_Auth_Type', 'select', 'scoped', {
+  label: 'Tipo de conta da integração',
+  values: [
+    { key: 'scoped', label: 'Conta de serviço com token com escopos (recomendado)' },
+    { key: 'basic', label: 'Token de API de uma conta comum' },
+  ],
+});
+add('Jira', 'Conexão', 'Jira_Account_Email', 'string', '', { label: 'E-mail da conta da integração' });
+add('Jira', 'Conexão', 'Jira_Cloud_Id', 'string', '', { label: 'ID do site (cloudId), preenchido ao testar a conexão' });
+add('Jira', 'Contas', 'Jira_User_Auth', 'select', 'token', {
+  label: 'Como cada pessoa conecta a própria conta',
+  values: [
+    { key: 'oauth', label: 'Entrar com a Atlassian (OAuth 2.0, recomendado)' },
+    { key: 'token', label: 'Token de API pessoal' },
+    { key: 'off', label: 'Ninguém conecta (só a conta da integração)' },
+  ],
+});
+add('Jira', 'Contas', 'Jira_OAuth_Client_Id', 'string', '', { label: 'Client ID do aplicativo OAuth da Atlassian' });
+add('Jira', 'Contas', 'Jira_Create_As_Integration', 'boolean', false, { label: 'Quem não conectou a conta cria issues pela conta da integração' });
+add('Jira', 'Avisos', 'Jira_Events_Mode', 'select', 'polling', {
+  label: 'Como o chat fica sabendo das mudanças',
+  values: [
+    { key: 'polling', label: 'Consulta periódica (não precisa de endereço público)' },
+    { key: 'webhook', label: 'Webhook do Jira (precisa de https público)' },
+  ],
+});
+add('Jira', 'Avisos', 'Jira_Poll_Minutes', 'int', 2, { label: 'Intervalo da consulta (minutos)', validate: intRange(1, 15) });
+add('Jira', 'Chat', 'Jira_Unfurl_Enabled', 'boolean', true, { label: 'Mostrar prévia das issues citadas nas mensagens' });
+add('Jira', 'Chat', 'Jira_Unfurl_Max', 'int', 3, { label: 'Prévias por mensagem', validate: intRange(1, 5) });
+add('Jira', 'Chat', 'Jira_Projects_Visible', 'string', '', { label: 'Projetos visíveis para toda a empresa (prévias)', validate: validateProjectKeys });
+add('Jira', 'Chat', 'Jira_Projects_Create', 'string', '', { label: 'Projetos em que o chat cria issues (vazio = todos que a pessoa pode)', validate: validateProjectKeys });
+add('Jira', 'Chat', 'Jira_Default_Project', 'string', '', { label: 'Projeto sugerido ao criar issues', validate: validateProjectKeys });
+
+add('MSTeams', 'Conexão', 'MSTeams_Enabled', 'boolean', false, { label: 'Ativar a integração com o Microsoft Teams' });
+add('MSTeams', 'Conexão', 'MSTeams_Tenant_Id', 'string', '', { label: 'ID do locatário (Directory/tenant ID)', validate: validateGuid });
+add('MSTeams', 'Conexão', 'MSTeams_Client_Id', 'string', '', { label: 'ID do aplicativo (Application/client ID)', validate: validateGuid });
+// 'polling' só é gravado por msteams.config.save com acceptPolling: true (auditado); a tela genérica esconde o grupo.
+add('MSTeams', 'Mensagens', 'MSTeams_Inbound_Mode', 'select', 'off', {
+  label: 'Como as mensagens do Teams chegam ao chat',
+  values: [
+    { key: 'off', label: 'Desligado' },
+    { key: 'notifications', label: 'Notificações do Microsoft 365 (precisa de https público)' },
+    { key: 'polling', label: 'Consulta periódica (contra a recomendação da Microsoft)' },
+  ],
+});
+add('MSTeams', 'Mensagens', 'MSTeams_Poll_Minutes', 'int', 2, { label: 'Intervalo da consulta aos canais do Teams (minutos)', validate: intRange(1, 15) });
+add('MSTeams', 'Reuniões', 'MSTeams_Meetings_Mode', 'select', 'links', {
+  label: 'Reuniões do Teams nas salas',
+  values: [
+    { key: 'off', label: 'Desligado' },
+    { key: 'links', label: 'Colar link e agendar pelo Teams' },
+    { key: 'graph', label: 'Também criar a reunião na hora (precisa de permissão no Microsoft 365)' },
+  ],
+});
+add('MSTeams', 'Reuniões', 'MSTeams_Meeting_Lobby', 'select', 'organization', {
+  label: 'Quem entra direto, sem sala de espera',
+  values: [
+    { key: 'organization', label: 'Pessoas da organização' },
+    { key: 'everyone', label: 'Todos' },
+    { key: 'organizer', label: 'Só o organizador' },
+  ],
+});
+add('MSTeams', 'Reuniões', 'MSTeams_Meeting_Minutes', 'int', 30, { label: 'Duração padrão (minutos)', validate: intRange(15, 240) });
+add('MSTeams', 'Presença', 'MSTeams_Presence_Enabled', 'boolean', false, { label: 'Mostrar a presença do Teams no chat' });
+add('MSTeams', 'Presença', 'MSTeams_Presence_Minutes', 'int', 5, { label: 'Intervalo de leitura da presença no modo consulta (minutos)', validate: intRange(5, 30) });
 
 const cache = new Map<string, unknown>();
 

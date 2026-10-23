@@ -1,4 +1,5 @@
 import type { Attachment, MessageFile, UserRef } from '@shared/index';
+import type { MessageBridge, MessageJira, MessageMeeting } from '@shared/integrations';
 import { messagePreviewText, stickerPreviewText, type MessageSticker } from '@shared/stickers';
 import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
@@ -95,6 +96,11 @@ export interface SendInput {
   avatar?: string;
   customFields?: Record<string, unknown>;
   ackRequired?: boolean; // aviso que pede "Ciente"
+  // Integrações (Jira/Teams): só valem com opts.integration (código do servidor); chat.sendMessage nunca os repassa.
+  jira?: MessageJira;
+  meeting?: MessageMeeting;
+  bridge?: MessageBridge;
+  mentionsAllowed?: string[]; // usernames que podem virar menção numa mensagem de integração (só o responsável da issue)
   sticker?: MessageSticker; // figurinha (só chat.sendSticker preenche, com opts.sticker)
 }
 
@@ -191,7 +197,7 @@ export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Atta
 
 // trusted: mensagens de integrações, que podem definir apelido e avatar próprios.
 // internalAttachments: anexos montados pelo próprio servidor (upload de arquivo).
-export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipCommands?: boolean; trusted?: boolean; internalAttachments?: boolean; sticker?: boolean } = {}) {
+export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipCommands?: boolean; trusted?: boolean; internalAttachments?: boolean; sticker?: boolean; integration?: boolean } = {}) {
   const sticker = opts.sticker ? input.sticker : undefined; // só o servidor monta figurinhas
   const room = await getRoom(input.rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
@@ -200,7 +206,8 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
   const max = getSetting<number>('Message_MaxAllowedSize');
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
   const attachments = opts.internalAttachments ? (input.attachments ?? []) : await sanitizeAttachments(ctx, input.attachments);
-  if (!msg && !attachments.length && !input.files?.length && !sticker) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  const rich = opts.integration && (input.jira || input.meeting);
+  if (!msg && !attachments.length && !input.files?.length && !sticker && !rich) throw badRequest('error-invalid-message', 'Mensagem vazia.');
   if (sticker && (msg || input.ackRequired)) throw badRequest('error-invalid-message', 'Figurinha não leva texto nem pede “Ciente”.');
   if (input.ackRequired && (!room.notice || !room.notice_ack || input.tmid)) {
     throw badRequest('error-ack-not-allowed', 'Só avisos de um canal de avisos com “Ciente” ativado podem pedir confirmação.');
@@ -228,7 +235,13 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
   }
 
   msg = filterBadWords(msg);
-  const { mentions, channels } = await parseMentions(msg, room);
+  let { mentions, channels } = await parseMentions(msg, room);
+  // Integrações (Jira/Teams): texto de fora não menciona ninguém; só o responsável escolhido pelo servidor. Nunca @all, @here, times ou #sala.
+  if (opts.integration) {
+    const allowed = new Set((input.mentionsAllowed ?? []).map((u) => u.toLowerCase()));
+    mentions = mentions.filter((m: any) => m._id !== 'all' && m._id !== 'here' && m.type !== 'team' && allowed.has(String(m.username).toLowerCase()));
+    channels = [];
+  }
   const mentionAll = mentions.some((m) => m._id === 'all');
   const mentionHere = mentions.some((m) => m._id === 'here');
   if (mentionAll && !rolesHavePermission(roles, 'mention-all')) throw forbidden('Sem permissão para mencionar @all.');
@@ -243,6 +256,12 @@ export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipComman
   const extra: Record<string, unknown> = {};
   if (input.tshow && tmid) extra.tshow = true;
   if (input.customFields) extra.customFields = input.customFields;
+  // Integrações (Jira/Teams)
+  if (opts.integration) {
+    if (input.jira) extra.jira = input.jira;
+    if (input.meeting) extra.meeting = input.meeting;
+    if (input.bridge) extra.bridge = input.bridge;
+  }
   if (sticker) extra.sticker = sticker;
   const row = await one(
     `INSERT INTO messages (id, room_id, user_id, username, user_name, msg, tmid, mentions, channels, attachments, files, alias, emoji, avatar, extra, unread, ack_required, sticker_file_id)
@@ -419,7 +438,8 @@ export async function removeMessageRow(m: any) {
     // Raiz de thread com respostas: mantém o lugar como "mensagem removida", sem o pedido de "Ciente" nem as confirmações.
     const row = await one(
       `UPDATE messages SET msg = '', t = 'rm', attachments = '[]', files = '[]', reactions = '{}', ack_required = false, ack_count = 0,
-         extra = extra - 'sticker', sticker_file_id = NULL, updated_at = now()
+         -- Integrações (Jira/Teams): mensagem removida não guarda cartão
+         extra = extra - 'sticker' - 'jira' - 'meeting' - 'bridge', sticker_file_id = NULL, updated_at = now()
        WHERE id = $1 RETURNING *`,
       [m.id],
     );
@@ -445,6 +465,38 @@ export async function removeMessageRow(m: any) {
     await query('UPDATE rooms SET last_message = $2, updated_at = now() WHERE id = $1', [m.room_id, lm ? JSON.stringify(lm) : null]);
     await notifyRoomUpdated(m.room_id);
   }
+}
+
+// Integrações (Jira/Teams): grava ou remove uma chave de extra sem marcar a mensagem como editada (prévias, cartões).
+export async function setMessageExtra(msgId: string, key: 'jira' | 'meeting' | 'bridge' | 'jiraNoPreview', value: unknown) {
+  const row =
+    value === null || value === undefined
+      ? await one(`UPDATE messages SET extra = extra - $2, updated_at = now() WHERE id = $1 RETURNING *`, [msgId, key])
+      : await one(`UPDATE messages SET extra = jsonb_set(extra, ARRAY[$2::text], $3::jsonb), updated_at = now() WHERE id = $1 RETURNING *`, [msgId, key, JSON.stringify(value)]);
+  if (row) bus.publish({ room: row.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
+  return row;
+}
+
+// Integrações (Jira/Teams): edição espelhada de outro sistema (Teams). Sem as regras de tempo de edição, sem menções.
+export async function replaceMessageText(msgId: string, text: string, editor: { id: string; username: string }, extra: Record<string, unknown> = {}) {
+  const m = await getMessageRow(msgId);
+  if (!m || m.t) return null;
+  const msg = filterBadWords(text.trim()).slice(0, getSetting<number>('Message_MaxAllowedSize'));
+  if (getSetting('Message_KeepHistory')) {
+    await query('INSERT INTO message_history (message_id, room_id, msg, edited_by) VALUES ($1,$2,$3,$4)', [m.id, m.room_id, m.msg, editor.id]);
+  }
+  const row = await one(
+    `UPDATE messages SET msg = $2, mentions = '[]', channels = '[]', extra = extra || $4::jsonb, edited_at = now(), edited_by = $3, updated_at = now() WHERE id = $1 RETURNING *`,
+    [m.id, msg, JSON.stringify({ _id: editor.id, username: editor.username }), JSON.stringify(extra)],
+  );
+  const room = await getRoom(m.room_id);
+  if (room?.last_message?._id === m.id) {
+    await query(`UPDATE rooms SET last_message = jsonb_set(last_message, '{msg}', to_jsonb($2::text)) WHERE id = $1`, [room.id, truncate(msg, 200)]);
+  }
+  const message = withExtra(row);
+  bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message });
+  emit('message.updated', { room, message });
+  return message;
 }
 
 // ---------- Reações, fixar, favoritar ----------

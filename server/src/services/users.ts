@@ -552,6 +552,18 @@ export async function setStatus(userId: string, status: UserStatus | undefined, 
   if (row) bus.publish({ all: true }, { type: 'presence', userId: row.id, username: row.username, status: row.status, statusText: row.status_text });
 }
 
+// Integrações (Jira/Teams): status passageiro (ex.: "Em reunião no Teams"). Muda status e status_text, nunca status_default,
+// então a escolha da pessoa continua valendo quando ela reconecta ou volta de ausente (F10).
+export async function setStatusTransient(userId: string, status: UserStatus | undefined, statusText?: string) {
+  const sets: string[] = [];
+  const params: unknown[] = [userId];
+  if (status) sets.push(`status = CASE WHEN EXISTS (SELECT 1 FROM presence_connections WHERE user_id = $1) THEN $${params.push(status)} ELSE 'offline' END`);
+  if (statusText !== undefined) sets.push(`status_text = $${params.push(statusText.slice(0, 120))}`);
+  if (!sets.length) return;
+  const row = await one(`UPDATE users SET ${sets.join(', ')} WHERE id = $1 RETURNING id, username, status, status_text`, params);
+  if (row) bus.publish({ all: true }, { type: 'presence', userId: row.id, username: row.username, status: row.status, statusText: row.status_text });
+}
+
 export async function deleteUser(actor: Ctx, userId: string, opts: { confirmRelinquish?: boolean } = {}) {
   const u = await getUserById(userId);
   if (!u) throw notFound('error-invalid-user', 'Usuário não encontrado.');

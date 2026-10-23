@@ -92,6 +92,10 @@ export function route(app: FastifyInstance, method: 'GET' | 'POST' | 'PUT' | 'DE
 }
 
 export function errorHandler(err: any, req: FastifyRequest, reply: FastifyReply) {
+  // Integrações (Jira/Teams): o banco recusa excluir o robô de uma regra (gatilho integration_bot_guard).
+  if (err?.code === 'WI001') {
+    return reply.status(400).send({ success: false, error: err.message, errorType: 'error-integration-bot' });
+  }
   if (err instanceof ApiError) {
     return reply.status(err.statusCode).send({ success: false, error: err.message, errorType: err.errorType, details: err.details });
   }
