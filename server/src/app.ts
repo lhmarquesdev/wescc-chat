@@ -1,7 +1,10 @@
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import type http from 'node:http';
+import type https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
@@ -16,19 +19,35 @@ import { usersRoutes } from './api/users';
 import { registerWebsocket } from './realtime/ws';
 import { isCorsOriginAllowed } from './services/origins';
 import { getSetting } from './services/settings';
+import { MAX_HEADER_SIZE, safeReq } from './tls';
 
-export async function buildApp(opts: { logger?: boolean } = {}) {
-  const app = Fastify({
-    logger: opts.logger === false ? false : { level: config.logLevel },
-    trustProxy: true,
+export async function buildApp(opts: { logger?: boolean; https?: https.ServerOptions | null } = {}) {
+  const base = {
+    logger: opts.logger === false ? false : { level: config.logLevel, serializers: { req: safeReq } },
+    // Com HTTPS próprio não há proxy na frente: X-Forwarded-For só vale de quem TRUST_PROXY indicar.
+    trustProxy: config.trustProxy,
     bodyLimit: 2 * 1024 * 1024,
-  });
+  };
+  // maxHeaderSize: o livekit-client põe a oferta SDP compactada na consulta do /sfu, e o Node conta a linha da
+  // requisição nos 16 KiB padrão.
+  const app = (opts.https
+    ? Fastify({ ...base, https: { maxHeaderSize: MAX_HEADER_SIZE, ...opts.https } })
+    : Fastify({ ...base, http: { maxHeaderSize: MAX_HEADER_SIZE } })) as unknown as FastifyInstance;
 
   // Sem cookies entre sites (o cookie de sessão só vale para leituras na mesma origem); outros sites só com CORS ligado.
   await app.register(cors, { origin: (origin, cb) => cb(null, isCorsOriginAllowed(origin)), credentials: false });
   // Campos de texto limitados em todas as rotas multipart (o padrão do busboy é 1 MB por campo, sem limite de quantidade).
   await app.register(multipart, { limits: { fileSize: 1024 * 1024 * 1024, files: 1, fields: 20, parts: 21, fieldSize: 64 * 1024 } });
-  await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
+  // Upgrades do /sfu vão para a ponte do servidor de chamadas (servidor ws próprio, 1 MiB por quadro); os demais
+  // seguem para o @fastify/websocket com 64 KiB, como antes.
+  const chatUpgrades = new EventEmitter();
+  await app.register(websocket, { options: { maxPayload: 64 * 1024, server: chatUpgrades as unknown as http.Server } });
+  const { isSfuUpgrade, sfuUpgrade, useBridgeLogger } = await import('./calls/sfu-bridge');
+  useBridgeLogger(app.log);
+  app.server.on('upgrade', (req, socket, head) => {
+    if (isSfuUpgrade(req.url)) sfuUpgrade(req, socket, head);
+    else chatUpgrades.emit('upgrade', req, socket, head);
+  });
   await app.register(rateLimit, {
     global: true,
     max: () => (getSetting('API_Enable_Rate_Limiter') ? getSetting<number>('API_Enable_Rate_Limiter_Limit_Calls_Default') : 1_000_000),
@@ -61,6 +80,8 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   oauthRoutes(app);
   const { callsRoutes } = await import('./api/calls');
   callsRoutes(app);
+  const { sfuRoutes } = await import('./calls/sfu-api');
+  sfuRoutes(app);
   const { ldapRoutes } = await import('./ldap/api');
   ldapRoutes(app);
   const { importRoutes } = await import('./importer/api');

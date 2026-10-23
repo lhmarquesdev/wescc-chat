@@ -113,7 +113,10 @@ export const DEFAULT_PERMISSIONS: [string, string, string[]][] = [
   ['mention-here', 'rooms', [A, O, M, U]],
   ['view-other-user-channels', 'rooms', [A]],
   ['view-room-members', 'rooms', [A, U, B]],
-  ['call-management', 'rooms', [A, O, M]],
+  ['call-management', 'rooms', [A, O, M, U]],
+  ['videoconf-ring-users', 'rooms', [A, O, M]],
+  ['moderate-call', 'rooms', [A, O, M]],
+  ['manage-calls', 'admin', [A]],
   // Mensagens
   ['post-readonly', 'messages', [A, O, M]],
   ['edit-message', 'messages', [A, O, M]],

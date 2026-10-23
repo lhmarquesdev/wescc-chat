@@ -1,6 +1,8 @@
 // Chaves de advisory lock (pg_try_advisory_lock): uma por tarefa, nunca repetida. Quem criar tarefa nova anota aqui.
 //   727001 migrações · 727101 limpeza (a cada minuto) · 727102 retenção · 727103 LDAP · 727104 omnichannel
-//   727105 importação · 727110 chamadas em grupo · 727111 figurinhas (limpeza diária)
+//   727105 importação · 727110 chamadas (varredura a cada 10 s; com hashtext(id), a trava de cada chamada; com 0, a
+//   trava curta das entradas, sempre depois da trava da chamada)
+//   727111 figurinhas (limpeza diária)
 //   727120–727124 integrações Jira/Teams
 import cron from 'node-cron';
 import { pool, query } from './db/pool';
@@ -56,10 +58,16 @@ export function startScheduler(log: (m: string) => void) {
     void withLock(727104, async () => {
       const { runOmnichannelTimers } = await import('./omnichannel/service');
       await runOmnichannelTimers();
-      const { sweepCalls } = await import('./services/calls');
-      await sweepCalls();
     }).catch((e) => log(`omnichannel falhou: ${e.message}`));
   }, 30_000);
+
+  // Chamadas: toques vencidos, presença no servidor de chamadas, travas, chamadas abandonadas e histórico.
+  const calls = setInterval(() => {
+    void withLock(727110, async () => {
+      const { sweepCalls } = await import('./calls/sweep');
+      await sweepCalls();
+    }).catch((e) => log(`chamadas falhou: ${e.message}`));
+  }, 10_000);
 
   // Figurinhas: lixeira de arquivos, quarentena vencida e arquivos sem uso há 7 dias.
   const runStickersGc = () =>
@@ -103,6 +111,7 @@ export function startScheduler(log: (m: string) => void) {
   return () => {
     clearInterval(heartbeat);
     clearInterval(omni);
+    clearInterval(calls);
     clearInterval(re);
     clearTimeout(stickersBoot);
     for (const t of tasks) t.stop();

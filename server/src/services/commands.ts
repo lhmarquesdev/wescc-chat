@@ -1,5 +1,7 @@
+import { callScopeOf, isTransmissionRoom } from '@shared/calls';
+import { sfuConfig } from '../calls/livekit';
 import { one } from '../db/pool';
-import { badRequest } from '../lib/errors';
+import { ApiError, badRequest, forbidden } from '../lib/errors';
 import { bus } from '../realtime/bus';
 import { sendMessage } from './messages';
 import {
@@ -154,12 +156,34 @@ reg('lennyface', '[mensagem]', '( ͡° ͜ʖ ͡°)', say('( ͡° ͜ʖ ͡°)'));
 reg('gimme', '[mensagem]', '༼ つ ◕_◕ ༽つ', async (ctx, room, args, tmid) =>
   sendMessage(ctx, { rid: room.id, msg: `༼ つ ◕_◕ ༽つ ${args}`.trim(), tmid }, { skipCommands: true }),
 );
-reg('call', '', 'Iniciar videoconferência (Jitsi)', async (ctx, room, _args, tmid) => {
-  if (!getSetting('VideoConf_Enabled')) throw badRequest('error-videoconf-disabled', 'Videoconferência desativada.');
+// Link do Jitsi (serviço externo), como antes; só com VideoConf_Enabled.
+const jitsiLink = (ctx: Ctx, room: any, tmid: string | null) => {
   const url = `https://${getSetting('VideoConf_Jitsi_Domain')}/${getSetting('VideoConf_Jitsi_Prefix')}-${room.id}`;
   return sendMessage(ctx, { rid: room.id, msg: `📞 Chamada de vídeo iniciada: ${url}`, tmid }, { skipCommands: true });
+};
+// /call, /call voz, /call vídeo: a web abre a tela de entrada da chamada (a dois, já toca). Nada é postado na sala;
+// calls.start confere tudo de novo.
+reg('call', '[voz|vídeo]', 'Iniciar uma chamada de voz ou vídeo nesta sala', async (ctx, room, args, tmid) => {
+  const a = args.trim().toLocaleLowerCase('pt-BR');
+  const kind = a === 'voz' || a === 'audio' || a === 'áudio' ? 'audio' : 'video';
+  const enabled = !!getSetting('Calls_Enabled');
+  const scope = room.t === 'l' ? null : callScopeOf(room);
+  const groupOk = !!getSetting('Calls_Group_Enabled') && sfuConfig().configured;
+  if (enabled && scope && (scope === 'direct' || groupOk)) {
+    if (scope === 'group' && isTransmissionRoom(room)) throw new ApiError(403, 'error-call-not-allowed', 'Esta sala não aceita chamadas.');
+    bus.publish({ user: ctx.userId }, { type: 'call.prompt', rid: room.id, kind });
+    return ok('call');
+  }
+  if (getSetting('VideoConf_Enabled')) return jitsiLink(ctx, room, tmid);
+  if (!enabled) throw forbidden('As chamadas estão desativadas.');
+  if (room.t === 'l') throw badRequest('error-call-room', 'Chamadas não estão disponíveis em conversas de atendimento.');
+  if (scope === 'group') throw badRequest('error-call-group-disabled', 'Chamadas em grupo estão desativadas. Só é possível ligar em mensagens diretas entre duas pessoas.');
+  throw badRequest('error-call-user', 'Este usuário não pode receber chamadas.');
 });
-commands.set('jitsi', { ...commands.get('call')!, command: 'jitsi' });
+reg('jitsi', '', 'Link de videoconferência do Jitsi', async (ctx, room, _args, tmid) => {
+  if (!getSetting('VideoConf_Enabled')) throw badRequest('error-videoconf-disabled', 'O Jitsi está desativado. Use /call para uma chamada interna.');
+  return jitsiLink(ctx, room, tmid);
+});
 reg('help', '', 'Listar comandos', async (ctx) => {
   const lines = [...commands.values()].map((c) => `/${c.command} ${c.params} — ${c.description}`);
   bus.publish({ user: ctx.userId }, { type: 'notification', rid: '', title: 'Comandos disponíveis', text: lines.join('\n'), messageId: '', sender: { _id: 'system', username: 'system' } });

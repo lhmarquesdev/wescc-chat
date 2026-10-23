@@ -1,0 +1,32 @@
+{
+  "livekit": {
+    "version": "1.13.9",
+    "released": "2026-10-07",
+    "sha256": {
+      "windows_amd64": "d5b5e44c197f613fdd6bdb2ae53e9d086d848156d43f614c688c6b595cd3f25e",
+      "linux_amd64": "0b7fa208b662d09cfdeae8c06cf4c481aead0556086558b48250501e2e2d6e20"
+    },
+    "exe_sha256": {
+      "windows_amd64": "4699597551a8a0a34beef0004a6c693082459c0dd8bcad264b2a453a1ee6f400",
+      "linux_amd64": "0fbb1246f555fc3d27ae92530273f53d9463bbccd93c7edb398e0c6ccfe1536b"
+    }
+  },
+  "winsw": {
+    "version": "2.12.0",
+    "released": "2023-01-28",
+    "file": "WinSW-x64.exe",
+    "sha256": "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"
+  },
+  "lk": {
+    "version": "2.19.0",
+    "released": "2026-10-08",
+    "sha256": {
+      "windows_amd64": "544c3cb752341bdbaba3fab2fb9a5a096925559aadd4699fb15031358f9c0870",
+      "linux_amd64": "601ce74299db7e538014426644ab23b2a1ba171c506967197a259c3cd762d418"
+    },
+    "exe_sha256": {
+      "windows_amd64": "ef98551595e205e4c252fb40a6ffee1ecb4e38922bc5ee79b2c2490cc1524639",
+      "linux_amd64": "be5da23e78fbf417882981220e0485f7dcdad89272b05bb46056f68e4e0836da"
+    }
+  }
+}

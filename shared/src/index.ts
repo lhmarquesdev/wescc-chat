@@ -214,6 +214,7 @@ export interface Message {
   ackRequired?: boolean; // o aviso pede "Ciente"
   ackCount?: number; // quantas pessoas confirmaram
   sticker?: MessageSticker; // figurinha (messages.extra.sticker, montada pelo servidor)
+  call?: CallCard | CallSummary; // chamadas: cartão (grupo) ou resumo (a dois)
   alias?: string;
   emoji?: string;
   avatar?: string;
@@ -378,6 +379,13 @@ export type ServerEvent =
   | { type: 'livechat.agentStatus'; status: LivechatAgentStatus }
   | { type: 'call'; call: Call }
   | { type: 'call.signal'; callId: string; data: CallSignal }
+  | { type: 'call.room'; rid: string; call: Call | null } // resumo para a sala; null = acabou
+  | { type: 'call.ring'; action: 'ring' | 'stop'; call: Call; by?: UserRef }
+  | { type: 'call.notice'; callId: string; notice: CallNotice }
+  | { type: 'call.prompt'; rid: string; kind: CallKind } // /call: abre a tela de entrada
+  | { type: 'call.hand'; callId: string; userId: string; at: string | null } // mão levantada ou baixada
+  | { type: 'call.presence'; userId: string; inCall: boolean } // "Em chamada"
+  | { type: 'call.invite'; call: Call; by: UserRef } // "Avisar a sala": aviso sem toque
   | { type: 'import.progress'; operation: ImportProgress }
   | { type: 'stickers.changed'; scope: 'org' | 'mine' }
   | { type: 'sticker.removed'; fileId: string }
@@ -396,27 +404,177 @@ export interface ImportProgress {
   error?: string | null;
 }
 
-// ---------- Chamadas (WebRTC em mensagens diretas) ----------
+// ---------- Chamadas (diretas e em grupo) ----------
 
 export type CallKind = 'audio' | 'video';
-export type CallStatus = 'ringing' | 'ongoing' | 'ended' | 'missed' | 'declined' | 'canceled' | 'busy';
+export type CallStatus = 'ringing' | 'ongoing' | 'ended' | 'missed' | 'declined' | 'canceled' | 'busy'; // grupo: só ongoing e ended
+export type CallScope = 'direct' | 'group';
+export type CallMedia = 'p2p' | 'sfu';
+export type CallParticipantState = 'ringing' | 'joining' | 'joined' | 'left' | 'declined' | 'missed';
+export type CallEndReason =
+  | 'hangup' | 'empty' | 'dropped' | 'moderator' | 'restricted' | 'no-answer' | 'alone' | 'max-duration'
+  | 'room' | 'readonly' | 'no-speaker' | 'sfu';
+export type CallLeftReason = 'hangup' | 'disconnected' | 'removed' | 'ended' | 'failed' | 'busy' | 'deactivated' | 'room';
+export type CallModerationAction = 'mute' | 'stopVideo' | 'lowerHand' | 'allowSpeak' | 'revokeSpeak' | 'remove';
+export type CallSource = 'microphone' | 'camera' | 'screen_share' | 'screen_share_audio';
+export type CallGuardMode = 'strict' | 'pairs';
+
+export interface CallRoomRef {
+  _id: string;
+  t: RoomType;
+  name: string | null;
+  fname: string | null;
+  prid?: string | null;
+  teamMain?: boolean;
+  notice?: boolean;
+  broadcast?: boolean;
+  usernames?: string[]; // DMs
+}
+
+// Estado da trava de pessoas restritas, para a web prever a recusa sem conhecer os papéis de cada um.
+export interface CallGuardState {
+  mode: CallGuardMode;
+  chaperone: boolean; // há na chamada alguém sem restrição ou isento
+  restrictedSpeakers: number; // pessoas restritas que podem falar agora
+  connectedSpeakers?: number; // dessas, as já conectadas (a regra dos três do modo pairs só conta estas)
+}
+
+// Quem pergunta, para a mesma previsão: calculado pelo servidor, sem expor papéis.
+export interface CallViewerGuard {
+  restricted: boolean;
+  exempt: boolean;
+  speaks: boolean; // falaria nesta chamada ao entrar
+}
+
+export interface CallParticipant {
+  user: UserRef;
+  state: CallParticipantState;
+  host: boolean;
+  speaker: boolean; // pode publicar áudio agora (papel na sala, fala liberada, sem trava)
+  speakGranted: boolean;
+  handAt: string | null;
+  joinedAt: string | null;
+  leftAt: string | null;
+  leftReason: CallLeftReason | null;
+  seconds: number;
+}
+
+// O que a pessoa que pergunta é e pode fazer nesta chamada.
+export interface CallMine {
+  state: CallParticipantState | null; // null: nunca entrou nem foi chamada
+  host: boolean;
+  seconds: number;
+  direction: 'incoming' | 'outgoing';
+  missed: boolean;
+  leftReason: CallLeftReason | null;
+  leftAt: string | null;
+  listenOnly: boolean; // entra ou está só ouvindo
+  handAt: string | null;
+  canModerate: boolean; // moderate-call na sala, ou anfitrião com call-management
+  canEnd: boolean; // anfitrião ou moderate-call
+  canRing: boolean; // presente e pode usar "Chamar"
+  canInvite: boolean; // presente, pode usar "Avisar a sala" e o intervalo de 10 min já passou
+}
 
 export interface Call {
   _id: string;
   rid: string;
   kind: CallKind;
   status: CallStatus;
-  caller: UserRef;
-  callee: UserRef;
-  callerConnectionId: string;
-  calleeConnectionId: string | null;
+  scope: CallScope;
+  media: CallMedia;
+  caller: UserRef; // quem iniciou
+  callee: UserRef | null; // só em chamadas a dois
+  callerConnectionId: string | null; // só P2P
+  calleeConnectionId: string | null; // só P2P
   createdAt: string;
   answeredAt: string | null;
   endedAt: string | null;
   endedBy: string | null;
-  duration: number | null; // segundos
-  canCall?: boolean; // só em calls.list
+  endedReason: CallEndReason | null;
+  duration: number | null; // segundos: atendimento → fim (a dois) ou início → fim (grupo)
+  listenOnly: boolean; // transmissão
+  participantsCount: number; // presentes agora
+  sample: UserRef[]; // até 5 presentes (encerrada: os primeiros que entraram); com a lista oculta, só quem fala
+  peak: number;
+  totalJoined: number;
+  guardUntil: string | null; // pausada até; null = sem pausa
+  guard?: CallGuardState; // só quando a trava se aplica a esta sala
+  messageId: string | null; // cartão na sala (grupo)
+  room?: CallRoomRef; // em calls.active, calls.list, calls.admin.active, call.ring e call.invite
+  participants?: CallParticipant[]; // só em calls.info e nas respostas de start, join e accept
+  mine?: CallMine; // para quem pergunta
+  canCall?: boolean; // só em calls.list (chamadas a dois)
   callBlockedReason?: string;
+}
+
+export interface CallJoin {
+  token: string; // abre só a primeira conexão, por 60 s; o endereço é sempre o próprio chat em /sfu
+  expiresAt: string;
+  identity: string; // = _id do usuário
+  canPublish: boolean;
+  sources: CallSource[];
+  hidden: boolean; // ouvinte de transmissão: o LiveKit não o anuncia aos outros
+  maxVideoPublishers: number;
+}
+
+// Cartão da chamada em grupo na sala (messages.extra.call, t = 'call_group').
+export interface CallCard {
+  _id: string;
+  kind: CallKind;
+  scope: 'group';
+  status: 'ongoing' | 'ended';
+  listenOnly: boolean;
+  startedAt: string;
+  endedAt: string | null;
+  duration: number | null;
+  participantsCount: number;
+  sample: UserRef[];
+  peak: number;
+  totalJoined: number;
+  endedReason: CallEndReason | null;
+  endedBy: UserRef | null;
+}
+
+// Resumo das chamadas a dois (t = 'call_ended' | 'call_missed'), como hoje.
+export interface CallSummary {
+  _id: string;
+  kind: CallKind;
+  status: CallStatus;
+  duration: number | null;
+}
+
+export type CallNotice =
+  | { kind: 'guard'; until: string; text: string }
+  | { kind: 'guard-cleared'; text: string }
+  | { kind: 'moderated'; action: CallModerationAction; by: UserRef; text: string }
+  | { kind: 'host'; text: string }
+  | { kind: 'refused'; text: string } // a ponte ou o servidor recusou a conexão
+  | { kind: 'ended'; reason: CallEndReason; text: string };
+
+export interface CallsConfig {
+  enabled: boolean;
+  groupEnabled: boolean; // Calls_Group_Enabled e servidor de chamadas configurado
+  directViaSfu: boolean; // [v1b] Calls_Direct_Via_SFU
+  inNoticeRooms: boolean; // [v1b] Calls_In_Notice_Rooms
+  ringTimeout: number;
+  sfu: boolean; // servidor de chamadas configurado e respondendo
+  iceServers: { urls: string[]; username?: string; credential?: string }[]; // só P2P
+  limits: { participants: number; listeners: number; videoPublishers: number; maxHours: number; ringPerAction: number };
+  serverTime: string; // relógio do servidor, para os cronômetros
+}
+
+export interface RoomCallState {
+  call: Call | null; // chamada viva na sala
+  canStart: boolean;
+  startBlockedReason?: string;
+  hideStart: boolean; // a recusa não muda sozinha nesta sala: nem mostra os botões
+  canJoin: boolean;
+  joinBlockedReason?: string;
+  listenOnly: boolean; // quem pergunta entra só ouvindo
+  transmission: boolean; // sala somente leitura, de avisos ou com a lista oculta
+  viewerGuard?: CallViewerGuard; // só quando a trava se aplica a esta sala
+  serverTime: string;
 }
 
 export type CallSignal = { sdp: { type: 'offer' | 'answer'; sdp: string } } | { candidate: Record<string, unknown> | null };

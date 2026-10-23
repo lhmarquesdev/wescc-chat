@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import type { Setting, SettingType } from '@shared/index';
+import { config } from '../config';
 import { many, query } from '../db/pool';
 import { bus } from '../realtime/bus';
 import { roleScope } from './permissions';
@@ -256,14 +257,62 @@ add('Security', 'Push', 'Push_Privacy_Hide_Content', 'boolean', false, { public:
 add('Security', 'Push', 'Push_VAPID_Public_Key', 'string', '', { public: true, label: 'Chave pública VAPID (gerada automaticamente)' });
 add('Security', 'Push', 'Push_VAPID_Private_Key', 'password', '', { label: 'Chave privada VAPID (gerada automaticamente)' });
 
-// ---------- Vídeo ----------
-add('VideoConf', 'Calls', 'Calls_Enabled', 'boolean', true, { public: true, label: 'Chamadas de voz e vídeo em mensagens diretas' });
-add('VideoConf', 'Calls', 'Calls_Ring_Timeout', 'int', 40, { public: true, label: 'Segundos tocando antes de virar chamada perdida' });
-add('VideoConf', 'Calls', 'Calls_STUN_Servers', 'string', 'stun:stun.l.google.com:19302', { label: 'Servidores STUN, separados por vírgula' });
-add('VideoConf', 'Calls', 'Calls_TURN_Server', 'string', '', { label: 'Servidor TURN (ex.: turn:turn.empresa.com.br:3478), para redes que bloqueiam conexão direta' });
-add('VideoConf', 'Calls', 'Calls_TURN_Username', 'string', '', { label: 'Usuário do TURN' });
-add('VideoConf', 'Calls', 'Calls_TURN_Password', 'password', '', { label: 'Senha do TURN' });
-add('VideoConf', 'Jitsi', 'VideoConf_Enabled', 'boolean', true, { public: true, label: 'Videoconferência' });
+// ---------- Chamadas ----------
+// intRange vem do bloco das figurinhas (mesma regra e mesmo texto).
+// Com a variável de ambiente definida, a configuração não vale: o segredo fica fora do banco.
+const envLocked = (name: string, set: () => boolean) => (_v: unknown) =>
+  set() ? `Definido no servidor pela variável ${name}. Para mudar, altere a variável e reinicie o chat.` : null;
+// Só endereços deste computador ou da rede interna, escritos como IP: um nome de DNS pode apontar para qualquer lugar.
+function isInternalHttpUrl(s: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return false;
+  }
+  if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.username || u.password) return false;
+  const host = u.hostname.toLowerCase();
+  if (host === 'localhost') return true;
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  }
+  // A URL já normaliza o IPv6 (sem zeros à esquerda): fc00::/7 é o primeiro grupo de fc00 a fdff.
+  return host === '[::1]' || /^\[f[cd][0-9a-f]{2}:[0-9a-f:.]*\]$/.test(host);
+}
+// O chat manda tokens e a sinalização de todos para esse endereço: só deste computador ou da rede interna.
+const sfuUrlRule = (v: unknown) => envLocked('LIVEKIT_URL', () => !!config.livekit.url)(v) ?? (isInternalHttpUrl(String(v ?? ''))
+  ? null
+  : 'Use http:// ou https:// com um endereço deste computador ou da rede interna (por exemplo http://127.0.0.1:7880).');
+add('VideoConf', 'Chamadas', 'Calls_Enabled', 'boolean', true, { public: true, label: 'Chamadas de voz e vídeo' });
+add('VideoConf', 'Chamadas', 'Calls_Group_Enabled', 'boolean', true, { public: true, label: 'Chamadas em grupo em canais, grupos, times, discussões e conversas com várias pessoas' });
+add('VideoConf', 'Chamadas', 'Calls_Direct_Via_SFU', 'boolean', false, { public: true, label: 'Chamadas a dois pelo servidor de chamadas (voltam sozinhas depois de quedas; se ele parar, seguem direto entre os navegadores)' });
+add('VideoConf', 'Chamadas', 'Calls_In_Notice_Rooms', 'boolean', true, { public: true, label: 'Transmissões em canais de avisos e salas somente leitura (só quem publica fala)' });
+add('VideoConf', 'Chamadas', 'Calls_Ring_Timeout', 'int', 40, { public: true, label: 'Segundos tocando antes de virar chamada perdida', validate: intRange(10, 120) });
+add('VideoConf', 'Servidor de chamadas', 'Calls_SFU_Url', 'string', 'http://127.0.0.1:7880', { label: 'Endereço interno do LiveKit (API e sinalização)', validate: sfuUrlRule });
+add('VideoConf', 'Servidor de chamadas', 'Calls_SFU_Api_Key', 'string', '', { label: 'Chave da API do LiveKit', validate: envLocked('LIVEKIT_API_KEY', () => !!config.livekit.apiKey) });
+add('VideoConf', 'Servidor de chamadas', 'Calls_SFU_Api_Secret', 'password', '', { label: 'Segredo da API do LiveKit', validate: envLocked('LIVEKIT_API_SECRET_FILE', () => !!config.livekit.apiSecret) });
+add('VideoConf', 'Limites', 'Calls_Max_Participants', 'int', 30, { public: true, label: 'Pessoas por chamada', validate: intRange(2, 50) });
+add('VideoConf', 'Limites', 'Calls_Max_Listeners', 'int', 300, { public: true, label: 'Pessoas por transmissão', validate: intRange(2, 500) });
+add('VideoConf', 'Limites', 'Calls_Max_Total_Participants', 'int', 150, { label: 'Pessoas em chamadas ao mesmo tempo neste servidor', validate: intRange(10, 1000) });
+add('VideoConf', 'Limites', 'Calls_Max_Video_Publishers', 'int', 16, { public: true, label: 'Câmeras ligadas ao mesmo tempo', validate: intRange(1, 30) });
+add('VideoConf', 'Limites', 'Calls_Max_Duration_Hours', 'int', 12, { label: 'Duração máxima de uma chamada (horas)', validate: intRange(1, 24) });
+add('VideoConf', 'Restrições', 'Calls_Restricted_Public', 'select', 'pairs', {
+  label: 'Em canais públicos, chamadas de pessoas que não podem conversar em particular',
+  values: [
+    { key: 'pairs', label: 'Pausar quando restarem só duas delas sem um supervisor (três ou mais seguem como conversa de equipe)' },
+    { key: 'strict', label: 'Exigir um supervisor presente, como nos grupos privados' },
+  ],
+});
+add('VideoConf', 'Restrições', 'Calls_Restricted_Grace', 'int', 30, { label: 'Segundos de espera por um supervisor antes de encerrar', validate: intRange(10, 300) });
+add('VideoConf', 'Histórico', 'Calls_History_Retention_Days', 'int', 0, { label: 'Apagar o histórico de chamadas depois de (dias; 0 = manter)', validate: intRange(0, 3650) });
+add('VideoConf', 'Chamada direta (P2P)', 'Calls_STUN_Servers', 'string', '', { label: 'Servidores STUN, separados por vírgula (deixe vazio na rede interna)' });
+add('VideoConf', 'Chamada direta (P2P)', 'Calls_TURN_Server', 'string', '', { label: 'Servidor TURN (ex.: turn:turn.empresa.com.br:3478), para redes que bloqueiam conexão direta' });
+add('VideoConf', 'Chamada direta (P2P)', 'Calls_TURN_Secret', 'password', '', { label: 'Segredo compartilhado do TURN (credenciais temporárias; substitui usuário e senha)' });
+add('VideoConf', 'Chamada direta (P2P)', 'Calls_TURN_Username', 'string', '', { label: 'Usuário do TURN (sem segredo compartilhado)' });
+add('VideoConf', 'Chamada direta (P2P)', 'Calls_TURN_Password', 'password', '', { label: 'Senha do TURN (sem segredo compartilhado)' });
+add('VideoConf', 'Jitsi', 'VideoConf_Enabled', 'boolean', false, { public: true, label: 'Links do Jitsi com /jitsi (serviço externo)' });
 add('VideoConf', 'Jitsi', 'VideoConf_Jitsi_Domain', 'string', 'meet.jit.si', { public: true, label: 'Domínio do Jitsi' });
 add('VideoConf', 'Jitsi', 'VideoConf_Jitsi_Prefix', 'string', 'wescc', { public: true, label: 'Prefixo das salas' });
 
