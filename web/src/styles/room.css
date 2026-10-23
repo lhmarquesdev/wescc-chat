@@ -1,0 +1,2086 @@
+/* ---------- Conversa (dono 4a) ----------
+   Mensagens, markdown, anexos, compositor, seletor de emoji e visualizador de imagens. */
+
+/* Barra da mensagem, sugestões, seletor de emoji, pílula "ir para o fim" e compositor ficam acima do fundo: no escuro,
+   --bg-hover e --bg-active ficam a um nível deles e o hover, a linha ativa e o "Mais" aberto sumiam. Mesma regra de
+   overlays.css (menus, modais). */
+@supports (color: light-dark(white, black)) {
+  :where(.msg-toolbar, .suggestions, .emoji-picker, .jump-wrap, .composer) {
+    --raised-hover: light-dark(var(--bg-hover), color-mix(in srgb, var(--fg) 8%, var(--bg-raised)));
+    --raised-active: light-dark(var(--bg-active), color-mix(in srgb, var(--fg) 12%, var(--bg-raised)));
+  }
+  :where(.msg-toolbar, .suggestions, .emoji-picker, .jump-wrap, .composer) > * {
+    --bg-hover: var(--raised-hover);
+    --bg-active: var(--raised-active);
+  }
+}
+
+/* ---------- Lista de mensagens ---------- */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+  min-height: 0;
+}
+.messages.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Lista da sala: histórico curto encosta no compositor; a pílula "ir para o fim" fica presa embaixo. */
+.messages.stream {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overscroll-behavior: contain;
+}
+.messages.stream.loading {
+  justify-content: flex-end;
+  padding: 8px 0 16px;
+}
+.stream > .empty {
+  margin: auto;
+}
+.messages-list {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 8px 0 12px;
+}
+
+.room-start {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 32px 20px 16px;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  color: var(--fg-muted);
+}
+.room-start-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 10px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-muted);
+  color: var(--fg-2);
+}
+.room-start > .avatar {
+  margin-bottom: 10px;
+}
+.room-start-title {
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+  font-weight: var(--fw-semibold);
+  color: var(--fg);
+}
+.room-start-topic {
+  max-width: 640px;
+  overflow-wrap: anywhere;
+}
+
+/* Separador do dia: pílula presa no topo enquanto o dia rola. */
+.day-sep {
+  position: sticky;
+  top: 8px;
+  z-index: var(--z-sticky);
+  display: flex;
+  justify-content: center;
+  margin: 12px 0 4px;
+  pointer-events: none;
+}
+.day-sep span {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-1);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-medium);
+  color: var(--fg-2);
+  pointer-events: auto;
+}
+/* Presa no topo (data-stuck, MessageList): só aparece enquanto a pessoa rola, e some 1 s depois de parar. */
+.day-sep[data-stuck] > span {
+  opacity: 0;
+  pointer-events: none;
+}
+.day-sep[data-stuck='scroll'] > span {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity var(--dur-1) linear;
+}
+.day-sep[data-stuck='rest'] > span {
+  transition: opacity var(--dur-4) var(--ease-in);
+}
+.unread-sep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 20px;
+}
+.unread-sep::before {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--danger);
+}
+.unread-sep span {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: 9px;
+  background: var(--danger-solid);
+  color: #fff;
+  font-size: var(--fs-11);
+  line-height: var(--lh-11);
+  font-weight: var(--fw-semibold);
+}
+
+/* ---------- Linha da mensagem ---------- */
+.msg {
+  --ring-surface: var(--bg-canvas);
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 6px 20px;
+  transition: background-color var(--dur-1) linear;
+}
+.msg:hover {
+  --ring-surface: var(--bg-subtle);
+  background: var(--bg-subtle);
+}
+.msg.grouped {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.msg.mentioned {
+  background: var(--mention-row);
+  box-shadow: inset 2px 0 0 var(--mention-bar);
+}
+.msg.mentioned:hover {
+  background: color-mix(in srgb, var(--mention-bar) 14%, var(--bg-canvas));
+}
+.msg.editing {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+/* Destino de um link: o amarelo fica 600 ms e some em 1200 ms. */
+.msg.highlight {
+  animation: msg-flash 1800ms linear;
+}
+@keyframes msg-flash {
+  0%,
+  33% {
+    background-color: var(--highlight);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Sem a animação, o destaque fica parado enquanto dura a classe. */
+  .msg.highlight {
+    background: var(--highlight);
+  }
+}
+.msg.arrive {
+  animation: msg-in var(--dur-3) var(--ease-out);
+}
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Mensagem de sistema: uma linha, ícone na calha, sem itálico. */
+.msg.system {
+  align-items: center;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+.msg.system:hover {
+  background: none;
+}
+.msg.system .msg-left {
+  justify-content: center;
+  color: var(--fg-muted);
+}
+/* Uma linha só: o texto corta com reticências (o title tem o texto inteiro) e a hora nunca desce sozinha. */
+.system > .msg-main {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+}
+.sys-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sys-time {
+  flex: none;
+  white-space: pre;
+}
+/* Mensagem fixada: a linha e, embaixo, a citação compacta da mensagem. */
+.msg.pinned-note {
+  align-items: flex-start;
+}
+.pinned-note > .msg-left {
+  height: var(--lh-13);
+}
+.pinned-note > .msg-main {
+  flex-direction: column;
+  align-items: stretch;
+}
+.pinned-note .sys-line {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+}
+.pinned-note .quote-att {
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+.sys-time .msg-time {
+  font-size: inherit;
+  line-height: inherit;
+}
+.joins-toggle {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.joins-toggle .icon {
+  flex: none;
+  align-self: center;
+  margin-left: 4px;
+}
+.joins-toggle:hover {
+  color: var(--fg);
+}
+.joins-toggle .icon {
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.joins-toggle .icon.open {
+  transform: rotate(180deg);
+}
+
+.msg-left {
+  position: relative;
+  width: 36px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.msg-left .avatar {
+  width: 36px;
+  height: 36px;
+  margin-top: 2px;
+}
+/* Linha agrupada: a hora aparece na calha no hover; o recibo fica no lugar dela. */
+.msg-time-hover {
+  position: absolute;
+  inset: 0 0 auto;
+  font-size: var(--fs-11);
+  line-height: 22px;
+  text-align: right;
+  color: var(--fg-muted);
+  border-radius: var(--radius-xs);
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+}
+/* Com opacidade (e não visibility) a hora recebe o foco das setas da lista. */
+.msg:hover .msg-time-hover,
+.msg:has(:focus-visible) .msg-time-hover {
+  opacity: 1;
+}
+.msg-gutter-receipt {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  width: 100%;
+  height: 22px;
+}
+.msg:hover .msg-gutter-receipt,
+.msg:has(:focus-visible) .msg-gutter-receipt {
+  visibility: hidden;
+}
+.msg-main {
+  flex: 1;
+  min-width: 0;
+}
+/* Uma linha só: um nome longo encolhe com reticências e a hora nunca desce para uma linha própria. */
+.msg-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 0 8px;
+  min-width: 0;
+}
+.msg-head > :not(.msg-name) {
+  flex: none;
+}
+.msg-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-semibold);
+  color: var(--fg);
+  text-align: left;
+}
+.msg-name:hover {
+  text-decoration: underline;
+}
+/* O @usuário fica no cartão do usuário; aparece aqui só em mensagens de integração (com a pílula "Bot"). */
+.msg-username {
+  display: none;
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.msg.bot .msg-username {
+  display: inline;
+}
+.msg-bot {
+  align-self: center;
+  height: 18px;
+  font-size: var(--fs-11);
+}
+.msg-time {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.msg-flag {
+  display: inline-flex;
+  align-self: center;
+  color: var(--fg-muted);
+}
+.msg-flag.star {
+  color: var(--warn-solid);
+}
+.receipt {
+  display: inline-flex;
+  align-self: center;
+  color: var(--fg-muted);
+}
+.receipt.read {
+  color: var(--accent-text);
+}
+.edited {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.msg-body .edited {
+  margin-left: 6px;
+}
+.msg-thread-hint {
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.msg-body {
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+.msg-body p {
+  margin: 0;
+}
+/* Só emoji: grande, seja ":tada:" (span .emoji) ou o caractere digitado direto (texto solto no corpo). */
+.msg-body.big-emoji {
+  font-size: 32px;
+  line-height: 40px;
+}
+.msg-body.big-emoji .emoji {
+  font-size: inherit;
+  line-height: inherit;
+}
+.big-emoji .emoji.custom {
+  height: 40px;
+}
+
+/* Barra de ações no hover (some no toque: lá é o toque longo). Some com atraso: com display: none o Tab que sai
+   do último botão da linha perdia o foco, porque a barra sumia no instante em que a linha ficava sem foco. */
+.msg-toolbar {
+  --ring-offset: var(--bg-raised);
+  position: absolute;
+  top: -16px;
+  right: 16px;
+  z-index: var(--z-toolbar);
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2), var(--highlight-top);
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--dur-1) linear,
+    visibility 0s linear var(--dur-1);
+}
+.msg:hover .msg-toolbar,
+.msg:has(:focus-visible) .msg-toolbar,
+.msg.menu-open .msg-toolbar {
+  visibility: visible;
+  opacity: 1;
+  /* Ao aparecer, a visibilidade muda na hora; o atraso vale só para sumir. */
+  transition: opacity var(--dur-1) linear;
+}
+.msg[data-tb-in] .msg-toolbar {
+  top: var(--tb-top, 4px);
+}
+.msg-toolbar .menu-wrap,
+.msg-toolbar .menu-wrap > span {
+  display: inline-flex;
+}
+.tb-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-muted);
+}
+.tb-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.tb-btn[aria-expanded='true'] {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+.tb-btn.quick {
+  font-size: 16px;
+  line-height: 1;
+}
+.tb-btn .emoji.custom {
+  height: 18px;
+}
+.tb-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border);
+}
+
+/* Folha de ações (toque longo): reações rápidas em cima, depois os itens do "Mais". */
+.msg-sheet-quick {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 4px 4px 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.msg-sheet-quick > button.msg-sheet-emoji {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--bg-subtle);
+  font-size: 22px;
+  color: var(--fg-muted);
+}
+
+/* Reações */
+.reactions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+.reactions {
+  display: contents;
+}
+.reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--bg-subtle);
+  color: var(--fg);
+  font-size: 16px;
+  line-height: 1;
+  transition: border-color var(--dur-1) linear;
+}
+button.reaction:hover {
+  border-color: var(--border-strong);
+}
+.reaction .n {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-2);
+}
+.reaction.mine {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+}
+.reaction.mine .n {
+  color: var(--accent-text);
+}
+.reaction .emoji.custom {
+  height: 16px;
+}
+.reaction-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+  opacity: 0;
+  transition: opacity var(--dur-1) linear;
+}
+.msg:hover .reaction-add,
+.reaction-add:focus-visible {
+  opacity: 1;
+}
+.reaction-add:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+/* Resumo do tópico e da discussão */
+.thread-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: calc(100% + 8px);
+  margin: 6px 0 0 -8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+  text-align: left;
+}
+.thread-summary:hover {
+  --ring-surface: var(--bg-hover);
+  background: var(--bg-hover);
+}
+.thread-summary + .thread-summary {
+  margin-top: 2px;
+}
+.thread-summary.discussion .icon {
+  color: var(--accent-text);
+}
+.replies {
+  color: var(--accent-text);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+.thread-last {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Respostas novas no tópico: o mesmo índigo do selo de tópicos da barra lateral (vermelho é menção e conversa direta). */
+.thread-summary .badge.dot {
+  flex-shrink: 0;
+  background: var(--accent);
+}
+.mini-follow {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+
+/* ---------- Markdown ---------- */
+.mention {
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  background: var(--mention-other-bg);
+  color: var(--mention-other-fg);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+}
+.mention.me,
+.mention.all,
+.mention.here {
+  background: var(--mention-me-bg);
+  color: var(--mention-me-fg);
+  font-weight: var(--fw-semibold);
+}
+.mention.group {
+  cursor: default;
+}
+.mention.channel {
+  cursor: pointer;
+}
+.mention.channel:hover {
+  text-decoration: none;
+}
+.emoji {
+  font-size: 1.15em;
+  line-height: 1;
+}
+.emoji.custom {
+  height: 1.4em;
+  vertical-align: -0.35em;
+}
+.md-code {
+  padding: 1px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: 0.866em;
+}
+.md-pre-wrap {
+  position: relative;
+  max-width: 760px;
+  margin: 4px 0;
+}
+.md-pre {
+  max-width: 760px;
+  margin: 4px 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  /* Sombra na borda de onde ainda há código para rolar (as capas "local" andam com o texto e a escondem nas pontas):
+     uma linha longa não parece mais cortada a seco. */
+  background:
+    linear-gradient(to right, var(--code-bg) 30%, transparent) left / 24px 100% no-repeat local,
+    linear-gradient(to left, var(--code-bg) 30%, transparent) right / 24px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, var(--code-fg) 14%, transparent), transparent) left / 12px 100% no-repeat scroll,
+    linear-gradient(to left, color-mix(in srgb, var(--code-fg) 14%, transparent), transparent) right / 12px 100% no-repeat scroll,
+    var(--code-bg);
+  color: var(--code-fg);
+  font: 13px/20px var(--font-mono);
+  white-space: pre;
+}
+.md-pre-wrap > .md-pre {
+  margin: 0;
+}
+.md-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  transition: opacity var(--dur-1) linear;
+}
+/* Sobre o código, no canto: fundo e borda próprios para não se misturar ao texto da primeira linha. */
+.btn.md-copy {
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-1);
+}
+.btn.md-copy:hover {
+  background: var(--bg-hover);
+}
+.md-pre-wrap:hover .md-copy,
+.md-copy:focus-visible {
+  opacity: 1;
+}
+.md-h {
+  margin: 4px 0 2px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.005em;
+}
+/* 1.333, 1.2 e 1.067em do corpo: 20/28, 18/26 e 16/24 com o corpo de 15px. */
+.md-h1 {
+  font-size: 1.333em;
+  line-height: 1.4;
+}
+.md-h2 {
+  font-size: 1.2em;
+  line-height: 1.444;
+}
+.md-h3 {
+  font-size: 1.067em;
+  line-height: 1.5;
+}
+.md-h4 {
+  font-size: 1em;
+  line-height: inherit;
+}
+.md-li {
+  padding-left: 8px;
+}
+.msg-body blockquote {
+  margin: 4px 0;
+}
+
+/* ---------- Anexos ---------- */
+.att {
+  margin-top: 6px;
+}
+.att-media {
+  width: fit-content;
+  max-width: 100%;
+}
+/* Caixa da imagem reservada (esqueleto) até carregar: a lista não pula. */
+.att-image-box {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 10px;
+}
+.att-image-box:not(.loaded) {
+  min-width: min(240px, 100%);
+  min-height: 160px;
+  background: var(--skeleton);
+}
+.att-image-open {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  cursor: zoom-in;
+}
+.att-image {
+  display: block;
+  max-width: min(400px, 100%);
+  max-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.att-image-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 0 10px 0 24px;
+  background: linear-gradient(to bottom left, rgb(0 0 0 / 0.45), transparent 75%);
+  opacity: 0;
+  transition: opacity var(--dur-2) linear;
+}
+.att-image-box:hover .att-image-actions,
+.att-image-box:focus-within .att-image-actions {
+  opacity: 1;
+}
+.glass-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+}
+.glass-btn:hover {
+  background: rgb(0 0 0 / 0.7);
+  color: #fff;
+}
+.att-thumb-box {
+  flex-shrink: 0;
+}
+.att-thumb {
+  display: block;
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.att-video {
+  display: block;
+  max-width: min(480px, 100%);
+  max-height: 320px;
+  margin-top: 6px;
+  border-radius: 10px;
+}
+.att-audio {
+  display: block;
+  width: 320px;
+  max-width: 100%;
+  margin-top: 6px;
+}
+.att-desc {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  color: var(--fg);
+}
+/* Cartão do arquivo: quadradinho do tipo, nome, "PDF · 14,5 KB" e baixar. */
+.att-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 360px;
+  max-width: 100%;
+  height: 56px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  color: var(--fg);
+  transition: border-color var(--dur-1) linear;
+}
+.att-file:hover {
+  border-color: var(--border-strong);
+  text-decoration: none;
+}
+.att-file-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.att-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+}
+.att-file-size {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.att-file-dl {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  color: var(--fg-muted);
+}
+.att-file:hover .att-file-dl {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.att-tile {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--bg-muted);
+  color: var(--fg-2);
+}
+.att-tile.sm {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+}
+.att-tile[data-kind='pdf'] {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.att-tile[data-kind='doc'],
+.att-tile[data-kind='image'],
+.att-tile[data-kind='video'],
+.att-tile[data-kind='audio'] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.att-tile[data-kind='sheet'] {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.att-tile[data-kind='archive'] {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.quote-att {
+  max-width: 640px;
+  margin-top: 6px;
+  padding: 6px 12px;
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--bg-subtle);
+}
+.quote-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.quote-head strong {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--fg);
+}
+.quote-body {
+  margin-top: 2px;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  overflow-wrap: anywhere;
+}
+/* Anexos no formato do Slack (integrações e mensagens importadas) */
+.att-rich-wrap {
+  max-width: 640px;
+  margin-top: 6px;
+}
+.att-pretext {
+  margin-bottom: 4px;
+}
+.att-rich {
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--border-strong);
+  border-radius: 0 10px 10px 0;
+  background: var(--bg-subtle);
+}
+.att-rich-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  overflow-wrap: anywhere;
+}
+.att-author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-muted);
+}
+.att-author img {
+  flex-shrink: 0;
+  border-radius: var(--radius-xs);
+  object-fit: cover;
+}
+.att-author a {
+  color: inherit;
+}
+.att-title {
+  font-weight: var(--fw-semibold);
+  color: var(--fg);
+}
+a.att-title {
+  color: var(--accent-text);
+}
+.att-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+}
+.att-field {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.att-field.short {
+  grid-column: auto;
+}
+.att-field-title {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-2);
+}
+.att-field-value {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.att-rich .att-image-box,
+.att-rich .att-video,
+.att-rich .att-audio {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.att-rich .att-title {
+  align-self: flex-start;
+}
+.att-footer {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.att-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Registro de chamada */
+.call-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 360px;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+}
+.call-card-tile {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.call-card.missed .call-card-tile {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.call-card-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.call-card-title {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+  color: var(--fg);
+}
+.call-card-meta {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.call-card > .btn {
+  flex-shrink: 0;
+}
+
+/* Aviso com leitura obrigatória: cartão com o "Ciente" no rodapé. */
+.notice-card {
+  max-width: 640px;
+  margin-top: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-1);
+}
+.notice-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px 0;
+}
+.notice-card-tile {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.notice-card-titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* O título do aviso vem da primeira linha da mensagem (# Título ou *Título*); sem ela, "Aviso". */
+.notice-card-title {
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.005em;
+  color: var(--fg);
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+.notice-card-meta {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.notice-card > .msg-body {
+  padding: 10px 16px 12px;
+}
+.notice-card > .att,
+.notice-card > .att-rich-wrap,
+.notice-card > .quote-att,
+.notice-card > .att-pending,
+.notice-card > .att-video,
+.notice-card > .att-audio {
+  margin: 0 16px 12px;
+}
+.notice-card-head:last-child {
+  padding-bottom: 14px;
+}
+.notice-card-foot {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+.notice-card-foot:empty {
+  display: none;
+}
+.notice-card-foot > .ack-bar {
+  margin: 0;
+}
+
+/* Pílula "ir para o fim" */
+.jump-wrap {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 0;
+  pointer-events: none;
+}
+.jump-pill {
+  position: absolute;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2), var(--highlight-top);
+  color: var(--fg);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  pointer-events: auto;
+  animation: pop-in var(--dur-2) var(--ease-out);
+}
+.jump-pill:hover {
+  background: var(--bg-hover);
+}
+.jump-pill .icon {
+  color: var(--accent-text);
+}
+
+/* Quem leu (modal) */
+.receipt-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+.receipt-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+}
+.receipt-who strong {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+}
+.receipt-list time {
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+
+/* ---------- Visualizador de imagens ---------- */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-lightbox);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 16px 56px;
+  background: rgb(0 0 0 / 0.9);
+  /* Desfoca a sala por trás: sem isso o cabeçalho de uma sala clara ficava legível ao lado do nome de quem enviou. */
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  cursor: zoom-out;
+  animation: fade-in var(--dur-2) var(--ease-out);
+}
+.lightbox:focus-visible {
+  box-shadow: none;
+}
+.lightbox-img {
+  max-width: 92vw;
+  max-height: calc(100dvh - 120px);
+  object-fit: contain;
+  border-radius: var(--radius-xs);
+  cursor: default;
+  animation: pop-in var(--dur-3) var(--ease-out);
+}
+.lightbox-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  height: 56px;
+  padding: 0 12px 0 16px;
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  cursor: default;
+}
+.lightbox-who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.lightbox-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.lightbox-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-semibold);
+}
+.lightbox-time {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--call-fg-muted);
+}
+.lightbox-file {
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-13);
+  color: var(--call-fg-muted);
+}
+.lightbox-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.lightbox-btn {
+  --ring-offset: var(--call-bg);
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 0.1);
+  color: #fff;
+}
+.lightbox-btn:hover {
+  background: rgb(255 255 255 / 0.2);
+  color: #fff;
+}
+
+/* ---------- Compositor ---------- */
+.composer {
+  position: relative;
+  margin: 0 16px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-input);
+  box-shadow: var(--shadow-1);
+  transition: border-color var(--dur-2) linear;
+}
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border-strong));
+}
+.composer.disabled {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 12px 16px;
+  border-color: var(--border);
+  background: var(--bg-subtle);
+  box-shadow: none;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+  text-align: center;
+}
+.composer.disabled > span {
+  text-wrap: balance;
+}
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--bg-subtle);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-2);
+}
+.composer-bar + .composer-bar {
+  border-radius: 0;
+}
+.composer-bar > .icon {
+  color: var(--fg-muted);
+}
+.composer-bar .icon-btn {
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.composer-bar-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-bar.editing {
+  background: var(--accent-soft);
+}
+.composer-bar.editing > .icon {
+  color: var(--accent-text);
+}
+.composer-bar.editing .composer-bar-text {
+  font-weight: var(--fw-medium);
+  color: var(--fg);
+}
+.composer-bar-hint {
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.composer-bar.quoting {
+  box-shadow: inset 2px 0 0 var(--border-strong);
+}
+.composer-bar-excerpt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+}
+.composer-bar.upload .composer-bar-text {
+  flex: 0 1 auto;
+  max-width: 50%;
+}
+.progress {
+  flex: 1;
+  min-width: 40px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--bg-muted);
+}
+.progress > div,
+.progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--dur-2) linear;
+}
+.composer-bar-pct {
+  min-width: 32px;
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--fg-muted);
+}
+.composer-row textarea {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  max-height: 200px;
+  padding: 12px 14px 4px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--fg);
+  font: var(--fs-15) / var(--lh-15) var(--font-sans);
+}
+.composer-row textarea:focus {
+  border: 0;
+  box-shadow: none;
+}
+.composer-row textarea::placeholder {
+  color: var(--fg-placeholder);
+  /* Nome longo de sala ou pessoa: o texto de exemplo corta numa linha, o compositor vazio não cresce. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Formatação no celular (botão T): uma linha própria acima das ferramentas. */
+.composer-format {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px 0;
+}
+.also-channel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 8px 8px;
+}
+.composer-tools > button:not(.btn),
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.composer-tools > button:where(:not(.btn)):hover,
+.tool-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.tool-btn.on {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+.tool-btn input[type='file'] {
+  display: none;
+}
+.tool-sep {
+  flex-shrink: 0;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+.composer-tools > .chip {
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+.chip.on > .chip-icon {
+  display: none;
+}
+.counter {
+  margin-right: 8px;
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+}
+.counter.over {
+  color: var(--danger);
+  font-weight: var(--fw-semibold);
+}
+.btn.primary.send {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  margin-left: 4px;
+  padding: 0;
+  border-radius: var(--radius-md);
+}
+.btn.send.save {
+  width: auto;
+  height: 28px;
+  padding: 0 12px;
+}
+.composer-tools > .btn.ghost {
+  margin-left: 4px;
+}
+
+/* Comandos (/): mais largo, para a descrição caber. */
+.suggestions.commands {
+  width: 440px;
+}
+.suggestions.commands .sug-title {
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+}
+/* Sugestões (@, #, :, /, !): em portal, acima do compositor. */
+.suggestions {
+  --ring-offset: var(--bg-raised);
+  position: fixed;
+  z-index: var(--z-popover);
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2), var(--highlight-top);
+  color: var(--fg);
+  animation: pop-in-up var(--dur-2) var(--ease-out);
+}
+.suggestions[data-side='bottom'] {
+  animation-name: pop-in;
+}
+.sug-section {
+  padding: 6px 8px 4px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-muted);
+}
+.suggestions button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  text-align: left;
+}
+.suggestions button.active {
+  background: var(--bg-hover);
+}
+.sug-lead {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  color: var(--fg-muted);
+}
+.sug-emoji {
+  font-size: 18px;
+  line-height: 1;
+}
+.sug-title {
+  flex-shrink: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+}
+.sug-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-13);
+  color: var(--fg-muted);
+}
+/* Na linha ativa o fundo sobe um degrau: o texto secundário também, para manter 4.5:1 no escuro. */
+.active > .sug-sub {
+  color: var(--fg-2);
+}
+
+/* Envio de arquivo: lista no modal e área de soltar. */
+.upload-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+.upload-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--fw-medium);
+}
+.upload-size {
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+}
+.upload-preview {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.upload-list + input {
+  width: 100%;
+  margin-top: 12px;
+}
+.drop-overlay {
+  position: fixed;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent) 6%, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
+  color: var(--accent-text);
+  font-size: var(--fs-15);
+  font-weight: var(--fw-medium);
+  pointer-events: none;
+  animation: fade-in var(--dur-2) var(--ease-out);
+}
+
+/* ---------- Seletor de emoji ---------- */
+.emoji-picker {
+  --ring-offset: var(--bg-raised);
+  position: fixed;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  width: 352px;
+  max-width: calc(100vw - 16px);
+  height: 400px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2), var(--highlight-top);
+  color: var(--fg);
+  animation: pop-in-up var(--dur-2) var(--ease-out);
+}
+.emoji-picker[data-side='bottom'] {
+  animation-name: pop-in;
+}
+.emoji-picker[data-layer='modal'] {
+  z-index: calc(var(--z-modal) + 10);
+}
+.emoji-picker.in-sheet {
+  position: static;
+  width: auto;
+  max-width: none;
+  height: 50dvh;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  animation: none;
+}
+.emoji-search {
+  position: relative;
+  flex-shrink: 0;
+  padding: 8px 8px 6px;
+}
+.emoji-search > .icon {
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  color: var(--fg-muted);
+  pointer-events: none;
+}
+.emoji-search input {
+  width: 100%;
+  height: 32px;
+  padding-left: 34px;
+}
+.emoji-cats {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 0 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: none;
+}
+.emoji-cats button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: none;
+  color: var(--fg-muted);
+}
+.emoji-cats button:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.emoji-cats button.active {
+  color: var(--accent-text);
+}
+.emoji-cats .active::after {
+  content: '';
+  position: absolute;
+  right: 6px;
+  bottom: -1px;
+  left: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.emoji-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 8px;
+  overscroll-behavior: contain;
+}
+.emoji-section-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 2px 4px;
+  background: var(--bg-raised);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-muted);
+}
+.emoji-picker.in-sheet .emoji-section-title {
+  background: var(--bg-raised);
+}
+.emoji-items {
+  display: grid;
+  grid-template-columns: repeat(8, 36px);
+  justify-content: space-between;
+  row-gap: 2px;
+  padding-top: 4px;
+}
+.emoji-items button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  font-size: 22px;
+  line-height: 1;
+}
+.emoji-items button:hover,
+.emoji-items button:focus-visible {
+  background: var(--bg-hover);
+}
+.emoji-items img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+.emoji-empty {
+  padding: 40px 8px;
+  text-align: center;
+  font-size: var(--fs-13);
+  color: var(--fg-muted);
+}
+.emoji-foot {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.emoji-foot-glyph {
+  display: inline-flex;
+  font-size: 24px;
+  line-height: 1;
+}
+.emoji-foot-glyph img {
+  width: 24px;
+  height: 24px;
+}
+.emoji-foot code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+
+/* ---------- Celular e toque ---------- */
+@media (max-width: 760px) {
+  .msg {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .composer {
+    margin: 0 8px calc(8px + env(safe-area-inset-bottom));
+  }
+  .composer-row textarea {
+    max-height: 50dvh;
+  }
+  .composer.disabled {
+    justify-content: flex-start;
+    text-align: left;
+  }
+  .unread-sep {
+    margin: 8px 12px;
+  }
+  .room-start {
+    padding: 24px 12px 12px;
+  }
+  .att-image {
+    max-width: 100%;
+    max-height: 280px;
+  }
+  .att-thumb {
+    width: 48px;
+    height: 48px;
+  }
+  .lightbox-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 0 8px 0 12px;
+  }
+  .lightbox-file {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .att-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .att-field.short {
+    grid-column: 1 / -1;
+  }
+  /* Sem espaço para o título: "Ligar de volta" desce para a linha de baixo, alinhado ao texto. */
+  .call-card {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .call-card-text {
+    flex-basis: auto;
+  }
+  .call-card > .btn {
+    margin-left: 48px;
+  }
+}
+@media (hover: none) {
+  .msg-toolbar {
+    display: none;
+  }
+  .msg:hover {
+    background: none;
+  }
+  .msg.mentioned:hover {
+    background: var(--mention-row);
+  }
+  /* Toque longo abre a folha de ações: sem seleção de texto nem o menu do sistema. */
+  .msg {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .reaction-add,
+  .md-copy {
+    opacity: 1;
+  }
+  /* Sem hover o "Copiar" fica sempre à vista: só o ícone, no canto do bloco, com uma margem à direita do código
+     para não cobrir a primeira linha (antes ele tomava uma faixa inteira acima de um código curto). */
+  .md-pre-wrap > .md-pre {
+    padding-right: 44px;
+  }
+  .md-copy {
+    top: 2px;
+    right: 2px;
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+  .md-copy > .md-copy-label {
+    display: none;
+  }
+  .att-image-actions {
+    display: none;
+  }
+  /* A hora da linha agrupada só aparece no hover: no toque o recibo ficaria sozinho na calha. */
+  .msg-gutter-receipt {
+    display: none;
+  }
+  /* A prévia acompanha o ponteiro; no toque ficaria parada em "Escolha um emoji". */
+  .emoji-foot {
+    display: none;
+  }
+  /* Links, imagens e código mantêm o menu do sistema e a seleção no toque longo. */
+  .msg :where(a, img) {
+    -webkit-touch-callout: default;
+  }
+  .msg .md-pre {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
+@media (pointer: coarse) {
+  .composer-tools > button:not(.btn),
+  .tool-btn,
+  .btn.primary.send {
+    width: var(--touch);
+    height: var(--touch);
+  }
+  .btn.send.save {
+    width: auto;
+    padding: 0 16px;
+  }
+  .btn.send.save,
+  .composer-tools > .btn.ghost {
+    height: var(--touch);
+  }
+  .composer-row textarea,
+  .also-channel,
+  .thread-summary,
+  .suggestions button {
+    min-height: var(--touch);
+  }
+  .composer-bar .icon-btn {
+    width: var(--touch);
+    height: var(--touch);
+    margin: -8px -10px -8px auto;
+  }
+  /* Sem teclado físico o atalho não serve. */
+  .composer-bar-hint {
+    display: none;
+  }
+  .jump-pill {
+    height: var(--touch);
+    border-radius: 22px;
+  }
+  .lightbox-btn {
+    width: var(--touch);
+    height: var(--touch);
+  }
+  .emoji-search input {
+    height: var(--touch);
+  }
+  .emoji-search > .icon {
+    top: 22px;
+  }
+  .emoji-cats button {
+    width: var(--touch);
+    height: var(--touch);
+  }
+  .emoji-items {
+    grid-template-columns: repeat(auto-fill, var(--touch));
+  }
+  .emoji-items button {
+    width: var(--touch);
+    height: var(--touch);
+  }
+  .reaction,
+  .reaction-add {
+    height: 32px;
+    border-radius: 16px;
+  }
+  /* Fichas pequenas mantêm o tamanho visível; a área de toque cresce para 44px por baixo. */
+  .reaction,
+  .reaction-add,
+  .call-card .btn,
+  .msg-name.clickable {
+    position: relative;
+  }
+  .reaction::after,
+  .reaction-add::after,
+  .md-copy::after,
+  .call-card .btn::after,
+  .msg-name.clickable::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--touch));
+    height: max(100%, var(--touch));
+    transform: translate(-50%, -50%);
+  }
+  /* O nome cresce para os lados e só até o meio do vão de cima (o resto é da reação ou do resumo da linha anterior);
+     para baixo não cresce: lá começa o corpo, com links e menções. O avatar ao lado abre o mesmo cartão. */
+  .msg-name.clickable::after {
+    top: -6px;
+    bottom: 0;
+    height: auto;
+    transform: translateX(-50%);
+  }
+}

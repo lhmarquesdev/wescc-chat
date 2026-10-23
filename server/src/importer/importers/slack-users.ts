@@ -93,7 +93,7 @@ export const slackUsersImporter: Importer = {
   name: 'Usuários do Slack',
   label: 'Usuários do Slack (.csv)',
   description:
-    'A lista de membros exportada pelo Slack (Gerenciar membros → Exportar lista de membros). Cria as contas sem canais nem mensagens; administradores, bots e contas desativadas são mantidos.',
+    'A lista de membros exportada pelo Slack (Gerenciar membros › Exportar lista de membros). Cria as contas sem canais nem mensagens; administradores, bots e contas desativadas são mantidos.',
   accept: '.csv',
   sourceKind: 'file',
   visible: true,

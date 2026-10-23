@@ -3,7 +3,8 @@ import { LDAP_SYNC_PRESETS, type LdapRunStatus, type LdapStatus, type LdapSyncCh
 import { api, ApiError, errorMessage } from '../../../lib/api';
 import { formatDateTime, formatDuration } from '../../../lib/format';
 import { useStore } from '../../../lib/store';
-import { Empty, Field, Modal, Pager, Spinner, Tabs, useAsync } from '../../../components/ui';
+import { Icon } from '../../../components/Icon';
+import { Empty, Field, Modal, Pager, SkeletonTable, Tabs, useAsync } from '../../../components/ui';
 import { SettingInput } from '../AdminSettings';
 import type { LdapSettings } from './index';
 
@@ -11,7 +12,14 @@ const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error')
 const ok = (t: string) => useStore.getState().toast(t);
 
 const INTERVAL = 'LDAP_Background_Sync_Interval';
-const TOGGLES = ['LDAP_Background_Sync_Import_New_Users', 'LDAP_Sync_User_Active_State', 'LDAP_Sync_AD_Disabled', 'LDAP_Sync_Reactivate_Users', 'LDAP_Sync_Avatar', 'LDAP_Sync_Max_Deactivation_Percent'];
+const TOGGLES = [
+  'LDAP_Background_Sync_Import_New_Users',
+  'LDAP_Sync_User_Active_State',
+  'LDAP_Sync_AD_Disabled',
+  'LDAP_Sync_Reactivate_Users',
+  'LDAP_Sync_Avatar',
+  'LDAP_Sync_Max_Deactivation_Percent',
+];
 export const AGENDA_IDS = ['LDAP_Background_Sync', INTERVAL, ...TOGGLES];
 const PAGE = 20;
 const CUSTOM = 'custom';
@@ -152,6 +160,7 @@ export function LdapSync({ s, status, statusError, reloadStatus, active }: { s: 
     <>
       {!enabled && (
         <div className="callout warn">
+          <Icon name="warning" />
           <span>O LDAP está desativado. Ative-o na aba Conexão para sincronizar.</span>
         </div>
       )}
@@ -163,10 +172,14 @@ export function LdapSync({ s, status, statusError, reloadStatus, active }: { s: 
           <button className="btn primary" disabled={!s.canEdit || !enabled || syncing} onClick={() => void start()}>
             {syncing ? (
               <>
-                <span className="ldap-busy" aria-hidden="true" /> Sincronizando…
+                <span className="spinner sm ldap-busy" aria-hidden="true" />
+                Sincronizando…
               </>
             ) : (
-              '⟳ Sincronizar agora'
+              <>
+                <Icon name="sync" />
+                Sincronizar agora
+              </>
             )}
           </button>
         </div>
@@ -179,7 +192,7 @@ export function LdapSync({ s, status, statusError, reloadStatus, active }: { s: 
         {statusError && !status ? (
           <div className="form-error">Não foi possível ler a situação do LDAP: {statusError}</div>
         ) : !status && !run ? (
-          <Spinner />
+          <SkeletonTable rows={3} cols={3} />
         ) : shown ? (
           <RunSummary run={shown} onDetails={() => setDetails(shown._id)} />
         ) : (
@@ -220,7 +233,7 @@ export function LdapSync({ s, status, statusError, reloadStatus, active }: { s: 
       <div className="card">
         <h3>Histórico</h3>
         {history.loading && !history.data ? (
-          <Spinner />
+          <SkeletonTable rows={4} cols={4} />
         ) : history.error && !history.data ? (
           <div className="form-error">Não foi possível carregar o histórico: {history.error}</div>
         ) : !history.data?.runs.length ? (
@@ -286,11 +299,19 @@ function Frequency({ s, status, custom, onCustom }: { s: LdapSettings; status: L
         </select>
       </Field>
       {selected === CUSTOM && (
-        <Field label={<>Expressão cron {def && <span className="muted mono small">{def._id}</span>}</>} hint="Minuto, hora, dia do mês, mês e dia da semana. Ex.: 0 7-19 * * 1-5 (de hora em hora, das 7h às 19h, em dias úteis).">
+        <Field
+          label={<>Expressão cron {def && <span className="muted mono small">{def._id}</span>}</>}
+          hint="Minuto, hora, dia do mês, mês e dia da semana. Ex.: 0 7-19 * * 1-5 (de hora em hora, das 7h às 19h, em dias úteis)."
+        >
           <input className="mono" value={value} disabled={!s.canEdit} onChange={(e) => s.set(INTERVAL, e.target.value)} placeholder="*/15 * * * *" spellCheck={false} />
         </Field>
       )}
-      {status && !status.background.valid && <p className="ldap-warn-text">⚠ Expressão inválida: a sincronização automática está parada.</p>}
+      {status && !status.background.valid && (
+        <p className="ldap-warn-text">
+          <Icon name="warning" size={14} />
+          Expressão inválida: a sincronização automática está parada.
+        </p>
+      )}
     </div>
   );
 }
@@ -314,18 +335,19 @@ function RunSummary({ run, onDetails }: { run: LdapSyncRun; onDetails: () => voi
         </span>
       </div>
       {run.error && <div className="form-error">{run.error}</div>}
-      <div className="ldap-counts">
+      <div className="stats ldap-counts">
         {COUNT_LABEL.map(([k, label]) => (
-          <div key={k} className={`ldap-count ${run.counts[k] ? '' : 'zero'} ${k === 'errors' && run.counts.errors ? 'bad' : ''}`}>
-            <span className="ldap-count-value">{num(run.counts[k])}</span>
-            <span className="ldap-count-label">{label}</span>
+          <div key={k} className={`stat ldap-count ${run.counts[k] ? '' : 'zero'} ${k === 'errors' && run.counts.errors ? 'bad' : ''}`}>
+            <span className="stat-value ldap-count-value">{num(run.counts[k])}</span>
+            <span className="stat-label ldap-count-label">{label}</span>
           </div>
         ))}
       </div>
       {/* As listas só existem no fim da execução. */}
       {run.status !== 'running' && (
         <button className="link" onClick={onDetails}>
-          Ver mudanças, erros e avisos ›
+          Ver mudanças, erros e avisos
+          <Icon name="next" size={14} />
         </button>
       )}
     </div>
@@ -365,9 +387,8 @@ function HistoryRow({ r, onOpen }: { r: LdapSyncRun; onOpen: () => void }) {
       <td className="num">
         <span className={c.errors ? 'neg' : ''}>{num(c.errors)}</span>
         {r.warningsCount > 0 && (
-          <span className="ldap-warn-mark" title={`${r.warningsCount} ${r.warningsCount === 1 ? 'aviso' : 'avisos'}`}>
-            {' '}
-            ⚠
+          <span className="ldap-warn-mark" title={`${r.warningsCount} ${r.warningsCount === 1 ? 'aviso' : 'avisos'}`} aria-label={`${r.warningsCount} ${r.warningsCount === 1 ? 'aviso' : 'avisos'}`}>
+            <Icon name="warning" size={14} />
           </span>
         )}
       </td>
@@ -414,14 +435,19 @@ function RunModal({ runId, onClose }: { runId: string; onClose: () => void }) {
   const changes = (run?.changes ?? []).filter((c) => !f || c.username.toLowerCase().includes(f) || c.detail.toLowerCase().includes(f));
   const errors = (run?.errors ?? []).filter((e) => !f || `${e.login ?? ''} ${e.dn ?? ''} ${e.message}`.toLowerCase().includes(f));
   const warnings = (run?.warnings ?? []).filter((w) => !f || w.toLowerCase().includes(f));
-  const capped = (n: number, shown: number, fem: boolean) => n > shown && <p className="muted small">Mostrando {fem ? 'as primeiras' : 'os primeiros'} {num(shown)}.</p>;
+  const capped = (n: number, shown: number, fem: boolean) =>
+    n > shown && (
+      <p className="muted small">
+        Mostrando {fem ? 'as primeiras' : 'os primeiros'} {num(shown)}.
+      </p>
+    );
   // Em andamento ainda não há listas: elas são gravadas no fim da execução.
   const total = run && !running ? { changes: run.changes?.length ?? 0, errors: run.errors?.length ?? 0, warnings: run.warnings?.length ?? 0 } : null;
 
   return (
     <Modal wide title={run ? `Sincronização de ${formatDateTime(run.startedAt)}` : 'Sincronização'} onClose={onClose}>
       {loading && !run ? (
-        <Spinner />
+        <SkeletonTable rows={5} cols={3} />
       ) : !run ? (
         <div className="form-error">Não foi possível abrir esta sincronização{error ? `: ${error}` : '.'}</div>
       ) : (
@@ -502,7 +528,10 @@ function RunModal({ runId, onClose }: { runId: string; onClose: () => void }) {
                 {capped(run.warningsCount, total.warnings, false)}
                 <ul className="ldap-warnings">
                   {warnings.map((w, i) => (
-                    <li key={i}>⚠ {w}</li>
+                    <li key={i}>
+                      <Icon name="warning" size={14} />
+                      {w}
+                    </li>
                   ))}
                 </ul>
                 {!warnings.length && <Empty>Nada encontrado com esse filtro.</Empty>}

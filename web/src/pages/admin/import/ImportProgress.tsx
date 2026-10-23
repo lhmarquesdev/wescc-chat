@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError, errorMessage } from '../../../lib/api';
 import { useStore } from '../../../lib/store';
-import { Spinner } from '../../../components/ui';
+import { confirmDialog, SkeletonTable } from '../../../components/ui';
 import { fail, ImportTitle, isImporting, num, ok, plural, processed, ProgressBar, ST, Stat, stepText, useImportEvents, usePolling } from './common';
 import type { ImportOperation } from './types';
 
@@ -79,7 +79,14 @@ export function ImportProgress() {
   });
 
   const cancel = async () => {
-    if (!confirm('Cancelar a importação? O que já foi importado continua no chat; o resto fica de fora.')) return;
+    const yes = await confirmDialog({
+      title: 'Cancelar a importação?',
+      body: 'O que já foi importado continua no chat; o resto fica de fora.',
+      confirmLabel: 'Cancelar importação',
+      cancelLabel: 'Continuar importando',
+      danger: true,
+    });
+    if (!yes) return;
     setCancelling(true);
     try {
       const r = await api.post<{ operation: ImportOperation }>('import.cancel');
@@ -95,7 +102,7 @@ export function ImportProgress() {
     return (
       <>
         <ImportTitle title={titleOf(null)} />
-        {loadError ? <div className="form-error imp-block">Não foi possível carregar a importação: {loadError}</div> : <Spinner />}
+        {loadError ? <div className="form-error imp-block">Não foi possível carregar a importação: {loadError}</div> : <SkeletonTable rows={4} cols={3} />}
       </>
     );
   }

@@ -1,17 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { Message } from '@shared/index';
-import { api, errorMessage, uploadFile } from '../lib/api';
+import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
 import { EMOJI, searchEmoji } from '../lib/emoji';
+import { formatBytes } from '../lib/format';
 import { realtime } from '../lib/realtime';
 import { useSetting, useStore } from '../lib/store';
+import { namesIn, useNames } from '../lib/names';
 import { EmojiPicker } from './EmojiPicker';
-import { Avatar } from './ui';
+import { Icon, type IconName } from './Icon';
+import { fileIconName, FileTile, setEditingMessage } from './MessageItem';
+import { Portal, useAnchored, useIsPhone, useMedia } from './overlay';
+import { Avatar, Modal } from './ui';
 
 interface Suggestion {
   key: string;
-  label: React.ReactNode;
   insert: string;
+  // Avatar, ícone ou emoji à esquerda (24px), nome e o texto secundário.
+  lead?: ReactNode;
+  title: ReactNode;
+  sub?: ReactNode;
 }
+
+// No canal de avisos a faixa do topo já explica quem publica: aqui basta uma linha curta.
+const disabledText = (reason?: string) => (!reason ? 'Você não pode enviar mensagens aqui.' : /canal de avisos/i.test(reason) ? 'Só os publicadores enviam aqui.' : reason);
+
+const SECTION: Record<string, string> = { '@': 'Pessoas', '#': 'Canais', ':': 'Emojis', '/': 'Comandos', '!': 'Respostas prontas' };
 
 let commandsCache: { command: string; params: string; description: string }[] | null = null;
 
@@ -20,11 +33,22 @@ export interface ComposerHandle {
   quote(m: Message): void;
 }
 
+// Ícone do compositor desativado, pelo motivo (o texto vem da sala).
+function disabledIconFor(reason?: string): IconName {
+  if (!reason) return 'composer-locked';
+  if (/canal de avisos/i.test(reason)) return 'notice';
+  if (/arquivad/i.test(reason)) return 'sys-archived';
+  if (/silenciad/i.test(reason)) return 'composer-muted';
+  if (/particular|bloquead/i.test(reason)) return 'direct-blocked';
+  return 'composer-locked';
+}
+
 export function Composer({
   rid,
   tmid,
   disabled,
   disabledReason,
+  disabledIcon,
   placeholder,
   editing,
   setEditing,
@@ -38,6 +62,7 @@ export function Composer({
   tmid?: string;
   disabled?: boolean;
   disabledReason?: string;
+  disabledIcon?: IconName;
   placeholder?: string;
   editing: Message | null;
   setEditing: (m: Message | null) => void;
@@ -50,21 +75,32 @@ export function Composer({
   ackOption?: boolean;
 }) {
   const me = useStore((s) => s.me)!;
+  const nameOf = useNames();
   const sendOnEnter = me.preferences?.sendOnEnter !== false;
   const maxSize = useSetting<number>('Message_MaxAllowedSize') ?? 5000;
   const uploadsOn = useSetting<boolean>('FileUpload_Enabled');
+  const phone = useIsPhone();
+  const coarse = useMedia('(pointer: coarse)');
   const [text, setText] = useState('');
   const [sugs, setSugs] = useState<Suggestion[]>([]);
+  const [section, setSection] = useState('');
   const [sel, setSel] = useState(0);
   const [picker, setPicker] = useState(false);
-  const [uploads, setUploads] = useState<{ name: string; progress: number }[]>([]);
+  const [fmt, setFmt] = useState(false);
+  const [uploads, setUploads] = useState<{ id: number; name: string; progress: number; abort: AbortController }[]>([]);
+  const uploadSeq = useRef(0);
   const [alsoChannel, setAlsoChannel] = useState(false);
   const [pending, setPending] = useState<File[]>([]);
   const [fileDesc, setFileDesc] = useState('');
   const [askAck, setAskAck] = useState(true);
+  const [drop, setDrop] = useState<DOMRect | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const emojiBtn = useRef<HTMLButtonElement>(null);
   const typingRef = useRef<{ on: boolean; timer: number | null }>({ on: false, timer: null });
+  const listId = useId();
   const draftKey = `wescc.draft.${rid}${tmid ? `.${tmid}` : ''}`;
+  const anch = useAnchored({ open: sugs.length > 0, placement: 'top-start', gap: 6, minHeight: 120 });
 
   useEffect(() => {
     try {
@@ -79,10 +115,66 @@ export function Composer({
       setText(editing.msg);
       ta.current?.focus();
     }
+    // A linha da mensagem em edição fica marcada na lista (.msg.editing).
+    setEditingMessage(editing?._id ?? null);
   }, [editing]);
+  useEffect(() => () => setEditingMessage(null), []);
   useEffect(() => {
     if (quoting) ta.current?.focus();
   }, [quoting]);
+
+  useEffect(() => {
+    if (box.current) anch.setReference(box.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disabled]);
+
+  // A caixa cresce com o texto até o limite do CSS (8 linhas; metade da tela no celular) e depois rola.
+  useLayoutEffect(() => {
+    const el = ta.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text, phone]);
+
+  // Arrastar um arquivo sobre a sala (ou o painel do tópico) mostra a área de soltar.
+  useEffect(() => {
+    const host = box.current?.closest<HTMLElement>('.thread-panel, .room-main');
+    if (!host || !uploadsOn || disabled) return;
+    let depth = 0;
+    const files = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+    const enter = (e: DragEvent) => {
+      if (!files(e)) return;
+      e.preventDefault();
+      if (depth++ === 0) setDrop(host.getBoundingClientRect());
+    };
+    const over = (e: DragEvent) => {
+      if (files(e)) e.preventDefault();
+    };
+    const leave = (e: DragEvent) => {
+      if (!files(e)) return;
+      if (--depth <= 0) {
+        depth = 0;
+        setDrop(null);
+      }
+    };
+    const dropped = (e: DragEvent) => {
+      if (!files(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDrop(null);
+      if (e.dataTransfer?.files.length) setPending([...e.dataTransfer.files]);
+    };
+    host.addEventListener('dragenter', enter);
+    host.addEventListener('dragover', over);
+    host.addEventListener('dragleave', leave);
+    host.addEventListener('drop', dropped);
+    return () => {
+      host.removeEventListener('dragenter', enter);
+      host.removeEventListener('dragover', over);
+      host.removeEventListener('dragleave', leave);
+      host.removeEventListener('drop', dropped);
+    };
+  }, [uploadsOn, disabled]);
 
   const saveDraft = (v: string) => {
     try {
@@ -108,8 +200,10 @@ export function Composer({
     async (value: string, caret: number) => {
       // Respostas antigas do servidor não podem reabrir a lista depois do envio.
       const my = ++reqSeq.current;
-      const put = (list: Suggestion[]) => {
-        if (my === reqSeq.current) setSugs(list);
+      const put = (list: Suggestion[], trig = '') => {
+        if (my !== reqSeq.current) return;
+        setSugs(list);
+        setSection(SECTION[trig] ?? '');
       };
       const before = value.slice(0, caret);
       const cm = canned ? before.match(/(?:^|\s)!([\w-]*)$/) : null;
@@ -127,13 +221,12 @@ export function Composer({
             .slice(0, 10)
             .map((c: any) => ({
               key: c._id,
-              label: (
-                <>
-                  <strong>!{c.shortcut}</strong> <span className="muted">{c.text.slice(0, 80)}</span>
-                </>
-              ),
+              lead: <Icon name="canned" size={16} />,
+              title: `!${c.shortcut}`,
+              sub: c.text.slice(0, 80),
               insert: fill(c.text),
             })),
+          '!',
         );
         setSel(0);
         return;
@@ -143,35 +236,56 @@ export function Composer({
       const [, trig, term] = m;
       if (trig === '@') {
         const r = await api.get('users.autocomplete', { term, rid }).catch(() => ({ items: [] }));
-        const items: Suggestion[] = r.items.map((u: any) => ({
+        const person = (u: any): Suggestion => ({
           key: u._id,
-          label: (
-            <>
-              <Avatar username={u.username} size={20} /> <strong>{u.username}</strong> <span className="muted">{u.name}</span>
-            </>
-          ),
+          lead: <Avatar username={u.username} size={24} />,
+          title: u.name || u.username,
+          sub: `@${u.username}`,
           insert: `@${u.username} `,
-        }));
-        for (const g of ['all', 'here']) if (g.startsWith(term)) items.push({ key: g, label: <><strong>@{g}</strong> <span className="muted">{g === 'all' ? 'todos da sala' : 'todos online'}</span></>, insert: `@${g} ` });
-        put(items.slice(0, 10));
+        });
+        const items: Suggestion[] = r.items.filter((u: any) => u.username !== me.username).map(person);
+        for (const g of ['all', 'here'])
+          if (g.startsWith(term))
+            items.push({ key: g, lead: <Icon name="mention" size={16} />, title: `@${g}`, sub: g === 'all' ? 'todos da sala' : 'todos online', insert: `@${g} ` });
+        // Quem escreve vai para o fim, depois de @all e @here: quase nunca se menciona a si mesmo.
+        const self = r.items.find((u: any) => u.username === me.username);
+        put([...items.slice(0, self ? 9 : 10), ...(self ? [person(self)] : [])], '@');
       } else if (trig === '#') {
         const r = await api.get('rooms.autocomplete.channelAndPrivate', { term }).catch(() => ({ items: [] }));
-        put(r.items.map((x: any) => ({ key: x._id, label: <>#{x.name}</>, insert: `#${x.name} ` })));
+        put(
+          r.items.map((x: any) => ({ key: x._id, lead: <Icon name={x.t === 'p' ? 'room-private' : 'room-channel'} size={16} />, title: x.name, insert: `#${x.name} ` })),
+          '#',
+        );
       } else if (trig === ':') {
         if (term.length < 2) return put([]);
-        put(searchEmoji(term).map((c) => ({ key: c, label: <>{EMOJI[c] ?? <img className="emoji custom" src={`/emoji-custom/${c}`} alt="" />} :{c}:</>, insert: `:${c}: ` })));
+        put(
+          searchEmoji(term).map((c) => ({
+            key: c,
+            lead: <span className="sug-emoji">{EMOJI[c] ?? <img className="emoji custom" src={`/emoji-custom/${c}`} alt="" />}</span>,
+            title: `:${c}:`,
+            insert: `:${c}: `,
+          })),
+          ':',
+        );
       } else if (trig === '/') {
         commandsCache ??= (await api.get('commands.list').catch(() => ({ commands: [] }))).commands;
+        // Sinônimos (/part = /leave, /jitsi = /call) têm a mesma descrição: fica só o primeiro, a não ser que a
+        // pessoa já esteja digitando o sinônimo.
+        const seenDesc = new Set<string>();
+        const cmds = (commandsCache ?? []).filter((c) => {
+          if (!c.command.startsWith(term)) return false;
+          if (c.command !== term && c.description && seenDesc.has(c.description)) return false;
+          seenDesc.add(c.description);
+          return true;
+        });
         put(
-          (commandsCache ?? [])
-            .filter((c) => c.command.startsWith(term))
-            .slice(0, 12)
-            .map((c) => ({ key: c.command, label: <><strong>/{c.command}</strong> <span className="muted">{c.params} — {c.description}</span></>, insert: `/${c.command} ` })),
+          cmds.slice(0, 12).map((c) => ({ key: c.command, title: `/${c.command}`, sub: [c.params, c.description].filter(Boolean).join(' · '), insert: `/${c.command} ` })),
+          '/',
         );
       }
       setSel(0);
     },
-    [rid, canned],
+    [rid, canned, me.username],
   );
 
   const applySuggestion = (s: Suggestion) => {
@@ -190,6 +304,8 @@ export function Composer({
       el.setSelectionRange(pos, pos);
     });
   };
+
+  const over = text.length > maxSize;
 
   const send = async () => {
     let msg = text.trim();
@@ -217,15 +333,25 @@ export function Composer({
 
   const doUpload = async (files: File[], description: string) => {
     for (const f of files) {
-      setUploads((u) => [...u, { name: f.name, progress: 0 }]);
+      const id = ++uploadSeq.current;
+      const abort = new AbortController();
+      setUploads((u) => [...u, { id, name: f.name, progress: 0, abort }]);
       try {
-        await uploadFile(rid, f, { description, tmid: tmid ?? '' }, (p) => setUploads((u) => u.map((x) => (x.name === f.name ? { ...x, progress: p } : x))));
+        const progress = (p: number) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, progress: p } : x)));
+        await uploadTo(`rooms.upload/${rid}`, f, { description, tmid: tmid ?? '' }, progress, abort.signal);
       } catch (e) {
-        useStore.getState().toast(errorMessage(e), 'error');
+        // Cancelado por quem enviou: a barra some e basta.
+        if (!(e instanceof ApiError && e.errorType === 'aborted')) useStore.getState().toast(errorMessage(e), 'error');
       } finally {
-        setUploads((u) => u.filter((x) => x.name !== f.name));
+        setUploads((u) => u.filter((x) => x.id !== id));
       }
     }
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setText('');
+    ta.current?.focus();
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -233,7 +359,7 @@ export function Composer({
       if (e.key === 'ArrowDown') return (e.preventDefault(), setSel((sel + 1) % sugs.length));
       if (e.key === 'ArrowUp') return (e.preventDefault(), setSel((sel - 1 + sugs.length) % sugs.length));
       if (e.key === 'Enter' || e.key === 'Tab') return (e.preventDefault(), applySuggestion(sugs[sel]));
-      if (e.key === 'Escape') return setSugs([]);
+      if (e.key === 'Escape') return (e.preventDefault(), setSugs([]));
     }
     if (e.key === 'Escape') {
       if (editing) {
@@ -247,7 +373,9 @@ export function Composer({
       onEditLast();
     }
     if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-      const wantsSend = sendOnEnter ? !e.shiftKey && !e.ctrlKey : e.ctrlKey || e.metaKey;
+      // Teclado de toque não tem Shift: lá o Enter quebra a linha e quem envia é o botão (a opção "Enter envia"
+      // nem aparece nas Preferências do celular).
+      const wantsSend = coarse ? false : sendOnEnter ? !e.shiftKey && !e.ctrlKey : e.ctrlKey || e.metaKey;
       if (wantsSend) {
         e.preventDefault();
         void send();
@@ -278,46 +406,110 @@ export function Composer({
     });
   };
 
-  if (disabled) return <div className="composer disabled">{disabledReason ?? 'Você não pode enviar mensagens aqui.'}</div>;
+  const closePicker = useCallback(() => setPicker(false), []);
+  const cancelPending = () => (setPending([]), setFileDesc(''));
+  const confirmPending = () => (void doUpload(pending, fileDesc), setPending([]), setFileDesc(''));
+
+  if (disabled) {
+    // Os motivos do servidor citam @usuário: aqui aparece o nome da pessoa.
+    const note = namesIn(disabledText(disabledReason), nameOf);
+    return (
+      <div className="composer disabled" ref={box} title={note !== disabledReason ? disabledReason : undefined}>
+        <Icon name={disabledIcon ?? disabledIconFor(disabledReason)} size={16} />
+        <span>{note}</span>
+      </div>
+    );
+  }
+
+  const quoteName = quoting ? quoting.u.name || quoting.u.username : '';
+  const format = (
+    <>
+      <button type="button" className="tool-btn" title="Negrito" aria-label="Negrito" onClick={() => wrap('*')}>
+        <Icon name="bold" size={16} />
+      </button>
+      <button type="button" className="tool-btn" title="Itálico" aria-label="Itálico" onClick={() => wrap('_')}>
+        <Icon name="italic" size={16} />
+      </button>
+      <button type="button" className="tool-btn" title="Tachado" aria-label="Tachado" onClick={() => wrap('~')}>
+        <Icon name="strike" size={16} />
+      </button>
+      <button type="button" className="tool-btn" title="Código" aria-label="Código" onClick={() => wrap('`')}>
+        <Icon name="code" size={16} />
+      </button>
+    </>
+  );
 
   return (
-    <div
-      className="composer"
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        if (uploadsOn && e.dataTransfer.files.length) setPending([...e.dataTransfer.files]);
-      }}
-    >
+    <div className={`composer${editing ? ' is-editing' : ''}`} ref={box}>
       {editing && (
-        <div className="composer-bar">
-          ✏️ Editando mensagem <button className="link" onClick={() => (setEditing(null), setText(''))}>cancelar (Esc)</button>
+        <div className="composer-bar editing">
+          <Icon name="editing" size={14} />
+          <span className="composer-bar-text">Editando mensagem</span>
+          <span className="composer-bar-hint">
+            <kbd>Esc</kbd> para cancelar
+          </span>
+          <button type="button" className="icon-btn" title="Cancelar edição" aria-label="Cancelar edição" onClick={cancelEdit}>
+            <Icon name="close" size={16} />
+          </button>
         </div>
       )}
       {quoting && (
-        <div className="composer-bar">
-          ❝ Citando <strong>{quoting.u.username}</strong>: <span className="muted ellipsis">{quoting.msg.slice(0, 80)}</span>
-          <button className="link" onClick={() => setQuoting(null)}>
-            remover
+        <div className="composer-bar quoting">
+          <Icon name="quote" size={14} />
+          <span className="composer-bar-text">
+            Citando <strong>{quoteName}</strong>
+          </span>
+          <span className="composer-bar-excerpt">{quoting.msg.slice(0, 160)}</span>
+          <button type="button" className="icon-btn" title="Remover citação" aria-label="Remover citação" onClick={() => setQuoting(null)}>
+            <Icon name="close" size={16} />
           </button>
         </div>
       )}
       {uploads.map((u) => (
-        <div key={u.name} className="composer-bar">
-          ⬆ Enviando {u.name}… {Math.round(u.progress * 100)}%
-          <div className="progress">
-            <div style={{ width: `${u.progress * 100}%` }} />
-          </div>
+        <div key={u.id} className="composer-bar upload" role="status">
+          <Icon name={fileIconName(u.name)} size={16} />
+          <span className="composer-bar-text">Enviando {u.name}</span>
+          <span className="progress" aria-hidden="true">
+            <span style={{ width: `${u.progress * 100}%` }} />
+          </span>
+          <span className="composer-bar-pct">{Math.round(u.progress * 100)}%</span>
+          <button type="button" className="icon-btn" title="Cancelar envio" aria-label={`Cancelar envio de ${u.name}`} onClick={() => u.abort.abort()}>
+            <Icon name="close" size={16} />
+          </button>
         </div>
       ))}
       {sugs.length > 0 && (
-        <div className="suggestions">
-          {sugs.map((s, i) => (
-            <button key={s.key} className={i === sel ? 'active' : ''} onMouseDown={(e) => (e.preventDefault(), applySuggestion(s))}>
-              {s.label}
-            </button>
-          ))}
-        </div>
+        <Portal>
+          <div
+            ref={anch.setFloating}
+            className={section === SECTION['/'] ? 'suggestions commands' : 'suggestions'}
+            id={listId}
+            role="listbox"
+            aria-label={section || 'Sugestões'}
+            style={anch.style}
+            data-side={anch.positioned ? anch.side : undefined}
+            data-layer={anch.layer}
+          >
+            {section && <div className="sug-section">{section}</div>}
+            {sugs.map((s, i) => (
+              <button
+                key={s.key}
+                type="button"
+                id={`${listId}-${i}`}
+                role="option"
+                aria-selected={i === sel}
+                className={i === sel ? 'active' : ''}
+                tabIndex={-1}
+                onMouseDown={(e) => (e.preventDefault(), applySuggestion(s))}
+                onMouseEnter={() => setSel(i)}
+              >
+                {s.lead && <span className="sug-lead">{s.lead}</span>}
+                <span className="sug-title">{s.title}</span>
+                {s.sub && <span className="sug-sub">{s.sub}</span>}
+              </button>
+            ))}
+          </div>
+        </Portal>
       )}
       <div className="composer-row">
         <textarea
@@ -325,6 +517,12 @@ export function Composer({
           rows={1}
           value={text}
           placeholder={placeholder ?? 'Mensagem'}
+          aria-label={placeholder ?? 'Mensagem'}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={sugs.length > 0}
+          aria-controls={sugs.length ? listId : undefined}
+          aria-activedescendant={sugs.length ? `${listId}-${sel}` : undefined}
           onChange={(e) => {
             setText(e.target.value);
             saveDraft(e.target.value);
@@ -340,78 +538,113 @@ export function Composer({
             }
           }}
           onBlur={() => setTimeout(() => setSugs([]), 150)}
-          style={{ height: Math.min(200, 22 + 20 * Math.min(8, text.split('\n').length)) }}
         />
       </div>
-      <div className="composer-tools">
-        <button title="Emoji" onClick={() => setPicker(!picker)}>
-          😊
-        </button>
-        <button title="Negrito" onClick={() => wrap('*')}>
-          <b>B</b>
-        </button>
-        <button title="Itálico" onClick={() => wrap('_')}>
-          <i>I</i>
-        </button>
-        <button title="Tachado" onClick={() => wrap('~')}>
-          <s>S</s>
-        </button>
-        <button title="Código" onClick={() => wrap('`')}>
-          {'</>'}
-        </button>
-        {uploadsOn && (
-          <label className="tool-btn" title="Enviar arquivo">
-            📎
-            <input type="file" multiple hidden onChange={(e) => e.target.files && setPending([...e.target.files])} />
-          </label>
-        )}
-        {tmid && (
-          <label className="also-channel">
-            <input type="checkbox" checked={alsoChannel} onChange={(e) => setAlsoChannel(e.target.checked)} /> Também enviar para a sala
-          </label>
-        )}
-        <span className="spacer" />
-        <span className={`counter ${text.length > maxSize ? 'over' : ''}`}>{text.length > maxSize * 0.8 ? `${text.length}/${maxSize}` : ''}</span>
-        {ackOption && !editing && !tmid && (
-          <button type="button" className={`chip selectable ${askAck ? 'on' : 'off'}`} aria-pressed={askAck} aria-label="Pedir “Ciente”" title="Os membros confirmam que leram este aviso." onClick={() => setAskAck(!askAck)}>
-            ✔ <span className="pill-label">Pedir </span>“Ciente”
-          </button>
-        )}
-        <button className="btn primary send" onClick={send} disabled={!text.trim()}>
-          {editing ? 'Salvar' : 'Enviar'}
-        </button>
-      </div>
-      {picker && (
-        <div className="picker-anchor composer-picker">
-          <EmojiPicker onClose={() => setPicker(false)} onPick={(c) => (insertAtCaret(`:${c}: `), setPicker(false))} />
+      {/* No celular a formatação é uma linha própria acima das ferramentas: o botão Enviar nunca sai do lugar. */}
+      {phone && fmt && (
+        <div className="composer-format" role="toolbar" aria-label="Formatação">
+          {format}
         </div>
       )}
+      {tmid && (
+        <label className="also-channel">
+          <input type="checkbox" checked={alsoChannel} onChange={(e) => setAlsoChannel(e.target.checked)} /> Também enviar na sala
+        </label>
+      )}
+      <div className="composer-tools">
+        {uploadsOn && (
+          <label
+            className="tool-btn"
+            title="Enviar arquivo"
+            aria-label="Enviar arquivo"
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              e.currentTarget.querySelector('input')?.click();
+            }}
+          >
+            <Icon name={phone ? 'add' : 'attach'} size={phone ? 18 : 16} />
+            <input type="file" multiple hidden onChange={(e) => (e.target.files && setPending([...e.target.files]), (e.target.value = ''))} />
+          </label>
+        )}
+        {phone && (
+          <button type="button" className={fmt ? 'tool-btn on' : 'tool-btn'} title="Formatação" aria-label="Formatação" aria-pressed={fmt} onClick={() => setFmt(!fmt)}>
+            <Icon name="format" size={16} />
+          </button>
+        )}
+        <button ref={emojiBtn} type="button" className={picker ? 'tool-btn on' : 'tool-btn'} title="Emoji" aria-label="Emoji" aria-expanded={picker} onClick={() => setPicker(!picker)}>
+          <Icon name="emoji" size={16} />
+        </button>
+        {!phone && (
+          <>
+            <span className="tool-sep" aria-hidden="true" />
+            {format}
+          </>
+        )}
+        <span className="spacer" />
+        {text.length > maxSize * 0.8 && <span className={`counter ${over ? 'over' : ''}`}>{`${text.length}/${maxSize}`}</span>}
+        {ackOption && !editing && !tmid && (
+          <button type="button" className={`chip selectable ${askAck ? 'on' : 'off'}`} aria-pressed={askAck} aria-label="Pedir “Ciente”" title="Os membros confirmam que leram este aviso." onClick={() => setAskAck(!askAck)}>
+            <Icon name="ack-request" size={14} className="chip-icon" />
+            {/* Um item só para o texto: o gap do chip não entra entre as duas palavras. */}
+            <span><span className="pill-label">Pedir </span>“Ciente”</span>
+          </button>
+        )}
+        {editing ? (
+          <>
+            <button type="button" className="btn small ghost" onClick={cancelEdit}>
+              Cancelar
+            </button>
+            <button type="button" className="btn primary small send save" onClick={send} disabled={!text.trim() || over}>
+              Salvar
+            </button>
+          </>
+        ) : (
+          <button type="button" className="btn primary send" onClick={send} disabled={!text.trim() || over} title="Enviar">
+            <Icon name="send" size={18} />
+            <span className="visually-hidden">Enviar</span>
+          </button>
+        )}
+      </div>
+      {picker && (
+        <EmojiPicker anchor={emojiBtn.current} reference={box.current} placement="top-start" gap={6} onClose={closePicker} onPick={(c) => (insertAtCaret(`:${c}: `), setPicker(false))} />
+      )}
+      {drop && (
+        <Portal>
+          <div className="drop-overlay" style={{ top: drop.top + 8, left: drop.left + 8, width: drop.width - 16, height: drop.height - 16 }} aria-hidden="true">
+            <Icon name="upload-drop" size={32} />
+            <span>Solte para enviar</span>
+          </div>
+        </Portal>
+      )}
       {pending.length > 0 && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <div className="modal-head">
-              <h2>Enviar {pending.length === 1 ? 'arquivo' : `${pending.length} arquivos`}</h2>
-            </div>
-            <div className="modal-body">
-              <ul className="plain-list">
-                {pending.map((f) => (
-                  <li key={f.name}>
-                    {f.type.startsWith('image/') ? <img className="upload-preview" src={URL.createObjectURL(f)} alt="" /> : '📄'} {f.name}
-                  </li>
-                ))}
-              </ul>
-              <input autoFocus placeholder="Descrição (opcional)" value={fileDesc} onChange={(e) => setFileDesc(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (void doUpload(pending, fileDesc), setPending([]), setFileDesc(''))} />
-            </div>
-            <div className="modal-foot">
-              <button className="btn" onClick={() => (setPending([]), setFileDesc(''))}>
+        <Modal
+          title={pending.length === 1 ? 'Enviar arquivo' : `Enviar ${pending.length} arquivos`}
+          onClose={cancelPending}
+          footer={
+            <>
+              <button type="button" className="btn ghost" onClick={cancelPending}>
                 Cancelar
               </button>
-              <button className="btn primary" onClick={() => (void doUpload(pending, fileDesc), setPending([]), setFileDesc(''))}>
+              <button type="button" className="btn primary" onClick={confirmPending}>
                 Enviar
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <ul className="plain-list upload-list">
+            {pending.map((f) => (
+              <li key={f.name}>
+                {f.type.startsWith('image/') ? <img className="upload-preview" src={URL.createObjectURL(f)} alt="" /> : <FileTile name={f.name} mime={f.type} />}
+                <span className="upload-name">{f.name}</span>
+                <span className="upload-size">{formatBytes(f.size)}</span>
+              </li>
+            ))}
+          </ul>
+          <input autoFocus placeholder="Descrição (opcional)" aria-label="Descrição" value={fileDesc} onChange={(e) => setFileDesc(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && confirmPending()} />
+        </Modal>
       )}
     </div>
   );

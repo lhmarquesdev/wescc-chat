@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
 import { partyOf, useDirect, type DirectState } from '../lib/direct';
 import { roomPath } from '../lib/format';
 import { usePermission } from '../lib/store';
+import { Icon } from './Icon';
 import { RoomPicker, UserPicker, type PickedRoom, type PickedUser } from './Pickers';
-import { Field, Modal, Toggle } from './ui';
+import { Field, Modal, Segmented, Toggle } from './ui';
 
 export type CreateKind = 'dm' | 'channel' | 'team' | 'discussion';
 
@@ -17,6 +18,16 @@ const TITLES: Record<CreateKind, string> = {
 };
 
 const blockedText = (st: DirectState) => (st.kind === 'none' ? st.text : undefined);
+
+// Erro do formulário com o ícone na frente (a classe .form-error é a que os testes procuram).
+function FormError({ children }: { children: ReactNode }) {
+  return (
+    <div className="form-error" role="alert">
+      <Icon name="error" size={16} />
+      <span>{children}</span>
+    </div>
+  );
+}
 
 export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind; onClose: () => void; parent?: PickedRoom; pmid?: string }) {
   const navigate = useNavigate();
@@ -81,13 +92,14 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
   return (
     <Modal
       title={TITLES[kind]}
+      className="create-modal"
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             Cancelar
           </button>
-          <button className="btn primary" disabled={!nameValid || busy || dmBlocked} onClick={submit}>
+          <button type="button" className="btn primary" aria-busy={busy || undefined} disabled={!nameValid || busy || dmBlocked} onClick={submit}>
             {dmState?.kind === 'view' ? 'Ver conversa' : kind === 'dm' ? 'Abrir conversa' : 'Criar'}
           </button>
         </>
@@ -100,52 +112,61 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
           </Field>
         )}
         {kind !== 'dm' && (
-          <Field label="Nome" hint={kind === 'discussion' ? undefined : 'Sem espaços. Use letras, números, ponto, hífen ou sublinhado.'}>
-            <input autoFocus value={name} onChange={(e) => setName(kind === 'discussion' ? e.target.value : e.target.value.replace(/\s/g, '-'))} />
+          <Field label="Nome" required hint={kind === 'discussion' ? undefined : 'Sem espaços. Use letras, números, ponto, hífen ou sublinhado.'}>
+            <input
+              autoFocus
+              value={name}
+              placeholder={kind === 'discussion' ? 'Ex.: Escala de dezembro' : kind === 'team' ? 'Ex.: time-retencao' : 'Ex.: operacao-sac'}
+              onChange={(e) => setName(kind === 'discussion' ? e.target.value : e.target.value.replace(/\s/g, '-'))}
+            />
           </Field>
         )}
         {(kind === 'channel' || kind === 'team') && (
           <>
-            <Field label="Tópico">
+            <Field label="Tópico" hint="Opcional. Aparece no cabeçalho, embaixo do nome.">
               <input value={topic} onChange={(e) => setTopic(e.target.value)} />
             </Field>
-            <Toggle
-              checked={isPrivate}
-              onChange={(v) => setPrivate(v ? canPrivate || !canPublic : !canPublic)}
-              label={isPrivate ? 'Privado: só convidados podem entrar' : 'Público: qualquer pessoa pode entrar'}
-            />
-            {kind === 'team' && <Toggle checked={readOnly} onChange={setReadOnly} label="Somente leitura" />}
+            {/* div, não label: um <label> em volta dos botões passaria o clique do título para o primeiro deles. */}
+            <div className="field">
+              <span className="field-label">Quem pode entrar</span>
+              <Segmented
+                label="Quem pode entrar"
+                value={isPrivate ? 'private' : 'public'}
+                onChange={(v) => setPrivate(v === 'private' ? canPrivate || !canPublic : !canPublic)}
+                items={[
+                  { id: 'private', label: 'Privado', icon: 'room-private' },
+                  { id: 'public', label: 'Público', icon: kind === 'team' ? 'room-team' : 'room-channel' },
+                ]}
+              />
+              <span className="field-hint">{isPrivate ? 'Só quem for convidado entra.' : 'Qualquer pessoa da empresa encontra no diretório e entra.'}</span>
+            </div>
+            {kind === 'team' && <Toggle checked={readOnly} onChange={setReadOnly} label="Somente leitura" description="Só donos e moderadores escrevem na sala principal do time." />}
           </>
         )}
         {kind === 'channel' && (
-          <div className="field" role="radiogroup" aria-label="Tipo de canal">
+          <div className="field">
             <span className="field-label">Tipo de canal</span>
-            <div className="radio-cards">
-              <label className={`radio-card ${notice ? '' : 'on'}`}>
-                <input type="radio" name="channel-kind" checked={!notice} onChange={() => setNotice(false)} />
-                <span>
-                  <strong>Canal comum</strong>
-                  <span className="field-hint">Todos os membros conversam.</span>
-                </span>
-              </label>
-              <label className={`radio-card ${notice ? 'on' : ''}`}>
-                <input type="radio" name="channel-kind" checked={notice} onChange={() => setNotice(true)} />
-                <span>
-                  <strong>📢 Canal de avisos</strong>
-                  <span className="field-hint">Só donos, moderadores e publicadores escrevem. Todos os membros leem.</span>
-                </span>
-              </label>
-            </div>
+            <Segmented
+              label="Tipo de canal"
+              value={notice ? 'notice' : 'common'}
+              onChange={(v) => setNotice(v === 'notice')}
+              items={[
+                { id: 'common', label: 'Canal comum', icon: 'room-channel' },
+                { id: 'notice', label: 'Canal de avisos', icon: 'notice' },
+              ]}
+            />
+            <span className="field-hint">{notice ? 'Só donos, moderadores e publicadores escrevem. Todos os membros leem.' : 'Todos os membros conversam.'}</span>
           </div>
         )}
         {kind === 'channel' && notice && (
           <div className="notice-opts">
             <Toggle checked={reactions} onChange={setReactions} label="Permitir reações aos avisos" />
-            <Toggle checked={ack} onChange={setAck} label="Pedir “Ciente” nos avisos" />
-            <span className="field-hint opt-hint">Cada aviso ganha o botão Ciente, e quem publica vê quem já confirmou a leitura.</span>
-            <Toggle checked={hideMembers} onChange={setHideMembers} label="Ocultar a lista de membros" />
-            <span className="field-hint opt-hint">Só donos e moderadores veem quem está no canal.</span>
-            <p className="muted small">Você será o dono do canal. Para escolher quem publica, abra o perfil da pessoa no canal e use “Tornar publicador”.</p>
+            <Toggle checked={ack} onChange={setAck} label="Pedir “Ciente” nos avisos" description="Cada aviso ganha o botão Ciente, e quem publica vê quem já confirmou a leitura." />
+            <Toggle checked={hideMembers} onChange={setHideMembers} label="Ocultar a lista de membros" description="Só donos e moderadores veem quem está no canal." />
+            <p className="muted small notice-owner">
+              <Icon name="info" size={14} />
+              <span>Você será o dono do canal. Para escolher quem publica, abra o perfil da pessoa no canal e use “Tornar publicador”.</span>
+            </p>
           </div>
         )}
         <Field label={kind === 'dm' ? 'Pessoas (até 8)' : 'Adicionar membros'}>
@@ -161,14 +182,19 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
             }
           />
         </Field>
-        {dmState?.kind === 'none' && <div className="form-error">{dmState.text}</div>}
-        {dmState?.kind === 'view' && <p className="muted small direct-note">🚫 {dmState.text}</p>}
+        {dmState?.kind === 'none' && <FormError>{dmState.text}</FormError>}
+        {dmState?.kind === 'view' && (
+          <p className="muted small direct-note">
+            <Icon name="direct-blocked" size={16} />
+            <span>{dmState.text}</span>
+          </p>
+        )}
         {kind === 'discussion' && (
           <Field label="Primeira mensagem (opcional)">
             <textarea value={reply} onChange={(e) => setReply(e.target.value)} rows={3} />
           </Field>
         )}
-        {error && <div className="form-error">{error}</div>}
+        {error && <FormError>{error}</FormError>}
       </div>
     </Modal>
   );

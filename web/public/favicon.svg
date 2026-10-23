@@ -1,1 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#1d74f5"/><path d="M16 20h32a4 4 0 0 1 4 4v14a4 4 0 0 1-4 4H30l-9 7v-7h-5a4 4 0 0 1-4-4V24a4 4 0 0 1 4-4z" fill="#fff"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28">
+  <defs>
+    <linearGradient id="mark-fill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b6bf0"/>
+      <stop offset="1" stop-color="#3240b5"/>
+    </linearGradient>
+    <clipPath id="mark-clip"><rect width="28" height="28" rx="8"/></clipPath>
+  </defs>
+  <rect width="28" height="28" rx="8" fill="url(#mark-fill)"/>
+  <path class="mark-highlight" clip-path="url(#mark-clip)" fill="#fff" fill-opacity=".18" fill-rule="evenodd" d="M8 0h12a8 8 0 0 1 8 8v12a8 8 0 0 1-8 8H8a8 8 0 0 1-8-8V8a8 8 0 0 1 8-8zM8 1h12a8 8 0 0 1 8 8v12a8 8 0 0 1-8 8H8a8 8 0 0 1-8-8V9a8 8 0 0 1 8-8z"/>
+  <g fill="#fff" transform="translate(6 6)">
+    <rect x="2" y="2.5" width="12" height="2.5" rx="1.25"/>
+    <rect x="2" y="6.75" width="8.5" height="2.5" rx="1.25"/>
+    <rect x="2" y="11" width="12" height="2.5" rx="1.25"/>
+  </g>
+</svg>

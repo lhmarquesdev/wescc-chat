@@ -45,7 +45,7 @@ add('General', 'Workspace', 'Site_Url', 'string', process.env.SITE_URL ?? 'http:
 add('General', 'Workspace', 'Language', 'string', 'pt-BR', { public: true, label: 'Idioma padrão' });
 add('General', 'Workspace', 'Default_Channels', 'string', 'geral', { label: 'Canais padrão (separados por vírgula)' });
 add('Layout', 'Home', 'Layout_Home_Title', 'string', 'Início', { public: true, label: 'Título da página inicial' });
-add('Layout', 'Home', 'Layout_Home_Body', 'multiline', 'Bem-vindo ao chat interno.', { public: true, label: 'Conteúdo da página inicial (Markdown)' });
+add('Layout', 'Home', 'Layout_Home_Body', 'multiline', 'Boas-vindas ao chat interno.', { public: true, label: 'Conteúdo da página inicial (Markdown)' });
 add('Layout', 'Custom', 'Layout_Custom_CSS', 'code', '', { public: true, label: 'CSS personalizado' });
 add('Layout', 'Custom', 'Layout_Login_Terms', 'multiline', '', { public: true, label: 'Termos exibidos no login' });
 
