@@ -4,7 +4,7 @@ import { setCustomEmoji } from './emoji';
 import { syncPushSubscription, unsubscribeOnLogout } from './push';
 import { realtime } from './realtime';
 import { useStore, type Me } from './store';
-import { roomPath } from './format';
+import { roomPath, setRoleDescriptions } from './format';
 
 export async function loadPublicSettings() {
   const r = await api.get('settings.public');
@@ -19,7 +19,10 @@ export async function loadSubscriptions() {
 export async function loadPermissionMap() {
   const [r, roles] = await Promise.all([api.get('permissions.listAll').catch(() => null), api.get('roles.list').catch(() => null)]);
   if (r) useStore.setState({ permMap: Object.fromEntries(r.update.map((p: any) => [p._id, p.roles])) });
-  if (roles) useStore.setState({ restrictedRoles: (roles.roles as Role[]).filter((x) => x.restrictDirect).map((x) => x._id) });
+  if (roles) {
+    setRoleDescriptions(roles.roles as Role[]);
+    useStore.setState({ restrictedRoles: (roles.roles as Role[]).filter((x) => x.restrictDirect).map((x) => x._id) });
+  }
 }
 
 export async function loadCustomEmoji() {

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError, errorMessage, uploadTo } from '../../../lib/api';
 import { formatBytes } from '../../../lib/format';
-import { Field, Spinner, useAsync } from '../../../components/ui';
+import { Icon, type IconName } from '../../../components/Icon';
+import { Field, SkeletonTable, useAsync } from '../../../components/ui';
 import { ImportTitle, isBusy, ok, operationPath, ProgressBar, ST, statusLabel } from './common';
 import { FormatHelp } from './FormatHelp';
 import type { ImporterInfo, ImportOperation, ImportSource } from './types';
@@ -12,6 +13,9 @@ const SOURCE_LABEL: Record<ImportSource, string> = {
   url: 'Baixar de um endereço (URL)',
   path: 'Arquivo no servidor',
 };
+
+// Ícone de cada tipo nos cartões da escolha (tipos novos ficam com o ícone da importação).
+const TYPE_ICON: Record<string, IconName> = { slack: 'file-archive', csv: 'file-sheet', 'slack-users': 'admin-users', omnichannel_contact: 'nav-omnichannel' };
 
 const URL_RE = /^https?:\/\/[^\s/?#]+\S*$/i;
 
@@ -30,7 +34,7 @@ function fileProblem(importer: ImporterInfo, file: File, max: number): string | 
     if (exts.includes('.csv') && name.endsWith('.zip')) return 'Este importador precisa do arquivo .csv em si, sem compactar.';
     return `Este importador precisa de um arquivo ${exts.join(' ou ')}.`;
   }
-  if (max > 0 && file.size > max) return `O arquivo tem ${formatBytes(file.size)}, e o máximo para importação é ${formatBytes(max)}. O limite fica em Configurações → Importação.`;
+  if (max > 0 && file.size > max) return `O arquivo tem ${formatBytes(file.size)}, e o máximo para importação é ${formatBytes(max)}. O limite fica em Configurações › Importação.`;
   if (file.size === 0) return 'O arquivo está vazio.';
   return null;
 }
@@ -111,7 +115,18 @@ export function NewImport({ importerKey }: { importerKey?: string }) {
     }
   };
 
-  if (list.loading && !list.data) return <Spinner />;
+  if (list.loading && !list.data) return <SkeletonTable rows={2} cols={1} />;
+
+  const typeSelect = (
+    <select value={importer?.key ?? ''} disabled={sending} tabIndex={importer ? undefined : -1} onChange={(e) => chooseImporter(e.target.value)}>
+      <option value="">Escolha o tipo…</option>
+      {importers.map((i) => (
+        <option key={i.key} value={i.key}>
+          {i.label}
+        </option>
+      ))}
+    </select>
+  );
 
   return (
     <>
@@ -119,9 +134,8 @@ export function NewImport({ importerKey }: { importerKey?: string }) {
       {list.error && <div className="form-error imp-block">Não foi possível carregar os tipos de importação: {list.error}</div>}
       {opBusy && op && (
         <div className="callout warn">
-          <span>
-            Há uma importação em andamento ({statusLabel(op.status).toLowerCase()}). Espere ela terminar ou cancele antes de começar outra.
-          </span>
+          <Icon name="warning" />
+          <span>Há uma importação em andamento ({statusLabel(op.status).toLowerCase()}). Espere ela terminar ou cancele antes de começar outra.</span>
           {opPath && (
             <button className="btn small" onClick={() => navigate(opPath)}>
               Ver
@@ -131,9 +145,8 @@ export function NewImport({ importerKey }: { importerKey?: string }) {
       )}
       {opPending && op && (
         <div className="callout info">
-          <span>
-            O arquivo lido antes{op.file ? ` (${op.file})` : ''} ainda não foi importado. Se você enviar outro, ele é descartado.
-          </span>
+          <Icon name="info" />
+          <span>O arquivo lido antes{op.file ? ` (${op.file})` : ''} ainda não foi importado. Se você enviar outro, ele é descartado.</span>
           {opPath && (
             <button className="btn small" onClick={() => navigate(opPath)}>
               Continuar com ele
@@ -143,16 +156,31 @@ export function NewImport({ importerKey }: { importerKey?: string }) {
       )}
       <div className="imp-new">
         <div className="form">
-          <Field label="Tipo de importação" hint={importer?.description}>
-            <select value={importer?.key ?? ''} disabled={sending} onChange={(e) => chooseImporter(e.target.value)}>
-              <option value="">Escolha o tipo…</option>
+          {importer ? (
+            <Field label="Tipo de importação" hint={importer.description}>
+              {typeSelect}
+            </Field>
+          ) : (
+            // Antes da escolha valem só os cartões; o select fica no DOM, oculto, para quem escolhe pelo rótulo (automação).
+            <span className="visually-hidden" aria-hidden="true">
+              {typeSelect}
+            </span>
+          )}
+          {!importer && importers.length > 0 && (
+            <div className="imp-types" role="group" aria-label="Tipo de importação">
               {importers.map((i) => (
-                <option key={i.key} value={i.key}>
-                  {i.label}
-                </option>
+                <button key={i.key} type="button" className="card action imp-type" disabled={sending} onClick={() => chooseImporter(i.key)}>
+                  <span className="card-icon">
+                    <Icon name={TYPE_ICON[i.key] ?? 'admin-import'} />
+                  </span>
+                  <span className="preset-text">
+                    <strong>{i.label}</strong>
+                    <span className="muted small">{i.description}</span>
+                  </span>
+                </button>
               ))}
-            </select>
-          </Field>
+            </div>
+          )}
           {importer && (
             <>
               <Field label="Origem do arquivo">
@@ -167,7 +195,8 @@ export function NewImport({ importerKey }: { importerKey?: string }) {
               {src === 'upload' && (
                 <>
                   <div className="callout info small">
-                    {max > 0 ? `O servidor aceita arquivos de importação de até ${formatBytes(max)}.` : 'O servidor aceita arquivos de importação de qualquer tamanho.'}
+                    <Icon name="info" />
+                    <span>{max > 0 ? `O servidor aceita arquivos de importação de até ${formatBytes(max)}.` : 'O servidor aceita arquivos de importação de qualquer tamanho.'}</span>
                   </div>
                   <label
                     className={`dropzone ${dragging ? 'over' : ''} ${sending ? 'disabled' : ''}`}
@@ -175,14 +204,10 @@ export function NewImport({ importerKey }: { importerKey?: string }) {
                     onDragLeave={() => setDragging(false)}
                     onDrop={onDrop}
                   >
-                    <input
-                      className="visually-hidden"
-                      type="file"
-                      accept={importer.accept}
-                      disabled={sending}
-                      onChange={(e) => (pick(e.target.files?.[0]), (e.target.value = ''))}
-                    />
-                    <span className="dropzone-icon">📦</span>
+                    <input className="visually-hidden" type="file" accept={importer.accept} disabled={sending} onChange={(e) => (pick(e.target.files?.[0]), (e.target.value = ''))} />
+                    <span className="dropzone-icon">
+                      <Icon name="upload-drop" size={24} />
+                    </span>
                     <span>
                       <strong>Escolha o arquivo {extensionsOf(importer.accept).join(' ou ')}</strong>
                       <span className="muted small"> ou arraste até aqui</span>
@@ -190,13 +215,16 @@ export function NewImport({ importerKey }: { importerKey?: string }) {
                   </label>
                   {file && (
                     <div className="imp-file">
+                      <span className="imp-file-icon">
+                        <Icon name={/\.(csv|tsv|xlsx?)$/i.test(file.name) ? 'file-sheet' : 'file-archive'} />
+                      </span>
                       <span className="ellipsis" title={file.name}>
-                        📄 {file.name}
+                        {file.name}
                       </span>
                       <span className="muted small nowrap">{formatBytes(file.size)}</span>
                       {!sending && (
                         <button className="icon-btn" title="Remover" aria-label="Remover arquivo" onClick={() => pick(null)}>
-                          ✕
+                          <Icon name="close" />
                         </button>
                       )}
                     </div>
@@ -207,9 +235,23 @@ export function NewImport({ importerKey }: { importerKey?: string }) {
               {src === 'url' && (
                 <Field
                   label="Endereço do arquivo"
-                  hint={urlInvalid ? <span className="neg">O endereço precisa começar com http:// ou https://.</span> : 'O servidor baixa o arquivo deste endereço. Endereços da rede interna são bloqueados.'}
+                  hint={
+                    urlInvalid ? (
+                      <span className="neg">O endereço precisa começar com http:// ou https://.</span>
+                    ) : (
+                      'O servidor baixa o arquivo deste endereço. Endereços da rede interna são bloqueados.'
+                    )
+                  }
                 >
-                  <input type="url" inputMode="url" placeholder="https://exemplo.com/exportacao.zip" value={url} disabled={sending} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void submit()} />
+                  <input
+                    type="url"
+                    inputMode="url"
+                    placeholder="https://exemplo.com/exportacao.zip"
+                    value={url}
+                    disabled={sending}
+                    onChange={(e) => setUrl(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && void submit()}
+                  />
                 </Field>
               )}
               {src === 'path' && (
@@ -217,7 +259,14 @@ export function NewImport({ importerKey }: { importerKey?: string }) {
                   label="Caminho no servidor"
                   hint={`Um arquivo${importer.key === 'csv' ? ' ou uma pasta' : ''} dentro da pasta liberada no servidor (IMPORT_SERVER_DIR). Ele é lido no lugar, sem cópia.`}
                 >
-                  <input className="mono" placeholder={importer.key === 'csv' ? '/dados/importacao/csv' : `/dados/importacao/arquivo${extensionsOf(importer.accept)[0] ?? ''}`} value={path} disabled={sending} onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void submit()} />
+                  <input
+                    className="mono"
+                    placeholder={importer.key === 'csv' ? '/dados/importacao/csv' : `/dados/importacao/arquivo${extensionsOf(importer.accept)[0] ?? ''}`}
+                    value={path}
+                    disabled={sending}
+                    onChange={(e) => setPath(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && void submit()}
+                  />
                 </Field>
               )}
               {sending && src === 'upload' && progress !== null && (
@@ -225,7 +274,9 @@ export function NewImport({ importerKey }: { importerKey?: string }) {
                   <ProgressBar value={progress * 100} label="Envio do arquivo" />
                   <div className="row-actions">
                     <span className="muted small">
-                      {progress < 1 ? `Enviando… ${formatBytes(Math.round((file?.size ?? 0) * progress))} de ${formatBytes(file?.size ?? 0)}. Não saia desta página.` : 'Arquivo enviado. Guardando no servidor…'}
+                      {progress < 1
+                        ? `Enviando… ${formatBytes(Math.round((file?.size ?? 0) * progress))} de ${formatBytes(file?.size ?? 0)}. Não saia desta página.`
+                        : 'Arquivo enviado. Guardando no servidor…'}
                     </span>
                     <span className="spacer" />
                     {progress < 1 && (
@@ -237,12 +288,13 @@ export function NewImport({ importerKey }: { importerKey?: string }) {
                 </div>
               )}
               {error && <div className="form-error">{error}</div>}
-              <div className="row-actions">
-                <button className="btn primary" disabled={!ready} onClick={() => void submit()}>
-                  {sending ? 'Enviando…' : 'Importar'}
-                </button>
+              {/* Ordem dos rodapés: Cancelar antes da ação principal, à direita. */}
+              <div className="row-actions imp-submit">
                 <button className="btn" disabled={sending} onClick={() => navigate('/admin/import')}>
                   Cancelar
+                </button>
+                <button className="btn primary" disabled={!ready} onClick={() => void submit()}>
+                  {sending ? 'Enviando…' : 'Importar'}
                 </button>
               </div>
             </>

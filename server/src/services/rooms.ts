@@ -733,9 +733,10 @@ export async function adminListRooms(opts: { filter?: string; types?: RoomType[]
   const params: unknown[] = [`%${opts.filter ?? ''}%`];
   let w = '(r.name ILIKE $1 OR r.fname ILIKE $1 OR array_to_string(r.usernames, \',\') ILIKE $1)';
   if (opts.types?.length) w += ` AND r.t = ANY($${params.push(opts.types)})`;
+  // Pela última atividade (mensagem, ou a criação se não há mensagens): as salas em uso vêm primeiro.
   const rows = await many(
     `SELECT r.*, u.username AS owner_username, count(*) OVER() AS total FROM rooms r LEFT JOIN users u ON u.id = r.owner_id
-     WHERE ${w} ORDER BY r.created_at DESC LIMIT ${Math.min(opts.count ?? 25, 200)} OFFSET ${Number(opts.offset ?? 0)}`,
+     WHERE ${w} ORDER BY COALESCE(r.lm, r.created_at) DESC, r.created_at DESC LIMIT ${Math.min(opts.count ?? 25, 200)} OFFSET ${Number(opts.offset ?? 0)}`,
     params,
   );
   return { total: Number(rows[0]?.total ?? 0), rooms: rows.map(mapRoom) };

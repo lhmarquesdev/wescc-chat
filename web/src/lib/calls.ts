@@ -143,6 +143,11 @@ const ENDED_TEXT: Record<string, string> = {
   ended: 'Chamada encerrada.',
 };
 
+// Compartilhar a tela: só com getDisplayMedia e fora de telas de toque (navegadores de celular não compartilham).
+export function canShareScreen() {
+  return 'getDisplayMedia' in (navigator.mediaDevices ?? {}) && !matchMedia('(pointer: coarse)').matches;
+}
+
 // ---------- Ações ----------
 
 export async function startCall(rid: string, kind: CallKind) {
@@ -158,7 +163,7 @@ export async function startCall(rid: string, kind: CallKind) {
     const { call } = (await api.post('calls.start', { roomId: rid, kind, connectionId: realtime.connectionId })) as { call: Call };
     if (call.status === 'busy') {
       for (const t of local.getTracks()) t.stop();
-      return toast(ENDED_TEXT.busy);
+      return useStore.getState().toast(ENDED_TEXT.busy, 'info', { icon: 'call-missed' });
     }
     useCalls.setState({ call, local, cameraOff: !local.getVideoTracks().length });
     startRing('outgoing');
@@ -277,7 +282,11 @@ async function onCall(call: Call) {
       useCalls.setState({ incoming: call });
       startRing('incoming');
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-        const n = new Notification(call.caller.name || call.caller.username, { body: call.kind === 'video' ? '🎥 Chamada de vídeo' : '📞 Chamada de voz', tag: `call-${call._id}` });
+        const n = new Notification(call.caller.name || call.caller.username, {
+          body: call.kind === 'video' ? 'Chamada de vídeo' : 'Chamada de voz',
+          icon: '/icons/icon-192.png',
+          tag: `call-${call._id}`,
+        });
         n.onclick = () => (window.focus(), n.close());
       }
     }
@@ -302,7 +311,8 @@ async function onCall(call: Call) {
   }
   if (call.status !== 'ringing') {
     cleanup();
-    toast(ENDED_TEXT[call.status] ?? 'Chamada encerrada.');
+    // Fim de chamada não é um aviso genérico: o ícone é o do telefone.
+    useStore.getState().toast(ENDED_TEXT[call.status] ?? 'Chamada encerrada.', 'info', { icon: call.status === 'missed' || call.status === 'busy' ? 'call-missed' : 'call-hangup' });
   }
 }
 

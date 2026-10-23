@@ -1,6 +1,16 @@
 import { create } from 'zustand';
 import type { LivechatAgentStatus, LivechatInquiry, LivechatRoomInfo, Message, Room, ServerEvent, Subscription, User, UserStatus } from '@shared/index';
 
+export type ToastKind = 'info' | 'success' | 'warning' | 'error';
+export interface ToastItem {
+  id: number;
+  text: string;
+  kind: ToastKind;
+  action?: { label: string; onClick: () => void };
+  duration: number;
+  icon?: string; // nome de ícone no lugar do ícone do tipo (ex.: fim de chamada)
+}
+
 export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean };
 
 interface RoomMessages {
@@ -20,7 +30,7 @@ interface State {
   typing: Record<string, Record<string, number>>;
   connected: boolean;
   emojiVersion: number;
-  toasts: { id: number; text: string; kind: 'info' | 'error' }[];
+  toasts: ToastItem[];
   permMap: Record<string, string[]>;
   restrictedRoles: string[]; // papéis globais com "Restrito em conversas diretas"
   userRoles: Record<string, string[]>; // papéis globais anunciados por eventos "user" desde a conexão (id -> papéis)
@@ -43,7 +53,8 @@ interface State {
   setPresence(username: string, status: UserStatus, statusText?: string): void;
   setTyping(rid: string, username: string, typing: boolean): void;
   setConnected(c: boolean): void;
-  toast(text: string, kind?: 'info' | 'error'): void;
+  toast(text: string, kind?: ToastKind, opts?: { action?: ToastItem['action']; duration?: number; icon?: string }): void;
+  dismissToast(id: number): void;
   reset(): void;
 }
 
@@ -138,12 +149,16 @@ export const useStore = create<State>((set, get) => ({
     else delete room[username];
     set({ typing: { ...get().typing, [rid]: room } });
   },
-  setConnected: (connected) => set({ connected }),
-  toast: (text, kind = 'info') => {
+  // Sem conexão os eventos de "parou de digitar" não chegam: a faixa de digitação sairia presa.
+  setConnected: (connected) => set(connected ? { connected } : { connected, typing: {} }),
+  // O tempo corre no componente (pausa com o mouse em cima): erro 8 s, os outros 4 s.
+  toast: (text, kind = 'info', opts) => {
     const id = ++toastSeq;
-    set({ toasts: [...get().toasts, { id, text, kind }] });
-    setTimeout(() => set({ toasts: get().toasts.filter((t) => t.id !== id) }), 5000);
+    const duration = opts?.duration ?? (kind === 'error' ? 8000 : 4000);
+    // No máximo 3: um aviso antigo não reaparece depois que os novos saem.
+    set({ toasts: [...get().toasts, { id, text, kind, action: opts?.action, duration, icon: opts?.icon }].slice(-3) });
   },
+  dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
   reset: () => set({ ...initial }),
 }));
 
@@ -176,10 +191,15 @@ export function useSetting<T = any>(id: string): T {
 export function applyEvent(ev: ServerEvent) {
   const st = useStore.getState();
   switch (ev.type) {
-    case 'message':
+    case 'message': {
       st.upsertMessage(ev.message);
-      if (ev.action === 'inserted') st.setTyping(ev.message.rid, ev.message.u.username, false);
+      if (ev.action !== 'inserted') break;
+      st.setTyping(ev.message.rid, ev.message.u.username, false);
+      // A sala sobe em "Recentes" já com a mensagem, sem esperar o evento da inscrição.
+      const sub = st.subscriptions[ev.message.rid];
+      if (sub && (sub.lm ?? '') < ev.message.ts) st.upsertSubscription({ ...sub, lm: ev.message.ts });
       break;
+    }
     case 'message.deleted':
       st.removeMessage(ev.rid, ev._id, ev.tmid);
       break;

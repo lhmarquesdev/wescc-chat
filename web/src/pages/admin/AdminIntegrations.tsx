@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
 import { useStore } from '../../lib/store';
-import { Empty, Field, Modal, Pager, Spinner, Tabs, Toggle, useAsync } from '../../components/ui';
+import { Icon } from '../../components/Icon';
+import { Empty, Field, Modal, Pager, SkeletonList, SkeletonTable, Tabs, Toggle, confirmDialog, useAsync } from '../../components/ui';
+import { ActivePill, PageHead, RoomCell, TableWrap } from './parts';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -41,21 +43,25 @@ const OUTGOING_SCRIPT = `class Script {
 
 type Kind = 'webhook-incoming' | 'webhook-outgoing';
 
+const STEP_LABEL: Record<string, string> = { sent: 'Enviado', failed: 'Falhou', 'script-error': 'Erro no script' };
+
 export function AdminIntegrations() {
   const [tab, setTab] = useState<Kind>('webhook-incoming');
   const [offset, setOffset] = useState(0);
   const { data, loading, reload } = useAsync(() => api.get('integrations.list', { type: tab, offset, count: 50 }), [tab, offset]);
   const [edit, setEdit] = useState<any>(null);
   const [historyOf, setHistoryOf] = useState<any>(null);
+  const newButton = (
+    <button className="btn primary" onClick={() => setEdit({ type: tab, isNew: true })}>
+      <Icon name="add" />
+      Nova integração
+    </button>
+  );
 
   return (
     <>
-      <div className="page-title-row">
-        <h1>Integrações</h1>
-        <button className="btn primary" onClick={() => setEdit({ type: tab, isNew: true })}>
-          ＋ Nova integração
-        </button>
-      </div>
+      {/* Lista vazia: o botão fica só no estado vazio, para não repetir a mesma ação duas vezes na tela. */}
+      <PageHead title="Integrações">{(loading && !data) || data?.integrations.length ? newButton : null}</PageHead>
       <Tabs
         value={tab}
         onChange={(t) => (setTab(t), setOffset(0))}
@@ -64,45 +70,75 @@ export function AdminIntegrations() {
           { id: 'webhook-outgoing', label: 'Webhooks de saída' },
         ]}
       />
-      {loading ? (
-        <Spinner />
+      {loading && !data ? (
+        <SkeletonTable rows={5} cols={5} />
       ) : !data?.integrations.length ? (
-        <Empty>{tab === 'webhook-incoming' ? 'Nenhum webhook de entrada. Use para que sistemas externos publiquem mensagens no chat.' : 'Nenhum webhook de saída. Use para avisar sistemas externos sobre eventos do chat.'}</Empty>
+        <Empty icon="admin-integrations" title={tab === 'webhook-incoming' ? 'Nenhum webhook de entrada' : 'Nenhum webhook de saída'} action={newButton}>
+          {tab === 'webhook-incoming' ? 'Use para que sistemas externos publiquem mensagens no chat.' : 'Use para avisar sistemas externos sobre eventos do chat.'}
+        </Empty>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Nome</th>
-              <th>{tab === 'webhook-incoming' ? 'Canal' : 'Evento'}</th>
-              <th>Publica como</th>
-              <th>Status</th>
-              <th>Criada</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {data.integrations.map((i: any) => (
-              <tr key={i._id} className="clickable" onClick={() => setEdit(i)}>
-                <td>
-                  <strong>{i.name}</strong> {i.scriptEnabled && <span className="pill">script</span>}
-                </td>
-                <td>{tab === 'webhook-incoming' ? i.channel.join(', ') : EVENT_LABEL[i.event] ?? i.event}</td>
-                <td>@{i.username}</td>
-                <td>{i.enabled ? <span className="pill accent">ativa</span> : <span className="pill">desativada</span>}</td>
-                <td className="muted">{formatDateTime(i._createdAt)}</td>
-                <td>
-                  {tab === 'webhook-outgoing' && (
-                    <button className="btn small" onClick={(e) => (e.stopPropagation(), setHistoryOf(i))}>
-                      Histórico
-                    </button>
-                  )}
-                </td>
+        <TableWrap>
+          <table className="table stack kv">
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>{tab === 'webhook-incoming' ? 'Canal' : 'Evento'}</th>
+                <th className="col-lg">Publica como</th>
+                <th>Status</th>
+                <th className="col-xl">Criada</th>
+                <th className="actions-col">
+                  <span className="visually-hidden">Ações</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.integrations.map((i: any) => (
+                <tr key={i._id} className="clickable" onClick={() => setEdit(i)}>
+                  <td>
+                    <RoomCell
+                      icon={<Icon name="admin-integrations" />}
+                      name={
+                        <>
+                          {i.name}
+                          {i.scriptEnabled && <span className="pill tag">Script</span>}
+                        </>
+                      }
+                      sub={tab === 'webhook-incoming' ? 'Webhook de entrada' : 'Webhook de saída'}
+                    />
+                  </td>
+                  <td className="nowrap" data-label={tab === 'webhook-incoming' ? 'Canal' : 'Evento'}>
+                    {tab === 'webhook-incoming' ? i.channel.join(', ') : (EVENT_LABEL[i.event] ?? i.event)}
+                  </td>
+                  <td className="nowrap col-lg" data-label="Publica como">
+                    @{i.username}
+                  </td>
+                  <td data-label="Status">
+                    <ActivePill active={i.enabled} on="Ativa" off="Desativada" />
+                  </td>
+                  <td className="muted nowrap col-xl" data-label="Criada">
+                    {formatDateTime(i._createdAt)}
+                  </td>
+                  <td className="actions-col">
+                    <div className="row-actions">
+                      {tab === 'webhook-outgoing' && (
+                        <button className="btn small ghost" onClick={(e) => (e.stopPropagation(), setHistoryOf(i))}>
+                          <Icon name="last-seen" />
+                          Histórico
+                        </button>
+                      )}
+                      <button className="btn small ghost" onClick={(e) => (e.stopPropagation(), setEdit(i))}>
+                        <Icon name="edit" />
+                        Editar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
       )}
-      {data && <Pager offset={offset} count={50} total={data.total} onChange={setOffset} />}
+      {data && data.total > 0 && <Pager offset={offset} count={50} total={data.total} onChange={setOffset} />}
       {edit && <IntegrationForm initial={edit} onClose={() => setEdit(null)} onSaved={reload} />}
       {historyOf && <History integration={historyOf} onClose={() => setHistoryOf(null)} />}
     </>
@@ -139,9 +175,18 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
     const body = {
       ...f,
       type: initial.type,
-      channel: f.channel.split(',').map((s: string) => s.trim()).filter(Boolean),
-      urls: f.urls.split('\n').map((s: string) => s.trim()).filter(Boolean),
-      triggerWords: f.triggerWords.split(',').map((s: string) => s.trim()).filter(Boolean),
+      channel: f.channel
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean),
+      urls: f.urls
+        .split('\n')
+        .map((s: string) => s.trim())
+        .filter(Boolean),
+      triggerWords: f.triggerWords
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean),
       retryCount: Number(f.retryCount),
     };
     try {
@@ -155,7 +200,8 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
     }
   };
   const remove = async () => {
-    if (!confirm(`Excluir a integração ${initial.name}?`)) return;
+    const yes = await confirmDialog({ title: `Excluir a integração ${initial.name}?`, body: 'Quem usa este webhook passa a receber erro.', confirmLabel: 'Excluir', danger: true });
+    if (!yes) return;
     try {
       await api.post('integrations.remove', { type: initial.type, integrationId: initial._id });
       onSaved();
@@ -173,11 +219,11 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
       footer={
         <>
           {!initial.isNew && (
-            <button className="btn danger" onClick={remove}>
+            <button className="btn danger left" onClick={remove}>
+              <Icon name="delete" />
               Excluir
             </button>
           )}
-          <span className="spacer" />
           <button className="btn" onClick={onClose}>
             Cancelar
           </button>
@@ -260,7 +306,7 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
         </Field>
         <Toggle checked={f.scriptEnabled} onChange={(v) => set({ scriptEnabled: v })} label="Usar script" />
         {f.scriptEnabled && (
-          <Field label="Script" hint="Só roda se a configuração Integrações → Permitir scripts estiver ligada.">
+          <Field label="Script" hint="Só roda se a configuração Integrações › Permitir scripts estiver ligada.">
             <textarea className="mono" rows={12} value={f.script} onChange={(e) => set({ script: e.target.value })} />
           </Field>
         )}
@@ -269,10 +315,11 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
             <div className="copy-box">
               <input readOnly value={hookUrl} />
               <button className="btn" onClick={() => (navigator.clipboard?.writeText(hookUrl), ok('URL copiada.'))}>
+                <Icon name="copy" />
                 Copiar
               </button>
             </div>
-            <code className="small muted">{`curl -X POST -H 'Content-Type: application/json' --data '{"text":"Olá"}' ${hookUrl}`}</code>
+            <code className="small muted code-sample">{`curl -X POST -H 'Content-Type: application/json' --data '{"text":"Olá"}' ${hookUrl}`}</code>
           </Field>
         )}
         {!incoming && initial.token && (
@@ -294,22 +341,27 @@ function History({ integration, onClose }: { integration: any; onClose: () => vo
       title={`Histórico: ${integration.name}`}
       onClose={onClose}
       footer={
-        <button className="btn" onClick={() => api.post('integrations.clearHistory', { integrationId: integration._id }).then(reload).catch(fail)}>
+        <button className="btn" disabled={!data?.history.length} onClick={() => api.post('integrations.clearHistory', { integrationId: integration._id }).then(reload).catch(fail)}>
           Limpar histórico
         </button>
       }
     >
-      {loading ? (
-        <Spinner />
+      {loading && !data ? (
+        <SkeletonList n={4} />
       ) : !data?.history.length ? (
-        <Empty>Nenhuma chamada ainda.</Empty>
+        <Empty icon="last-seen" title="Nenhuma chamada ainda">
+          Cada disparo deste webhook aparece aqui, com a resposta do sistema chamado.
+        </Empty>
       ) : (
-        <ul className="plain-list">
+        <ul className="plain-list history-list">
           {data.history.map((h: any) => (
             <li key={h._id}>
-              <div>
-                <strong className={h.step === 'sent' ? 'pos' : h.step === 'failed' || h.step === 'script-error' ? 'neg' : ''}>{h.step}</strong> <span className="muted">· {EVENT_LABEL[h.event] ?? h.event} · {formatDateTime(h._createdAt)}</span>
-                {h.httpStatus ? <span className="pill">HTTP {h.httpStatus}</span> : null}
+              <div className="history-head">
+                <span className={h.step === 'sent' ? 'pill ok dot' : h.step === 'failed' || h.step === 'script-error' ? 'pill err dot' : 'pill dot'}>{STEP_LABEL[h.step] ?? h.step}</span>
+                <span className="muted small">
+                  {EVENT_LABEL[h.event] ?? h.event} · {formatDateTime(h._createdAt)}
+                </span>
+                {h.httpStatus ? <span className="pill tag">HTTP {h.httpStatus}</span> : null}
               </div>
               {h.url && <div className="mono small">{h.url}</div>}
               {h.error && <div className="neg small">{h.error}</div>}
@@ -318,7 +370,7 @@ function History({ integration, onClose }: { integration: any; onClose: () => vo
           ))}
         </ul>
       )}
-      {data && <Pager offset={offset} count={25} total={data.total} onChange={setOffset} />}
+      {data && data.total > 0 && <Pager offset={offset} count={25} total={data.total} onChange={setOffset} />}
     </Modal>
   );
 }

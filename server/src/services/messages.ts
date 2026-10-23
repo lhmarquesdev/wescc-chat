@@ -763,7 +763,8 @@ export async function createDiscussion(ctx: Ctx, input: { prid: string; pmid?: s
     pmid: input.pmid ?? null,
     members: input.users,
     encrypted: input.encrypted,
-    topic: input.topic ?? parent.fname ?? parent.name ?? '',
+    // Sem tópico próprio: o nome da sala de origem já aparece no cabeçalho, como o chip da sala-mãe.
+    topic: input.topic ?? '',
     skipPermission: true,
   });
   // Em DMs, todos os participantes entram na discussão.
@@ -773,7 +774,7 @@ export async function createDiscussion(ctx: Ctx, input: { prid: string; pmid?: s
     const row = await one('UPDATE messages SET drid = $2, dcount = 0, dlm = now(), updated_at = now() WHERE id = $1 RETURNING *', [pm.id, room.id]);
     bus.publish({ room: parent.id }, { type: 'message', action: 'updated', message: withExtra(row) });
   } else {
-    await query('UPDATE messages SET drid = $2 WHERE id = $1', [sys.id, room.id]);
+    await query('UPDATE messages SET drid = $2, dcount = 0 WHERE id = $1', [sys.id, room.id]);
   }
   if (input.reply) await sendMessage(ctx, { rid: room.id, msg: input.reply }, { skipCommands: true });
   return room;
@@ -790,10 +791,14 @@ export async function listDiscussions(ctx: Ctx, rid: string, opts: { text?: stri
   return { total: Number(rows[0]?.total ?? 0), discussions: rows.map(mapRoom) };
 }
 
-// Ao enviar numa discussão, atualiza o contador na mensagem de origem.
+// Ao enviar numa discussão, atualiza o contador na mensagem de origem. Criada pelo menu Criar (sem mensagem de
+// origem), o contador fica na mensagem "discussion-created" da sala-mãe, a que tem o drid da discussão.
 export async function bumpDiscussionCounter(room: any) {
-  if (!room.prid || !room.pmid) return;
-  const row = await one('UPDATE messages SET dcount = dcount + 1, dlm = now(), updated_at = now() WHERE id = $1 RETURNING *', [room.pmid]);
+  if (!room.prid) return;
+  const set = 'SET dcount = coalesce(dcount, 0) + 1, dlm = now(), updated_at = now()';
+  const row = room.pmid
+    ? await one(`UPDATE messages ${set} WHERE id = $1 RETURNING *`, [room.pmid])
+    : await one(`UPDATE messages ${set} WHERE room_id = $1 AND drid = $2 RETURNING *`, [room.prid, room.id]);
   if (row) bus.publish({ room: row.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
 }
 

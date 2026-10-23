@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import type { LdapMappingTest } from '@shared/ldap';
 import { api, errorMessage } from '../../../lib/api';
 import { useStore } from '../../../lib/store';
+import { Icon } from '../../../components/Icon';
 import { Field } from '../../../components/ui';
 import { TestResult } from './TestResult';
 
@@ -42,7 +43,16 @@ export function LdapTest({ canEdit, overrides, draftBlocked }: { canEdit: boolea
             {busy ? 'Testando…' : 'Testar mapeamento'}
           </button>
         </div>
-        {!canEdit ? <p className="muted small ldap-note">Testar exige permissão para alterar as configurações.</p> : blocked && <p className="small ldap-warn-text">⚠ {blocked}</p>}
+        {!canEdit ? (
+          <p className="muted small ldap-note">Testar exige permissão para alterar as configurações.</p>
+        ) : (
+          blocked && (
+            <p className="small ldap-warn-text">
+              <Icon name="warning" size={14} />
+              {blocked}
+            </p>
+          )
+        )}
         {overrides && (
           <label className="check">
             <input type="checkbox" checked={useDraft} disabled={!canEdit} onChange={(e) => setUseDraft(e.target.checked)} /> Usar as alterações não salvas

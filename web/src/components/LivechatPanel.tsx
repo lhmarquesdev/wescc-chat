@@ -4,12 +4,32 @@ import type { LivechatRoomInfo } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
 import { formatDateTime, formatRelative } from '../lib/format';
 import { usePermission, useSetting, useStore } from '../lib/store';
-import { Field, Modal, Spinner } from './ui';
+import { Icon } from './Icon';
+import { Empty, Field, Modal, Segmented, SkeletonList, Spinner } from './ui';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
 
 export const LIVECHAT_STATUS: Record<string, string> = { queued: 'Na fila', open: 'Em atendimento', onhold: 'Em espera', closed: 'Encerrada' };
+// Situação com cor de status (nunca a cor de destaque): na fila = atenção, em atendimento = ok.
+const LIVECHAT_TONE: Record<string, string> = { queued: 'pill warn dot', open: 'pill ok dot', onhold: 'pill dot', closed: 'pill' };
+
+export function LivechatStatus({ status }: { status: string }) {
+  return <span className={LIVECHAT_TONE[status] ?? 'pill'}>{LIVECHAT_STATUS[status] ?? status}</span>;
+}
+
+// Visitante não tem foto: as iniciais do nome num círculo neutro, com a mesma regra dos avatares do
+// servidor (primeiras letras das duas primeiras palavras), para o mesmo nome dar as mesmas letras no app todo.
+export function VisitorAvatar({ name, size = 32 }: { name?: string | null; size?: number }) {
+  const clean = (name ?? '').trim() || '?';
+  const parts = clean.split(/[\s._-]+/).filter(Boolean);
+  const initials = (parts.length > 1 ? parts[0][0] + parts[1][0] : clean.slice(0, 2)).toUpperCase();
+  return (
+    <span className="visitor-avatar" style={{ width: size, height: size, fontSize: Math.round(size * 0.4) }} aria-hidden="true">
+      {initials}
+    </span>
+  );
+}
 
 export function useLivechatRoom(rid: string) {
   const live = useStore((s) => s.livechatRooms[rid]);
@@ -48,32 +68,70 @@ export function LivechatActions({ rid, onPanel }: { rid: string; onPanel: () => 
           Assumir
         </button>
       )}
+      {/* No celular o nome do visitante tem prioridade no cabeçalho: espera e transferência vão para o painel. */}
       {canHold && allowHold && room.status === 'open' && (
-        <button className="icon-btn" title="Colocar em espera" onClick={() => api.post('livechat/room.onHold', { roomId: rid }).catch(fail)}>
-          ⏸
+        <button className="icon-btn lc-secondary" title="Colocar em espera" aria-label="Colocar em espera" onClick={() => api.post('livechat/room.onHold', { roomId: rid }).catch(fail)}>
+          <Icon name="on-hold" size={18} />
         </button>
       )}
       {room.status === 'onhold' && (
-        <button className="icon-btn" title="Retomar" onClick={() => api.post('livechat/room.resumeOnHold', { roomId: rid }).catch(fail)}>
-          ▶
+        <button className="icon-btn lc-secondary" title="Retomar" aria-label="Retomar" onClick={() => api.post('livechat/room.resumeOnHold', { roomId: rid }).catch(fail)}>
+          <Icon name="resume" size={18} />
         </button>
       )}
       {canForward && room.status !== 'queued' && (
-        <button className="icon-btn" title="Transferir" onClick={() => setModal('forward')}>
-          ⇄
+        <button className="icon-btn lc-secondary" title="Transferir" aria-label="Transferir" onClick={() => setModal('forward')}>
+          <Icon name="transfer" size={18} />
         </button>
       )}
       {canClose && (mine || room.status !== 'queued') && (
-        <button className="btn small danger" onClick={() => setModal('close')}>
-          Encerrar
+        <button className="btn small danger lc-close" title="Encerrar atendimento" onClick={() => setModal('close')}>
+          <Icon name="livechat-close" size={18} />
+          {/* No celular só o ícone aparece; o texto continua para leitores de tela. */}
+          <span className="lc-close-label">Encerrar</span>
         </button>
       )}
-      <button className="icon-btn" title="Dados do atendimento" onClick={onPanel}>
-        🎧
+      <button className="icon-btn" title="Dados do atendimento" aria-label="Dados do atendimento" onClick={onPanel}>
+        <Icon name="livechat-details" size={18} />
       </button>
       {modal === 'close' && <CloseModal room={room} onClose={() => setModal(null)} />}
       {modal === 'forward' && <ForwardModal room={room} onClose={() => setModal(null)} />}
     </>
+  );
+}
+
+// Espera, retomada e transferência no topo do painel: no celular elas saem do cabeçalho para o nome caber.
+function PanelActions({ room }: { room: LivechatRoomInfo }) {
+  const [forward, setForward] = useState(false);
+  const canForward = usePermission('transfer-livechat-guest');
+  const canHold = usePermission('on-hold-livechat-room');
+  const allowHold = useSetting<boolean>('Livechat_allow_manual_on_hold');
+  const hold = canHold && allowHold && room.status === 'open';
+  const resume = room.status === 'onhold';
+  const transfer = canForward && room.status !== 'queued' && room.status !== 'closed';
+  if (!hold && !resume && !transfer) return null;
+  return (
+    <div className="lc-actions">
+      {transfer && (
+        <button type="button" className="btn" onClick={() => setForward(true)}>
+          <Icon name="transfer" />
+          Transferir
+        </button>
+      )}
+      {hold && (
+        <button type="button" className="btn" onClick={() => api.post('livechat/room.onHold', { roomId: room.rid }).catch(fail)}>
+          <Icon name="on-hold" />
+          Colocar em espera
+        </button>
+      )}
+      {resume && (
+        <button type="button" className="btn" onClick={() => api.post('livechat/room.resumeOnHold', { roomId: room.rid }).catch(fail)}>
+          <Icon name="resume" />
+          Retomar
+        </button>
+      )}
+      {forward && <ForwardModal room={room} onClose={() => setForward(false)} />}
+    </div>
   );
 }
 
@@ -89,28 +147,32 @@ function TagEditor({ value, onChange, departmentId }: { value: string[]; onChang
     setText('');
   };
   return (
-    <div className="picker">
+    <div className="picker lc-tags">
       <div className="chips">
         {value.map((t) => (
           <span key={t} className="chip">
             {t}
-            <button onClick={() => onChange(value.filter((x) => x !== t))}>✕</button>
+            <button type="button" title="Remover" aria-label={`Remover ${t}`} onClick={() => onChange(value.filter((x) => x !== t))}>
+              <Icon name="close" size={14} />
+            </button>
           </span>
         ))}
+        {/* O campo fica dentro da caixa das tags, como no seletor de pessoas. */}
+        <input
+          list="livechat-tags"
+          placeholder="Adicionar tag"
+          aria-label="Adicionar tag"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add(text);
+            }
+          }}
+          onBlur={() => text && add(text)}
+        />
       </div>
-      <input
-        list="livechat-tags"
-        placeholder="Adicionar tag"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            add(text);
-          }
-        }}
-        onBlur={() => text && add(text)}
-      />
       <datalist id="livechat-tags">
         {tags.map((t) => (
           <option key={t._id} value={t.name} />
@@ -189,6 +251,9 @@ function ForwardModal({ room, onClose }: { room: LivechatRoomInfo; onClose: () =
             Devolver para a fila
           </button>
           <span className="spacer" />
+          <button className="btn" onClick={onClose}>
+            Cancelar
+          </button>
           <button className="btn primary" disabled={!target} onClick={submit}>
             Transferir
           </button>
@@ -196,14 +261,15 @@ function ForwardModal({ room, onClose }: { room: LivechatRoomInfo; onClose: () =
       }
     >
       <div className="form">
-        <div className="tabs">
-          <button className={mode === 'agent' ? 'active' : ''} onClick={() => (setMode('agent'), setTarget(''))}>
-            Para um agente
-          </button>
-          <button className={mode === 'department' ? 'active' : ''} onClick={() => (setMode('department'), setTarget(''))}>
-            Para um departamento
-          </button>
-        </div>
+        <Segmented
+          label="Transferir para"
+          value={mode}
+          onChange={(m) => (setMode(m), setTarget(''))}
+          items={[
+            { id: 'agent', label: 'Para um agente' },
+            { id: 'department', label: 'Para um departamento' },
+          ]}
+        />
         {mode === 'agent' ? (
           agents === null ? (
             <Spinner />
@@ -256,58 +322,115 @@ export function LivechatInfoPanel({ rid }: { rid: string }) {
     api.get('livechat/sla').then((r) => setSlas(r.sla)).catch(() => {});
     api.get('livechat/custom-fields').then((r) => setFields(r.customFields)).catch(() => {});
   }, []);
-  if (error) return <div className="form-error">{error}</div>;
-  if (!room || !visitor) return <Spinner />;
+  if (error)
+    return (
+      <Empty icon="error" tone="danger" title="Não foi possível carregar o atendimento">
+        {error}
+      </Empty>
+    );
+  if (!room || !visitor) return <SkeletonList n={6} />;
   const save = (roomData: Record<string, unknown>) => api.post('livechat/room.saveInfo', { rid, roomData }).then(reload).catch(fail);
   const closed = room.status === 'closed';
   const roomFields = fields.filter((f) => f.scope === 'room');
   const visitorFields = fields.filter((f) => f.scope === 'visitor');
+  const rating = room.survey?.satisfaction != null ? Math.max(0, Math.min(5, Number(room.survey.satisfaction) || 0)) : null;
   return (
-    <div className="info">
+    <div className="info livechat-info">
       <div className="info-hero">
+        <VisitorAvatar name={visitor.name} size={64} />
         <h3>{visitor.name}</h3>
-        <span className={`pill ${room.status === 'open' ? 'accent' : ''}`}>{LIVECHAT_STATUS[room.status]}</span>
+        <LivechatStatus status={room.status} />
       </div>
+      <PanelActions room={room} />
       {edit ? (
         <ContactForm visitor={visitor} rid={rid} onDone={() => (setEdit(false), reload())} />
       ) : (
-        <section>
-          <h4>Contato</h4>
-          <div>{visitor.email ? <a href={`mailto:${visitor.email}`}>{visitor.email}</a> : <span className="muted">sem e-mail</span>}</div>
-          {visitor.phone && <div>📞 {visitor.phone}</div>}
+        <div className="lc-section">
+          <div className="lc-label">
+            Contato
+            {canEdit && (
+              <button type="button" className="btn small ghost" onClick={() => setEdit(true)}>
+                <Icon name="edit" size={14} />
+                Editar
+              </button>
+            )}
+          </div>
+          <div className="lc-line">
+            <Icon name="email" size={14} />
+            {visitor.email ? <a href={`mailto:${visitor.email}`}>{visitor.email}</a> : <span className="muted">Sem e-mail</span>}
+          </div>
+          {visitor.phone && (
+            <div className="lc-line">
+              <Icon name="call-audio" size={14} />
+              <span className="num">{visitor.phone}</span>
+            </div>
+          )}
           {visitorFields.map((f) =>
             visitor.customFields?.[f._id] ? (
-              <div key={f._id} className="small">
-                <span className="muted">{f.label}:</span> {String(visitor.customFields[f._id])}
+              <div key={f._id} className="lc-line">
+                <span className="muted">{f.label}</span> {String(visitor.customFields[f._id])}
               </div>
             ) : null,
           )}
-          {visitor.ip && <div className="muted small">IP {visitor.ip}</div>}
-          {canEdit && (
-            <button className="link small" onClick={() => setEdit(true)}>
-              Editar contato
-            </button>
-          )}
-        </section>
-      )}
-      <section>
-        <h4>Atendimento</h4>
-        <div className="small">
-          <div>Departamento: {room.departmentName ?? '—'}</div>
-          <div>Agente: {room.servedBy ? `${room.servedBy.name ?? ''} (@${room.servedBy.username})` : '—'}</div>
-          <div>Na fila desde: {formatDateTime(room.queuedAt)}</div>
-          {room.servedAt && <div>Atendido em: {formatDateTime(room.servedAt)}</div>}
-          {room.closedAt && <div>Encerrado em: {formatDateTime(room.closedAt)}</div>}
-          {room.closeComment && <div>Comentário: {room.closeComment}</div>}
-          {room.source?.url && (
-            <div className="ellipsis">
-              Página: <a href={room.source.url} target="_blank" rel="noopener noreferrer">{room.source.url}</a>
-            </div>
-          )}
-          {room.survey?.satisfaction != null && <div>Satisfação: {'⭐'.repeat(Number(room.survey.satisfaction) || 0)}</div>}
-          {room.survey?.additionalFeedback != null && <div>Feedback: {String(room.survey.additionalFeedback)}</div>}
+          {visitor.ip && <div className="lc-line muted">IP {visitor.ip}</div>}
         </div>
-      </section>
+      )}
+      <div className="lc-section">
+        <div className="lc-label">Atendimento</div>
+        <dl className="lc-kv">
+          <dt>Departamento</dt>
+          <dd>{room.departmentName ?? '—'}</dd>
+          <dt>Agente</dt>
+          <dd>{room.servedBy ? room.servedBy.name || `@${room.servedBy.username}` : '—'}</dd>
+          <dt>Na fila desde</dt>
+          <dd>{formatDateTime(room.queuedAt)}</dd>
+          {room.servedAt && (
+            <>
+              <dt>Atendido em</dt>
+              <dd>{formatDateTime(room.servedAt)}</dd>
+            </>
+          )}
+          {room.closedAt && (
+            <>
+              <dt>Encerrado em</dt>
+              <dd>{formatDateTime(room.closedAt)}</dd>
+            </>
+          )}
+          {room.closeComment && (
+            <>
+              <dt>Comentário</dt>
+              <dd>{room.closeComment}</dd>
+            </>
+          )}
+          {room.source?.url && (
+            <>
+              <dt>Página</dt>
+              <dd className="ellipsis">
+                <a href={room.source.url} target="_blank" rel="noopener noreferrer">
+                  {room.source.url}
+                </a>
+              </dd>
+            </>
+          )}
+          {rating != null && (
+            <>
+              <dt>Satisfação</dt>
+              <dd className="lc-rating" title={`${rating} de 5`}>
+                {Array.from({ length: 5 }, (_, i) => (
+                  <Icon key={i} name="rating" size={14} fill={i < rating} className={i < rating ? 'on' : ''} />
+                ))}
+                <span>{rating} de 5</span>
+              </dd>
+            </>
+          )}
+          {room.survey?.additionalFeedback != null && (
+            <>
+              <dt>Feedback</dt>
+              <dd>{String(room.survey.additionalFeedback)}</dd>
+            </>
+          )}
+        </dl>
+      </div>
       <section className="form">
         <Field label="Prioridade">
           <select disabled={closed} value={room.priority?._id ?? ''} onChange={(e) => save({ priorityId: e.target.value || null })}>
@@ -339,22 +462,24 @@ export function LivechatInfoPanel({ rid }: { rid: string }) {
       </section>
       {closed && visitor.email && (
         <button className="btn" onClick={() => api.post('livechat/room.transcript', { rid, email: visitor.email }).then(() => ok('Transcrição enviada.')).catch(fail)}>
-          ✉ Enviar transcrição para {visitor.email}
+          <Icon name="email" />
+          Enviar transcrição para {visitor.email}
         </button>
       )}
       {previousChats.length > 0 && (
-        <section>
-          <h4>Conversas anteriores</h4>
+        <div className="lc-section">
+          <div className="lc-label">Conversas anteriores</div>
           {previousChats.map((c) => (
-            <button key={c.rid} className="list-row link-row" onClick={() => navigate(`/live/${c.rid}`)}>
-              <span>{formatDateTime(c.ts)}</span>
+            <button key={c.rid} type="button" className="list-row link-row lc-prev" onClick={() => navigate(`/live/${c.rid}`)}>
+              <Icon name="room-livechat" />
+              <span className="num">{formatDateTime(c.ts)}</span>
               <span className="spacer" />
-              <span className="pill">{LIVECHAT_STATUS[c.status]}</span>
+              <LivechatStatus status={c.status} />
             </button>
           ))}
-        </section>
+        </div>
       )}
-      <div className="muted small">Conversa iniciada {formatRelative(room.ts)}</div>
+      <div className="lc-foot">Conversa iniciada {formatRelative(room.ts)}</div>
     </div>
   );
 }

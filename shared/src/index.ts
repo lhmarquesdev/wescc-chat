@@ -66,6 +66,7 @@ export interface Room {
   topic?: string;
   description?: string;
   announcement?: string;
+  avatarETag?: string; // só quando alguém enviou uma imagem para a sala
   u?: UserRef; // criador
   ro: boolean; // somente leitura
   archived: boolean;
@@ -136,6 +137,7 @@ export interface Subscription {
   teamId?: string | null;
   teamMain?: boolean;
   notice?: boolean; // a sala é um canal de avisos (ícone na barra lateral)
+  lm?: string; // hora da última mensagem da sala (ordem de "Recentes")
   notifications: SubscriptionNotifyPrefs;
   _updatedAt: string;
 }

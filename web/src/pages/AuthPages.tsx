@@ -1,27 +1,104 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import type { OAuthProviderPublic } from '@shared/index';
+import type { OAuthProviderPublic, OAuthProviderType } from '@shared/index';
 import { api, ApiError, errorMessage, getCredentials } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
 import { login, loginWithOAuth, loginWithSaml } from '../lib/session';
 import { useSetting } from '../lib/store';
+import { BrandMark, ProviderIcon } from '../components/BrandIcons';
+import { Icon } from '../components/Icon';
 import { confirmAction, Field } from '../components/ui';
 
-function AuthShell({ children }: { children: React.ReactNode }) {
-  const site = useSetting<string>('Site_Name');
+// Versão do servidor para o rodapé da marca (uma busca por carregamento da página).
+let versionLoad: Promise<string> | null = null;
+function useVersion() {
+  const [v, setV] = useState('');
+  useEffect(() => {
+    versionLoad ??= api
+      .get('info')
+      .then((r: { info?: { version?: string } }) => r.info?.version ?? '')
+      .catch(() => '');
+    let alive = true;
+    void versionLoad.then((x) => alive && setV(x));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return v;
+}
+
+// Tela de entrada: painel da marca à esquerda (telas largas) e o formulário alinhado no alto, à direita.
+function AuthShell({ children, title, subtitle }: { children: ReactNode; title?: string; subtitle?: ReactNode }) {
+  const site = useSetting<string>('Site_Name') || 'Wescc Chat';
   const terms = useSetting<string>('Layout_Login_Terms');
+  const version = useVersion();
   return (
     <div className="auth">
-      <div className="auth-card">
-        <div className="auth-logo">
-          <img src="/favicon.svg" width={48} height={48} alt="" />
-          <h1>{site}</h1>
+      <aside className="auth-brand">
+        <div className="auth-brand-top">
+          <BrandMark size={40} />
+          <span className="auth-brand-name">{site}</span>
         </div>
-        {children}
-        {terms && <div className="auth-terms">{renderMarkdown(terms)}</div>}
-      </div>
+        <div className="auth-brand-copy">
+          <p className="auth-headline">Toda a operação em uma só conversa.</p>
+          <p className="auth-subline">Chat, chamadas e atendimento da sua equipe em um só lugar.</p>
+        </div>
+        <div className="auth-brand-foot">
+          {site}
+          {version && ` · versão ${version}`}
+        </div>
+      </aside>
+      <main className="auth-main">
+        <div className="auth-card">
+          <div className="auth-logo">
+            <BrandMark size={48} />
+            <h1>{site}</h1>
+          </div>
+          {title && (
+            <div className="auth-head">
+              <h2 className="auth-title">{title}</h2>
+              {subtitle && <p className="auth-subtitle">{subtitle}</p>}
+            </div>
+          )}
+          {children}
+          {terms && <div className="auth-terms">{renderMarkdown(terms)}</div>}
+        </div>
+      </main>
     </div>
   );
+}
+
+// Erro do formulário, acima dos campos para o cartão não pular (a classe .form-error é a dos testes).
+function FormError({ children }: { children: ReactNode }) {
+  return (
+    <div className="form-error" role="alert">
+      <Icon name="error" size={16} />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+// Senha com o botão de mostrar/ocultar dentro do campo.
+function PasswordInput(props: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  const [show, setShow] = useState(false);
+  const label = show ? 'Ocultar senha' : 'Mostrar senha';
+  return (
+    <span className="password-field">
+      <input {...props} type={show ? 'text' : 'password'} />
+      <button type="button" className="icon-btn" title={label} aria-label={label} aria-pressed={show} onClick={() => setShow(!show)}>
+        <Icon name={show ? 'hide' : 'show'} />
+      </button>
+    </span>
+  );
+}
+
+// O endpoint público não diz o tipo do provedor: o ícone sai do nome do botão.
+function providerType(label: string): OAuthProviderType {
+  if (/google/i.test(label)) return 'google';
+  if (/github/i.test(label)) return 'github';
+  if (/gitlab/i.test(label)) return 'gitlab';
+  if (/microsoft|azure|entra|office/i.test(label)) return 'microsoft';
+  return 'custom';
 }
 
 const safeNext = (v: string | null) => (v && v.startsWith('/') && !v.startsWith('//') && !/[\\\x00-\x1f]/.test(v) ? v : '/home');
@@ -83,52 +160,64 @@ export function LoginPage() {
   };
 
   return (
-    <AuthShell>
-      <form onSubmit={submit} className="form">
+    <AuthShell
+      title={needCode ? 'Verificação em duas etapas' : 'Entrar'}
+      subtitle={needCode ? 'Digite o código do seu aplicativo autenticador.' : ldap ? 'Use seu usuário de rede ou e-mail corporativo.' : 'Use seu usuário ou e-mail corporativo.'}
+    >
+      <form onSubmit={submit} className="form auth-form">
+        {error && <FormError>{error}</FormError>}
         {!needCode ? (
           <>
             <Field label={ldap ? 'Usuário de rede ou e-mail' : 'Usuário ou e-mail'}>
-              <input autoFocus autoComplete="username" value={user} onChange={(e) => setUser(e.target.value)} />
+              <input autoFocus autoComplete="username" autoCapitalize="none" spellCheck={false} value={user} onChange={(e) => setUser(e.target.value)} />
             </Field>
             <Field label="Senha">
-              <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <PasswordInput autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </Field>
+            {passwordReset && (
+              <div className="auth-row">
+                <Link to="/forgot-password">Esqueci minha senha</Link>
+              </div>
+            )}
           </>
         ) : (
-          <Field label="Código de verificação" hint="Digite o código de 6 dígitos do seu aplicativo autenticador ou um código de backup.">
+          <Field label="Código de verificação" hint="O código de 6 dígitos do aplicativo autenticador ou um código de backup.">
             <input autoFocus inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
           </Field>
         )}
-        {error && <div className="form-error">{error}</div>}
-        <button type="submit" className="btn primary block" disabled={busy || !user || !password}>
+        <button type="submit" className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !user || !password}>
+          {busy && <span className="spinner sm" aria-hidden="true" />}
           {needCode ? 'Verificar' : 'Entrar'}
         </button>
+        {needCode && (
+          <button type="button" className="btn ghost full" onClick={() => (setNeedCode(false), setCode(''), setError(''))}>
+            <Icon name="back" />
+            Voltar
+          </button>
+        )}
         {!needCode && (saml || providers.length > 0) && (
           <>
             <div className="auth-sep">
               <span>ou</span>
             </div>
             {saml && (
-              <a className="btn block sso-btn" href={`/saml/login?redirect=${encodeURIComponent(next)}`}>
-                🔐 {samlLabel}
+              <a className="btn lg block sso-btn" href={`/saml/login?redirect=${encodeURIComponent(next)}`}>
+                <Icon name="sso" size={18} />
+                {samlLabel}
               </a>
             )}
             {providers.map((p) => (
               <a
                 key={p._id}
-                className="btn block sso-btn"
+                className="btn lg block sso-btn"
                 style={{ background: p.buttonColor, color: p.buttonTextColor }}
                 href={`/oauth/${encodeURIComponent(p._id)}/login?redirect=${encodeURIComponent(next)}`}
               >
+                <ProviderIcon type={providerType(p.label)} size={18} />
                 {p.label || 'Entrar'}
               </a>
             ))}
           </>
-        )}
-        {!needCode && passwordReset && (
-          <div className="auth-alt">
-            <Link to="/forgot-password">Esqueci minha senha</Link>
-          </div>
         )}
         {registration === 'Public' && (
           <div className="auth-alt">
@@ -160,20 +249,25 @@ export function ForgotPasswordPage() {
   };
   if (sent)
     return (
-      <AuthShell>
-        <p>Se houver uma conta com o e-mail {email.trim()}, você vai receber em instantes um link para criar uma senha nova. O link vale por 1 hora.</p>
-        <Link to="/login">Voltar ao login</Link>
+      <AuthShell title="Confira seu e-mail">
+        <div className="callout ok">
+          <Icon name="success" />
+          <span>Se houver uma conta com o e-mail {email.trim()}, você vai receber em instantes um link para criar uma senha nova. O link vale por 1 hora.</span>
+        </div>
+        <Link className="btn lg full" to="/login">
+          <Icon name="back" />
+          Voltar ao login
+        </Link>
       </AuthShell>
     );
   return (
-    <AuthShell>
-      <form onSubmit={submit} className="form">
-        <p>Digite o e-mail da sua conta para receber um link de redefinição de senha.</p>
+    <AuthShell title="Esqueci minha senha" subtitle="Digite o e-mail da sua conta para receber um link de redefinição de senha.">
+      <form onSubmit={submit} className="form auth-form">
+        {error && <FormError>{error}</FormError>}
         <Field label="E-mail">
           <input autoFocus type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </Field>
-        {error && <div className="form-error">{error}</div>}
-        <button className="btn primary block" disabled={busy || !email.trim()}>
+        <button className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !email.trim()}>
           Enviar link
         </button>
         <div className="auth-alt">
@@ -209,32 +303,35 @@ export function ResetPasswordPage() {
   };
   if (!token)
     return (
-      <AuthShell>
-        <p>Link inválido. Peça um novo em "Esqueci minha senha".</p>
-        <Link to="/forgot-password">Esqueci minha senha</Link>
+      <AuthShell title="Link inválido" subtitle="Peça um novo link em “Esqueci minha senha”.">
+        <Link className="btn primary lg full" to="/forgot-password">
+          Esqueci minha senha
+        </Link>
       </AuthShell>
     );
   if (done)
     return (
-      <AuthShell>
-        <p>Senha redefinida. Por segurança, todas as sessões abertas foram encerradas.</p>
-        <Link className="btn primary block" to="/login">
+      <AuthShell title="Senha redefinida">
+        <div className="callout ok">
+          <Icon name="success" />
+          <span>Por segurança, todas as sessões abertas foram encerradas.</span>
+        </div>
+        <Link className="btn primary lg full block" to="/login">
           Entrar
         </Link>
       </AuthShell>
     );
   return (
-    <AuthShell>
-      <form onSubmit={submit} className="form">
-        <p>Crie uma senha nova para a sua conta.</p>
+    <AuthShell title="Nova senha" subtitle="Crie uma senha nova para a sua conta.">
+      <form onSubmit={submit} className="form auth-form">
+        {error && <FormError>{error}</FormError>}
         <Field label="Nova senha" hint={`Mínimo de ${minLen} caracteres.`}>
-          <input autoFocus type="password" autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} />
+          <PasswordInput autoFocus autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} />
         </Field>
         <Field label="Confirmar nova senha">
-          <input type="password" autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} />
+          <PasswordInput autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} />
         </Field>
-        {error && <div className="form-error">{error}</div>}
-        <button className="btn primary block" disabled={!p1}>
+        <button className="btn primary lg full block" disabled={!p1}>
           Salvar senha
         </button>
       </form>
@@ -268,17 +365,32 @@ export function RegisterPage() {
     }
   };
 
-  if (registration === 'Disabled') return <AuthShell><p>O cadastro está desativado. Peça um convite ao administrador.</p><Link to="/login">Voltar</Link></AuthShell>;
+  if (registration === 'Disabled')
+    return (
+      <AuthShell title="Cadastro desativado" subtitle="Peça um convite ao administrador.">
+        <Link className="btn lg full" to="/login">
+          <Icon name="back" />
+          Voltar ao login
+        </Link>
+      </AuthShell>
+    );
   if (done)
     return (
-      <AuthShell>
-        <p>Cadastro recebido. Sua conta precisa ser aprovada por um administrador.</p>
-        <Link to="/login">Voltar ao login</Link>
+      <AuthShell title="Cadastro recebido">
+        <div className="callout info">
+          <Icon name="info" />
+          <span>Sua conta precisa ser aprovada por um administrador.</span>
+        </div>
+        <Link className="btn lg full" to="/login">
+          <Icon name="back" />
+          Voltar ao login
+        </Link>
       </AuthShell>
     );
   return (
-    <AuthShell>
-      <form onSubmit={submit} className="form">
+    <AuthShell title="Criar conta" subtitle="Preencha seus dados para entrar no chat da sua equipe.">
+      <form onSubmit={submit} className="form auth-form">
+        {error && <FormError>{error}</FormError>}
         <Field label="Nome">
           <input autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         </Field>
@@ -289,13 +401,12 @@ export function RegisterPage() {
           <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
         </Field>
         <Field label="Senha" hint={`Mínimo de ${minLen} caracteres.`}>
-          <input type="password" autoComplete="new-password" value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />
+          <PasswordInput autoComplete="new-password" value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />
         </Field>
         <Field label="Confirmar senha">
-          <input type="password" autoComplete="new-password" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} />
+          <PasswordInput autoComplete="new-password" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} />
         </Field>
-        {error && <div className="form-error">{error}</div>}
-        <button className="btn primary block">Criar conta</button>
+        <button className="btn primary lg full block">Criar conta</button>
         <div className="auth-alt">
           Já tem conta? <Link to="/login">Entrar</Link>
         </div>
@@ -321,20 +432,26 @@ export function InvitePage({ loggedIn }: { loggedIn: boolean }) {
     }
   };
   return (
-    <AuthShell>
-      {error && <div className="form-error">{error}</div>}
-      {info && !info.valid && <p>Este convite é inválido ou expirou.</p>}
+    <AuthShell title={info && !info.valid ? 'Convite inválido' : 'Convite'}>
+      {error && <FormError>{error}</FormError>}
+      {!info && !error && <div className="spinner" role="status" aria-label="Carregando" />}
+      {info && !info.valid && <p className="muted">Este convite é inválido ou expirou. Peça um novo a quem convidou você.</p>}
       {info?.valid && (
-        <div className="form">
-          <p>
-            Você foi convidado para <strong>{info.room.fname || info.room.name}</strong>.
-          </p>
+        <div className="form auth-form">
+          <div className="auth-invite">
+            <span className="auth-invite-icon">
+              <Icon name={info.room.t === 'p' ? 'room-private' : 'room-channel'} size={20} />
+            </span>
+            <span>
+              Você foi convidado para <strong>{info.room.fname || info.room.name}</strong>.
+            </span>
+          </div>
           {loggedIn ? (
-            <button className="btn primary block" onClick={accept}>
+            <button type="button" className="btn primary lg full block" onClick={accept}>
               Entrar na sala
             </button>
           ) : (
-            <Link className="btn primary block" to={`/login?next=/invite/${token}`}>
+            <Link className="btn primary lg full block" to={`/login?next=/invite/${token}`}>
               Entrar para aceitar
             </Link>
           )}
@@ -359,17 +476,16 @@ export function ChangePasswordPage({ onDone }: { onDone: () => void }) {
     }
   };
   return (
-    <AuthShell>
-      <form className="form" onSubmit={submit}>
-        <p>O administrador pediu que você defina uma nova senha.</p>
+    <AuthShell title="Defina uma nova senha" subtitle="O administrador pediu que você troque a sua senha antes de continuar.">
+      <form className="form auth-form" onSubmit={submit}>
+        {error && <FormError>{error}</FormError>}
         <Field label="Nova senha">
-          <input type="password" value={p1} onChange={(e) => setP1(e.target.value)} />
+          <PasswordInput autoFocus autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} />
         </Field>
         <Field label="Confirmar">
-          <input type="password" value={p2} onChange={(e) => setP2(e.target.value)} />
+          <PasswordInput autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} />
         </Field>
-        {error && <div className="form-error">{error}</div>}
-        <button className="btn primary block">Salvar</button>
+        <button className="btn primary lg full block">Salvar</button>
       </form>
     </AuthShell>
   );
