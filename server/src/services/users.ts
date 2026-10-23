@@ -288,7 +288,7 @@ export async function listSessions(opts: { userId?: string; offset?: number; cou
   if (opts.userId) where.push(`s.user_id = $${params.push(opts.userId)}`);
   if (opts.search) where.push(`(u.username ILIKE $${params.push(`%${opts.search}%`)} OR s.device->>'ip' ILIKE $${params.length})`);
   const rows = await many(
-    `SELECT s.*, u.username, count(*) OVER() AS total FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT s.*, u.username, u.name, count(*) OVER() AS total FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE ${where.join(' AND ')} ORDER BY s.last_active_at DESC LIMIT ${Math.min(opts.count ?? 50, 200)} OFFSET ${Number(opts.offset ?? 0)}`,
     params,
   );
@@ -298,6 +298,7 @@ export async function listSessions(opts: { userId?: string; offset?: number; cou
       _id: r.id,
       userId: r.user_id,
       username: r.username,
+      name: r.name, // a tabela de dispositivos mostra nome e @usuário, como as outras
       device: r.device,
       createdAt: r.created_at,
       lastActiveAt: r.last_active_at,

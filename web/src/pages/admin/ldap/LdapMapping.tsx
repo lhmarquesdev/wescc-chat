@@ -1,12 +1,14 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { Role } from '@shared/index';
 import { api } from '../../../lib/api';
-import { usePermission, useStore } from '../../../lib/store';
-import { Toggle } from '../../../components/ui';
+import { roleLabel, setRoleDescriptions } from '../../../lib/format';
+import { usePermission, useSetting, useStore } from '../../../lib/store';
+import { Icon, type IconName } from '../../../components/Icon';
+import { Empty, Toggle } from '../../../components/ui';
 import { UserPicker } from '../../../components/Pickers';
 import type { LdapSettings } from './index';
 import { LdapTest } from './LdapTest';
-import { findRoom, findTeam, RuleModal, type MappingData } from './RuleModal';
+import { findRoom, findTeam, roleChipTitle, RuleModal, type MappingData } from './RuleModal';
 import {
   canonicalMap,
   channelName,
@@ -64,7 +66,10 @@ function useMappingData(): MappingData {
     let alive = true;
     api
       .get<{ roles: Role[] }>('roles.list')
-      .then((r) => alive && setData((d) => ({ ...d, roles: r.roles })))
+      .then((r) => {
+        setRoleDescriptions(r.roles);
+        if (alive) setData((d) => ({ ...d, roles: r.roles }));
+      })
       .catch(() => alive && setData((d) => ({ ...d, roles: [] })));
     if (canRooms) void loadAll<any>('rooms.adminRooms', 'rooms', { types: ['c', 'p'] }, 200, 2000).then((rooms) => alive && setData((d) => ({ ...d, rooms: rooms?.filter((r) => r.name) ?? null })));
     if (canTeams) void loadAll<any>('teams.listAll', 'teams', {}, 100, 1000).then((teams) => alive && setData((d) => ({ ...d, teams })));
@@ -77,6 +82,7 @@ function useMappingData(): MappingData {
 
 export function LdapMapping({ s, onDirtyChange }: { s: LdapSettings; onDirtyChange: (dirty: boolean) => void }) {
   const data = useMappingData();
+  const siteName = useSetting<string>('Site_Name') || 'Wescc Chat';
   const saved = useMemo(() => Object.fromEntries(MAP_IDS.map((id) => [id, String(s.saved(MAP_SETTING[id]) ?? '{}')])) as Record<MapId, string>, [s]);
   const [mode, setMode] = useState<'visual' | 'json'>('visual');
   const [rows, setRows] = useState<MappingRow[]>([]);
@@ -138,7 +144,9 @@ export function LdapMapping({ s, onDirtyChange }: { s: LdapSettings; onDirtyChan
   });
 
   // Regras que existem para um tipo de mapeamento desligado: avisar, senão a pessoa acha que estão valendo.
-  const offWithRules = MAP_IDS.filter((id) => !s.value(ENABLE[id]) && (mode === 'visual' ? rows.some((r) => (id === 'role' ? r.roles : id === 'channel' ? r.channels : r.teams).length) : mapHasRules(json[id])));
+  const offWithRules = MAP_IDS.filter(
+    (id) => !s.value(ENABLE[id]) && (mode === 'visual' ? rows.some((r) => (id === 'role' ? r.roles : id === 'channel' ? r.channels : r.teams).length) : mapHasRules(json[id])),
+  );
 
   return (
     <>
@@ -154,7 +162,8 @@ export function LdapMapping({ s, onDirtyChange }: { s: LdapSettings; onDirtyChan
                 Editar como JSON
               </button>
               <button className="btn primary" disabled={!s.canEdit} onClick={() => setEditing({ index: null })}>
-                ＋ Nova regra
+                <Icon name="add" />
+                Nova regra
               </button>
             </>
           ) : (
@@ -163,9 +172,10 @@ export function LdapMapping({ s, onDirtyChange }: { s: LdapSettings; onDirtyChan
             </button>
           )}
         </div>
-        <p className="muted small ldap-card-lead">Cada regra diz o que quem está num grupo ou numa OU do AD recebe no Wescc Chat. Uma pessoa recebe tudo das regras que se aplicam a ela.</p>
+        <p className="muted small ldap-card-lead">Cada regra diz o que quem está num grupo ou numa OU do AD recebe no {siteName}. Uma pessoa recebe tudo das regras que se aplicam a ela.</p>
         {offWithRules.map((id) => (
           <div key={id} className="callout warn">
+            <Icon name="warning" />
             <span>
               Há regras com {MAP_TITLE[id].toLowerCase()}, mas “{ENABLE_LABEL[id]}” está desligado nas opções: essa parte das regras não é aplicada.
             </span>
@@ -204,6 +214,7 @@ export function LdapMapping({ s, onDirtyChange }: { s: LdapSettings; onDirtyChan
           row={editing.index === null ? null : rows[editing.index]}
           others={rows.filter((_, i) => i !== editing.index)}
           data={data}
+          ldapOn={!!s.saved('LDAP_Enable')}
           onClose={() => setEditing(null)}
           onSave={(row) => {
             setRows(editing.index === null ? [...rows, row] : rows.map((r, i) => (i === editing.index ? row : r)));
@@ -246,9 +257,10 @@ function MappingOptions({ s, data }: { s: LdapSettings; data: MappingData }) {
               {globalRoles.map((r) => {
                 const on = defaults.includes(r._id);
                 return (
-                  <label key={r._id} className={`chip selectable ${on ? 'on' : ''}`} title={r.restrictDirect ? 'Restrito em conversas diretas' : r.description || undefined}>
+                  <label key={r._id} className={`chip selectable ${on ? 'on' : ''}`} title={roleChipTitle(r)}>
                     <input type="checkbox" hidden checked={on} disabled={!s.canEdit} onChange={() => setDefaults(on ? defaults.filter((x) => x !== r._id) : [...defaults, r._id])} />
-                    {r.restrictDirect ? `🚫 ${r._id}` : r._id}
+                    {r.restrictDirect && <Icon name="direct-blocked" size={14} />}
+                    {roleLabel(r._id)}
                   </label>
                 );
               })}
@@ -256,16 +268,18 @@ function MappingOptions({ s, data }: { s: LdapSettings; data: MappingData }) {
                 <span key={r} className="chip ldap-chip bad" title="Papel inexistente ou de sala: a sincronização ignora.">
                   {r}
                   <button type="button" aria-label={`Remover ${r}`} onClick={() => setDefaults(defaults.filter((x) => x !== r))}>
-                    ✕
+                    <Icon name="close" size={12} />
                   </button>
                 </span>
               ))}
             </div>
           )}
-          <span className="field-hint">{defaults.length ? 'Todo usuário que vem do AD recebe estes papéis, além dos das regras.' : 'Nenhum papel padrão: cada pessoa recebe só os papéis das regras.'}</span>
+          <span className="field-hint">
+            {defaults.length ? 'Todo usuário que vem do AD recebe estes papéis, além dos das regras.' : 'Nenhum papel padrão: cada pessoa recebe só os papéis das regras.'}
+          </span>
         </div>
         {toggle('LDAP_Default_Roles_Skip_Restricted', 'Não dar os papéis padrão a quem recebe um papel restrito')}
-        <span className="field-hint ldap-toggle-hint">Evita que a operação ganhe o papel user, que permite criar grupos privados e times.</span>
+        <span className="field-hint ldap-toggle-hint">Evita que a operação ganhe o papel Usuário, que permite criar grupos privados e times.</span>
 
         <h4 className="ldap-subhead">Quando a pessoa sai do grupo ou da OU</h4>
         {toggle('LDAP_Roles_Auto_Remove', 'Remover papéis mapeados de quem sai do grupo ou da OU')}
@@ -275,12 +289,7 @@ function MappingOptions({ s, data }: { s: LdapSettings; data: MappingData }) {
 
         <div className={`field ldap-setting ${s.isDirty('LDAP_Channels_Admin') ? 'changed' : ''}`}>
           <span className="field-label">Dono dos canais criados</span>
-          <UserPicker
-            single
-            value={owner ? [{ _id: owner, username: owner }] : []}
-            onChange={(v) => s.set('LDAP_Channels_Admin', v[0]?.username ?? '')}
-            placeholder="Buscar pessoa"
-          />
+          <UserPicker single value={owner ? [{ _id: owner, username: owner }] : []} onChange={(v) => s.set('LDAP_Channels_Admin', v[0]?.username ?? '')} placeholder="Buscar pessoa" />
           <span className="field-hint">Os canais que a sincronização criar terão esta pessoa como dona. Sem ninguém, eles ficam sem dono.</span>
         </div>
       </div>
@@ -289,7 +298,12 @@ function MappingOptions({ s, data }: { s: LdapSettings; data: MappingData }) {
 }
 
 function RulesTable({ rows, data, canEdit, onEdit, onRemove }: { rows: MappingRow[]; data: MappingData; canEdit: boolean; onEdit: (i: number) => void; onRemove: (i: number) => void }) {
-  if (!rows.length) return <div className="empty">Nenhuma regra. Use “Nova regra” para mapear um grupo ou uma OU do AD.</div>;
+  if (!rows.length)
+    return (
+      <Empty icon="ldap-group" title="Nenhuma regra">
+        Use “Nova regra” para mapear um grupo ou uma OU do AD.
+      </Empty>
+    );
   const role = (id: string) => data.roles?.find((r) => r._id === id);
   return (
     <div className="ldap-rules-wrap">
@@ -309,8 +323,9 @@ function RulesTable({ rows, data, canEdit, onEdit, onRemove }: { rows: MappingRo
             return (
               <tr key={row.key}>
                 <td className="ldap-origin" title={o.title}>
-                  <span>
-                    {o.icon} <strong>{o.label}</strong>
+                  <span className="ldap-origin-name">
+                    <Icon name={o.icon} size={16} />
+                    <strong>{o.label}</strong>
                   </span>
                   {o.kind === 'group' && <span className="muted small">pelo nome</span>}
                   {o.title && <span className="mono small muted ldap-dn">{o.title}</span>}
@@ -320,7 +335,12 @@ function RulesTable({ rows, data, canEdit, onEdit, onRemove }: { rows: MappingRo
                     items={row.roles.map((r) => {
                       const def = role(r);
                       const bad = !!data.roles && (!def || def.scope !== 'Users');
-                      return { text: def?.restrictDirect ? `🚫 ${r}` : r, cls: bad ? 'bad' : '', title: bad ? 'Papel inexistente ou de sala: a sincronização ignora.' : def?.restrictDirect ? 'Restrito em conversas diretas' : undefined };
+                      return {
+                        text: bad ? r : roleLabel(r),
+                        icon: def?.restrictDirect ? ('direct-blocked' as const) : undefined,
+                        cls: bad ? 'bad' : '',
+                        title: bad ? 'Papel inexistente ou de sala: a sincronização ignora.' : def ? roleChipTitle(def) : undefined,
+                      };
                     })}
                   />
                 </td>
@@ -328,7 +348,12 @@ function RulesTable({ rows, data, canEdit, onEdit, onRemove }: { rows: MappingRo
                   <Chips
                     items={row.channels.map((c) => {
                       const missing = !!data.rooms && !findRoom(data, c);
-                      return { text: `#${channelName(c)}`, note: missing ? '(será criado)' : undefined, cls: missing ? 'new' : '', title: missing ? 'Ainda não existe: a sincronização cria como grupo privado.' : undefined };
+                      return {
+                        text: `#${channelName(c)}`,
+                        note: missing ? '(será criado)' : undefined,
+                        cls: missing ? 'new' : '',
+                        title: missing ? 'Ainda não existe: a sincronização cria como grupo privado.' : undefined,
+                      };
                     })}
                   />
                 </td>
@@ -359,12 +384,13 @@ function RulesTable({ rows, data, canEdit, onEdit, onRemove }: { rows: MappingRo
   );
 }
 
-function Chips({ items }: { items: { text: string; cls?: string; title?: string; note?: string }[] }) {
+function Chips({ items }: { items: { text: string; icon?: IconName; cls?: string; title?: string; note?: string }[] }) {
   if (!items.length) return <span className="muted">—</span>;
   return (
     <div className="chips">
       {items.map((c) => (
         <span key={c.text} className={`chip ldap-chip ${c.cls ?? ''}`} title={c.title}>
+          {c.icon && <Icon name={c.icon} size={14} />}
           {c.text}
           {c.note && <span className="ldap-chip-note">{c.note}</span>}
         </span>
@@ -377,7 +403,8 @@ function JsonEditor({ json, errors, readOnly, onChange }: { json: Record<MapId, 
   return (
     <div className="form">
       <p className="muted small ldap-json-help">
-        Chaves: <code>"*"</code> (todos), <code>"ou:&lt;DN&gt;"</code>, <code>"group:&lt;DN&gt;"</code>, <code>"group:&lt;nome&gt;"</code> ou só o nome do grupo. Valores: um texto ou uma lista de textos.
+        Chaves: <code>"*"</code> (todos), <code>"ou:&lt;DN&gt;"</code>, <code>"group:&lt;DN&gt;"</code>, <code>"group:&lt;nome&gt;"</code> ou só o nome do grupo. Valores: um texto ou uma lista de
+        textos.
       </p>
       {MAP_IDS.map((id) => (
         <label key={id} className="field">

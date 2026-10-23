@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
-import { api, errorMessage } from '../lib/api';
-import { roomDisplayName, roomIcon, roomPath, STATUS_LABEL } from '../lib/format';
+import { api, ApiError, errorMessage } from '../lib/api';
+import { nameList, roomDisplayName, roomIconName, roomPath, STATUS_LABEL } from '../lib/format';
+import { namesIn } from '../lib/names';
 import { realtime } from '../lib/realtime';
 import { renderMarkdown } from '../lib/markdown';
 import { startCall } from '../lib/calls';
 import { sendText } from '../lib/direct';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { Composer } from '../components/Composer';
+import { Icon, type IconName } from '../components/Icon';
 import { LIVECHAT_STATUS, LivechatActions } from '../components/LivechatPanel';
 import { CreateModal } from '../components/CreateModal';
 import { MessageGateContext } from '../components/MessageItem';
@@ -17,28 +19,85 @@ import { NoticeBar } from '../components/NoticeBar';
 import { RoomPanel, type PanelId } from '../components/RoomPanels';
 import { ThreadPanel } from '../components/ThreadPanel';
 import { UserCard } from '../components/UserCard';
-import { Avatar, Menu, Spinner, StatusDot } from '../components/ui';
+import { useIsPhone, useMedia } from '../components/overlay';
+import { Empty, GroupAvatar, Menu, Skeleton, SkeletonMessages, UserAvatar, confirmDialog, useDelay } from '../components/ui';
 
 const notLive = (r: Room) => r.t !== 'l';
-const PANELS: { id: PanelId; icon: string; label: string; when?: (r: Room) => boolean }[] = [
-  { id: 'livechat', icon: '🎧', label: 'Atendimento', when: (r) => r.t === 'l' },
-  { id: 'info', icon: 'ℹ️', label: 'Informações', when: notLive },
-  { id: 'threads', icon: '💬', label: 'Threads' },
-  { id: 'discussions', icon: '🗨', label: 'Discussões', when: (r) => !r.prid && notLive(r) },
-  { id: 'team', icon: '👥', label: 'Canais do time', when: (r) => !!r.teamMain },
-  { id: 'members', icon: '🧑‍🤝‍🧑', label: 'Membros', when: (r) => notLive(r) && (r.t !== 'd' || (r.uids?.length ?? 0) > 2) },
-  { id: 'search', icon: '🔍', label: 'Buscar mensagens' },
-  { id: 'files', icon: '📁', label: 'Arquivos' },
-  { id: 'pinned', icon: '📌', label: 'Fixadas' },
-  { id: 'starred', icon: '⭐', label: 'Favoritas' },
-  { id: 'mentions', icon: '@', label: 'Menções' },
-  { id: 'notifications', icon: '🔔', label: 'Notificações' },
-  { id: 'invite', icon: '🔗', label: 'Link de convite', when: (r) => r.t !== 'd' && notLive(r) },
-  { id: 'prune', icon: '🧹', label: 'Limpar histórico', when: (r) => r.t !== 'd' && notLive(r) },
+// perm: só aparece para quem tem a permissão (global ou da sala), como o servidor exige.
+const PANELS: { id: PanelId; icon: IconName; label: string; when?: (r: Room) => boolean; perm?: string }[] = [
+  { id: 'livechat', icon: 'panel-livechat', label: 'Atendimento', when: (r) => r.t === 'l' },
+  { id: 'info', icon: 'panel-info', label: 'Informações', when: notLive },
+  { id: 'threads', icon: 'panel-threads', label: 'Tópicos' },
+  { id: 'discussions', icon: 'panel-discussions', label: 'Discussões', when: (r) => !r.prid && notLive(r) },
+  { id: 'team', icon: 'panel-team', label: 'Canais do time', when: (r) => !!r.teamMain },
+  { id: 'members', icon: 'panel-members', label: 'Membros', when: (r) => notLive(r) && (r.t !== 'd' || (r.uids?.length ?? 0) > 2) },
+  { id: 'search', icon: 'panel-search', label: 'Buscar mensagens' },
+  { id: 'files', icon: 'panel-files', label: 'Arquivos' },
+  { id: 'pinned', icon: 'panel-pinned', label: 'Fixadas' },
+  { id: 'starred', icon: 'panel-starred', label: 'Favoritas' },
+  { id: 'mentions', icon: 'panel-mentions', label: 'Menções' },
+  { id: 'notifications', icon: 'panel-notifications', label: 'Notificações' },
+  { id: 'invite', icon: 'panel-invite', label: 'Link de convite', when: (r) => r.t !== 'd' && notLive(r), perm: 'create-invite-links' },
+  { id: 'prune', icon: 'panel-prune', label: 'Limpar histórico', when: (r) => r.t !== 'd' && notLive(r), perm: 'clean-channel-history' },
 ];
+
+// Atalhos do cabeçalho, na ordem em que aparecem. Os que não cabem vão para o menu Mais.
+const SHORTCUTS: PanelId[] = ['threads', 'members', 'info', 'search'];
+
+// Compactação pela largura do próprio cabeçalho (o painel aberto também a reduz), não pela da tela.
+function shortcutsFor(width: number, calls: boolean): PanelId[] {
+  if (width < 440) return calls ? [] : ['members'];
+  if (width < 560) return ['members'];
+  if (width < 720) return ['threads', 'members', 'info'];
+  return SHORTCUTS;
+}
+
+// Largura de um elemento, medida antes da pintura e acompanhada por ResizeObserver.
+function useWidth() {
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    if (!el) return;
+    setWidth(el.getBoundingClientRect().width);
+    const ro = new ResizeObserver(([e]) => setWidth(e.borderBoxSize?.[0]?.inlineSize ?? e.target.getBoundingClientRect().width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return [setEl, width] as const;
+}
+
+// Nome de quem digita: o evento só traz o @usuário. Vale o nome das mensagens já carregadas da sala; sem ele, busca
+// uma vez em users.info. Só o primeiro nome, para a linha ficar curta.
+const typingNames = new Map<string, string>();
+const typingAsked = new Set<string>();
+function firstName(name: string | undefined, username: string) {
+  return name?.trim().split(/\s+/)[0] || username;
+}
+function useTypingName(rid: string) {
+  const list = useStore((s) => s.messages[rid]?.list);
+  const [, bump] = useState(0);
+  return (username: string) => {
+    const known = typingNames.get(username);
+    if (known) return known;
+    const m = list && [...list].reverse().find((x) => x.u.username === username && x.u.name);
+    if (m) return firstName(m.u.name, username);
+    if (!typingAsked.has(username)) {
+      typingAsked.add(username);
+      api
+        .get('users.info', { username })
+        .then((r) => {
+          typingNames.set(username, firstName(r.user?.name, username));
+          bump((x) => x + 1);
+        })
+        .catch(() => {});
+    }
+    return username;
+  };
+}
 
 function TypingIndicator({ id }: { id: string }) {
   const typing = useStore((s) => s.typing[id]);
+  const nameOf = useTypingName(id.split(':')[0]);
   const [, force] = useState(0);
   useEffect(() => {
     const t = setInterval(() => force((x) => x + 1), 2000);
@@ -46,11 +105,32 @@ function TypingIndicator({ id }: { id: string }) {
   }, []);
   const names = Object.entries(typing ?? {})
     .filter(([, ts]) => Date.now() - ts < 6000)
-    .map(([u]) => u);
-  if (!names.length) return <div className="typing" />;
+    .map(([u]) => nameOf(u));
+  // A linha fica sobre o fim da lista: não ocupa espaço quando ninguém digita.
   return (
-    <div className="typing">
-      <strong>{names.slice(0, 3).join(', ')}</strong> {names.length === 1 ? 'está digitando' : 'estão digitando'}…
+    <div className="typing" aria-live="polite">
+      {names.length > 0 && (
+        <div className="typing-row">
+          <span className="dots" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="typing-text">
+            {names.length === 1 ? (
+              <>
+                <strong>{names[0]}</strong> está digitando…
+              </>
+            ) : names.length === 2 ? (
+              <>
+                <strong>{names[0]}</strong> e <strong>{names[1]}</strong> estão digitando…
+              </>
+            ) : (
+              'Várias pessoas estão digitando…'
+            )}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -67,6 +147,63 @@ function LivechatJoinBar({ rid }: { rid: string }) {
   );
 }
 
+// Anúncio da sala: uma linha, com "Ver mais" quando o texto não cabe.
+function Announcement({ text }: { text: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    const check = () => setCut(el.scrollWidth > el.clientWidth + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text, open]);
+  return (
+    <div className={open ? 'announcement open' : 'announcement'}>
+      <Icon name="announcement" />
+      <span className="announcement-text" ref={ref}>
+        {renderMarkdown(text)}
+      </span>
+      {(cut || open) && (
+        <button type="button" className="link announcement-more" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? 'Ver menos' : 'Ver mais'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+const BackButton = ({ onClick }: { onClick: () => void }) => (
+  <button type="button" className="icon-btn mobile-only room-back" title="Voltar" aria-label="Voltar" onClick={onClick}>
+    <Icon name="back" size={20} />
+  </button>
+);
+
+function RoomLoading() {
+  const ready = useDelay(250);
+  return (
+    <div className="room loading">
+      <div className="room-main">
+        <div className="room-head-skeleton" aria-hidden="true">
+          {ready && (
+            <>
+              <Skeleton circle height={32} />
+              <span className="room-head-skeleton-lines">
+                <Skeleton width={180} height={14} />
+                <Skeleton width={260} height={10} />
+              </span>
+            </>
+          )}
+        </div>
+        <SkeletonMessages />
+      </div>
+    </div>
+  );
+}
+
 export function RoomPage() {
   const { rid = '', '*': rest = '' } = useParams();
   const tmid = rest.match(/^thread\/([^/]+)/)?.[1];
@@ -76,25 +213,59 @@ export function RoomPage() {
   const roomLive = useStore((s) => s.rooms[rid]);
   const me = useStore((s) => s.me)!;
   const [room, setRoom] = useState<(Room & { muted?: string[]; team?: any; parent?: any; joinCodeRequired?: boolean }) | null>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<{ text: string; missing: boolean } | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [quoting, setQuoting] = useState<Message | null>(null);
   const [discussionFrom, setDiscussionFrom] = useState<Message | null>(null);
-  const [userCard, setUserCard] = useState<string | null>(null);
+  const [userCard, setUserCard] = useState<{ username: string; anchor: HTMLElement | null } | null>(null);
   const [roomRoles, setRoomRoles] = useState<string[]>([]);
   const panel = params.get('tab') as PanelId | null;
   const presence = useStore((s) => (room?.t === 'd' && sub && !sub.name.includes(',') ? s.presence[sub.name] : undefined));
   const threadsOn = useSetting<boolean>('Threads_enabled');
   const callsEnabled = useSetting<boolean>('Calls_Enabled');
+  const [setHeader, headerWidth] = useWidth();
+  const phone = useIsPhone();
+  const coarse = useMedia('(pointer: coarse)');
+  // Quem está offline não vem no mapa de presença: o texto de status (que continua valendo) vem de users.info.
+  const dmName = room?.t === 'd' && sub && !sub.name.includes(',') ? sub.name : null;
+  const [dmStatusText, setDmStatusText] = useState('');
+  useEffect(() => {
+    setDmStatusText('');
+    if (!dmName || presence) return;
+    let alive = true;
+    api
+      .get('users.info', { username: dmName })
+      .then((r) => alive && setDmStatusText(r.user?.statusText ?? ''))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [dmName, !!presence]);
+
+  // O cartão do usuário abre junto do nome ou avatar clicado: guarda o alvo do último clique (fase de captura,
+  // antes do onClick do React) para ancorar o popover.
+  const lastClick = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      lastClick.current = e.target instanceof HTMLElement ? e.target : null;
+    };
+    document.addEventListener('click', h, true);
+    return () => document.removeEventListener('click', h, true);
+  }, []);
+  const openUserCard = useCallback((username: string) => {
+    const t = lastClick.current;
+    const anchor = t?.isConnected ? t.closest<HTMLElement>('.msg-name, .clickable, .mention, .member, button, a') ?? t : null;
+    setUserCard({ username, anchor });
+  }, []);
 
   const loadRoom = useCallback(async () => {
     try {
       const r = await api.get('rooms.info', { roomId: rid });
       setRoom(r.room);
       useStore.getState().upsertRoom(r.room);
-      setError('');
+      setError(null);
     } catch (e) {
-      setError(errorMessage(e));
+      setError({ text: errorMessage(e), missing: e instanceof ApiError && e.status < 500 });
     }
   }, [rid]);
 
@@ -102,6 +273,7 @@ export function RoomPage() {
     setRoom(null);
     setEditing(null);
     setQuoting(null);
+    setUserCard(null);
     void loadRoom();
   }, [rid, loadRoom]);
 
@@ -178,9 +350,10 @@ export function RoomPage() {
   const receiptsLimited = !!(room?.notice || room?.broadcast);
   const canSeeLimitedReceipts = canPostRO || (!!room?.broadcast && !membersHidden);
   // Vale para a lista e para a thread (que monta as próprias ações).
+  const canPin = room?.t === 'd' || canWithRoles('pin-message', roles);
   const gate = useMemo(
-    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts }),
-    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts],
+    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin }),
+    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin],
   );
 
   const actions = useMemo(
@@ -189,10 +362,10 @@ export function RoomPage() {
       onEdit: (m: Message) => setEditing(m),
       onQuote: (m: Message) => setQuoting(m),
       onDiscussion: (m: Message) => setDiscussionFrom(m),
-      onUserClick: (u: string) => setUserCard(u),
+      onUserClick: openUserCard,
       ...gate,
     }),
-    [navigate, rid, room?.t, threadsOn, gate],
+    [navigate, rid, room?.t, threadsOn, gate, openUserCard],
   );
 
   const editLast = () => {
@@ -201,8 +374,60 @@ export function RoomPage() {
     if (mine) setEditing(mine);
   };
 
-  if (error) return <div className="room-error">{error}</div>;
-  if (!room) return <div className="room center"><Spinner /></div>;
+  const knownName = sub ? roomDisplayName(sub, roomLive) : roomLive?.fname || roomLive?.name;
+  if (error)
+    return (
+      <div className="room">
+        <div className="room-main">
+          {/* O cabeçalho fica, com a seta de voltar e o nome que se conhece da sala (barra lateral, links). */}
+          <header className="room-header room-header-error">
+            <button type="button" className="icon-btn room-back-always" title="Voltar" aria-label="Voltar" onClick={() => navigate('/home')}>
+              <Icon name="back" size={20} />
+            </button>
+            <div className="room-title">
+              <div className="room-name">
+                <span className="room-name-text">{knownName || 'Sala indisponível'}</span>
+              </div>
+            </div>
+          </header>
+          <div className="room-error" role="alert">
+            {error.missing ? (
+              <Empty
+                icon="error"
+                tone="danger"
+                title="Sala não encontrada"
+                action={
+                  <button type="button" className="btn primary" onClick={() => navigate('/home')}>
+                    Voltar às conversas
+                  </button>
+                }
+              >
+                Ela pode ter sido apagada ou você não tem acesso.
+              </Empty>
+            ) : (
+              <Empty
+                icon="error"
+                tone="danger"
+                title="Algo deu errado"
+                action={
+                  <>
+                    <button type="button" className="btn primary" onClick={() => navigate('/home')}>
+                      Voltar às conversas
+                    </button>
+                    <button type="button" className="btn" onClick={() => location.reload()}>
+                      Recarregar
+                    </button>
+                  </>
+                }
+              >
+                {error.text}
+              </Empty>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  if (!room) return <RoomLoading />;
 
   const name = roomDisplayName(sub, room);
   const join = async () => {
@@ -215,102 +440,187 @@ export function RoomPage() {
   };
   const callBlocked = room.direct?.canCall === false ? room.direct.callBlockedReason : undefined;
   const dmUser = room.t === 'd' && sub && !sub.name.includes(',') ? sub.name : null;
-  const panels = PANELS.filter((p) => (!p.when || p.when(room)) && !(p.id === 'members' && membersHidden));
+  const panels = PANELS.filter((p) => (!p.when || p.when(room)) && (!p.perm || canWithRoles(p.perm, roles)) && !(p.id === 'members' && membersHidden));
+  const hasCalls = !!(dmUser && callsEnabled && room.uids?.length === 2);
+  const inHeader = new Set(shortcutsFor(headerWidth, hasCalls));
+  const shortcuts = SHORTCUTS.map((id) => panels.find((p) => p.id === id)).filter((p): p is (typeof PANELS)[number] => !!p && inHeader.has(p.id));
+  const menuPanels = panels.filter((p) => !shortcuts.includes(p));
+  const hasInfo = panels.some((p) => p.id === 'info');
+  const closePanel = () => (tmid ? navigate(roomPath(room)) : setPanel(null));
+  const favorite = () => api.post('rooms.favorite', { roomId: rid, favorite: !sub?.f }).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
+  // O # só nos canais públicos (não em grupos privados, times privados nem discussões, que têm nome livre).
+  const hashName = room.t === 'c' && !room.prid ? `#${name}` : name;
+  const groupDm = room.t === 'd' && (room.uids?.length ?? 0) > 2;
+  // No celular, a DM em grupo leva só os primeiros nomes (a de uma pessoa, o nome inteiro, que o CSS corta com
+  // reticências se for longo): o texto de exemplo cabe numa linha.
+  const firstNames = nameList(name.split(/,\s*/).map((x) => x.split(/\s+/)[0]), 3);
+  const placeholder = room.t === 'd' || room.t === 'l' ? `Mensagem para ${phone && groupDm ? firstNames : name}` : `Mensagem em ${hashName}`;
+  const leave = async () => {
+    const ok = await confirmDialog({ title: `Sair de ${hashName}?`, body: 'Você deixa de receber as mensagens desta sala.', confirmLabel: 'Sair da sala', danger: true });
+    if (ok) api.post('rooms.leave', { roomId: rid }).then(() => navigate('/home')).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
+  };
+  const status = presence?.status ?? 'offline';
+  const statusText = presence?.statusText || dmStatusText;
+  // No toque não há title: o botão desativado e a pílula de bloqueio explicam o motivo num aviso.
+  const explain = (text?: string) => text && useStore.getState().toast(namesIn(text), 'info');
 
   return (
     <MessageGateContext.Provider value={gate}>
       <div className={`room ${panel || tmid ? 'with-panel' : ''}`}>
         <div className="room-main">
-          <header className="room-header">
-            <button className="icon-btn mobile-only" onClick={() => navigate('/home')}>
-              ←
-            </button>
+          <header className="room-header" ref={setHeader}>
+            <BackButton onClick={() => navigate('/home')} />
             {dmUser ? (
-              <span className="avatar-wrap" style={{ width: 32, height: 32 }}>
-                <Avatar username={dmUser} size={32} />
-                <StatusDot username={dmUser} />
-              </span>
+              <UserAvatar username={dmUser} size={32} />
+            ) : groupDm ? (
+              <GroupAvatar usernames={room.usernames ?? []} size={32} />
             ) : (
-              <span className="room-icon">{roomIcon(room)}</span>
+              <span className="room-icon" aria-hidden="true">
+                <Icon name={roomIconName(room)} size={20} />
+              </span>
             )}
             <div className="room-title">
               <div className="room-name">
-                {name}
-                {sub?.f && <span title="Favorito"> ★</span>}
-                {room.encrypted && <span title="Criptografada"> 🔐</span>}
-                {room.notice ? (
-                  <span className="pill notice" title="Canal de avisos" aria-label="Canal de avisos">
-                    📢 <span className="pill-label">avisos</span>
+                <span className="room-name-text">{name}</span>
+                {sub?.f && (
+                  <button type="button" className="room-fav" title="Remover dos favoritos" aria-label="Remover dos favoritos" onClick={favorite}>
+                    <Icon name="favorite" size={14} fill />
+                  </button>
+                )}
+                {room.encrypted && (
+                  <span className="room-mark" title="Criptografada">
+                    <Icon name="encrypted" size={14} label="Criptografada" />
                   </span>
-                ) : (
-                  room.ro && <span className="pill">somente leitura</span>
+                )}
+                {/* Canal de avisos: o ícone da sala e a faixa logo abaixo já dizem isso, sem pílula. */}
+                {room.ro && !room.notice && (
+                  <span className="pill" title="Somente leitura">
+                    <Icon name="composer-locked" size={12} />
+                    <span className="pill-label">somente leitura</span>
+                  </span>
                 )}
                 {room.direct?.canSend === false && (
-                  <span className="pill blocked" title={room.direct.sendBlockedReason} aria-label="Conversa bloqueada">
-                    🚫 <span className="pill-label">conversa bloqueada</span>
+                  <button
+                    type="button"
+                    className="pill blocked clickable"
+                    title={room.direct.sendBlockedReason}
+                    aria-label="Conversa bloqueada"
+                    onClick={() => explain(room.direct?.sendBlockedReason)}
+                  >
+                    <Icon name="direct-blocked" size={12} />
+                    <span className="pill-label">conversa bloqueada</span>
+                  </button>
+                )}
+                {room.archived && (
+                  <span className="pill" title="Arquivada">
+                    <Icon name="archive" size={12} />
+                    <span className="pill-label">arquivada</span>
                   </span>
                 )}
-                {room.archived && <span className="pill">arquivada</span>}
                 {room.team && !room.teamMain && (
-                  <span className="pill clickable" onClick={() => navigate(roomPath({ _id: room.team.roomId, t: 'c' }))}>
-                    👥 {room.team.name}
-                  </span>
+                  <button type="button" className="pill clickable" title="Abrir o time" onClick={() => navigate(roomPath({ _id: room.team.roomId, t: 'c' }))}>
+                    <Icon name="room-team" size={12} />
+                    <span className="pill-label">{room.team.name}</span>
+                  </button>
                 )}
                 {room.parent && (
-                  <span className="pill clickable" onClick={() => navigate(roomPath(room.parent))}>
-                    ↖ {room.parent.fname || room.parent.name}
-                  </span>
+                  <button type="button" className="pill clickable" title="Abrir a sala de origem" onClick={() => navigate(roomPath(room.parent))}>
+                    <Icon name="parent-room" size={12} />
+                    <span className="pill-label">{room.parent.fname || room.parent.name}</span>
+                  </button>
                 )}
               </div>
-              <div className="room-topic">
-                {dmUser ? `${STATUS_LABEL[presence?.status ?? 'offline']}${presence?.statusText ? ` — ${presence.statusText}` : ''}` : room.topic ? renderMarkdown(room.topic) : null}
+              <div
+                className={hasInfo ? 'room-topic clickable' : 'room-topic'}
+                onClick={hasInfo ? (e) => !(e.target as HTMLElement).closest('a, .mention') && setPanel('info') : undefined}
+              >
+                {dmUser ? `${STATUS_LABEL[status] ?? status}${statusText ? ` · ${statusText}` : ''}` : room.topic ? renderMarkdown(room.topic) : null}
               </div>
             </div>
             <div className="room-actions">
               {room.t === 'l' && <LivechatActions rid={rid} onPanel={() => setPanel(panel === 'livechat' ? null : 'livechat')} />}
-              {dmUser && callsEnabled && room.uids?.length === 2 && (
+              {hasCalls && (
                 <>
-                  <button className="icon-btn" title={callBlocked ?? 'Chamada de voz'} disabled={!!callBlocked} onClick={() => void startCall(rid, 'audio')}>
-                    📞
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title={callBlocked ?? 'Chamada de voz'}
+                    aria-label="Chamada de voz"
+                    disabled={!!callBlocked && !coarse}
+                    aria-disabled={callBlocked ? true : undefined}
+                    onClick={() => (callBlocked ? explain(callBlocked) : void startCall(rid, 'audio'))}
+                  >
+                    <Icon name="call-audio" size={18} />
                   </button>
-                  <button className="icon-btn" title={callBlocked ?? 'Chamada de vídeo'} disabled={!!callBlocked} onClick={() => void startCall(rid, 'video')}>
-                    🎥
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title={callBlocked ?? 'Chamada de vídeo'}
+                    aria-label="Chamada de vídeo"
+                    disabled={!!callBlocked && !coarse}
+                    aria-disabled={callBlocked ? true : undefined}
+                    onClick={() => (callBlocked ? explain(callBlocked) : void startCall(rid, 'video'))}
+                  >
+                    <Icon name="call-video" size={18} />
                   </button>
+                  {shortcuts.length > 0 && <span className="room-actions-sep" aria-hidden="true" />}
                 </>
               )}
-              {sub && (
-                <button className="icon-btn" title={sub.f ? 'Remover dos favoritos' : 'Favoritar'} onClick={() => api.post('rooms.favorite', { roomId: rid, favorite: !sub.f })}>
-                  {sub.f ? '★' : '☆'}
-                </button>
-              )}
-              {panels.filter((p) => ['info', 'threads', 'members', 'search'].includes(p.id)).map((p) => (
-                <button key={p.id} className={`icon-btn room-shortcut ${panel === p.id ? 'on' : ''}`} title={p.label} onClick={() => setPanel(panel === p.id ? null : p.id)}>
-                  {p.icon}
+              {shortcuts.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`icon-btn room-shortcut ${p.id === 'members' && room.usersCount ? 'with-count' : ''} ${panel === p.id || (p.id === 'threads' && tmid) ? 'on' : ''}`}
+                  title={p.label}
+                  aria-label={p.label}
+                  aria-pressed={panel === p.id || (p.id === 'threads' && !!tmid)}
+                  onClick={() => setPanel(panel === p.id ? null : p.id)}
+                >
+                  <Icon name={p.icon} size={18} />
+                  {p.id === 'members' && room.usersCount ? <span className="count">{room.usersCount.toLocaleString('pt-BR')}</span> : null}
                 </button>
               ))}
-              <Menu trigger={<button className="icon-btn" title="Mais">⋮</button>}>
+              {(shortcuts.length > 0 || hasCalls || room.t === 'l') && <span className="room-actions-sep" aria-hidden="true" />}
+              <Menu
+                label="Mais opções da sala"
+                trigger={
+                  <button type="button" className="icon-btn" title="Mais" aria-label="Mais">
+                    <Icon name="more-vertical" size={18} />
+                  </button>
+                }
+              >
                 {(close) => (
                   <>
-                    {panels.map((p) => (
+                    {menuPanels.length > 0 && <div className="menu-label">Painéis</div>}
+                    {menuPanels.map((p) => (
                       <button key={p.id} onClick={() => (setPanel(p.id), close())}>
-                        {p.icon} {p.label}
+                        <Icon name={p.icon} />
+                        {p.label}
                       </button>
                     ))}
                     {sub && (
                       <>
-                        <hr />
-                        <button onClick={() => (api.post('subscriptions.unread', { roomId: rid }), close())}>● Marcar como não lida</button>
-                        <button onClick={() => (api.post('rooms.hide', { roomId: rid }).then(() => navigate('/home')), close())}>🙈 Ocultar</button>
+                        {menuPanels.length > 0 && <hr />}
+                        <button onClick={() => (favorite(), close())}>
+                          <Icon name={sub.f ? 'unfavorite' : 'favorite'} />
+                          {sub.f ? 'Remover dos favoritos' : 'Favoritar'}
+                        </button>
+                        <button onClick={() => (api.post('subscriptions.unread', { roomId: rid }), close())}>
+                          <Icon name="mark-unread" />
+                          Marcar como não lida
+                        </button>
+                        <button onClick={() => (api.post('rooms.hide', { roomId: rid }).then(() => navigate('/home')), close())}>
+                          <Icon name="hide" />
+                          Ocultar
+                        </button>
                         {room.t !== 'd' && (
-                          <button
-                            className="danger"
-                            onClick={() => {
-                              close();
-                              if (confirm(`Sair de ${name}?`)) api.post('rooms.leave', { roomId: rid }).then(() => navigate('/home')).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
-                            }}
-                          >
-                            ↩ Sair da sala
-                          </button>
+                          <>
+                            <hr />
+                            <button className="danger" onClick={() => (close(), void leave())}>
+                              <Icon name="leave-room" />
+                              Sair da sala
+                            </button>
+                          </>
                         )}
                       </>
                     )}
@@ -320,7 +630,7 @@ export function RoomPage() {
             </div>
           </header>
           {room.notice && <NoticeBar room={room} canPost={canPostRO} />}
-          {room.announcement && <div className="announcement">📌 {renderMarkdown(room.announcement)}</div>}
+          {room.announcement && <Announcement text={room.announcement} />}
           <MessageList key={rid} rid={rid} sub={sub} actions={actions} canModerate={canModerate} notice={room.notice ? { ack: room.noticeAck, canPost: canPostRO } : undefined} />
           <TypingIndicator id={rid} />
           {sub ? (
@@ -328,7 +638,7 @@ export function RoomPage() {
               rid={rid}
               disabled={!!disabledReason}
               disabledReason={disabledReason}
-              placeholder={`Mensagem para ${room.t === 'd' ? '@' : '#'}${name}`}
+              placeholder={placeholder}
               editing={editing}
               setEditing={setEditing}
               quoting={quoting}
@@ -341,7 +651,7 @@ export function RoomPage() {
             <div className="join-bar">
               {room.t === 'c' ? (
                 <>
-                  <span>Você está vendo uma prévia de #{name}.</span>
+                  <span>Você está vendo uma prévia de {hashName}</span>
                   <button className="btn primary" onClick={join}>
                     Entrar no canal
                   </button>
@@ -354,15 +664,27 @@ export function RoomPage() {
             </div>
           )}
         </div>
+        {(panel || tmid) && <div className="panel-scrim" aria-hidden="true" onClick={closePanel} />}
         {tmid ? (
-          <ThreadPanel key={tmid} rid={rid} tmid={tmid} room={room} canModerate={canModerate} onClose={() => navigate(roomPath(room))} onUserClick={setUserCard} isMember={!!sub} disabledReason={disabledReason} />
+          <ThreadPanel key={tmid} rid={rid} tmid={tmid} room={room} canModerate={canModerate} onClose={() => navigate(roomPath(room))} onUserClick={openUserCard} isMember={!!sub} disabledReason={disabledReason} />
         ) : panel ? (
-          <RoomPanel id={panel} room={room} sub={sub} roles={roles} onClose={() => setPanel(null)} onChanged={loadRoom} onUserClick={setUserCard} />
+          <RoomPanel
+            key={panel}
+            id={panel}
+            room={room}
+            sub={sub}
+            roles={roles}
+            available={panels.map((p) => p.id)}
+            onPanel={setPanel}
+            onClose={() => setPanel(null)}
+            onChanged={loadRoom}
+            onUserClick={openUserCard}
+          />
         ) : null}
         {discussionFrom && (
           <CreateModal kind="discussion" parent={{ _id: room._id, name: room.name ?? '', fname: name, t: room.t }} pmid={discussionFrom._id} onClose={() => setDiscussionFrom(null)} />
         )}
-        {userCard && <UserCard username={userCard} rid={rid} roomRoles={roles} onClose={() => setUserCard(null)} />}
+        {userCard && <UserCard key={userCard.username} username={userCard.username} anchor={userCard.anchor} rid={rid} roomRoles={roles} onClose={() => setUserCard(null)} />}
       </div>
     </MessageGateContext.Provider>
   );

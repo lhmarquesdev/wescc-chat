@@ -15,7 +15,8 @@ export default defineConfig({
       '/file-upload': target,
       '/emoji-custom': target,
       '/websocket': { target: target.replace('http', 'ws'), ws: true },
-      '/livechat': target,
+      // O widget do visitante abre o websocket dele em /livechat/websocket.
+      '/livechat': { target, ws: true },
       '/hooks': target,
       '/saml': target,
       '/oauth': target,

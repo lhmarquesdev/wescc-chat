@@ -4,6 +4,7 @@ import type { Setting } from '@shared/index';
 import { LDAP_AD_PRESET } from '@shared/ldap';
 import { api, errorMessage } from '../../../lib/api';
 import { useStore } from '../../../lib/store';
+import { Icon } from '../../../components/Icon';
 import { SettingInput } from '../AdminSettings';
 import type { LdapSettings } from './index';
 import { AGENDA_IDS } from './LdapSync';
@@ -91,6 +92,7 @@ export function LdapConnection({ s, ids, onSaved }: { s: LdapSettings; ids: stri
     <>
       {(presetHere.length > 0 || presetAgenda.length > 0) && (
         <div className="callout info">
+          <Icon name="info" />
           <span>
             {presetHere.length > 0 && <>Padrões do Active Directory no rascunho: {labels(presetHere)}. Revise e clique em Salvar. </>}
             {presetAgenda.length > 0 && (

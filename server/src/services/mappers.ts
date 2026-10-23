@@ -57,6 +57,7 @@ export function mapRoom(r: any): Room {
     lastMessage: r.last_message,
     lm: r.lm,
     retention: r.retention,
+    avatarETag: r.avatar_etag || undefined,
     ts: r.created_at,
     _updatedAt: r.updated_at,
   };
@@ -85,6 +86,8 @@ export function mapSubscription(s: any, room: any, user: { id: string; username:
     teamId: room.team_id,
     teamMain: room.team_main,
     notice: room.notice ? true : undefined,
+    // Hora da última mensagem da sala: a ordem de "Recentes" (ler a sala não pode mudar a lista de lugar).
+    lm: room.lm ? new Date(room.lm).toISOString() : undefined,
     notifications: s.notifications,
     _updatedAt: s.updated_at,
   };

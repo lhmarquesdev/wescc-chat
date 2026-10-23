@@ -1,28 +1,53 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import { disablePushHere, enablePushHere, pushEnabledHere, pushSupported, syncPushSubscription } from '../lib/push';
 import { endSession, startSession } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
-import { Avatar, Field, Spinner, Toggle, useAsync } from '../components/ui';
+import { Avatar, Empty, Field, Modal, Segmented, SkeletonTable, Toggle, confirmDialog, useAsync } from '../components/ui';
+import { useMedia } from '../components/overlay';
+import { Icon } from '../components/Icon';
+import { SideFoot, TakeoverBack, TakeoverHead } from '../components/Sidebar';
 import { QrCode } from '../components/QrCode';
+import { DeviceCell, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
 
 export function AccountPage() {
   const { section = 'profile' } = useParams();
+  const navRef = useActiveNavInView(section);
   const canTokens = useStore((s) => s.me?.permissions.includes('create-personal-access-tokens'));
   return (
-    <div className="page with-nav">
-      <nav className="page-nav">
+    <div className="page with-nav takeover account-page">
+      <TakeoverHead title="Minha conta" />
+      <nav className="page-nav" aria-label="Minha conta" ref={navRef}>
+        <TakeoverBack />
         <h2>Minha conta</h2>
-        <NavLink to="/account/profile">👤 Perfil</NavLink>
-        <NavLink to="/account/preferences">🎛 Preferências</NavLink>
-        <NavLink to="/account/security">🔐 Segurança</NavLink>
-        <NavLink to="/account/devices">💻 Dispositivos</NavLink>
-        {canTokens && <NavLink to="/account/tokens">🔑 Tokens de acesso</NavLink>}
+        <NavLink to="/account/profile">
+          <Icon name="account" />
+          Perfil
+        </NavLink>
+        <NavLink to="/account/preferences">
+          <Icon name="preferences" />
+          Preferências
+        </NavLink>
+        <NavLink to="/account/security">
+          <Icon name="security" />
+          Segurança
+        </NavLink>
+        <NavLink to="/account/devices">
+          <Icon name="devices" />
+          Dispositivos
+        </NavLink>
+        {canTokens && (
+          <NavLink to="/account/tokens">
+            <Icon name="tokens" />
+            Tokens de acesso
+          </NavLink>
+        )}
+        <SideFoot />
       </nav>
       <div className="page-body">
         {section === 'profile' && <Profile />}
@@ -42,6 +67,9 @@ function Profile() {
   const allowAvatar = useSetting<boolean>('Accounts_AllowUserAvatarChange');
   const allowDelete = useSetting<boolean>('Accounts_AllowDeleteOwnAccount');
   const [f, setF] = useState({ name: me.name, username: me.username, email: me.email ?? '', bio: me.bio ?? '', statusText: me.statusText ?? '' });
+  const [deleting, setDeleting] = useState(false);
+  const file = useRef<HTMLInputElement>(null);
+  const dirty = f.name !== me.name || f.username !== me.username || f.email !== (me.email ?? '') || f.bio !== (me.bio ?? '') || f.statusText !== (me.statusText ?? '');
   const save = async () => {
     try {
       const r = await api.post('users.updateOwnBasicInfo', { data: f });
@@ -51,75 +79,136 @@ function Profile() {
       fail(e);
     }
   };
-  const upload = async (file: File) => {
+  const upload = async (picked: File) => {
     const fd = new FormData();
-    fd.append('image', file);
-    await api.post('users.setAvatar', fd).then(() => ok('Foto atualizada.')).catch(fail);
+    fd.append('image', picked);
+    await api
+      .post('users.setAvatar', fd)
+      .then(() => ok('Foto atualizada.'))
+      .catch(fail);
   };
   const ldap = me.authSource === 'ldap';
   return (
-    <div className="card form narrow">
-      <h2>Perfil</h2>
-      <div className="avatar-edit">
-        <Avatar username={me.username} size={96} etag={me.avatarETag} />
-        {allowAvatar && (
-          <div>
-            <label className="btn">
-              Trocar foto
-              <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
-            </label>
-            <button className="btn" onClick={() => api.post('users.resetAvatar').catch(fail)}>
-              Remover
+    <>
+      <PageHead title="Perfil" />
+      <div className="account-col">
+        <div className="card profile-card">
+          <div className="avatar-edit">
+            <Avatar username={me.username} size={64} etag={me.avatarETag} />
+            <div className="profile-who">
+              <span className="profile-name">{me.name}</span>
+              <span className="muted">@{me.username}</span>
+              {allowAvatar && (
+                <div className="row-actions">
+                  <input ref={file} type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={(e) => (e.target.files?.[0] && upload(e.target.files[0]), (e.target.value = ''))} />
+                  <button type="button" className="btn small" onClick={() => file.current?.click()}>
+                    <Icon name="image-change" />
+                    Trocar foto
+                  </button>
+                  {/* Só há o que remover quando a pessoa enviou uma foto (as iniciais são o padrão). */}
+                  {me.avatarETag && (
+                    <button type="button" className="btn small ghost" onClick={() => api.post('users.resetAvatar').catch(fail)}>
+                      <Icon name="image-remove" />
+                      Remover
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        {ldap && (
+          <div className="callout info">
+            <Icon name="admin-ldap" />
+            <span>Sua conta é sincronizada com o diretório da empresa (LDAP); alguns campos são mantidos por lá.</span>
+          </div>
+        )}
+        <div className="card">
+          <div className="form">
+            <div className="two-col">
+              <Field label="Nome">
+                <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} disabled={ldap} />
+              </Field>
+              <Field label="Nome de usuário">
+                <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} disabled={!allowUsername || ldap} />
+              </Field>
+            </div>
+            <Field label="E-mail">
+              <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} disabled={!allowEmail || ldap} />
+            </Field>
+            <Field label="Mensagem de status" hint="Aparece ao lado do seu nome, até 120 caracteres.">
+              <input value={f.statusText} maxLength={120} onChange={(e) => setF({ ...f, statusText: e.target.value })} />
+            </Field>
+            <Field label="Sobre">
+              <textarea rows={3} value={f.bio} onChange={(e) => setF({ ...f, bio: e.target.value })} />
+            </Field>
+            <div className="form-actions">
+              <button className="btn primary" onClick={save} disabled={!dirty}>
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+        {allowDelete && (
+          <div className="danger-zone">
+            <div>
+              <h3>Excluir conta</h3>
+              <p className="muted small">Apaga sua conta de vez. As mensagens que você mandou continuam nas conversas.</p>
+            </div>
+            <button className="btn danger" onClick={() => setDeleting(true)}>
+              <Icon name="delete" />
+              Excluir minha conta
             </button>
           </div>
         )}
       </div>
-      {ldap && <div className="muted small">Sua conta é sincronizada com o diretório da empresa (LDAP); alguns campos são mantidos por lá.</div>}
-      <Field label="Nome">
-        <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} disabled={ldap} />
-      </Field>
-      <Field label="Nome de usuário">
-        <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} disabled={!allowUsername || ldap} />
-      </Field>
-      <Field label="E-mail">
-        <input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} disabled={!allowEmail || ldap} />
-      </Field>
-      <Field label="Mensagem de status">
-        <input value={f.statusText} maxLength={120} onChange={(e) => setF({ ...f, statusText: e.target.value })} />
-      </Field>
-      <Field label="Bio">
-        <textarea rows={3} value={f.bio} onChange={(e) => setF({ ...f, bio: e.target.value })} />
-      </Field>
-      <button className="btn primary" onClick={save}>
-        Salvar
-      </button>
-      {allowDelete && (
-        <div className="danger-zone">
-          <h3>Excluir conta</h3>
-          <button
-            className="btn danger"
-            onClick={async () => {
-              const password = prompt('Digite sua senha para confirmar a exclusão da conta:');
-              if (!password) return;
-              try {
-                await api.post('users.deleteOwnAccount', { password });
-                endSession();
-                location.href = '/login';
-              } catch (e) {
-                fail(e);
-              }
-            }}
-          >
+      {deleting && <DeleteAccount onClose={() => setDeleting(false)} />}
+    </>
+  );
+}
+
+// No lugar do prompt(): a senha confirma a exclusão.
+function DeleteAccount({ onClose }: { onClose: () => void }) {
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try {
+      await api.post('users.deleteOwnAccount', { password });
+      endSession();
+      location.href = '/login';
+    } catch (e) {
+      fail(e);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      size="sm"
+      title="Excluir sua conta?"
+      description="Não dá para desfazer. Digite sua senha para confirmar."
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancelar
+          </button>
+          <button className="btn danger solid" disabled={!password || busy} onClick={go}>
             Excluir minha conta
           </button>
-        </div>
-      )}
-    </div>
+        </>
+      }
+    >
+      <Field label="Senha">
+        <input type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" onKeyDown={(e) => e.key === 'Enter' && password && go()} />
+      </Field>
+    </Modal>
   );
 }
 
 function Preferences() {
   const me = useStore((s) => s.me)!;
+  const coarse = useMedia('(pointer: coarse)');
   const [p, setP] = useState<Record<string, any>>({
     theme: 'auto',
     desktopNotifications: 'mentions',
@@ -140,37 +229,85 @@ function Preferences() {
     }
   };
   return (
-    <div className="card form narrow">
-      <h2>Preferências</h2>
-      <Field label="Tema">
-        <select value={p.theme} onChange={(e) => save({ theme: e.target.value })}>
-          <option value="auto">Automático (sistema)</option>
-          <option value="light">Claro</option>
-          <option value="dark">Escuro</option>
-        </select>
-      </Field>
-      <Field label="Notificações na área de trabalho (padrão)">
-        <select value={p.desktopNotifications} onChange={(e) => save({ desktopNotifications: e.target.value })}>
-          <option value="all">Todas as mensagens</option>
-          <option value="mentions">Só menções e DMs</option>
-          <option value="nothing">Nada</option>
-        </select>
-      </Field>
-      <Field label="E-mail quando offline">
-        <select value={p.emailNotificationMode} onChange={(e) => save({ emailNotificationMode: e.target.value })}>
-          <option value="mentions">Menções e DMs</option>
-          <option value="nothing">Nunca</option>
-        </select>
-      </Field>
-      <Toggle checked={p.notificationSound !== false} onChange={(v) => save({ notificationSound: v })} label="Som de notificação" />
-      <Toggle checked={p.sendOnEnter !== false} onChange={(v) => save({ sendOnEnter: v })} label="Enter envia (Shift+Enter quebra linha)" />
-      {'Notification' in window && Notification.permission !== 'granted' && (
-        <button className="btn" onClick={() => Notification.requestPermission().then((r) => r === 'granted' && syncPushSubscription())}>
-          Permitir notificações do navegador
-        </button>
-      )}
-      <PushToggle />
-    </div>
+    <>
+      <PageHead title="Preferências" />
+      <div className="account-col">
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <h2>Aparência</h2>
+              <p className="card-desc">Vale para este e para os outros dispositivos em que você entrar.</p>
+            </div>
+          </div>
+          <div className="form">
+            {/* Três opções curtas: controle segmentado, como no menu do usuário (o rótulo não é <label>: são botões). */}
+            <div className="field">
+              <span className="field-label" id="account-theme">
+                Tema
+              </span>
+              <Segmented
+                label="Tema"
+                value={(['auto', 'light', 'dark'].includes(p.theme) ? p.theme : 'auto') as 'auto' | 'light' | 'dark'}
+                onChange={(v) => save({ theme: v })}
+                items={[
+                  { id: 'light', label: 'Claro', icon: 'theme-light' },
+                  { id: 'dark', label: 'Escuro', icon: 'theme-dark' },
+                  { id: 'auto', label: 'Automático', icon: 'theme-auto' },
+                ]}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <h2>Notificações</h2>
+              <p className="card-desc">O padrão de cada sala; dá para mudar sala a sala nas preferências de notificação dela.</p>
+            </div>
+          </div>
+          <div className="form">
+            {/* Vale para o computador, o celular e o app instalado: o rótulo não fala em "área de trabalho". */}
+            <Field label="Avisar sobre">
+              <select value={p.desktopNotifications} onChange={(e) => save({ desktopNotifications: e.target.value })}>
+                <option value="all">Todas as mensagens</option>
+                <option value="mentions">Só menções e DMs</option>
+                <option value="nothing">Nada</option>
+              </select>
+            </Field>
+            <Field label="E-mail quando offline">
+              <select value={p.emailNotificationMode} onChange={(e) => save({ emailNotificationMode: e.target.value })}>
+                <option value="mentions">Menções e DMs</option>
+                <option value="nothing">Nunca</option>
+              </select>
+            </Field>
+            <div className="toggle-list">
+              <Toggle checked={p.notificationSound !== false} onChange={(v) => save({ notificationSound: v })} label="Som de notificação" />
+              <PushToggle />
+            </div>
+            {'Notification' in window && Notification.permission !== 'granted' && (
+              <div className="callout info">
+                <Icon name="notify-prompt" />
+                <span>O navegador ainda não deixou este site mostrar notificações.</span>
+                <button className="btn small callout-action" onClick={() => Notification.requestPermission().then((r) => r === 'granted' && syncPushSubscription())}>
+                  Permitir notificações do navegador
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        {/* No teclado de toque não há Shift: lá o Enter sempre quebra a linha e o botão envia. */}
+        {!coarse && (
+          <div className="card">
+            <div className="card-head">
+              <h2>Mensagens</h2>
+            </div>
+            <div className="toggle-list">
+              <Toggle checked={p.sendOnEnter !== false} onChange={(v) => save({ sendOnEnter: v })} label="Enter envia" description="Shift+Enter quebra a linha." />
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -192,7 +329,7 @@ function PushToggle() {
       setOn(false);
     }
   };
-  return <Toggle checked={on} onChange={(v) => void change(v)} label="Notificações push neste dispositivo (mesmo com o chat fechado)" />;
+  return <Toggle checked={on} onChange={(v) => void change(v)} label="Notificações push neste dispositivo" description="Chegam mesmo com o chat fechado." />;
 }
 
 export function applyTheme(theme: string) {
@@ -208,6 +345,7 @@ function Security() {
   const [cur, setCur] = useState('');
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
+  const mismatch = !!p2 && p1 !== p2;
   const changePw = async () => {
     if (p1 !== p2) return fail(new Error('As senhas não conferem.'));
     try {
@@ -222,24 +360,38 @@ function Security() {
   };
   return (
     <>
-      {allowPassword && me.authSource !== 'ldap' && (
-        <div className="card form narrow">
-          <h2>Senha</h2>
-          <Field label="Senha atual">
-            <input type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" />
-          </Field>
-          <Field label="Nova senha">
-            <input type="password" value={p1} onChange={(e) => setP1(e.target.value)} autoComplete="new-password" />
-          </Field>
-          <Field label="Confirmar nova senha">
-            <input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" />
-          </Field>
-          <button className="btn primary" onClick={changePw} disabled={!p1}>
-            Alterar senha
-          </button>
-        </div>
-      )}
-      {twoFA && <TwoFactorCard />}
+      <PageHead title="Segurança" />
+      <div className="account-col">
+        {allowPassword && me.authSource !== 'ldap' && (
+          <div className="card">
+            <div className="card-head">
+              <div>
+                <h2>Senha</h2>
+                <p className="card-desc">Depois de trocar, as outras sessões continuam abertas; encerre-as em Dispositivos se precisar.</p>
+              </div>
+            </div>
+            <div className="form">
+              <Field label="Senha atual">
+                <input type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" />
+              </Field>
+              <div className="two-col">
+                <Field label="Nova senha">
+                  <input type="password" value={p1} onChange={(e) => setP1(e.target.value)} autoComplete="new-password" />
+                </Field>
+                <Field label="Confirmar nova senha" error={mismatch ? 'As senhas não conferem.' : undefined}>
+                  <input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" />
+                </Field>
+              </div>
+              <div className="form-actions">
+                <button className="btn primary" onClick={changePw} disabled={!p1 || mismatch}>
+                  Alterar senha
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {twoFA && <TwoFactorCard />}
+      </div>
     </>
   );
 }
@@ -256,63 +408,106 @@ export function TwoFactorCard() {
     if (me.require2faSetup) void startSession();
   };
   return (
-    <div className="card form narrow">
-      <h2>Autenticação em dois fatores</h2>
+    <div className="card form two-factor">
+      <div className="card-head">
+        <div>
+          <h2>Autenticação em dois fatores</h2>
+          <p className="card-desc">Um código do celular, além da senha, para entrar.</p>
+        </div>
+        {me.twoFactorEnabled && !codes && <span className="pill ok dot">Ativado</span>}
+      </div>
       {codes ? (
         <>
-          <p>2FA ativado. Guarde estes códigos de backup em local seguro; cada um funciona uma vez:</p>
+          <div className="callout ok">
+            <Icon name="success" />
+            <span>2FA ativado. Guarde estes códigos de backup em local seguro; cada um funciona uma vez:</span>
+          </div>
           <pre className="codes">{codes.join('\n')}</pre>
-          <button className="btn" onClick={done}>
-            Pronto
-          </button>
+          <div className="form-actions">
+            <button className="btn primary" onClick={done}>
+              Pronto
+            </button>
+          </div>
         </>
       ) : me.twoFactorEnabled ? (
         <>
-          <p>✅ Ativado com aplicativo autenticador.</p>
-          <Field label="Código atual para desativar">
-            <input value={code} onChange={(e) => setCode(e.target.value)} />
+          <div className="callout ok">
+            <Icon name="success" />
+            <span>Ativado com aplicativo autenticador.</span>
+          </div>
+          {/* Aceita também um código de backup (8 letras e números): sem o teclado só numérico. */}
+          <Field label="Código atual para desativar" hint="O código do aplicativo ou um dos códigos de backup.">
+            <input
+              className="otp-input"
+              autoComplete="one-time-code"
+              autoCapitalize="off"
+              spellCheck={false}
+              maxLength={8}
+              placeholder="000000"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\s/g, ''))}
+            />
           </Field>
-          <button
-            className="btn danger"
-            onClick={() =>
-              api
-                .post('users.2fa.disableTotp', { code })
-                .then(() => (useStore.getState().setMe({ ...me, twoFactorEnabled: false }), setCode(''), ok('2FA desativado.')))
-                .catch(fail)
-            }
-          >
-            Desativar 2FA
-          </button>
+          <div className="form-actions">
+            <button
+              className="btn danger"
+              disabled={!code}
+              onClick={() =>
+                api
+                  .post('users.2fa.disableTotp', { code })
+                  .then(() => (useStore.getState().setMe({ ...me, twoFactorEnabled: false }), setCode(''), ok('2FA desativado.')))
+                  .catch(fail)
+              }
+            >
+              Desativar 2FA
+            </button>
+          </div>
         </>
       ) : setup ? (
         <>
-          <p>Escaneie o QR code no seu aplicativo autenticador (Google Authenticator, Microsoft Authenticator, 1Password…):</p>
-          <QrCode text={setup.url} size={200} />
-          <p className="muted small">
-            Ou digite a chave manualmente: <code>{setup.secret}</code>
-          </p>
+          <ol className="steps">
+            <li>Escaneie o QR code no seu aplicativo autenticador (Google Authenticator, Microsoft Authenticator, 1Password…).</li>
+            <li>Digite o código de 6 dígitos que ele mostrar.</li>
+          </ol>
+          <div className="qr-box">
+            <QrCode text={setup.url} size={200} />
+            <p className="muted small">
+              Ou digite a chave manualmente: <code>{setup.secret}</code>
+            </p>
+          </div>
           <Field label="Código gerado pelo aplicativo">
-            <input autoFocus inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} />
+            <input
+              autoFocus
+              className="otp-input"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="000000"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+            />
           </Field>
-          <button
-            className="btn primary"
-            onClick={() =>
-              api
-                .post('users.2fa.verifyTotp', { code })
-                .then((r) => (setCodes(r.codes), setSetup(null), setCode(''), useStore.getState().setMe({ ...me, twoFactorEnabled: true })))
-                .catch(fail)
-            }
-          >
-            Verificar e ativar
-          </button>
+          <div className="form-actions">
+            <button
+              className="btn primary"
+              onClick={() =>
+                api
+                  .post('users.2fa.verifyTotp', { code })
+                  .then((r) => (setCodes(r.codes), setSetup(null), setCode(''), useStore.getState().setMe({ ...me, twoFactorEnabled: true })))
+                  .catch(fail)
+              }
+            >
+              Verificar e ativar
+            </button>
+          </div>
         </>
       ) : (
-        <>
-          <p>Proteja sua conta exigindo um código do celular no login.</p>
+        <div className="form-actions">
           <button className="btn primary" onClick={() => api.post('users.2fa.enableTotp').then(setSetup).catch(fail)}>
+            <Icon name="security" />
             Ativar 2FA
           </button>
-        </>
+        </div>
       )}
     </div>
   );
@@ -321,51 +516,72 @@ export function TwoFactorCard() {
 function Devices() {
   const { data, loading, reload } = useAsync(() => api.get('sessions.list', { count: 100 }), []);
   const allowAll = useSetting<boolean>('Device_Management_Allow_Logout_All');
+  const others = (data?.sessions ?? []).filter((s: any) => !s.current).length;
+  const logoutOthers = async () => {
+    const yes = await confirmDialog({ title: 'Encerrar as outras sessões?', body: 'Os outros dispositivos saem da conta e precisam entrar de novo.', confirmLabel: 'Encerrar sessões', danger: true });
+    if (!yes) return;
+    api
+      .post('sessions.logout.others')
+      .then((r) => (ok(`${r.removed} sessões encerradas.`), reload()))
+      .catch(fail);
+  };
   return (
-    <div className="card">
-      <h2>Dispositivos conectados</h2>
-      <p className="muted">Cada login cria uma sessão. Encerre as que você não reconhece.</p>
-      {allowAll && (
-        <button className="btn" onClick={() => api.post('sessions.logout.others').then((r) => (ok(`${r.removed} sessões encerradas.`), reload())).catch(fail)}>
-          Encerrar todas as outras sessões
-        </button>
+    <>
+      <PageHead title="Dispositivos" />
+      <p className="page-lead">Cada login cria uma sessão. Encerre as que você não reconhece.</p>
+      {/* Abaixo do texto, não no cabeçalho: a barra de 56px fica igual à das outras páginas da conta. */}
+      {allowAll && others > 0 && (
+        <div className="row-actions page-lead-actions">
+          <button className="btn" onClick={logoutOthers}>
+            <Icon name="logout" />
+            Encerrar todas as outras sessões
+          </button>
+        </div>
       )}
-      {loading ? (
-        <Spinner />
+      {loading && !data ? (
+        <SkeletonTable rows={4} cols={4} />
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Dispositivo</th>
-              <th>IP</th>
-              <th>Último uso</th>
-              <th>Login</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {data?.sessions.map((s: any) => (
-              <tr key={s._id}>
-                <td>
-                  {s.device.os === 'Android' || s.device.os === 'iOS' ? '📱' : '💻'} {s.device.name}
-                  {s.current && <span className="pill accent">esta sessão</span>}
-                </td>
-                <td className="muted">{s.device.ip}</td>
-                <td>{formatDateTime(s.lastActiveAt)}</td>
-                <td className="muted">{formatDateTime(s.createdAt)}</td>
-                <td>
-                  {!s.current && (
-                    <button className="btn small danger" onClick={() => api.post('sessions.logout.me', { sessionId: s._id }).then(reload).catch(fail)}>
-                      Encerrar
-                    </button>
-                  )}
-                </td>
+        <TableWrap>
+          <table className="table stack kv">
+            <thead>
+              <tr>
+                <th>Dispositivo</th>
+                <th>Último uso</th>
+                <th className="col-lg">Login</th>
+                <th className="actions-col">
+                  <span className="visually-hidden">Ações</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data?.sessions.map((s: any) => (
+                <tr key={s._id}>
+                  <td>
+                    <DeviceCell device={s.device} tag={s.current && <span className="pill accent tag">Esta sessão</span>} />
+                  </td>
+                  <td className="nowrap" data-label="Último uso">
+                    {s.current ? 'Agora' : lastSeen(s.lastActiveAt)}
+                  </td>
+                  <td className="muted nowrap col-lg" data-label="Login">
+                    {formatDateTime(s.createdAt)}
+                  </td>
+                  <td className="actions-col">
+                    {!s.current && (
+                      <div className="row-actions">
+                        <button className="btn small ghost danger" onClick={() => api.post('sessions.logout.me', { sessionId: s._id }).then(reload).catch(fail)}>
+                          <Icon name="logout" />
+                          Encerrar
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
       )}
-    </div>
+    </>
   );
 }
 
@@ -375,53 +591,150 @@ function Tokens() {
   const [name, setName] = useState('');
   const [bypass, setBypass] = useState(false);
   const [token, setToken] = useState('');
+  const [creating, setCreating] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const tokens: any[] = data?.tokens ?? [];
+  const generate = () =>
+    api
+      .post('users.generatePersonalAccessToken', { tokenName: name, bypassTwoFactor: bypass })
+      .then((r) => (setToken(r.token), setName(''), setCreating(false), reload()))
+      .catch(fail);
+  const revoke = async (t: any) => {
+    const yes = await confirmDialog({ title: `Revogar o token "${t.name}"?`, body: 'Scripts e integrações que usam este token param de funcionar.', confirmLabel: 'Revogar', danger: true });
+    if (!yes) return;
+    api.post('users.removePersonalAccessToken', { tokenName: t.name }).then(reload).catch(fail);
+  };
+  const open = () => (setCreating(true), setTimeout(() => input.current?.focus(), 0));
   return (
-    <div className="card form">
-      <h2>Tokens de acesso pessoal</h2>
-      <p className="muted">
-        Use em integrações com os cabeçalhos <code>X-User-Id: {me._id}</code> e <code>X-Auth-Token: &lt;token&gt;</code>.
-      </p>
-      <div className="row-actions">
-        <input placeholder="Nome do token" value={name} onChange={(e) => setName(e.target.value)} />
-        <Toggle checked={bypass} onChange={setBypass} label="Ignorar 2FA" />
-        <button className="btn primary" disabled={!name} onClick={() => api.post('users.generatePersonalAccessToken', { tokenName: name, bypassTwoFactor: bypass }).then((r) => (setToken(r.token), setName(''), reload())).catch(fail)}>
-          Gerar
+    <>
+      <PageHead title="Tokens de acesso" count={tokens.length || undefined}>
+        {tokens.length > 0 && !creating && (
+          <button className="btn primary" onClick={open}>
+            <Icon name="add" />
+            Gerar token
+          </button>
+        )}
+      </PageHead>
+      <p className="page-lead">Use em integrações: envie estes dois cabeçalhos em cada requisição.</p>
+      {/* Bloco de código com cópia: no celular o texto mono quebrava no meio ("X-User-" e "Id:"). */}
+      <div className="token-headers">
+        <pre>
+          <code>{`X-User-Id: ${me._id}\nX-Auth-Token: <token>`}</code>
+        </pre>
+        <button
+          type="button"
+          className="btn small"
+          onClick={() =>
+            navigator.clipboard
+              .writeText(`X-User-Id: ${me._id}\nX-Auth-Token: ${token || '<token>'}`)
+              .then(() => ok('Cabeçalhos copiados.'))
+              .catch(fail)
+          }
+        >
+          <Icon name="copy" />
+          Copiar
         </button>
       </div>
       {token && (
-        <div className="copy-box">
-          <span>Copie agora, ele não será mostrado de novo:</span>
-          <input readOnly value={token} onFocus={(e) => e.target.select()} />
+        <div className="callout ok token-new">
+          <Icon name="success" />
+          <span>Token gerado. Copie agora: ele não será mostrado de novo.</span>
+          <div className="copy-box">
+            <input readOnly value={token} onFocus={(e) => e.target.select()} aria-label="Token gerado" />
+            <button
+              type="button"
+              className="btn small"
+              onClick={() =>
+                navigator.clipboard
+                  .writeText(token)
+                  .then(() => ok('Token copiado.'))
+                  .catch(fail)
+              }
+            >
+              <Icon name="copy" />
+              Copiar
+            </button>
+          </div>
         </div>
       )}
-      {loading ? (
-        <Spinner />
-      ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Nome</th>
-              <th>Criado</th>
-              <th>Último uso</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {data?.tokens.map((t: any) => (
-              <tr key={t._id}>
-                <td>{t.name}</td>
-                <td>{formatDateTime(t.createdAt)}</td>
-                <td>{formatDateTime(t.lastUsedAt)}</td>
-                <td>
-                  <button className="btn small danger" onClick={() => api.post('users.removePersonalAccessToken', { tokenName: t.name }).then(reload).catch(fail)}>
-                    Revogar
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {creating && (
+        <div className="card token-form">
+          <div className="form">
+            <Field label="Nome do token" hint="Para reconhecer onde ele é usado, como “Relatório diário”.">
+              <input ref={input} placeholder="Nome do token" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && name && generate()} />
+            </Field>
+            <Toggle checked={bypass} onChange={setBypass} label="Ignorar 2FA" description="O token funciona sem pedir o código do autenticador." />
+            <div className="form-actions">
+              <button className="btn" onClick={() => (setCreating(false), setName(''))}>
+                Cancelar
+              </button>
+              <button className="btn primary" disabled={!name} onClick={generate}>
+                Gerar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
-    </div>
+      {loading && !data ? (
+        <SkeletonTable rows={3} cols={3} />
+      ) : !tokens.length ? (
+        !creating && (
+          <Empty
+            icon="tokens"
+            title="Nenhum token de acesso"
+            action={
+              <button className="btn primary" onClick={open}>
+                Gerar token
+              </button>
+            }
+          >
+            Tokens permitem usar a API em scripts e integrações.
+          </Empty>
+        )
+      ) : (
+        <TableWrap>
+          <table className="table stack kv">
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Criado</th>
+                <th>Último uso</th>
+                <th className="actions-col">
+                  <span className="visually-hidden">Ações</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {tokens.map((t: any) => (
+                <tr key={t._id}>
+                  <td>
+                    <div className="cell-entity">
+                      <span className="cell-icon">
+                        <Icon name="tokens" />
+                      </span>
+                      <div>
+                        <span className="cell-name">{t.name}</span>
+                        {t.bypassTwoFactor && <span className="cell-sub">Ignora 2FA</span>}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="nowrap" data-label="Criado">
+                    {formatDateTime(t.createdAt)}
+                  </td>
+                  <td data-label="Último uso">{t.lastUsedAt ? lastSeen(t.lastUsedAt) : <span className="muted">Nunca usado</span>}</td>
+                  <td className="actions-col">
+                    <div className="row-actions">
+                      <button className="btn small ghost danger" onClick={() => revoke(t)}>
+                        Revogar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
+      )}
+    </>
   );
 }

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 're
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../../lib/api';
 import { formatBytes, formatDateTime } from '../../../lib/format';
-import { Empty, Modal, Pager, Spinner, useAsync } from '../../../components/ui';
+import { Icon } from '../../../components/Icon';
+import { Empty, Modal, Pager, SkeletonTable, useAsync } from '../../../components/ui';
 import { fail, isBusy, isFinal, isImporting, num, ok, operationPath, plural, StatusPill, useImportEvents, Warnings, warningCount } from './common';
 import type { ImportErrorRow, ImportOperation } from './types';
 
@@ -60,7 +61,15 @@ export function ImportHistory({ canRun }: { canRun: boolean }) {
   };
   useImportEvents((p) => {
     if (current && p._id === current._id) {
-      setCurrent({ ...current, status: p.status, valid: p.valid, count: p.count, error: p.error ?? current.error, messagesstatus: p.messagesstatus !== undefined ? p.messagesstatus : current.messagesstatus, _updatedAt: new Date().toISOString() });
+      setCurrent({
+        ...current,
+        status: p.status,
+        valid: p.valid,
+        count: p.count,
+        error: p.error ?? current.error,
+        messagesstatus: p.messagesstatus !== undefined ? p.messagesstatus : current.messagesstatus,
+        _updatedAt: new Date().toISOString(),
+      });
       if (isFinal(p.status) && !isFinal(current.status)) reloadSoon();
     } else reloadSoon();
   });
@@ -89,22 +98,37 @@ export function ImportHistory({ canRun }: { canRun: boolean }) {
 
   return (
     <>
-      <div className="page-title-row">
+      <div className="page-title-row page-head">
         <h1>Importação</h1>
         {canRun && (
-          <div className="row-actions wrap">
+          <div className="page-actions">
             {pending.files > 0 && (
               <button className="btn" disabled={starting !== null || currentBusy} title={currentBusy ? 'Espere a importação atual terminar.' : undefined} onClick={() => void startPending('files')}>
-                {starting === 'files' ? 'Iniciando…' : `⬇ Baixar arquivos pendentes (${num(pending.files)})`}
+                {starting === 'files' ? (
+                  'Iniciando…'
+                ) : (
+                  <>
+                    <Icon name="download" />
+                    {`Baixar arquivos pendentes (${num(pending.files)})`}
+                  </>
+                )}
               </button>
             )}
             {pending.avatars > 0 && (
               <button className="btn" disabled={starting !== null || currentBusy} title={currentBusy ? 'Espere a importação atual terminar.' : undefined} onClick={() => void startPending('avatars')}>
-                {starting === 'avatars' ? 'Iniciando…' : `⬇ Baixar fotos pendentes (${num(pending.avatars)})`}
+                {starting === 'avatars' ? (
+                  'Iniciando…'
+                ) : (
+                  <>
+                    <Icon name="download" />
+                    {`Baixar fotos pendentes (${num(pending.avatars)})`}
+                  </>
+                )}
               </button>
             )}
             <button className="btn primary" onClick={() => navigate('/admin/import/new')}>
-              ＋ Importar arquivo
+              <Icon name="add" />
+              Importar arquivo
             </button>
           </div>
         )}
@@ -113,18 +137,21 @@ export function ImportHistory({ canRun }: { canRun: boolean }) {
         <p className="muted small imp-lead">Os arquivos das mensagens e as fotos de perfil de importações como a do Slack ficam na origem até serem baixados por estes botões.</p>
       )}
       {history.loading && !history.data ? (
-        <Spinner />
+        <SkeletonTable rows={5} cols={5} />
       ) : history.error ? (
         <div className="form-error">Não foi possível carregar o histórico: {history.error}</div>
       ) : !rows.length ? (
-        <Empty>{canRun ? 'Nenhuma importação ainda. Use "Importar arquivo" para trazer dados do Slack, de planilhas CSV ou contatos do omnichannel.' : 'Nenhuma importação ainda.'}</Empty>
+        // Sem botão aqui: o "Importar arquivo" do cabeçalho é o único (o E2E o procura pelo nome).
+        <Empty icon="admin-import" title="Nenhuma importação ainda">
+          {canRun ? 'Use "Importar arquivo" para trazer dados do Slack, de planilhas CSV ou contatos do atendimento.' : 'As importações feitas aparecem aqui, com a situação e as contagens.'}
+        </Empty>
       ) : (
         <div className="imp-table-wrap">
           <table className="table imp-history">
             <thead>
               <tr>
                 <th>Tipo</th>
-                <th>Atualizado em</th>
+                <th className="imp-when">Atualizado em</th>
                 <th>Situação</th>
                 <th className="imp-opt">Arquivo</th>
                 <th className="imp-opt imp-mid">Itens</th>
@@ -138,13 +165,7 @@ export function ImportHistory({ canRun }: { canRun: boolean }) {
             </thead>
             <tbody>
               {rows.map((op) => (
-                <HistoryRow
-                  key={op._id}
-                  op={op}
-                  isCurrent={!!showCurrent && op._id === current?._id}
-                  onNavigate={(p) => navigate(p)}
-                  onDetails={() => setDetails(op)}
-                />
+                <HistoryRow key={op._id} op={op} isCurrent={!!showCurrent && op._id === current?._id} onNavigate={(p) => navigate(p)} onDetails={() => setDetails(op)} />
               ))}
             </tbody>
           </table>
@@ -167,6 +188,8 @@ function HistoryRow({ op, isCurrent, onNavigate, onDetails }: { op: ImportOperat
     }
   };
   const c = op.count;
+  // Parou antes do fim e outra importação tomou o lugar: não fica mais "Pronta para escolher" para sempre.
+  const superseded = !isCurrent && !op.valid && !isFinal(op.status);
   return (
     <tr
       className={`${open ? 'clickable' : ''} ${isCurrent ? 'imp-current' : ''}`}
@@ -176,14 +199,27 @@ function HistoryRow({ op, isCurrent, onNavigate, onDetails }: { op: ImportOperat
       role={path ? 'link' : open ? 'button' : undefined}
       title={path ? (isImporting(op.status) ? 'Ver o progresso' : 'Continuar esta importação') : open ? 'Ver erros e avisos' : undefined}
     >
-      <td>
+      <td className="imp-type">
         <strong>{op.type}</strong>
         {isCurrent && <span className="pill accent imp-tag">atual</span>}
+        {/* Em largura estreita a coluna da data sai e ela vem aqui, sob o tipo: a situação continua à vista. */}
+        <div className="small muted imp-when-sub">{formatDateTime(op._updatedAt)}</div>
       </td>
-      <td className="nowrap">{formatDateTime(op._updatedAt)}</td>
+      <td className="nowrap imp-when">{formatDateTime(op._updatedAt)}</td>
       <td>
-        <StatusPill status={op.status} />
-        {path && <div className="imp-go small">{isImporting(op.status) ? 'Ver progresso ›' : 'Continuar ›'}</div>}
+        {superseded ? (
+          <span className="pill imp-status" title="Outra importação começou depois desta: ela não pode mais continuar.">
+            Substituída
+          </span>
+        ) : (
+          <StatusPill status={op.status} />
+        )}
+        {path && (
+          <div className="imp-go small">
+            {isImporting(op.status) ? 'Ver progresso' : 'Continuar'}
+            <Icon name="next" size={14} />
+          </div>
+        )}
       </td>
       <td className="imp-opt ellipsis-cell" title={op.file ? `${op.file}${op.fileSize ? ` (${formatBytes(op.fileSize)})` : ''}` : undefined}>
         {op.file ?? <span className="muted">—</span>}
@@ -197,9 +233,8 @@ function HistoryRow({ op, isCurrent, onNavigate, onDetails }: { op: ImportOperat
       <td className="imp-opt num nowrap">
         <span className={c.error ? 'neg' : ''}>{num(c.error)}</span>
         {op.warnings.length > 0 && (
-          <span className="imp-warn-mark" title={plural(warningCount(op.warnings), 'aviso', 'avisos')}>
-            {' '}
-            ⚠
+          <span className="imp-warn-mark" title={plural(warningCount(op.warnings), 'aviso', 'avisos')} aria-label={plural(warningCount(op.warnings), 'aviso', 'avisos')}>
+            <Icon name="warning" size={14} />
           </span>
         )}
       </td>
@@ -231,7 +266,10 @@ function OperationDetails({ op, canRun, onClose }: { op: ImportOperation; canRun
   // sempre que a importação chegou a gravar algo.
   const wantErrors = canRun && !pendingKind && (c.error > 0 || c.completed > 0);
   const { data, loading, error } = useAsync(
-    () => (wantErrors ? api.get<{ errors: ImportErrorRow[]; total: number }>('import.errors', { operationId: op._id, type: type || undefined, offset, count: 25 }) : Promise.resolve({ errors: [], total: 0 })),
+    () =>
+      wantErrors
+        ? api.get<{ errors: ImportErrorRow[]; total: number }>('import.errors', { operationId: op._id, type: type || undefined, offset, count: 25 })
+        : Promise.resolve({ errors: [], total: 0 }),
     [type, offset],
   );
   const showErrors = wantErrors && (hasErrors || !!type || !!data?.total);
@@ -263,9 +301,7 @@ function OperationDetails({ op, canRun, onClose }: { op: ImportOperation; canRun
       </p>
       {op.error && <div className="form-error imp-block">{op.error}</div>}
       <Warnings list={op.warnings} open={!showErrors} />
-      {hasErrors && !canRun && (
-        <p className="muted small">{plural(c.error, 'registro com erro', 'registros com erro')}. Os detalhes de cada um aparecem só para quem pode importar dados.</p>
-      )}
+      {hasErrors && !canRun && <p className="muted small">{plural(c.error, 'registro com erro', 'registros com erro')}. Os detalhes de cada um aparecem só para quem pode importar dados.</p>}
       {pendingKind && c.error > 0 && (
         <p className="muted">{plural(c.error, 'download falhou', 'downloads falharam')}. Eles continuam pendentes e são tentados de novo na próxima vez (até 5 tentativas por item).</p>
       )}
@@ -282,15 +318,11 @@ function OperationDetails({ op, canRun, onClose }: { op: ImportOperation; canRun
             </select>
           </div>
           {loading && !data ? (
-            <Spinner />
+            <SkeletonTable rows={4} cols={3} />
           ) : error ? (
             <div className="form-error">{error}</div>
           ) : !data?.errors.length ? (
-            <Empty>
-              {type
-                ? 'Nenhum erro ou aviso deste tipo.'
-                : 'Os detalhes dos erros desta importação não estão mais disponíveis: eles são apagados quando outra importação começa.'}
-            </Empty>
+            <Empty>{type ? 'Nenhum erro ou aviso deste tipo.' : 'Os detalhes dos erros desta importação não estão mais disponíveis: eles são apagados quando outra importação começa.'}</Empty>
           ) : (
             <ul className="plain-list imp-errors">
               {data.errors.map((r) => (

@@ -3,13 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import type { Setting } from '@shared/index';
 import type { LdapStatus } from '@shared/ldap';
 import { api, errorMessage } from '../../../lib/api';
-import { usePermission, useStore } from '../../../lib/store';
-import { Empty, Spinner, Tabs, useAsync } from '../../../components/ui';
+import { usePermission, useSetting, useStore } from '../../../lib/store';
+import { Icon } from '../../../components/Icon';
+import { Empty, SkeletonTable, Tabs, useAsync } from '../../../components/ui';
 import { connectionIdsOf, LdapConnection } from './LdapConnection';
 import { LdapMapping } from './LdapMapping';
 import { AGENDA_IDS, LdapSync } from './LdapSync';
 import { LdapTest } from './LdapTest';
-import './ldap.css';
 
 type Tab = 'conexao' | 'mapeamento' | 'sincronizacao' | 'testar';
 const TABS: Tab[] = ['conexao', 'mapeamento', 'sincronizacao', 'testar'];
@@ -121,6 +121,7 @@ export function AdminLdap() {
   const [mappingDirty, setMappingDirty] = useState(false);
   const { s, loading, error, anyDirty, draft } = useLdapSettings(canEdit);
   const status = useAsync(() => api.get<LdapStatus>('ldap.status'), []);
+  const siteName = useSetting<string>('Site_Name') || 'Wescc Chat';
 
   useEffect(() => {
     setVisited((v) => (v.includes(tab) ? v : [...v, tab]));
@@ -153,53 +154,61 @@ export function AdminLdap() {
   );
 
   return (
-    <div className="ldap-page">
-      <div className="page-title-row">
+    <>
+      {/* O título fica fora do .ldap-page: filho direto do .page-body, vira a barra presa no alto como nas outras páginas. */}
+      <div className="page-title-row page-head">
         <h1>
           LDAP / Active Directory
-          {(status.data || s.list.length > 0) && <span className={`pill ldap-state ${enabled ? 'on' : ''}`}>{enabled ? '● Ativo' : '○ Desativado'}</span>}
+          {(status.data || s.list.length > 0) && <span className={`pill dot ldap-state ${enabled ? 'on ok' : ''}`}>{enabled ? 'Ativo' : 'Desativado'}</span>}
         </h1>
       </div>
-      <p className="muted ldap-lead">Quem entra no Active Directory vira usuário do Wescc Chat automaticamente, com os papéis, canais e times definidos pelos grupos e OUs da rede.</p>
-      <Tabs
-        value={tab}
-        onChange={(t) => setParams({ tab: t })}
-        items={[
-          { id: 'conexao', label: label('conexao', 'Conexão') },
-          { id: 'mapeamento', label: label('mapeamento', 'Mapeamento') },
-          { id: 'sincronizacao', label: label('sincronizacao', 'Sincronização') },
-          { id: 'testar', label: label('testar', 'Testar usuário') },
-        ]}
-      />
-      {!canEdit && <div className="callout info">Você pode ver estas configurações, mas não alterá-las. Salvar, sincronizar e testar exigem a permissão para alterar configurações privilegiadas.</div>}
-      {loading ? (
-        <Spinner />
-      ) : error ? (
-        <div className="form-error">Não foi possível carregar as configurações do LDAP: {error}</div>
-      ) : (
-        <>
-          {visited.includes('conexao') && (
-            <div hidden={tab !== 'conexao'}>
-              <LdapConnection s={s} ids={connectionIds} onSaved={reloadStatus} />
-            </div>
-          )}
-          {visited.includes('mapeamento') && (
-            <div hidden={tab !== 'mapeamento'}>
-              <LdapMapping s={s} onDirtyChange={setMappingDirty} />
-            </div>
-          )}
-          {visited.includes('sincronizacao') && (
-            <div hidden={tab !== 'sincronizacao'}>
-              <LdapSync s={s} status={status.data} statusError={status.error} reloadStatus={reloadStatus} active={tab === 'sincronizacao'} />
-            </div>
-          )}
-          {visited.includes('testar') && (
-            <div hidden={tab !== 'testar'}>
-              <LdapTest canEdit={canEdit} />
-            </div>
-          )}
-        </>
-      )}
-    </div>
+      <div className="ldap-page">
+        <p className="muted ldap-lead">Quem entra no Active Directory vira usuário do {siteName} automaticamente, com os papéis, canais e times definidos pelos grupos e OUs da rede.</p>
+        <Tabs
+          value={tab}
+          onChange={(t) => setParams({ tab: t })}
+          items={[
+            { id: 'conexao', label: label('conexao', 'Conexão') },
+            { id: 'mapeamento', label: label('mapeamento', 'Mapeamento') },
+            { id: 'sincronizacao', label: label('sincronizacao', 'Sincronização') },
+            { id: 'testar', label: label('testar', 'Testar usuário') },
+          ]}
+        />
+        {!canEdit && (
+          <div className="callout info">
+            <Icon name="info" />
+            <span>Você pode ver estas configurações, mas não alterá-las. Salvar, sincronizar e testar exigem a permissão para alterar configurações privilegiadas.</span>
+          </div>
+        )}
+        {loading ? (
+          <SkeletonTable rows={6} cols={2} />
+        ) : error ? (
+          <div className="form-error">Não foi possível carregar as configurações do LDAP: {error}</div>
+        ) : (
+          <>
+            {visited.includes('conexao') && (
+              <div hidden={tab !== 'conexao'}>
+                <LdapConnection s={s} ids={connectionIds} onSaved={reloadStatus} />
+              </div>
+            )}
+            {visited.includes('mapeamento') && (
+              <div hidden={tab !== 'mapeamento'}>
+                <LdapMapping s={s} onDirtyChange={setMappingDirty} />
+              </div>
+            )}
+            {visited.includes('sincronizacao') && (
+              <div hidden={tab !== 'sincronizacao'}>
+                <LdapSync s={s} status={status.data} statusError={status.error} reloadStatus={reloadStatus} active={tab === 'sincronizacao'} />
+              </div>
+            )}
+            {visited.includes('testar') && (
+              <div hidden={tab !== 'testar'}>
+                <LdapTest canEdit={canEdit} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </>
   );
 }

@@ -1,0 +1,2797 @@
+/* ---------- Administração e Conta (dono 6) ----------
+   Páginas de administração, importação, LDAP/AD, gráficos e Minha conta. */
+
+/* ---------- Cabeçalho da seção ----------
+   O título da seção (PageHead) vira a barra de 56px presa no alto do conteúdo, de ponta a ponta:
+   título 18/600 à esquerda, ações à direita (a principal por último). */
+/* O sticky respeita o padding de quem rola: o top negativo cola a barra na borda de cima. */
+.page-body > .page-head {
+  top: calc(var(--space-6) * -1);
+  max-width: none;
+  margin: calc(var(--space-6) * -1) calc(var(--space-8) * -1) var(--space-6);
+  flex-wrap: nowrap;
+}
+.page-head .head-count,
+h2 .head-count,
+h3 .head-count,
+h4 .head-count {
+  margin-left: var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.page-actions select {
+  width: auto;
+}
+/* Cabeçalhos de tabela presos logo abaixo da barra do título. */
+.page-body > .table th {
+  top: calc(var(--header-h) - var(--space-6));
+}
+/* O padding de input (base.css) alarga caixas de seleção e rádios; aqui elas voltam a 16px. */
+.takeover input[type='checkbox'],
+.takeover input[type='radio'] {
+  padding: 0;
+}
+.page-lead {
+  max-width: 720px;
+  margin: calc(var(--space-2) * -1) 0 var(--space-5);
+  color: var(--fg-muted);
+}
+.page-lead-actions {
+  margin: calc(var(--space-2) * -1) 0 var(--space-5);
+}
+/* Cabeçalhos dos tokens: bloco mono que rola na horizontal em vez de quebrar, com a cópia no canto. */
+.token-headers {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  max-width: 720px;
+  margin: calc(var(--space-2) * -1) 0 var(--space-5);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+}
+.token-headers > pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  white-space: pre;
+  font-variant-ligatures: none;
+}
+.token-headers > .btn {
+  flex: none;
+}
+.admin-section + .admin-section {
+  margin-top: var(--space-8);
+}
+.section-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+  font-weight: var(--fw-semibold);
+}
+.sub-title {
+  display: flex;
+  align-items: center;
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-2);
+}
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.two-col > .full {
+  grid-column: 1 / -1;
+}
+
+/* ---------- Células e pills das tabelas ---------- */
+.cell-icon {
+  display: inline-grid;
+  place-items: center;
+  /* Algumas tabelas trocam o display para flex: centraliza nos dois casos. */
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-muted);
+  color: var(--fg-muted);
+}
+.cell-name > .pill {
+  margin-left: var(--space-1-5);
+}
+.pill.tag {
+  height: 18px;
+  padding: 0 6px;
+  font-size: var(--fs-11);
+  line-height: var(--lh-11);
+}
+.role-pills {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+
+/* ---------- Tabelas: invólucro e colunas opcionais ----------
+   O invólucro rola de lado (a página nunca rola), com a borda direita esmaecida enquanto há colunas escondidas e
+   a primeira coluna presa. As colunas opcionais somem pela largura da área, não da tela (o menu da administração
+   ocupa espaço): .col-xl abaixo de 1000px, .col-lg abaixo de 860px, .col-md abaixo de 640px. No celular as
+   tabelas .stack viram cartões e mostram todos os campos. */
+.table-wrap {
+  container: admin-table / inline-size;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+@supports (animation-timeline: scroll()) {
+  .table-wrap {
+    animation: table-fade linear both;
+    animation-timeline: scroll(self inline);
+  }
+}
+.table-wrap .table :where(th, td):first-child {
+  position: sticky;
+  left: 0;
+}
+/* Fundo da coluna presa sem especificidade: o hover e a seleção da linha continuam valendo. */
+:where(.table-wrap .table td:first-child) {
+  background: var(--bg-canvas);
+}
+:where(.card .table-wrap .table td:first-child) {
+  background: var(--bg-surface);
+}
+:where(.modal .table-wrap .table td:first-child) {
+  background: var(--bg-raised);
+}
+.table-wrap + .pager,
+.table-wrap + .table-foot {
+  margin-top: var(--space-3);
+}
+@media (min-width: 761px) {
+  .table-wrap .cell-entity {
+    max-width: 320px;
+  }
+  @container admin-table (max-width: 999px) {
+    .table .col-xl {
+      display: none;
+    }
+  }
+  @container admin-table (max-width: 859px) {
+    .table .col-lg {
+      display: none;
+    }
+  }
+  @container admin-table (max-width: 639px) {
+    .table .col-md {
+      display: none;
+    }
+  }
+}
+.table .actions-col {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+.actions-col .row-actions {
+  justify-content: flex-end;
+  gap: 2px;
+}
+.btn.icon-only {
+  width: var(--control-sm);
+  padding: 0;
+}
+.trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+}
+.trend.up {
+  color: var(--ok);
+}
+.trend.down {
+  color: var(--danger);
+}
+/* Blocos da mesma linha têm a mesma altura: com o rótulo quebrando em um deles, os valores continuam alinhados embaixo. */
+.takeover .stat {
+  justify-content: space-between;
+}
+.stat-unit {
+  margin-left: var(--space-2);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+  color: var(--fg-muted);
+}
+
+/* ---------- Usuários ---------- */
+.admin-filters .search-field {
+  flex: 1 1 260px;
+  width: auto;
+  margin: 0;
+}
+.admin-filters select {
+  width: auto;
+}
+.admin-filters .chips,
+.admin-filters .seg-nav {
+  margin: 0;
+}
+.seg-count {
+  margin-left: 6px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* Barra das ações em lote: aparece com a seleção, em cima da tabela. */
+.bulk-bar {
+  --ring-offset: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-height: 44px;
+  margin-bottom: var(--space-3);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+}
+.bulk-count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  margin-right: var(--space-1);
+  color: var(--accent-text);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-semibold);
+}
+.bulk-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 var(--space-1);
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.bulk-bar .bulk-clear {
+  margin-left: auto;
+}
+.users-table .sel-col {
+  width: 44px;
+  padding-right: 0;
+}
+/* Colunas de largura fixa: nome e e-mail dividem o resto e cortam com reticências, então um nome longo
+   não alarga a tabela. A coluna da seleção e a do nome ficam presas ao rolar de lado. */
+@media (min-width: 761px) {
+  .table.users-table {
+    table-layout: fixed;
+  }
+  .users-table .col-roles {
+    width: 212px;
+  }
+  .users-table .col-status {
+    width: 116px;
+  }
+  .users-table .col-seen {
+    width: 120px;
+  }
+  .users-table .actions-col {
+    width: 136px;
+  }
+  .users-table td:not(.actions-col) {
+    overflow: hidden;
+  }
+  .users-table .ellipsis-cell {
+    max-width: none;
+  }
+  .table-wrap .users-table :where(th, td):nth-child(2) {
+    position: sticky;
+    left: 44px;
+  }
+  /* Com a coluna do e-mail à vista, o nome fica com a fatia menor: e-mails são mais longos que nomes. Em 1440
+     cabem "Administrador" com a etiqueta Você e o e-mail mais longo. (max()/calc() com % numa coluna de
+     tabela fixa vira auto no Chrome, por isso é só a porcentagem.) */
+  @container admin-table (min-width: 1000px) {
+    .users-table :where(th:nth-child(2)) {
+      width: 18.5%;
+    }
+  }
+  :where(.table-wrap .users-table td:nth-child(2)) {
+    background: var(--bg-canvas);
+  }
+}
+.users-table .selected > td {
+  background: var(--accent-soft);
+}
+.session-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.session-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.session-list li > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ---------- Minha conta ---------- */
+.account-col {
+  max-width: 640px;
+}
+.profile-card .avatar-edit {
+  gap: var(--space-5);
+}
+.profile-who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.profile-name {
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+  font-weight: var(--fw-semibold);
+}
+.profile-who .row-actions {
+  margin-top: var(--space-2);
+}
+/* Tema: o segmentado fica do tamanho das opções, sem a margem de baixo das subnavegações. As três opções têm a mesma
+   largura e nunca quebram linha (em 360px "Escuro" caía sozinho numa segunda linha). */
+.field > .seg-nav {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  align-self: flex-start;
+  margin-bottom: 0;
+}
+:where(.field > .seg-nav) > button {
+  justify-content: center;
+}
+@media (max-width: 760px) {
+  .field > .seg-nav {
+    display: grid;
+    align-self: stretch;
+  }
+  :where(.field > .seg-nav) > button {
+    padding: 0 var(--space-2);
+  }
+}
+/* Código de 6 dígitos: campo curto, mono, com os dígitos espaçados. */
+.otp-input {
+  max-width: 200px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2em;
+}
+.otp-input::placeholder {
+  letter-spacing: 0.2em;
+}
+.account-col .danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.danger-zone h3 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-semibold);
+}
+.danger-zone p {
+  margin: 0;
+}
+.two-factor .codes {
+  margin: 0;
+  columns: 2;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  line-height: 1.8;
+}
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-5);
+}
+.qr-box {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+.qr-box p {
+  flex: 1 1 200px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.token-new {
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+.token-new .copy-box {
+  flex: 1 0 100%;
+}
+.token-form {
+  max-width: 640px;
+}
+
+/* ---------- Configurações ----------
+   Subnavegação de 220px com os grupos; linhas de 280px (rótulo) + controle (até 480px); barra de salvar presa embaixo. */
+.page-actions .head-search {
+  width: 280px;
+  margin: 0;
+}
+.settings-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--space-8);
+  align-items: start;
+}
+.tabs.settings-nav {
+  position: sticky;
+  top: calc(var(--header-h) - var(--space-6) + var(--space-4));
+  height: auto;
+  margin: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  overflow: visible;
+  border-bottom: 0;
+  mask-image: none;
+}
+.tabs.settings-nav button {
+  justify-content: flex-start;
+  gap: var(--space-2);
+  min-height: 32px;
+  height: auto;
+  padding: var(--space-1-5) 10px;
+  border-radius: var(--radius-md);
+  color: var(--fg-2);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-regular);
+  text-align: left;
+  white-space: normal;
+}
+.settings-nav button:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.settings-nav button.active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: var(--fw-medium);
+}
+.settings-nav button::after {
+  display: none;
+}
+.settings-nav-label {
+  flex: 1;
+  min-width: 0;
+}
+.settings-nav-dot,
+.setting-dot,
+.save-bar-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+/* Botão de grupo do celular: mesma caixa de um select, com o ponto de alterações e a seta no fim. */
+.settings-group-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: var(--touch);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+  font-weight: var(--fw-medium);
+  text-align: left;
+  cursor: pointer;
+}
+.settings-group-pick > .settings-nav-label {
+  flex: 1;
+  min-width: 0;
+}
+.settings-group-pick > .icon {
+  color: var(--fg-muted);
+}
+.settings-nav-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-2) 10px;
+}
+.settings-main {
+  min-width: 0;
+}
+.settings-group-title {
+  margin: 0;
+  font-size: var(--fs-18);
+  line-height: var(--lh-18);
+  font-weight: var(--fw-semibold);
+}
+.settings-main > .callout {
+  margin-top: var(--space-4);
+}
+.settings-section {
+  margin-top: var(--space-6);
+}
+.settings-section > .section-title {
+  margin: 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-2);
+}
+.setting-row {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.setting-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-top: var(--space-2);
+}
+/* Rótulo em texto corrido: o ponto e a chave (i) acompanham a última linha quando o rótulo quebra. */
+.setting-name {
+  display: block;
+  min-width: 0;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.setting-desc {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+.setting-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 480px;
+}
+.setting-control > input,
+.setting-control > select,
+.setting-control > textarea,
+.setting-control > .channel-list {
+  width: 100%;
+}
+.setting-control > .toggle {
+  min-height: 36px;
+}
+.setting-revert {
+  margin-left: calc(var(--space-2) * -1);
+}
+.setting-name > .setting-dot {
+  display: inline-block;
+  margin-right: var(--space-1-5);
+  vertical-align: middle;
+}
+/* A última palavra do rótulo reserva o lugar do (i), que volta sobre a reserva com margem negativa:
+   se o ícone não couber, a palavra desce junto e ele nunca fica sozinho na linha de baixo. */
+.setting-tail {
+  padding-right: calc(var(--space-1) + 22px);
+  white-space: nowrap;
+}
+.icon-btn.setting-key {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  margin-block: -1px;
+  margin-left: -22px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.setting-field {
+  display: flex;
+  align-items: flex-start;
+}
+/* No LDAP o campo de texto ocupa a coluna (até 560px), como nas Configurações. */
+.field.setting-field {
+  align-items: stretch;
+  max-width: 560px;
+}
+/* LDAP: chave no fim do texto; a primeira linha do texto centraliza com o interruptor (32px). */
+.toggle-field {
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.toggle-field > .toggle-text {
+  padding-top: var(--space-1-5);
+}
+.channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.settings-extra {
+  margin-top: var(--space-6);
+}
+/* A barra fica sempre no pé da janela: com a página em coluna flexível, a margem de cima automática a empurra
+   para baixo quando o conteúdo é curto; com conteúdo longo, o sticky a prende embaixo. */
+.page-body:has(> .save-bar) {
+  display: flex;
+  flex-direction: column;
+}
+.settings-layout {
+  padding-bottom: var(--space-8);
+}
+.page-body > .save-bar {
+  --ring-offset: var(--bg-raised);
+  position: sticky;
+  bottom: calc(var(--space-12) * -1);
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: none;
+  min-height: 64px;
+  margin: auto calc(var(--space-8) * -1) calc(var(--space-12) * -1);
+  padding: 0 var(--space-8);
+  border-top: 1px solid var(--border);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-3);
+}
+.save-bar-text {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--fw-medium);
+}
+.save-bar-dot {
+  width: 8px;
+  height: 8px;
+}
+
+/* ---------- Permissões: matriz ----------
+   Primeira coluna presa (280px) com o rótulo em português e o id embaixo; papéis na horizontal, 112px cada. */
+.matrix-wrap {
+  overflow: auto;
+  max-height: calc(100dvh - 240px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+}
+/* Mais papéis do que cabem: a borda direita esmaece enquanto houver colunas escondidas (em qualquer largura). */
+@supports (animation-timeline: scroll()) {
+  .matrix-wrap {
+    animation: table-fade linear both;
+    animation-timeline: scroll(self inline);
+  }
+}
+.matrix th {
+  width: 112px;
+  min-width: 112px;
+  height: auto;
+  padding: var(--space-2);
+  white-space: normal;
+  text-align: center;
+  vertical-align: bottom;
+  background: var(--bg-surface);
+}
+.matrix th:first-child,
+.matrix td:first-child {
+  position: sticky;
+  left: 0;
+  width: 280px;
+  min-width: 280px;
+  text-align: left;
+  background: var(--row-bg, var(--bg-surface));
+  box-shadow: inset -1px 0 0 var(--border);
+}
+.matrix th:first-child {
+  z-index: calc(var(--z-raised) + 1);
+  /* Mesmo recuo das células, para "Permissão" alinhar com os rótulos embaixo. */
+  padding-inline: var(--space-3);
+}
+.matrix td {
+  text-align: center;
+  background: var(--row-bg, transparent);
+}
+/* Linha sob o mouse: a cor passa por variável para chegar também à primeira coluna (presa, com fundo próprio). */
+.matrix tr:hover {
+  --row-bg: var(--bg-hover);
+}
+.matrix .perm-label {
+  display: block;
+  font-weight: var(--fw-medium);
+  color: var(--fg);
+}
+.matrix .perm-id {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.matrix .group-row td {
+  height: 36px;
+  background: var(--bg-subtle);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-semibold);
+  text-align: left;
+}
+.matrix .group-row span {
+  position: sticky;
+  left: var(--space-3);
+}
+.matrix .role-head {
+  display: block;
+  font-size: var(--fs-12);
+  line-height: 16px;
+  font-weight: var(--fw-semibold);
+  color: var(--fg-2);
+}
+.matrix .role-head-id {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: var(--lh-11);
+  font-weight: var(--fw-regular);
+  color: var(--fg-muted);
+}
+.matrix .check-cell {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+}
+
+/* ---------- Gráficos ----------
+   Barras de até 24px com topo arredondado, linhas de 2px, grade e eixo discretos, texto nos tokens de texto. */
+.chart,
+.chart-plot {
+  position: relative;
+}
+.chart svg {
+  display: block;
+  overflow: visible;
+}
+.chart svg:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
+.chart-bar {
+  fill: var(--s1);
+  transition: fill-opacity var(--dur-1) linear;
+}
+/* Com uma barra em foco, as outras esmaecem. */
+.chart-bar.dim {
+  fill-opacity: 0.45;
+}
+.chart-grid {
+  stroke: var(--chart-grid);
+  shape-rendering: crispEdges;
+}
+.chart-base {
+  stroke: var(--chart-axis);
+  shape-rendering: crispEdges;
+}
+.chart-cross {
+  stroke: var(--chart-axis);
+  stroke-dasharray: 3 3;
+  shape-rendering: crispEdges;
+}
+.chart-tick {
+  fill: var(--fg-muted);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+.chart-end {
+  fill: var(--fg-2);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+}
+.chart-hit {
+  fill: transparent;
+}
+.chart-line {
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.chart-line.s1 {
+  stroke: var(--s1);
+}
+.chart-line.s2 {
+  stroke: var(--s2);
+}
+.chart-line.s3 {
+  stroke: var(--s3);
+}
+.chart-dot {
+  stroke: var(--bg-surface);
+  stroke-width: 2;
+}
+.chart-dot.s1 {
+  fill: var(--s1);
+}
+.chart-dot.s2 {
+  fill: var(--s2);
+}
+.chart-dot.s3 {
+  fill: var(--s3);
+}
+.chart-tip {
+  position: absolute;
+  z-index: var(--z-raised);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+  color: var(--fg);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+}
+/* Na linha, a dica fica ao lado da cruz (e passa para a esquerda depois do meio). */
+.chart-tip.side {
+  transform: translate(12px, 0);
+}
+.chart-tip.flip {
+  transform: translate(calc(-100% - 12px), 0);
+}
+.chart-tip-x {
+  color: var(--fg-muted);
+}
+.chart-tip strong {
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-2);
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-item::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.legend-item.s1::before {
+  background: var(--s1);
+}
+.legend-item.s2::before {
+  background: var(--s2);
+}
+.legend-item.s3::before {
+  background: var(--s3);
+}
+.chart-empty .empty {
+  padding: var(--space-8) var(--space-4);
+}
+.chart-card .card-head {
+  margin-bottom: var(--space-4);
+}
+
+.oauth-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.oauth-preview {
+  display: inline-block;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+.form > p.field-hint {
+  margin: calc(-1 * var(--space-1-5)) 0 0;
+}
+/* URL e botão de copiar na mesma linha; a URL só quebra nas barras (<wbr> depois de cada "/"). */
+.oauth-callback {
+  white-space: nowrap;
+}
+.oauth-callback code {
+  white-space: normal;
+  overflow-wrap: normal;
+  margin-right: var(--space-2);
+}
+.oauth-preview-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.copy-box input.color-swatch {
+  flex: 0 0 44px;
+  width: 44px;
+  padding: 2px;
+  height: 36px;
+}
+
+/* Admin bits */
+.audit-msg {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.emoji-admin {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+.emoji-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  text-align: center;
+}
+.emoji-card img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+.avatar-edit {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* ---------- Omnichannel (administração) ----------
+   As 13 seções saem do controle segmentado e viram uma subnavegação de 200px, como em Configurações. */
+.omni-admin {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--space-8);
+  align-items: start;
+}
+.seg-nav.omni-subnav {
+  position: sticky;
+  top: calc(var(--header-h) - var(--space-6) + var(--space-4));
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.omni-subnav button {
+  --omni-icon: var(--fg-muted);
+  justify-content: flex-start;
+  gap: var(--space-2);
+  min-height: 32px;
+  height: auto;
+  padding: var(--space-1-5) 10px;
+  border-radius: var(--radius-md);
+  color: var(--fg-2);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-regular);
+  text-align: left;
+  white-space: normal;
+}
+.omni-subnav button:hover {
+  background: var(--bg-hover);
+}
+.omni-subnav button.on {
+  --omni-icon: var(--accent-text);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: var(--fw-medium);
+  box-shadow: none;
+}
+.omni-subnav .icon {
+  flex-shrink: 0;
+  color: var(--omni-icon);
+}
+.omni-main {
+  min-width: 0;
+}
+.omni-main > * + .card {
+  margin-top: var(--space-4);
+}
+/* Título do cartão e botão Novo na mesma linha de centro. */
+.omni-main .card-head {
+  align-items: center;
+}
+.omni-card > .table,
+.omni-card > .table-wrap {
+  margin-top: var(--space-2);
+}
+.omni-card > p.muted {
+  margin: 0;
+}
+/* "Padrão" ao lado do nome do horário. */
+.omni-hours-name > .pill {
+  margin-left: var(--space-1-5);
+}
+/* Adicionar e buscar nas seções e no formulário do departamento: mesma linha, quebram no celular. */
+.row.omni-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.omni-toolbar > input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.omni-toolbar > .omni-search {
+  flex: 1 1 200px;
+  width: auto;
+  margin-left: auto;
+}
+/* A busca não leva a margem de baixo da .search-field: na linha centralizada ela subia 6px em relação ao campo
+   de adicionar. */
+.omni-toolbar > .search-field {
+  margin-bottom: 0;
+}
+/* Formulários do Omnichannel: colunas com o espaçamento de .form, título das seções do formulário. */
+.grid-2.omni-form-cols {
+  align-items: start;
+  margin-bottom: 0;
+}
+.omni-form-title {
+  margin: var(--space-6) 0 var(--space-3);
+}
+.table .omni-order {
+  width: 1%;
+  color: var(--fg-muted);
+}
+.omni-order-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-1);
+}
+.omni-priorities input {
+  width: 100%;
+  max-width: 320px;
+}
+.omni-message {
+  min-width: 240px;
+  max-width: 480px;
+}
+.omni-week td {
+  padding-inline: 0 var(--space-3);
+}
+
+/* ---------- Detalhes das outras páginas ---------- */
+.head-select {
+  width: auto;
+  min-width: 160px;
+}
+.row-menu {
+  display: inline-flex;
+}
+.role-desc {
+  max-width: 360px;
+  color: var(--fg-2);
+}
+.role-users-add {
+  margin-bottom: var(--space-4);
+}
+.callout-sample {
+  display: block;
+  margin-top: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.report-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.report-list > li {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.report-list > li:last-child {
+  border-bottom: 0;
+}
+.report-meta {
+  margin-bottom: var(--space-1);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-2);
+}
+.report-meta .icon {
+  vertical-align: -1px;
+  margin-right: 2px;
+}
+.history-list > li {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.history-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.code-sample {
+  display: block;
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+.table-foot {
+  margin: var(--space-3) 0 0;
+}
+.audit-form,
+.audit-results {
+  margin-bottom: var(--space-4);
+}
+/* O formulário tem até 640px: o cartão acompanha, sem um vazio à direita. */
+.audit-form {
+  max-width: 688px;
+}
+.audit-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  margin-top: var(--space-1);
+}
+/* O JSON do alvo e dos detalhes corta cedo; a linha aberta mostra tudo formatado. */
+.audit-log .audit-json {
+  max-width: 180px;
+  color: var(--fg-2);
+}
+.audit-json.col-lg {
+  max-width: 220px;
+}
+.audit-log .open > td {
+  border-bottom-color: transparent;
+  background: var(--bg-subtle);
+}
+.audit-detail > td {
+  height: auto;
+  padding: 0 var(--space-3) var(--space-4);
+  background: var(--bg-subtle);
+}
+.audit-kv {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+.audit-kv dt {
+  padding-top: var(--space-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-muted);
+}
+.audit-kv dd {
+  min-width: 0;
+  margin: 0;
+}
+.audit-kv dd.mono {
+  padding-top: var(--space-2);
+}
+.audit-kv .code-block {
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+}
+.audit-action {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  white-space: nowrap;
+}
+.cell-icon.provider {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+/* Ícone ao lado do texto: o seletor com o contêiner vence .card.action (coluna), que vem antes. */
+.oauth-presets .preset-card {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: 0;
+  text-align: left;
+}
+.preset-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.preset-card .card-icon {
+  background: var(--bg-subtle);
+  color: var(--fg);
+}
+.modal-title-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 760px) {
+  .oauth-presets {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Importação ---------- */
+.imp-status.ok {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.imp-status.err {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.imp-status.warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.imp-status.busy {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.imp-status.busy::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: imp-pulse 1.2s ease-in-out infinite;
+}
+@keyframes imp-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+.imp-tag {
+  margin-left: var(--space-1-5);
+}
+.imp-go {
+  display: flex;
+  align-items: center;
+  gap: var(--space-half);
+  margin-top: var(--space-1);
+  color: var(--accent-text);
+  font-weight: var(--fw-medium);
+}
+.imp-lead {
+  max-width: 760px;
+  margin: calc(var(--space-2) * -1) 0 var(--space-4);
+}
+.imp-block {
+  margin-bottom: var(--space-3);
+}
+.imp-strong {
+  font-weight: var(--fw-medium);
+  overflow-wrap: anywhere;
+}
+.imp-room {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+.imp-room .icon {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.imp-warn-mark {
+  display: inline-flex;
+  margin-left: var(--space-1);
+  vertical-align: -2px;
+  color: var(--warn);
+}
+.imp-head .icon-btn {
+  margin-left: calc(var(--space-2) * -1);
+}
+.imp-table-wrap {
+  overflow-x: auto;
+  container-type: inline-size;
+}
+/* As contagens ficam numa coluna "Itens" em qualquer largura: oito colunas de números espremiam o tipo em três
+   linhas e, em 1024, cortavam a tabela. O tipo fica numa linha. */
+.imp-history .imp-wide {
+  display: none;
+}
+.imp-history .imp-mid {
+  display: table-cell;
+  min-width: 150px;
+}
+.imp-history .imp-type {
+  white-space: nowrap;
+}
+.imp-history .imp-when-sub {
+  display: none;
+}
+/* As colunas do histórico dependem da largura da área, não da tela (o menu da administração ocupa espaço). */
+@container (max-width: 1080px) {
+  .imp-history .ellipsis-cell {
+    max-width: 180px;
+  }
+}
+@container (max-width: 640px) {
+  .imp-history .imp-opt,
+  .imp-history .imp-mid,
+  .imp-history .imp-when {
+    display: none;
+  }
+  .imp-history .imp-when-sub {
+    display: block;
+  }
+  .imp-history td.nowrap {
+    white-space: normal;
+  }
+}
+.imp-current > td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.imp-new {
+  display: grid;
+  grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
+  gap: var(--space-8);
+  align-items: start;
+}
+.imp-help {
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  min-width: 0;
+}
+.imp-help h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-semibold);
+}
+.imp-help h3:first-child {
+  margin-top: 0;
+}
+.imp-help-list {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-4);
+}
+.imp-help-list li {
+  margin: var(--space-1) 0;
+}
+.imp-help-more > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  font-weight: var(--fw-medium);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.imp-help-more > :where(summary):hover {
+  text-decoration: underline;
+}
+.imp-help-more[open] > summary {
+  margin-bottom: var(--space-1);
+}
+.code-block.imp-tree {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-12);
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
+}
+.dropzone {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-4);
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-subtle);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) linear,
+    border-color var(--dur-1) linear;
+}
+.dropzone:hover,
+.dropzone.over {
+  --dropzone-icon: var(--accent-text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.dropzone:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.dropzone.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.dropzone-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--dropzone-icon, var(--fg-muted));
+}
+.imp-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+.imp-file-icon {
+  display: inline-flex;
+  color: var(--fg-muted);
+}
+.imp-file .ellipsis {
+  flex: 1;
+}
+.imp-upload {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.imp-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.imp-bar {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-muted);
+  overflow: hidden;
+}
+.imp-bar > div {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  transition: width var(--dur-3) var(--ease-out);
+}
+.imp-bar.indeterminate > div {
+  position: absolute;
+  width: 35%;
+  animation: imp-slide 1.3s ease-in-out infinite;
+}
+@keyframes imp-slide {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .imp-bar.indeterminate > div {
+    left: 0;
+    width: 100%;
+    opacity: 0.4;
+    animation: none;
+  }
+  .imp-status.busy::before {
+    animation: none;
+  }
+}
+.imp-pct {
+  min-width: 3.5em;
+  text-align: right;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.imp-card {
+  max-width: 640px;
+}
+.imp-card h2 {
+  margin-bottom: var(--space-2);
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+}
+.imp-stats {
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  margin: var(--space-4) 0;
+}
+.imp-detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  margin-bottom: var(--space-2);
+}
+.imp-warnings {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--warn-solid) 45%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--warn-soft);
+}
+.imp-warnings summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  cursor: pointer;
+  font-weight: var(--fw-medium);
+}
+.imp-warnings summary .icon {
+  color: var(--warn);
+}
+.imp-warnings ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  max-height: 260px;
+  overflow: auto;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.imp-warnings li {
+  margin: var(--space-half) 0;
+  overflow-wrap: anywhere;
+}
+.imp-errors-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 var(--space-2);
+}
+.imp-errors-head h3 {
+  flex: 1;
+  margin: 0;
+}
+.imp-err-label {
+  overflow-wrap: anywhere;
+}
+.imp-select {
+  margin-bottom: var(--space-4);
+}
+.table .imp-check {
+  width: 36px;
+  padding-right: 0;
+}
+.imp-off > td {
+  color: var(--fg-muted);
+}
+.imp-tags {
+  text-align: right;
+  white-space: nowrap;
+}
+.imp-tags .pill:not(:first-child) {
+  margin-left: var(--space-1);
+}
+.imp-lines div {
+  overflow-wrap: anywhere;
+}
+.imp-phone-only {
+  display: none;
+}
+.imp-pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.imp-pager select {
+  padding: var(--space-1) var(--space-1-5);
+}
+.imp-options {
+  max-width: 640px;
+}
+.imp-options .check {
+  font-weight: var(--fw-medium);
+}
+.imp-options .field-hint {
+  margin: var(--space-1-5) 0 0 var(--space-6);
+}
+/* Escolha do tipo: antes dela, só os cartões, um por linha na largura do formulário (o select aparece depois). */
+.imp-types {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+.imp-types .imp-type {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+.imp-type:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.row-actions.imp-submit {
+  justify-content: flex-end;
+}
+.imp-actionbar {
+  --ring-offset: var(--bg-raised);
+  position: sticky;
+  bottom: calc(var(--space-4) - var(--space-12));
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+}
+@media (max-width: 1100px) {
+  .imp-new {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 760px) {
+  .imp-table-wrap .table {
+    display: table;
+  }
+  .imp-table-wrap .table th,
+  .imp-table-wrap .table td {
+    padding: var(--space-2) var(--space-1-5);
+  }
+  .imp-opt,
+  .imp-history .imp-mid {
+    display: none;
+  }
+  .imp-phone-only {
+    display: block;
+  }
+  .imp-history td.nowrap {
+    white-space: normal;
+  }
+  .imp-tags {
+    white-space: normal;
+  }
+  .imp-tags .pill {
+    margin: var(--space-half) 0 var(--space-half) var(--space-1);
+  }
+  .imp-actionbar .imp-summary {
+    flex-basis: 100%;
+  }
+  .imp-actionbar .primary {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* ---------- Administração: LDAP / Active Directory ---------- */
+.ldap-page .page-title-row {
+  margin-bottom: var(--space-1);
+}
+.ldap-lead {
+  margin: calc(var(--space-2) * -1) 0 var(--space-4);
+  max-width: 760px;
+}
+.pill.ldap-state {
+  margin-left: var(--space-2);
+  vertical-align: 3px;
+}
+.ldap-state.on {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.ldap-tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--space-1-5);
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 2px;
+}
+.ldap-page .callout > span {
+  min-width: 0;
+}
+
+/* Quem só pode ver: os campos ficam num fieldset desativado. */
+.ldap-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.ldap-fieldset:disabled .toggle,
+.ldap-fieldset:disabled .toggle-text,
+.ldap-fieldset:disabled .selectable {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.ldap-fieldset:disabled :where(input:not([type='checkbox']), select, textarea) {
+  cursor: not-allowed;
+  color: var(--fg-muted);
+  background: var(--bg-subtle);
+}
+
+/* Com alterações não salvas, a barra de ações fica grudada embaixo: o campo focado não pode ficar escondido atrás dela. */
+.ldap-page input,
+.ldap-page textarea,
+.ldap-page select {
+  scroll-margin-bottom: 80px;
+}
+
+/* Campo alterado e ainda não salvo: barra na margem esquerda. */
+.ldap-setting {
+  min-width: 0;
+}
+.ldap-setting.changed {
+  box-shadow: inset 3px 0 0 var(--accent);
+  margin-left: calc(-1 * var(--space-4));
+  padding-left: var(--space-4);
+}
+.ldap-setting > * + .field {
+  margin-top: var(--space-3);
+}
+.ldap-actionbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) 0;
+}
+/* Com alterações, a barra flutua presa embaixo. O sticky para na borda interna do .page-body (padding de baixo
+   de 48 px; 24 px no tablet): o bottom negativo a deixa a 16 px da beira da janela. No celular quem rola é o .page, sem padding. */
+.ldap-actionbar.sticky {
+  --ring-offset: var(--bg-raised);
+  position: sticky;
+  bottom: calc(var(--space-4) - var(--space-12));
+  z-index: var(--z-sticky);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+}
+.ldap-origin-name,
+.ldap-choice-title,
+.ldap-hint-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+.ldap-origin-name .icon,
+.ldap-choice-title .icon {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.ldap-arrow {
+  display: inline-flex;
+}
+.ldap-warnings .icon {
+  margin-right: var(--space-1-5);
+  vertical-align: -2px;
+  color: var(--warn);
+}
+.ldap-warn-text .icon {
+  margin-right: var(--space-1);
+  vertical-align: -2px;
+}
+.ldap-chip > .icon,
+.selectable > .icon {
+  margin-right: var(--space-1);
+  vertical-align: -2px;
+}
+.ldap-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-1);
+}
+.ldap-card-head h3 {
+  margin: 0;
+}
+.ldap-card-lead {
+  margin: 0 0 var(--space-3);
+}
+.ldap-subhead {
+  margin: var(--space-1-5) 0 calc(-1 * var(--space-1));
+  font-size: var(--fs-13);
+  color: var(--fg-muted);
+  font-weight: var(--fw-semibold);
+}
+.ldap-note {
+  margin: 0;
+}
+.ldap-warn-text {
+  margin: var(--space-2) 0 0;
+  color: var(--warn);
+  font-weight: var(--fw-medium);
+}
+.ldap-break {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.ldap-dn-text {
+  overflow-wrap: break-word;
+}
+.ldap-strong {
+  font-weight: var(--fw-semibold);
+}
+
+/* Opções do mapeamento: a dica alinha com o texto do interruptor (trilho de 36px + 10px de folga do .toggle). */
+.ldap-toggle-hint {
+  display: block;
+  margin: calc(-1 * var(--space-2)) 0 0 calc(36px + 10px);
+}
+
+.chip.ldap-chip {
+  padding: var(--space-half) var(--space-2);
+}
+.ldap-chip.bad {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.ldap-chip.new {
+  color: var(--fg);
+  background: transparent;
+  border: 1px dashed var(--border);
+}
+.ldap-chip.add {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.ldap-chip.del {
+  color: var(--danger);
+  background: var(--danger-soft);
+  text-decoration: line-through;
+}
+.ldap-chip-note {
+  margin-left: var(--space-half);
+  color: var(--fg-muted);
+  font-size: var(--fs-11);
+}
+.bad > .ldap-chip-note {
+  color: inherit;
+}
+
+/* Tabela de regras: vira uma lista de cartões quando a área é estreita. */
+.ldap-rules-wrap {
+  container-type: inline-size;
+}
+.table.ldap-rules td {
+  vertical-align: top;
+}
+.ldap-origin {
+  min-width: 150px;
+  max-width: 260px;
+}
+.ldap-rules .chip {
+  white-space: nowrap;
+}
+.ldap-origin > span {
+  display: block;
+}
+.ldap-dn {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+.ldap-row-actions {
+  width: 1%;
+}
+.ldap-row-actions > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.ldap-row-actions .btn {
+  justify-content: center;
+}
+/* As células vencem o .table td global (0,1,1) por especificidade; as linhas empatam e vencem pela ordem (admin.css é o último). */
+@container (max-width: 860px) {
+  .ldap-page .ldap-rules,
+  .table.ldap-rules tbody,
+  .table.ldap-rules tr,
+  .table.ldap-rules td {
+    display: block;
+    width: 100%;
+  }
+  .table.ldap-rules thead {
+    display: none;
+  }
+  .ldap-rules tr {
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .ldap-rules tr:last-child {
+    border-bottom: 0;
+  }
+  .table.ldap-rules td {
+    border: 0;
+    padding: var(--space-1) 0;
+    max-width: none;
+  }
+  .ldap-rules td[data-label] {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: var(--space-2);
+    align-items: start;
+  }
+  .ldap-rules td[data-label]::before {
+    content: attr(data-label);
+    font-size: var(--fs-12);
+    color: var(--fg-muted);
+    padding-top: var(--space-half);
+  }
+  .ldap-dn {
+    max-width: 100%;
+  }
+  /* Empata com .table.ldap-rules td (0,2,1) e vence pela ordem. */
+  .ldap-rules td.ldap-row-actions {
+    padding-top: var(--space-2);
+  }
+  .ldap-row-actions > div {
+    flex-direction: row;
+  }
+}
+
+/* Modo JSON */
+.ldap-json-help {
+  margin: 0;
+}
+.ldap-json {
+  width: 100%;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.ldap-json.invalid {
+  border-color: var(--danger);
+}
+
+/* Modal da regra */
+.ldap-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.ldap-choices.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.ldap-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  cursor: pointer;
+  min-width: 0;
+}
+.ldap-choice.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.ldap-choice:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.ldap-choice input[type='radio'] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  padding: 0;
+  margin: var(--space-half) 0 0;
+  accent-color: var(--accent);
+}
+.ldap-choice input:where([type='radio']):focus {
+  outline: none;
+}
+.ldap-choice strong:where(:not(.ldap-choice-title)),
+.ldap-choice .field-hint {
+  display: block;
+}
+/* Título com ícone: o texto que quebra continua depois do ícone, e não embaixo dele. */
+.ldap-choice .ldap-choice-title {
+  display: flex;
+  align-items: flex-start;
+}
+.ldap-choice-title > .icon {
+  margin-top: 2px;
+}
+.ldap-key {
+  margin: calc(-1 * var(--space-1)) 0 0;
+  overflow-wrap: anywhere;
+}
+.ldap-dir {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+.ldap-dir-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.ldap-dir-list.busy {
+  opacity: 0.6;
+}
+.ldap-dir-list button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+.ldap-dir-list button:last-child {
+  border-bottom: 0;
+}
+.ldap-dir-list button:hover {
+  background: var(--bg-muted);
+}
+.ldap-dir-list button.on {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.ldap-dir-name,
+.ldap-dir-dn {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ldap-dir-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-13);
+}
+.picker-list .ldap-dir-msg {
+  font-size: var(--fs-12);
+}
+
+/* Sincronização */
+.ldap-run.success {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.ldap-run.partial {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.ldap-run.failed {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.ldap-run.running {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.ldap-run.running::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: var(--space-1);
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+  animation: ldap-pulse 1.2s ease-in-out infinite;
+}
+@keyframes ldap-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+.ldap-run-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+.ldap-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5) var(--space-4);
+  margin-bottom: var(--space-2);
+}
+.ldap-run-summary .ldap-run-meta {
+  margin: 0;
+}
+.ldap-run-summary .form-error {
+  align-self: stretch;
+}
+/* Contagens da execução: o mesmo bloco .stat das outras páginas (rótulo em cima), mais compacto dentro do cartão. */
+.ldap-counts {
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: var(--space-2);
+  align-self: stretch;
+  margin: 0;
+}
+.ldap-count {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+}
+.ldap-count-value {
+  font-size: var(--fs-22);
+  line-height: var(--lh-22);
+  font-variant-numeric: tabular-nums;
+}
+.zero > .ldap-count-value {
+  color: var(--fg-muted);
+  font-weight: var(--fw-medium);
+}
+.bad > .ldap-count-value {
+  color: var(--danger);
+}
+.ldap-history-wrap {
+  overflow-x: auto;
+  container-type: inline-size;
+}
+.ldap-history td.num,
+.ldap-history th.num {
+  font-variant-numeric: tabular-nums;
+}
+.ldap-warn-mark {
+  color: var(--warn);
+}
+.ldap-history .ldap-mid,
+.ldap-history .ldap-start-origin {
+  display: none;
+}
+/* Colunas pela largura da área (o menu da administração ocupa espaço), como no histórico de importações. */
+@container (max-width: 980px) {
+  .ldap-history .ldap-wide {
+    display: none;
+  }
+  .ldap-history .ldap-mid {
+    display: table-cell;
+  }
+}
+/* Ex.: janela de 1024 px com os dois menus abertos: a origem passa para baixo da data. */
+@container (max-width: 640px) {
+  .ldap-history .ldap-opt {
+    display: none;
+  }
+  .ldap-history .ldap-start-origin {
+    display: block;
+  }
+}
+/* Largura de celular: só Início, Situação e Erros. */
+@container (max-width: 420px) {
+  .ldap-history .ldap-mid,
+  .ldap-history .ldap-start-origin {
+    display: none;
+  }
+  .ldap-history td.nowrap {
+    white-space: normal;
+  }
+}
+.table.ldap-changes td {
+  vertical-align: top;
+}
+.ldap-kind.created,
+.ldap-kind.reactivated {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.ldap-kind.deactivated {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.ldap-kind.roles,
+.ldap-kind.channels,
+.ldap-kind.teams {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.ldap-issues,
+.ldap-warnings,
+.ldap-matched {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ldap-issues li,
+.ldap-warnings li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-half);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.ldap-issues li:last-child,
+.ldap-warnings li:last-child {
+  border-bottom: 0;
+}
+.ldap-issue-who {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Testar usuário */
+.ldap-test-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.ldap-test-row .field {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.ldap-test-form .ldap-warn-text {
+  margin: 0;
+}
+.ldap-result {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.ldap-result > .card,
+.ldap-result > .callout {
+  margin: 0;
+  min-width: 0;
+}
+.ldap-result-card.wide,
+.ldap-result-wide {
+  grid-column: 1 / -1;
+}
+.ldap-result-lead {
+  margin: 0;
+}
+.ldap-result-card h3 {
+  margin-bottom: var(--space-3);
+}
+.ldap-result-card p {
+  margin: var(--space-2) 0 0;
+}
+.ldap-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+/* Foto do AD e, sem ela, o avatar de iniciais: os dois redondos, como o avatar que a pessoa vai ter no chat. */
+.ldap-photo {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--bg-muted);
+}
+.ldap-photo.none {
+  display: inline-flex;
+  overflow: hidden;
+}
+.ldap-entry-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ldap-kv {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+.ldap-kv-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: baseline;
+}
+.ldap-kv dt {
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+}
+.ldap-kv dd {
+  margin: 0;
+  min-width: 0;
+}
+.ldap-account {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.ldap-matched li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5) var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.ldap-matched li:last-child {
+  border-bottom: 0;
+}
+.ldap-matched-origin {
+  min-width: 200px;
+}
+.ldap-matched-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.ldap-roles-change {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ldap-diff {
+  margin-top: var(--space-2);
+}
+
+@media (max-width: 760px) {
+  .ldap-actionbar.sticky {
+    bottom: 0;
+  }
+  .ldap-choices,
+  .ldap-choices.three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* As ações secundárias crescem até fechar a linha (lado a lado se cabem, uma por linha se não): mesma largura. */
+  .ldap-actionbar > .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .ldap-actionbar .primary {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+  .ldap-matched-origin {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+  .pill.ldap-state {
+    margin-left: var(--space-1-5);
+  }
+}
+
+/* ---------- Administração e Conta: tablet e celular ---------- */
+/* Coluna única: liga/desliga fica à direita do rótulo, na mesma linha, em vez de numa linha só para ele. */
+@media (max-width: 1199px) {
+  .setting-row.bool {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .bool > .setting-control {
+    align-items: flex-end;
+  }
+}
+@media (min-width: 761px) and (max-width: 1199px) {
+  .page-body > .page-head {
+    margin: calc(var(--space-6) * -1) calc(var(--space-6) * -1) var(--space-6);
+  }
+}
+@media (max-width: 760px) {
+  /* No celular a faixa de seções já fica presa no alto: o título rola junto com o conteúdo. */
+  .page-body > .page-head {
+    position: static;
+    min-height: 52px;
+    margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) var(--space-4);
+    padding: var(--space-2) var(--space-4);
+    flex-wrap: wrap;
+  }
+  .page-body > .table th {
+    top: 0;
+  }
+  /* O título não encolhe: sem espaço, as ações descem para a linha de baixo. */
+  .page-body > .page-head h1 {
+    flex: 1 0 auto;
+  }
+  /* As ações quebram linha dentro da largura da tela (sem min-width 0 a fila de botões passava de 600px e o
+     "Importar arquivo" ficava fora da tela); a principal vem primeiro. */
+  .page-actions {
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .page-actions > .btn.primary {
+    order: -1;
+  }
+  /* Tabelas empilhadas das páginas de administração: rótulo à esquerda e valor à direita, numa linha. */
+  /* td[data-label] empata com .table.stack td (0,2,1) e vence pela ordem: senão a célula fica em bloco. */
+  .kv td[data-label] {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: 28px;
+    text-align: right;
+  }
+  .kv :where(td)[data-label]::before {
+    display: inline;
+    flex-shrink: 0;
+    text-align: left;
+    /* O rótulo fica na fonte da interface mesmo quando o valor é .mono. */
+    font-family: var(--font-sans);
+  }
+  .stack td.num {
+    text-align: right;
+  }
+  /* No cartão do papel a descrição é o subtítulo, sem rótulo: vazia, o travessão sozinho não diz nada. */
+  td.role-desc.empty {
+    display: none;
+  }
+  .stack td.ellipsis-cell {
+    max-width: none;
+  }
+  /* Matriz no celular: quem rola é a .matrix-wrap, então a tabela volta a ser tabela; a coluna presa
+     encolhe e quebra linha para deixar ao menos um papel à vista. */
+  .matrix {
+    display: table;
+    overflow: visible;
+    animation: none;
+  }
+  .matrix th:first-child,
+  .matrix td:first-child {
+    width: 176px;
+    min-width: 176px;
+    white-space: normal;
+  }
+  .matrix .group-row td {
+    white-space: nowrap;
+  }
+  .stack td.opt {
+    display: none;
+  }
+  /* Registro de ações aberto: o cartão inteiro (e o detalhe embaixo) ganha o fundo, não cada campo. */
+  .audit-log .open > td,
+  .audit-detail > td {
+    background: transparent;
+  }
+  .audit-log .open,
+  .audit-log .audit-detail {
+    background: var(--bg-subtle);
+  }
+  .audit-log .open {
+    border-bottom-color: transparent;
+  }
+  .audit-log .audit-detail {
+    padding-top: 0;
+  }
+  .audit-kv {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+  .users-table td.sel-col,
+  .users-table th.sel-col {
+    display: none;
+  }
+  /* O recuo do botão fantasma (10px) sai para a esquerda: o ícone alinha com os rótulos do cartão. */
+  .stack td.actions-col {
+    width: auto;
+    margin-left: -10px;
+    text-align: left;
+  }
+  /* Só o ⋯ nas ações: ele vai para o canto do cartão, na linha do título, em vez de ocupar uma linha sozinho. */
+  .table.stack tr:where(:has(> td.actions-col > .row-actions > .row-menu:only-child)) {
+    position: relative;
+  }
+  /* Só a linha do título abre espaço para o ⋯; os pares rótulo e valor seguem até a borda do cartão. */
+  .table.stack tr:where(:has(> td.actions-col > .row-actions > .row-menu:only-child)) > :where(td:first-child) {
+    padding-right: var(--space-12);
+  }
+  .stack td.actions-col:where(:has(> .row-actions > .row-menu:only-child)) {
+    position: absolute;
+    /* .table.stack .row-actions tem 6px de respiro em cima: o botão de 28px fica centrado na primeira linha. */
+    top: calc(var(--space-2) - var(--space-1-5));
+    right: var(--space-2);
+    width: auto;
+    margin: 0;
+    padding: 0;
+  }
+  .actions-col .row-actions {
+    justify-content: flex-start;
+  }
+  .grid-2.omni-form-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .omni-toolbar > .omni-search {
+    flex-basis: 100%;
+  }
+  .stack td.omni-message {
+    min-width: 0;
+    max-width: none;
+  }
+  /* URL de callback: longa demais para dividir a linha com o rótulo; desce para baixo dele, alinhada à esquerda. */
+  .kv td.oauth-callback {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    row-gap: 0;
+    text-align: left;
+    white-space: normal;
+  }
+  .oauth-callback::before {
+    flex-basis: 100%;
+  }
+  .oauth-callback code {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .account-col .danger-zone {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .two-factor .codes {
+    columns: 1;
+  }
+  .bulk-bar .bulk-clear {
+    margin-left: 0;
+  }
+}
+@media (min-width: 761px) and (max-width: 1199px) {
+  .ldap-actionbar.sticky,
+  .imp-actionbar {
+    bottom: calc(var(--space-4) - var(--space-6));
+  }
+  .omni-admin {
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: var(--space-6);
+  }
+  .settings-layout {
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: var(--space-6);
+  }
+  .setting-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+  .setting-label {
+    padding-top: 0;
+  }
+  .page-body > .save-bar {
+    margin: auto calc(var(--space-6) * -1) calc(var(--space-6) * -1);
+    bottom: calc(var(--space-6) * -1);
+    padding: 0 var(--space-6);
+  }
+}
+@media (max-width: 760px) {
+  .page-actions .head-search {
+    width: 100%;
+  }
+  .page-actions:has(.head-search) {
+    flex: 1 0 100%;
+  }
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .imp-actionbar {
+    bottom: var(--space-2);
+  }
+  .ldap-actionbar.sticky {
+    bottom: var(--space-2);
+  }
+  /* Celular: as seções do Omnichannel viram uma faixa que rola de lado. */
+  .omni-admin {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+  .seg-nav.omni-subnav {
+    position: static;
+    flex-direction: row;
+    gap: var(--space-1);
+    max-width: none;
+    margin: 0 calc(var(--space-4) * -1);
+    padding: 0 var(--space-4) var(--space-1);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .omni-subnav button {
+    min-height: 36px;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+  }
+  .omni-subnav button.on {
+    border-color: transparent;
+  }
+  /* Seções escondidas de um lado (useEdgeFade): a borda daquele lado esmaece, em vez de cortar o rótulo seco. */
+  .omni-subnav[data-fade='end'] {
+    mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
+  }
+  .omni-subnav[data-fade='start'] {
+    mask-image: linear-gradient(90deg, transparent, #000 32px);
+  }
+  .omni-subnav[data-fade='both'] {
+    mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  }
+  /* Celular: o grupo é escolhido num botão com cara de select, que abre a folha com os grupos (10.4). */
+  .settings-main > .menu-wrap {
+    display: block;
+    margin-bottom: var(--space-4);
+  }
+  .setting-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+  .setting-label {
+    padding-top: 0;
+  }
+  .page-body > .save-bar {
+    bottom: 0;
+    flex-wrap: wrap;
+    margin: auto calc(var(--space-4) * -1) calc(var(--space-4) * -1);
+    padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---------- Toque: alvos de 44px ----------
+   Com ponteiro grosso, os controles pequenos destas páginas ganham 44px de área sem mudar o desenho. */
+@media (pointer: coarse) {
+  /* A chave da configuração mantém o ícone de 14px no mesmo lugar; as margens negativas evitam que a linha cresça
+     e que o ícone se afaste do rótulo. Sem fundo, o hover que fica preso depois do toque não cobre o rótulo. */
+  .icon-btn.setting-key {
+    width: var(--touch);
+    height: var(--touch);
+    margin-block: calc((var(--touch) - 22px) / -2);
+    margin-inline: calc(-22px - (var(--touch) - 22px) / 2) calc((var(--touch) - 22px) / -2);
+    background: transparent;
+  }
+  /* O interruptor do LDAP cresce para 44px: a primeira linha do texto continua no centro dele. */
+  .toggle-field > .toggle-text {
+    padding-top: var(--space-3);
+  }
+  /* No rótulo só está a trilha (36px): 4px de cada lado completam os 44px sem mover nada. */
+  .toggle-field > .toggle {
+    padding-inline: 4px;
+    margin-inline: -4px;
+  }
+  .setting-control > .toggle,
+  .ldap-page > .tabs button {
+    min-height: var(--touch);
+  }
+  .ldap-page > .tabs button {
+    height: var(--touch);
+  }
+  .actions-col .btn {
+    min-width: var(--touch);
+    min-height: var(--touch);
+    justify-content: center;
+  }
+  .profile-who .btn,
+  .settings-main > .btn,
+  .omni-card .btn,
+  .btn.callout-action {
+    min-height: var(--touch);
+  }
+  .matrix .check-cell {
+    width: var(--touch);
+    height: var(--touch);
+  }
+  .omni-subnav button {
+    min-height: var(--touch);
+  }
+  /* Segmentado dos filtros: sem o recuo interno, os botões ocupam os 44px e o raio acompanha a borda. */
+  .admin-filters .seg-nav {
+    padding: 0;
+  }
+  .admin-filters .seg-nav button {
+    height: var(--touch);
+    border-radius: var(--radius-md);
+  }
+  .oauth-callback .btn {
+    min-width: var(--touch);
+    min-height: var(--touch);
+    justify-content: center;
+  }
+  /* Nome que abre a edição (button.link): a área de toque cresce para 44px sem mudar a linha. */
+  .omni-card td > .link {
+    min-height: var(--touch);
+    display: inline-flex;
+    align-items: center;
+  }
+  .omni-order-actions .btn {
+    min-width: var(--touch);
+    min-height: var(--touch);
+    justify-content: center;
+  }
+}

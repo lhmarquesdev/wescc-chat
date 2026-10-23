@@ -38,11 +38,14 @@ export const EMOJI: Record<string, string> = {
   sweat_drops: '💦', droplet: '💧', ok: '🆗', new: '🆕', free: '🆓', sos: '🆘', cool: '🆒', top: '🔝', soon: '🔜',
 };
 
+// O JS põe chaves numéricas ('100') antes das outras: sem o filtro, o 💯 abriria a lista de rostos.
+const FACE_KEYS = Object.keys(EMOJI).filter((k) => !/^\d+$/.test(k));
+
 export const EMOJI_CATEGORIES: { name: string; icon: string; items: string[] }[] = [
   {
     name: 'Rostos',
     icon: '😄',
-    items: Object.keys(EMOJI).slice(0, Object.keys(EMOJI).indexOf('wave')),
+    items: FACE_KEYS.slice(0, FACE_KEYS.indexOf('wave')),
   },
   {
     name: 'Pessoas',

@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../../lib/api';
-import { formatDateTime, formatRelative } from '../../lib/format';
+import { badgeCount, formatDateTime, formatRelative } from '../../lib/format';
 import { usePermission, useStore } from '../../lib/store';
-import { LIVECHAT_STATUS } from '../../components/LivechatPanel';
-import { Empty, Field, Modal, Pager, Spinner, useAsync } from '../../components/ui';
+import { Icon } from '../../components/Icon';
+import { LivechatStatus, VisitorAvatar } from '../../components/LivechatPanel';
+import { useIsPhone } from '../../components/overlay';
+import { isMentionBadge } from '../../components/navState';
+import { confirmDialog, Empty, Field, Modal, Pager, SearchInput, SkeletonList, SkeletonTable, useAsync } from '../../components/ui';
 import { OmniAnalytics } from './OmniAnalytics';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 
+// Disponibilidade do agente para novos atendimentos (barra lateral e navegação do Atendimento).
 export function AgentStatusToggle() {
   const status = useStore((s) => s.agentStatus);
   const me = useStore((s) => s.me);
@@ -16,13 +20,48 @@ export function AgentStatusToggle() {
   const on = status === 'available';
   return (
     <button
-      className={`btn small ${on ? 'primary' : ''}`}
+      type="button"
+      role="switch"
+      aria-checked={on}
+      className={on ? 'agent-toggle on' : 'agent-toggle'}
       title="Receber novos atendimentos"
       onClick={() => api.post('livechat/agent.status', { status: on ? 'not-available' : 'available' }).catch(fail)}
     >
-      {on ? '● Disponível' : '○ Indisponível'}
+      <span className="agent-dot" aria-hidden="true" />
+      <span className="agent-label">{on ? 'Disponível na fila' : 'Indisponível na fila'}</span>
+      <span className="toggle-track" aria-hidden="true" />
     </button>
   );
+}
+
+// Erro numa seção não derruba a navegação do Atendimento: a seção mostra o erro e o resto continua.
+class SectionBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: unknown) {
+    console.error(error);
+  }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="card omni-empty">
+        <Empty
+          icon="error"
+          tone="danger"
+          title="Algo deu errado"
+          action={
+            <button type="button" className="btn" onClick={() => location.reload()}>
+              Recarregar
+            </button>
+          }
+        >
+          Recarregue a página. Se continuar, avise o suporte.
+        </Empty>
+      </div>
+    );
+  }
 }
 
 export function OmnichannelPage() {
@@ -33,26 +72,59 @@ export function OmnichannelPage() {
   const canAnalytics = usePermission('view-livechat-analytics');
   const canManage = usePermission('view-livechat-manager');
   const queueCount = useStore((s) => Object.keys(s.queue).length);
+  const nav = useRef<HTMLElement>(null);
+  // No celular a navegação é uma faixa que rola para o lado: a aba ativa fica à vista também quando a página abre direto nela.
+  useEffect(() => {
+    nav.current?.querySelector('a.active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }, [section]);
   return (
-    <div className="page with-nav">
-      <nav className="page-nav">
-        <h2>Omnichannel</h2>
-        <div style={{ padding: '0 10px 8px' }}>
-          <AgentStatusToggle />
-        </div>
-        <NavLink to="/omnichannel/queue">📥 Fila {queueCount > 0 && <span className="badge mention">{queueCount}</span>}</NavLink>
-        {canCurrent && <NavLink to="/omnichannel/current">💬 Conversas</NavLink>}
-        {canContacts && <NavLink to="/omnichannel/contacts">📇 Contatos</NavLink>}
-        {canCanned && <NavLink to="/omnichannel/canned">⚡ Respostas prontas</NavLink>}
-        {canAnalytics && <NavLink to="/omnichannel/analytics">📊 Relatórios</NavLink>}
-        {canManage && <NavLink to="/admin/omnichannel">⚙️ Gestão</NavLink>}
+    <div className="page with-nav omni-page">
+      <nav className="page-nav" aria-label="Atendimento" ref={nav}>
+        <h2>Atendimento</h2>
+        <NavLink to="/omnichannel/queue">
+          <Icon name="queue" />
+          Fila
+          {queueCount > 0 && <span className="badge group">{badgeCount(queueCount)}</span>}
+        </NavLink>
+        {canCurrent && (
+          <NavLink to="/omnichannel/current">
+            <Icon name="conversations" />
+            Conversas
+          </NavLink>
+        )}
+        {canContacts && (
+          <NavLink to="/omnichannel/contacts">
+            <Icon name="contacts" />
+            Contatos
+          </NavLink>
+        )}
+        {canCanned && (
+          <NavLink to="/omnichannel/canned">
+            <Icon name="canned" />
+            Respostas prontas
+          </NavLink>
+        )}
+        {canAnalytics && (
+          <NavLink to="/omnichannel/analytics">
+            <Icon name="reports" />
+            Relatórios
+          </NavLink>
+        )}
+        {canManage && (
+          <NavLink to="/admin/omnichannel">
+            <Icon name="manage" />
+            Gestão
+          </NavLink>
+        )}
       </nav>
       <div className="page-body">
-        {section === 'queue' && <QueuePage />}
-        {section === 'current' && <CurrentChats />}
-        {section === 'contacts' && <Contacts />}
-        {section === 'canned' && <CannedResponses />}
-        {section === 'analytics' && <OmniAnalytics />}
+        <SectionBoundary key={section}>
+          {section === 'queue' && <QueuePage />}
+          {section === 'current' && <CurrentChats />}
+          {section === 'contacts' && <Contacts />}
+          {section === 'canned' && <CannedResponses />}
+          {section === 'analytics' && <OmniAnalytics />}
+        </SectionBoundary>
       </div>
     </div>
   );
@@ -97,66 +169,101 @@ function QueuePage() {
   };
   return (
     <>
-      <div className="page-title-row">
+      <div className="page-title-row page-head">
         <h1>Fila de atendimento</h1>
+        {list.length > 0 && <span className="pill">{list.length === 1 ? '1 aguardando' : `${list.length} aguardando`}</span>}
+      </div>
+      {/* No computador o interruptor fica na barra lateral; no celular, aqui no topo da fila (a barra do título vem
+          antes: ela é o primeiro filho do .page-body, como nas outras páginas). */}
+      <div className="omni-agent">
+        <AgentStatusToggle />
       </div>
       {!list.length ? (
-        <Empty>Ninguém aguardando. 🎉</Empty>
+        <div className="card omni-empty">
+          <Empty icon="all-done" title="Ninguém aguardando">
+            Novos atendimentos aparecem aqui assim que chegarem.
+          </Empty>
+        </div>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Visitante</th>
-              <th>Mensagem</th>
-              <th>Departamento</th>
-              <th>Prioridade</th>
-              <th>Aguardando</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((i: any, idx) => {
-              const late = i.slaDue && new Date(i.slaDue) < new Date();
-              return (
-                <tr key={i.rid}>
-                  <td>{idx + 1}</td>
-                  <td>
-                    <strong>{i.v.name || i.v.username}</strong>
-                  </td>
-                  <td className="ellipsis-cell">{i.message}</td>
-                  <td>{i.departmentName ?? '—'}</td>
-                  <td>{i.priority ? <span className="pill accent">{i.priority.name}</span> : '—'}</td>
-                  <td className={late ? 'neg' : ''}>
-                    {formatRelative(i.queuedAt)}
-                    {late && ' · SLA estourado'}
-                  </td>
-                  <td className="row-actions">
-                    <button className="btn small" onClick={() => navigate(`/live/${i.rid}`)}>
-                      Ver
-                    </button>
-                    {canTake && (
-                      <button className="btn small primary" onClick={() => take(i.rid)}>
-                        Assumir
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="card omni-flush">
+          <table className="table stack queue-table">
+            <thead>
+              <tr>
+                <th className="num queue-pos omni-wide">#</th>
+                <th>Visitante</th>
+                <th>Mensagem</th>
+                <th className="omni-wide">Departamento</th>
+                <th className="omni-wide">Prioridade</th>
+                <th>Aguardando</th>
+                <th>
+                  <span className="visually-hidden">Ações</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((i: any, idx) => {
+                const late = i.slaDue && new Date(i.slaDue) < new Date();
+                return (
+                  <tr key={i.rid}>
+                    <td className="num queue-pos omni-wide">{idx + 1}</td>
+                    <td className="queue-who">
+                      <div className="cell-entity">
+                        <VisitorAvatar name={i.v.name || i.v.username} size={28} />
+                        <div>
+                          <span className="cell-name">{i.v.name || i.v.username}</span>
+                          {i.v.email && <span className="cell-sub omni-wide-only">{i.v.email}</span>}
+                          {/* Cartão estreito: departamento e prioridade numa linha só, no lugar das colunas. */}
+                          <span className="cell-sub omni-narrow">{[i.departmentName, i.priority?.name].filter(Boolean).join(' · ') || i.v.email}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="queue-msg" title={i.message}>
+                      <span className="queue-msg-text">{i.message}</span>
+                    </td>
+                    <td className="omni-wide omni-cut">{i.departmentName ?? <span className="muted">—</span>}</td>
+                    <td className="omni-wide nowrap">{i.priority ? <span className="pill">{i.priority.name}</span> : <span className="muted">—</span>}</td>
+                    <td className="nowrap queue-since">
+                      <span className="queue-wait">
+                        <Icon name="wait-time" size={14} />
+                        {formatRelative(i.queuedAt)}
+                      </span>
+                      {late && <span className="pill err dot">SLA estourado</span>}
+                    </td>
+                    <td className="num queue-act">
+                      <div className="row-actions">
+                        <button className="btn small ghost" onClick={() => navigate(`/live/${i.rid}`)}>
+                          Ver
+                        </button>
+                        {canTake && (
+                          <button className="btn small primary" onClick={() => take(i.rid)}>
+                            Assumir
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
-      <h2 style={{ marginTop: 24 }}>Meus atendimentos ({mySubs.length})</h2>
+      <div className="omni-section-head">
+        <h2>Meus atendimentos</h2>
+        {mySubs.length > 0 && <span className="pill">{mySubs.length}</span>}
+      </div>
       {!mySubs.length ? (
-        <Empty>Nenhum atendimento em andamento.</Empty>
+        <Empty>Nenhum atendimento em andamento. Assuma uma conversa da fila para começar.</Empty>
       ) : (
-        <div className="card">
+        <div className="card omni-flush omni-mine">
           {mySubs.map((s) => (
-            <button key={s.rid} className="list-row link-row" onClick={() => navigate(`/live/${s.rid}`)}>
-              🎧 <strong>{s.fname || s.name}</strong>
+            <button key={s.rid} type="button" className="list-row link-row" onClick={() => navigate(`/live/${s.rid}`)}>
+              <VisitorAvatar name={s.fname || s.name} size={32} />
+              <span className="omni-mine-name">{s.fname || s.name}</span>
               <span className="spacer" />
-              {s.unread > 0 && <span className="badge mention">{s.unread}</span>}
+              {/* Mesmo selo da barra lateral: vermelho só com menção. */}
+              {s.unread > 0 && <span className={isMentionBadge(s) ? 'badge mention' : 'badge'}>{badgeCount(s.unread)}</span>}
+              <Icon name="next" className="omni-mine-go" />
             </button>
           ))}
         </div>
@@ -167,6 +274,7 @@ function QueuePage() {
 
 function CurrentChats() {
   const navigate = useNavigate();
+  const phone = useIsPhone();
   const [f, setF] = useState({ text: '', status: 'queued,open,onhold', departmentId: '', agent: '', from: '', to: '', tags: '' });
   const [offset, setOffset] = useState(0);
   const deps = useAsync(() => api.get('livechat/department', { count: 200 }).catch(() => ({ departments: [] })), []);
@@ -187,76 +295,177 @@ function CurrentChats() {
     [f, offset],
   );
   const set = (patch: Partial<typeof f>) => (setF({ ...f, ...patch }), setOffset(0));
+  const filtered = f.text || f.status !== 'queued,open,onhold' || f.departmentId || f.agent || f.tags || f.from || f.to;
+  const [sheet, setSheet] = useState(false);
+  // Filtros fora do padrão (a busca fica de fora: ela continua à vista).
+  const activeFilters = [f.status !== 'queued,open,onhold', f.departmentId, f.agent, f.tags, f.from || f.to].filter(Boolean).length;
+  const clearFilters = () => (setF({ text: f.text, status: 'queued,open,onhold', departmentId: '', agent: '', from: '', to: '', tags: '' }), setOffset(0));
+  // Na folha do celular cada controle ganha o rótulo; na barra do computador o rótulo é o próprio texto do controle.
+  const filterControls = (labeled: boolean) => {
+    const wrap = (label: string, el: ReactNode) => (labeled ? <Field label={label}>{el}</Field> : el);
+    return (
+      <>
+        {wrap(
+          'Situação',
+          <select aria-label="Situação" value={f.status} onChange={(e) => set({ status: e.target.value })}>
+            <option value="queued,open,onhold">Em andamento</option>
+            <option value="queued">Na fila</option>
+            <option value="open">Em atendimento</option>
+            <option value="onhold">Em espera</option>
+            <option value="closed">Encerradas</option>
+            <option value="">Todas</option>
+          </select>,
+        )}
+        {wrap(
+          'Departamento',
+          <select aria-label="Departamento" value={f.departmentId} onChange={(e) => set({ departmentId: e.target.value })}>
+            <option value="">Todos os departamentos</option>
+            {deps.data?.departments.map((d: any) => (
+              <option key={d._id} value={d._id}>
+                {d.name}
+              </option>
+            ))}
+          </select>,
+        )}
+        {wrap(
+          'Agente',
+          <select aria-label="Agente" value={f.agent} onChange={(e) => set({ agent: e.target.value })}>
+            <option value="">Todos os agentes</option>
+            {agents.data?.users.map((a: any) => (
+              <option key={a._id} value={a._id}>
+                {a.name}
+              </option>
+            ))}
+          </select>,
+        )}
+        {wrap('Tags', <input className="omni-tags" aria-label="Tags" placeholder="Tags, separadas por vírgula" value={f.tags} onChange={(e) => set({ tags: e.target.value })} />)}
+        {wrap(
+          'Período',
+          <div className="omni-dates" role="group" aria-label="Período">
+            <input type="date" aria-label="De" title="De" value={f.from} max={f.to || undefined} onChange={(e) => set({ from: e.target.value })} />
+            <span aria-hidden="true">–</span>
+            <input type="date" aria-label="Até" title="Até" value={f.to} min={f.from || undefined} onChange={(e) => set({ to: e.target.value })} />
+          </div>,
+        )}
+      </>
+    );
+  };
   return (
     <>
-      <h1>Conversas</h1>
-      <div className="filters">
-        <input placeholder="Visitante, e-mail ou assunto" value={f.text} onChange={(e) => set({ text: e.target.value })} />
-        <select value={f.status} onChange={(e) => set({ status: e.target.value })}>
-          <option value="queued,open,onhold">Em andamento</option>
-          <option value="queued">Na fila</option>
-          <option value="open">Em atendimento</option>
-          <option value="onhold">Em espera</option>
-          <option value="closed">Encerradas</option>
-          <option value="">Todas</option>
-        </select>
-        <select value={f.departmentId} onChange={(e) => set({ departmentId: e.target.value })}>
-          <option value="">Todos os departamentos</option>
-          {deps.data?.departments.map((d: any) => (
-            <option key={d._id} value={d._id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-        <select value={f.agent} onChange={(e) => set({ agent: e.target.value })}>
-          <option value="">Todos os agentes</option>
-          {agents.data?.users.map((a: any) => (
-            <option key={a._id} value={a._id}>
-              {a.name}
-            </option>
-          ))}
-        </select>
-        <input placeholder="Tags (vírgula)" value={f.tags} onChange={(e) => set({ tags: e.target.value })} />
-        <input type="date" value={f.from} onChange={(e) => set({ from: e.target.value })} />
-        <input type="date" value={f.to} onChange={(e) => set({ to: e.target.value })} />
+      <div className="page-title-row page-head">
+        <h1>Conversas</h1>
+        {data && <span className="pill">{data.total === 1 ? '1 conversa' : `${data.total} conversas`}</span>}
       </div>
-      {loading ? (
-        <Spinner />
+      <div className="omni-filters">
+        <SearchInput className="omni-search" placeholder="Visitante, e-mail ou assunto" value={f.text} onChange={(text) => set({ text })} />
+        {phone ? (
+          // Celular: os cinco filtros numa folha, atrás de um botão só (eles ocupavam a tela antes do primeiro resultado).
+          <button type="button" className="btn omni-filter-btn" onClick={() => setSheet(true)}>
+            <Icon name="search-filters" />
+            Filtros
+            {activeFilters > 0 && <span className="badge">{activeFilters}</span>}
+          </button>
+        ) : (
+          <div className="filters">
+            {filterControls(false)}
+            {filtered && (
+              <button type="button" className="btn ghost" onClick={clearFilters}>
+                Limpar filtros
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {phone && sheet && (
+        <Modal
+          title="Filtros"
+          variant="sheet"
+          onClose={() => setSheet(false)}
+          footer={
+            <>
+              <button type="button" className="btn" disabled={!activeFilters} onClick={clearFilters}>
+                Limpar
+              </button>
+              <button type="button" className="btn primary" onClick={() => setSheet(false)}>
+                Ver conversas
+              </button>
+            </>
+          }
+        >
+          <div className="form">{filterControls(true)}</div>
+        </Modal>
+      )}
+      {loading && !data ? (
+        <SkeletonTable rows={6} cols={5} />
       ) : !data?.rooms.length ? (
-        <Empty>Nenhuma conversa encontrada.</Empty>
+        <div className="card omni-empty">
+          <Empty icon="conversations" title="Nenhuma conversa encontrada">
+            {filtered ? 'Confira os filtros ou busque por outro visitante.' : 'As conversas do Atendimento aparecem aqui.'}
+          </Empty>
+        </div>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Visitante</th>
-              <th>Agente</th>
-              <th>Departamento</th>
-              <th>Status</th>
-              <th>Tags</th>
-              <th>Início</th>
-              <th>Mensagens</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.rooms.map((r: any) => (
-              <tr key={r._id} className="clickable" onClick={() => navigate(`/live/${r._id}`)}>
-                <td>
-                  <strong>{r.v.name}</strong>
-                  {r.topic && <div className="muted small ellipsis">{r.topic}</div>}
-                </td>
-                <td>{r.servedBy ? `@${r.servedBy.username}` : '—'}</td>
-                <td>{r.departmentName ?? '—'}</td>
-                <td>
-                  <span className={`pill ${r.status === 'open' ? 'accent' : ''}`}>{LIVECHAT_STATUS[r.status]}</span>
-                  {r.priority && <span className="pill">{r.priority.name}</span>}
-                </td>
-                <td className="small">{r.tags.join(', ')}</td>
-                <td className="nowrap">{formatDateTime(r.ts)}</td>
-                <td>{r.messages}</td>
+        <div className="card omni-flush">
+          <table className="table stack omni-chats">
+            <thead>
+              <tr>
+                <th>Visitante</th>
+                <th>Agente</th>
+                <th className="omni-wide">Departamento</th>
+                <th>Situação</th>
+                <th className="omni-wide">Tags</th>
+                <th>Início</th>
+                <th className="num omni-wide">Mensagens</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.rooms.map((r: any) => (
+                <tr key={r._id} className="clickable" tabIndex={0} onClick={() => navigate(`/live/${r._id}`)} onKeyDown={(e) => e.key === 'Enter' && navigate(`/live/${r._id}`)}>
+                  <td className="omni-chats-who">
+                    <div className="cell-entity">
+                      <VisitorAvatar name={r.v.name} size={28} />
+                      <div>
+                        <span className="cell-name">{r.v.name}</span>
+                        {r.topic && <span className="cell-sub omni-wide-only">{r.topic}</span>}
+                        {/* Sem a coluna do departamento, ele vem antes do assunto. */}
+                        {(r.departmentName || r.topic) && <span className="cell-sub omni-mid">{[r.departmentName, r.topic].filter(Boolean).join(' · ')}</span>}
+                        {/* Cartão compacto: agente e departamento numa linha, a hora na de baixo (juntos, cortavam no celular). */}
+                        <span className="cell-sub omni-phone">
+                          {[r.servedBy ? r.servedBy.name || `@${r.servedBy.username}` : 'Sem agente', r.departmentName].filter(Boolean).join(' · ')}
+                        </span>
+                        <span className="cell-sub omni-phone">{formatRelative(r.ts)}</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="omni-col omni-cut omni-chats-agent">{r.servedBy ? r.servedBy.name || `@${r.servedBy.username}` : <span className="muted">—</span>}</td>
+                  <td className="omni-wide omni-cut">{r.departmentName ?? <span className="muted">—</span>}</td>
+                  <td className="omni-chats-st">
+                    <span className="omni-pills">
+                      <LivechatStatus status={r.status} />
+                      {r.priority && <span className="pill">{r.priority.name}</span>}
+                    </span>
+                  </td>
+                  <td className="omni-wide">
+                    {r.tags.length ? (
+                      <span className="omni-pills">
+                        {r.tags.map((t: string) => (
+                          <span key={t} className="pill">
+                            {t}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td className="nowrap omni-col">
+                    <time dateTime={r.ts}>{formatDateTime(r.ts)}</time>
+                  </td>
+                  <td className="num omni-wide">{r.messages}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {data && <Pager offset={offset} count={50} total={data.total} onChange={setOffset} />}
     </>
@@ -270,37 +479,61 @@ function Contacts() {
   const { data, loading, reload } = useAsync(() => api.get('livechat/visitors.search', { text, offset, count: 50 }), [text, offset]);
   return (
     <>
-      <h1>Contatos</h1>
-      <input className="search-input" placeholder="Buscar por nome, e-mail ou telefone" value={text} onChange={(e) => (setText(e.target.value), setOffset(0))} />
-      {loading ? (
-        <Spinner />
+      <div className="page-title-row page-head">
+        <h1>Contatos</h1>
+        {data && <span className="pill">{data.total === 1 ? '1 contato' : `${data.total} contatos`}</span>}
+      </div>
+      <SearchInput placeholder="Buscar por nome, e-mail ou telefone" value={text} onChange={(v) => (setText(v), setOffset(0))} />
+      {loading && !data ? (
+        <SkeletonTable rows={6} cols={4} />
       ) : !data?.visitors.length ? (
-        <Empty>Nenhum contato.</Empty>
+        <div className="card omni-empty">
+          <Empty icon="contacts" title={text ? `Nada encontrado para "${text}"` : 'Nenhum contato ainda'}>
+            {text ? 'Confira a grafia ou busque por outro nome.' : 'Quem conversa pelo Atendimento vira um contato aqui.'}
+          </Empty>
+        </div>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Nome</th>
-              <th>E-mail</th>
-              <th>Telefone</th>
-              <th>Conversas</th>
-              <th>Última conversa</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.visitors.map((v: any) => (
-              <tr key={v._id} className="clickable" onClick={() => setOpen(v)}>
-                <td>
-                  <strong>{v.name}</strong>
-                </td>
-                <td>{v.email ?? '—'}</td>
-                <td>{v.phone ?? '—'}</td>
-                <td>{v.chats}</td>
-                <td>{v.lastChat ? formatDateTime(v.lastChat.ts) : '—'}</td>
+        <div className="card omni-flush">
+          <table className="table stack omni-contacts">
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th className="omni-wide">E-mail</th>
+                <th>Telefone</th>
+                <th className="num">Conversas</th>
+                <th>Última conversa</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.visitors.map((v: any) => (
+                <tr key={v._id} className="clickable" tabIndex={0} onClick={() => setOpen(v)} onKeyDown={(e) => e.key === 'Enter' && setOpen(v)}>
+                  <td className="omni-contacts-who">
+                    <div className="cell-entity">
+                      <VisitorAvatar name={v.name} size={28} />
+                      <div>
+                        <span className="cell-name">{v.name}</span>
+                        {/* Sem a coluna do e-mail, ele vai para baixo do nome. */}
+                        {v.email && <span className="cell-sub omni-mid">{v.email}</span>}
+                        {/* Cartão compacto: e-mail (ou telefone) numa linha e a última conversa na de baixo. */}
+                        {(v.email || v.phone) && <span className="cell-sub omni-phone">{v.email || v.phone}</span>}
+                        {v.lastChat && <span className="cell-sub omni-phone">Última conversa {formatRelative(v.lastChat.ts)}</span>}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="omni-wide omni-cut">{v.email ?? <span className="muted">—</span>}</td>
+                  <td className="nowrap omni-col">{v.phone ?? <span className="muted">—</span>}</td>
+                  <td className="num omni-contacts-n">
+                    <span className="omni-count" title={v.chats === 1 ? '1 conversa' : `${v.chats} conversas`}>
+                      <Icon name="conversations" size={12} />
+                      {v.chats}
+                    </span>
+                  </td>
+                  <td className="nowrap omni-col">{v.lastChat ? formatDateTime(v.lastChat.ts) : <span className="muted">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {data && <Pager offset={offset} count={50} total={data.total} onChange={setOffset} />}
       {open && <ContactModal contact={open} onClose={() => (setOpen(null), reload())} />}
@@ -324,12 +557,24 @@ function ContactModal({ contact, onClose }: { contact: any; onClose: () => void 
           {canRemove && (
             <button
               className="btn danger"
-              onClick={() => confirm('Remover o contato e todo o histórico de conversas? Não dá para desfazer.') && api.del(`livechat/visitors/${contact._id}`).then(onClose).catch(fail)}
+              onClick={async () => {
+                const yes = await confirmDialog({
+                  title: `Remover ${contact.name}?`,
+                  body: 'O contato e todo o histórico de conversas dele serão apagados. Não dá para desfazer.',
+                  confirmLabel: 'Remover contato',
+                  danger: true,
+                });
+                if (yes) api.del(`livechat/visitors/${contact._id}`).then(onClose).catch(fail);
+              }}
             >
+              <Icon name="delete" />
               Remover contato e dados
             </button>
           )}
           <span className="spacer" />
+          <button className="btn" onClick={onClose}>
+            {canEdit ? 'Cancelar' : 'Fechar'}
+          </button>
           {canEdit && (
             <button className="btn primary" onClick={() => api.put(`livechat/visitors/${contact._id}`, f).then(onClose).catch(fail)}>
               Salvar
@@ -351,25 +596,35 @@ function ContactModal({ contact, onClose }: { contact: any; onClose: () => void 
           <input disabled={!canEdit} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
         </Field>
         {Object.keys(contact.customFields ?? {}).length > 0 && (
-          <div className="small">
+          <dl className="lc-kv">
             {Object.entries(contact.customFields).map(([k, v]) => (
-              <div key={k}>
-                <span className="muted">{k}:</span> {String(v)}
+              <div key={k} className="lc-kv-row">
+                <dt>{k}</dt>
+                <dd>{String(v)}</dd>
               </div>
             ))}
-          </div>
+          </dl>
         )}
-        <h3>Histórico</h3>
+        <div className="omni-section-head">
+          <h3>Histórico</h3>
+          {chats.data && <span className="pill">{chats.data.rooms.length}</span>}
+        </div>
         {chats.loading ? (
-          <Spinner />
+          <SkeletonList n={3} />
+        ) : !chats.data?.rooms.length ? (
+          <Empty>Nenhuma conversa com este contato.</Empty>
         ) : (
-          chats.data?.rooms.map((r: any) => (
-            <button key={r._id} className="list-row link-row" onClick={() => (onClose(), navigate(`/live/${r._id}`))}>
-              {formatDateTime(r.ts)} · {r.servedBy ? `@${r.servedBy.username}` : 'sem agente'}
-              <span className="spacer" />
-              <span className="pill">{LIVECHAT_STATUS[r.status]}</span>
-            </button>
-          ))
+          <div className="omni-history">
+            {chats.data.rooms.map((r: any) => (
+              <button key={r._id} type="button" className="list-row link-row" onClick={() => (onClose(), navigate(`/live/${r._id}`))}>
+                <Icon name="room-livechat" />
+                <time dateTime={r.ts}>{formatDateTime(r.ts)}</time>
+                <span className="muted">{r.servedBy ? r.servedBy.name || `@${r.servedBy.username}` : 'Sem agente'}</span>
+                <span className="spacer" />
+                <LivechatStatus status={r.status} />
+              </button>
+            ))}
+          </div>
         )}
       </div>
     </Modal>
@@ -385,44 +640,79 @@ function CannedResponses() {
   const SCOPE: Record<string, string> = { global: 'Todos', department: 'Departamento', user: 'Pessoal' };
   return (
     <>
-      <div className="page-title-row">
+      <div className="page-title-row page-head">
         <h1>Respostas prontas</h1>
         <button className="btn primary" onClick={() => setEdit({ scope: manager ? 'global' : 'user', shortcut: '', text: '', tags: [] })}>
-          ＋ Nova resposta
+          <Icon name="add" />
+          Nova resposta
         </button>
       </div>
-      <p className="muted small">
-        No atendimento, digite <code>!atalho</code> para inserir. Variáveis: <code>{'{{contact.name}}'}</code>, <code>{'{{contact.email}}'}</code>, <code>{'{{agent.name}}'}</code>.
+      <p className="omni-hint">
+        No atendimento, digite <kbd>!atalho</kbd> para inserir. Variáveis: <code>{'{{contact.name}}'}</code>, <code>{'{{contact.email}}'}</code>, <code>{'{{agent.name}}'}</code>.
       </p>
-      <input className="search-input" placeholder="Buscar" value={text} onChange={(e) => (setText(e.target.value), setOffset(0))} />
-      {loading ? (
-        <Spinner />
+      <SearchInput placeholder="Buscar por atalho ou texto" value={text} onChange={(v) => (setText(v), setOffset(0))} />
+      {loading && !data ? (
+        <SkeletonTable rows={5} cols={4} />
       ) : !data?.cannedResponses.length ? (
-        <Empty>Nenhuma resposta pronta.</Empty>
+        <div className="card omni-empty">
+          <Empty
+            icon="canned"
+            title={text ? `Nada encontrado para "${text}"` : 'Nenhuma resposta pronta'}
+            action={
+              !text && (
+                <button className="btn primary" onClick={() => setEdit({ scope: manager ? 'global' : 'user', shortcut: '', text: '', tags: [] })}>
+                  <Icon name="add" />
+                  Nova resposta
+                </button>
+              )
+            }
+          >
+            {text ? 'Confira a grafia ou busque por outro atalho.' : 'Textos que você usa sempre, inseridos com !atalho durante o atendimento.'}
+          </Empty>
+        </div>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Atalho</th>
-              <th>Texto</th>
-              <th>Disponível para</th>
-              <th>Tags</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.cannedResponses.map((c: any) => (
-              <tr key={c._id} className="clickable" onClick={() => setEdit(c)}>
-                <td className="mono">!{c.shortcut}</td>
-                <td className="ellipsis-cell">{c.text}</td>
-                <td>
-                  {SCOPE[c.scope]}
-                  {c.departmentName ? `: ${c.departmentName}` : ''}
-                </td>
-                <td className="small">{c.tags.join(', ')}</td>
+        <div className="card omni-flush">
+          <table className="table stack omni-canned">
+            <thead>
+              <tr>
+                <th>Atalho</th>
+                <th>Texto</th>
+                <th>Disponível para</th>
+                <th>Tags</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.cannedResponses.map((c: any) => (
+                <tr key={c._id} className="clickable" tabIndex={0} onClick={() => setEdit(c)} onKeyDown={(e) => e.key === 'Enter' && setEdit(c)}>
+                  <td className="omni-canned-code">
+                    <code className="omni-shortcut">!{c.shortcut}</code>
+                  </td>
+                  <td className="ellipsis-cell omni-canned-text" title={c.text}>
+                    {c.text}
+                  </td>
+                  <td className="omni-canned-scope">
+                    {SCOPE[c.scope]}
+                    {c.departmentName ? `: ${c.departmentName}` : ''}
+                  </td>
+                  {/* Sem tags, a linha compacta não mostra o campo vazio. */}
+                  <td className={c.tags.length ? 'omni-canned-tags' : 'omni-canned-tags omni-col'}>
+                    {c.tags.length ? (
+                      <span className="omni-pills">
+                        {c.tags.map((t: string) => (
+                          <span key={t} className="pill">
+                            {t}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {data && <Pager offset={offset} count={50} total={data.total} onChange={setOffset} />}
       {edit && <CannedForm initial={edit} manager={manager} onClose={() => setEdit(null)} onSaved={reload} />}
@@ -449,11 +739,21 @@ function CannedForm({ initial, manager, onClose, onSaved }: { initial: any; mana
       footer={
         <>
           {initial._id && (
-            <button className="btn danger" onClick={() => api.del(`canned-responses?_id=${initial._id}`).then(() => (onSaved(), onClose())).catch(fail)}>
+            <button
+              className="btn danger"
+              onClick={async () => {
+                const yes = await confirmDialog({ title: `Excluir !${initial.shortcut}?`, body: 'A resposta pronta deixa de aparecer para os agentes.', confirmLabel: 'Excluir', danger: true });
+                if (yes) api.del(`canned-responses?_id=${initial._id}`).then(() => (onSaved(), onClose())).catch(fail);
+              }}
+            >
+              <Icon name="delete" />
               Excluir
             </button>
           )}
           <span className="spacer" />
+          <button className="btn" onClick={onClose}>
+            Cancelar
+          </button>
           <button className="btn primary" onClick={save}>
             Salvar
           </button>

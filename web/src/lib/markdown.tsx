@@ -83,7 +83,7 @@ function inline(text: string, o: Opts, keyBase: string): ReactNode[] {
       const known = name === 'all' || name === 'here' || o.mentions?.some((x) => x.username.toLowerCase() === name.toLowerCase());
       if (!known) out.push(mention);
       else {
-        const cls = name === o.me ? 'mention me' : name === 'all' || name === 'here' ? 'mention group' : 'mention';
+        const cls = name === o.me ? 'mention me' : name === 'all' || name === 'here' ? `mention group ${name}` : 'mention';
         out.push(
           <span key={k} className={cls} onClick={() => name !== 'all' && name !== 'here' && o.onUserClick?.(name)}>
             @{name}
@@ -122,10 +122,12 @@ function lines(text: string, o: Opts, keyBase: string, depth = 0): ReactNode[] {
   const out: ReactNode[] = [];
   const ls = text.split('\n');
   let quote: string[] = [];
+  let quoted = false;
   const flushQuote = (k: string) => {
     if (!quote.length) return;
     out.push(<blockquote key={k}>{lines(quote.join('\n'), o, k, depth + 1)}</blockquote>);
     quote = [];
+    quoted = true;
   };
   ls.forEach((line, i) => {
     const k = `${keyBase}-l${i}`;
@@ -134,6 +136,10 @@ function lines(text: string, o: Opts, keyBase: string, depth = 0): ReactNode[] {
       return;
     }
     flushQuote(`${k}q`);
+    // A citação já é um bloco: a linha em branco logo depois dela virava um vão a mais antes do texto seguinte.
+    const afterQuote = quoted;
+    quoted = false;
+    if (afterQuote && !line.trim()) return;
     // \s+ seguido de \S (classes disjuntas): sem isso "#" + muitos espaços + "a\u2028" volta atrás de forma quadrática.
     const h = line.match(/^(#{1,4})\s+(\S.*)$/);
     if (h) {

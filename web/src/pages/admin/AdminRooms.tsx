@@ -1,68 +1,121 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, errorMessage } from '../../lib/api';
-import { formatDateTime, roomIcon, roomPath } from '../../lib/format';
+import { formatDateTime, roomIconName, roomPath } from '../../lib/format';
 import { useStore } from '../../lib/store';
 import { UserPicker, type PickedUser } from '../../components/Pickers';
-import { Field, Modal, Pager, Spinner, Toggle, useAsync } from '../../components/ui';
+import { Icon } from '../../components/Icon';
+import { Empty, Field, Modal, Pager, SearchInput, SkeletonTable, Toggle, confirmDialog, useAsync } from '../../components/ui';
+import { PageHead, RoomCell, TableWrap, num } from './parts';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 
 const TYPE_LABEL: Record<string, string> = { c: 'Canal público', p: 'Grupo privado', d: 'Mensagem direta', l: 'Atendimento' };
 
 export function AdminRooms() {
+  const navigate = useNavigate();
   const [filter, setFilter] = useState('');
   const [types, setTypes] = useState<string[]>([]);
   const [offset, setOffset] = useState(0);
+  const [count, setCount] = useState(25);
   const [edit, setEdit] = useState<any>(null);
-  const { data, loading, reload } = useAsync(() => api.get('rooms.adminRooms', { filter, types, offset, count: 25 }), [filter, types.join(), offset]);
+  const { data, loading, reload } = useAsync(() => api.get('rooms.adminRooms', { filter, types, offset, count }), [filter, types.join(), offset, count]);
   const toggleType = (t: string) => (setTypes(types.includes(t) ? types.filter((x) => x !== t) : [...types, t]), setOffset(0));
+  const rooms: any[] = data?.rooms ?? [];
   return (
     <>
-      <h1>Salas</h1>
-      <div className="filters">
-        <input placeholder="Buscar salas" value={filter} onChange={(e) => (setFilter(e.target.value), setOffset(0))} />
-        {Object.entries(TYPE_LABEL).map(([t, l]) => (
-          <label key={t} className={`chip selectable ${types.includes(t) ? 'on' : ''}`}>
-            <input type="checkbox" hidden checked={types.includes(t)} onChange={() => toggleType(t)} />
-            {l}
-          </label>
-        ))}
+      <PageHead title="Salas" count={data?.total} />
+      <div className="filters admin-filters">
+        <SearchInput value={filter} onChange={(v) => (setFilter(v), setOffset(0))} placeholder="Buscar salas" />
+        <div className="chips" role="group" aria-label="Tipo de sala">
+          {Object.entries(TYPE_LABEL).map(([t, l]) => (
+            <label key={t} className={`chip selectable ${types.includes(t) ? 'on' : ''}`}>
+              <input type="checkbox" hidden checked={types.includes(t)} onChange={() => toggleType(t)} />
+              {l}
+            </label>
+          ))}
+        </div>
       </div>
-      {loading ? (
-        <Spinner />
+      {loading && !data ? (
+        <SkeletonTable rows={8} cols={5} />
+      ) : !rooms.length ? (
+        <Empty
+          icon="search"
+          title="Nenhuma sala encontrada"
+          action={
+            (filter || types.length > 0) && (
+              <button className="btn" onClick={() => (setFilter(''), setTypes([]), setOffset(0))}>
+                Limpar filtros
+              </button>
+            )
+          }
+        >
+          Confira a grafia ou mude os tipos escolhidos.
+        </Empty>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Nome</th>
-              <th>Tipo</th>
-              <th>Membros</th>
-              <th>Mensagens</th>
-              <th>Criada por</th>
-              <th>Criada em</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data?.rooms.map((r: any) => (
-              <tr key={r._id} className="clickable" onClick={() => setEdit(r)}>
-                <td>
-                  {roomIcon(r)} {r.fname || r.name || r.usernames?.join(', ')}
-                  {r.default && <span className="pill">padrão</span>}
-                  {r.featured && <span className="pill">destaque</span>}
-                  {r.archived && <span className="pill">arquivada</span>}
-                </td>
-                <td>{r.teamMain ? 'Time' : r.prid ? 'Discussão' : TYPE_LABEL[r.t]}</td>
-                <td>{r.usersCount}</td>
-                <td>{r.msgs}</td>
-                <td>{r.u?.username ?? '—'}</td>
-                <td className="muted">{formatDateTime(r.ts)}</td>
+        <TableWrap>
+          <table className="table stack kv">
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th className="num">Membros</th>
+                <th className="num col-md">Mensagens</th>
+                <th className="col-lg">Criada por</th>
+                <th className="col-xl">Criada em</th>
+                <th className="actions-col">
+                  <span className="visually-hidden">Ações</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rooms.map((r: any) => (
+                <tr key={r._id} className="clickable" onClick={() => setEdit(r)}>
+                  <td>
+                    <RoomCell
+                      icon={<Icon name={roomIconName(r)} />}
+                      name={
+                        <>
+                          {r.fname || r.name || r.usernames?.join(', ')}
+                          {r.default && <span className="pill tag">Padrão</span>}
+                          {r.featured && <span className="pill accent tag">Destaque</span>}
+                          {r.archived && <span className="pill tag">Arquivada</span>}
+                        </>
+                      }
+                      sub={r.teamMain ? 'Time' : r.prid ? 'Discussão' : TYPE_LABEL[r.t]}
+                    />
+                  </td>
+                  <td className="num" data-label="Membros">
+                    {/* Atendimento não tem membros (o visitante não é usuário): o zero pareceria sala vazia. */}
+                    {r.t === 'l' ? <span className="muted">—</span> : num(r.usersCount)}
+                  </td>
+                  <td className="num col-md" data-label="Mensagens">
+                    {num(r.msgs)}
+                  </td>
+                  <td className="opt nowrap col-lg" data-label="Criada por">
+                    {r.u?.username ? `@${r.u.username}` : <span className="muted">—</span>}
+                  </td>
+                  <td className="muted nowrap opt col-xl" data-label="Criada em">
+                    {formatDateTime(r.ts)}
+                  </td>
+                  <td className="actions-col">
+                    <div className="row-actions">
+                      <button type="button" className="btn small ghost" onClick={(e) => (e.stopPropagation(), navigate(roomPath(r)))}>
+                        <Icon name="open-external" />
+                        Abrir
+                      </button>
+                      <button type="button" className="btn small ghost" onClick={(e) => (e.stopPropagation(), setEdit(r))}>
+                        <Icon name="edit" />
+                        Editar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
       )}
-      {data && <Pager offset={offset} count={25} total={data.total} onChange={setOffset} />}
+      {data && data.total > 0 && <Pager offset={offset} count={count} total={data.total} onChange={setOffset} sizes={[25, 50, 100]} onCountChange={(n) => (setCount(n), setOffset(0))} />}
       {edit && <RoomEdit room={edit} onClose={() => setEdit(null)} onSaved={reload} />}
     </>
   );
@@ -104,22 +157,28 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
       fail(e);
     }
   };
+  const remove = async () => {
+    const yes = await confirmDialog({
+      title: `Excluir ${room.fname || room.name || 'a sala'}?`,
+      body: 'A sala e todas as mensagens dela são apagadas. Não dá para desfazer.',
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!yes) return;
+    (room.teamMain ? api.post('teams.delete', { teamId: room.teamId }) : api.post('rooms.delete', { roomId: room._id })).then(() => (onSaved(), onClose())).catch(fail);
+  };
   return (
     <Modal
       title={`Sala ${room.fname || room.name || ''}`}
       onClose={onClose}
       footer={
         <>
-          <button
-            className="btn danger left"
-            onClick={() =>
-              confirm('Excluir a sala e todas as mensagens?') &&
-              (room.teamMain ? api.post('teams.delete', { teamId: room.teamId }) : api.post('rooms.delete', { roomId: room._id })).then(() => (onSaved(), onClose())).catch(fail)
-            }
-          >
+          <button className="btn danger left" onClick={remove}>
+            <Icon name="delete" />
             Excluir
           </button>
           <button className="btn" onClick={() => navigate(roomPath(room))}>
+            <Icon name="open-external" />
             Abrir
           </button>
           <button className="btn primary" onClick={save}>
@@ -144,7 +203,7 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
           <textarea value={f.roomAnnouncement} onChange={(e) => setF({ ...f, roomAnnouncement: e.target.value })} />
         </Field>
         {room.t !== 'd' && (
-          <>
+          <div className="toggle-list">
             <Toggle checked={f.roomType === 'p'} onChange={(v) => setF({ ...f, roomType: v ? 'p' : 'c' })} label="Privada" />
             {(room.t === 'c' || room.t === 'p') && (
               <>
@@ -164,7 +223,7 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
             {!f.notice && <Toggle checked={f.readOnly} onChange={(v) => setF({ ...f, readOnly: v })} label="Somente leitura" />}
             <Toggle checked={f.default} onChange={(v) => setF({ ...f, default: v })} label="Padrão para novos usuários" />
             <Toggle checked={f.featured} onChange={(v) => setF({ ...f, featured: v })} label="Destaque" />
-          </>
+          </div>
         )}
         {room.t !== 'd' && (
           <Field label="Adicionar usuários">
