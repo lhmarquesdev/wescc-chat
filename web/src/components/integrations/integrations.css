@@ -1,0 +1,438 @@
+/* Integrações (Jira/Teams) no chat: cartão de issue, cartão de reunião, respostas efêmeras e pílulas.
+   Só tokens; importado pelos próprios componentes, depois dos arquivos do design system. Nunca muda .pill, .btn,
+   .callout, .card ou .msg em si. */
+
+/* ---------- Cartão de issue do Jira ---------- */
+.att-jira-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 520px;
+  margin-top: var(--space-1);
+}
+/* Prévia com "Remover prévia": o botão fica à direita da pilha, fora dos cartões (não cobre o status). */
+.att-jira-stack:where(:has(> .icon-btn)) {
+  max-width: 560px;
+  padding-right: 40px;
+}
+.att-jira-stack > .icon-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+.att-jira {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  /* Barra de 3px da categoria do status (JIRA_STATUS[…].bar); a cor nunca é o acento. */
+  box-shadow: inset 3px 0 0 var(--att-jira-bar, var(--border-strong));
+}
+.att-jira-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 20px;
+}
+.att-jira-row > .icon {
+  flex: none;
+  color: var(--fg-muted);
+}
+/* O status vai para a direita (a pílula ou a âncora da dica que a envolve). */
+.att-jira-row > :last-child {
+  margin-left: auto;
+}
+.att-jira-row .pill {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.att-jira-key {
+  flex: none;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-2);
+  text-decoration: none;
+}
+.att-jira-summary {
+  display: block;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+  color: var(--fg);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.att-jira-summary > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.att-jira-key:hover,
+.att-jira-summary:hover {
+  text-decoration: underline;
+}
+.att-jira-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+.att-jira .quote-att {
+  margin-top: 2px;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+.att-jira-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+/* No cartão da mensagem a linha 3 e as ações (só o ícone, com a dica) dividem uma linha: as ações guardam o próprio
+   espaço e só aparecem no hover e no foco, então nunca cobrem o texto e nada pula quando o mouse passa. A linha tem a
+   altura do texto (16px) e os botões de 28px saem 6px para cima (até a caixa do resumo) e para baixo (no recuo do
+   cartão): em repouso não sobra faixa vazia e todos os cartões têm a mesma altura. */
+.att-jira-row:has(> .att-jira-actions) {
+  min-height: 0;
+  margin-top: 2px;
+}
+.att-jira-row > .att-jira-meta {
+  flex: 0 1 auto;
+}
+.att-jira-row > .att-jira-actions {
+  flex: none;
+  flex-wrap: nowrap;
+  margin-block: calc((var(--lh-12) - var(--control-sm)) / 2);
+  margin-right: -6px;
+  opacity: 0;
+  transition: opacity var(--dur-1) linear;
+}
+.att-jira-actions .icon-btn {
+  width: var(--control-sm);
+  height: var(--control-sm);
+}
+.att-jira-stack > .icon-btn {
+  opacity: 0;
+  transition: opacity var(--dur-1) linear;
+}
+:where(.msg:hover, .msg:focus-within) .att-jira-row > .att-jira-actions,
+:where(.msg:hover, .msg:focus-within) .att-jira-stack > .icon-btn {
+  opacity: 1;
+}
+
+/* ---------- Cartão de reunião do Teams (como o cartão de chamada) ---------- */
+/* 360 px como o cartão de chamada, crescendo até 480 px para "Reunião do Microsoft Teams · hh:mm–hh:mm" caber numa linha. */
+.att-meeting {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: max-content;
+  min-width: min(360px, 100%);
+  max-width: min(480px, 100%);
+  margin-top: var(--space-1);
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+}
+.att-meeting > span:first-child {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.att-meeting > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.att-meeting strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+  color: var(--fg);
+}
+.att-meeting small {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.att-meeting > .btn,
+.att-meeting > .icon-btn {
+  flex-shrink: 0;
+}
+
+/* ---------- Resposta que só você vê ---------- */
+/* Moldura tracejada sobre a superfície: não pode parecer uma linha com o mouse em cima. Margem (8px) + borda (1px) +
+   recuo (11px) = os 20px das linhas, dos dois lados: o ícone e o nome ficam na coluna do avatar e do nome. */
+.msg.ephemeral {
+  --ring-surface: var(--bg-surface);
+  margin: var(--space-1) var(--space-2);
+  padding: var(--space-2) 11px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+/* div. para vencer o .msg:hover do room.css, que entra depois deste arquivo. */
+div.ephemeral:hover {
+  --ring-surface: var(--bg-surface);
+  background: var(--bg-surface);
+}
+/* Painel do tópico: as linhas recuam 16px (.thread-panel .msg do panels.css, que entra depois; div. para vencer).
+   Margem (8px) + borda + recuo (7px) = 16px. */
+.thread-panel div.ephemeral {
+  padding-left: 7px;
+  padding-right: 7px;
+}
+.ephemeral :where(.msg-left > span) {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-top: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg-muted);
+  color: var(--fg-muted);
+}
+.ephemeral :where(.msg-head > strong) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-semibold);
+  color: var(--fg);
+}
+.ephemeral-pill {
+  align-self: center;
+  height: 18px;
+  font-size: var(--fs-11);
+}
+.ephemeral > .icon-btn {
+  align-self: flex-start;
+  margin: -2px 0 0 auto;
+}
+.ephemeral :where(.msg-body) {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1-5);
+}
+.ephemeral :where(.msg-body > .icon) {
+  flex: none;
+  margin-top: 3px;
+}
+.ephemeral[data-tone='warn'] :where(.msg-body > .icon) {
+  color: var(--warn);
+}
+.ephemeral[data-tone='err'] :where(.msg-body > .icon) {
+  color: var(--danger);
+}
+.ephemeral :where(.msg-main) > .att-jira-stack {
+  max-width: none;
+  margin-top: var(--space-2);
+}
+/* Lista da resposta: cada cartão (compacto) na largura toda. */
+.att-jira-stack .att-jira-stack {
+  max-width: none;
+  margin-top: 0;
+}
+.ephemeral :where(.msg-main) > .row-actions {
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+/* Cada cartão da lista com as próprias ações logo abaixo. */
+.att-jira-stack :where(div > .att-jira-actions) {
+  margin-top: var(--space-1);
+}
+
+/* ---------- Pílula da mensagem copiada do Teams ---------- */
+.bridge-pill {
+  align-self: center;
+  height: 18px;
+  font-size: var(--fs-11);
+}
+
+/* ---------- Modais ---------- */
+/* Tipo da issue: a lista nativa com o ícone do tipo escolhido à esquerda. */
+[data-int='type'] {
+  position: relative;
+}
+[data-int='type'] > .icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  color: var(--fg-muted);
+  pointer-events: none;
+  translate: 0 -50%;
+}
+[data-int='type'] > select {
+  width: 100%;
+  padding-left: 34px;
+}
+/* Pessoas do Jira: a mesma altura carregando, vazia, com erro ou com resultados (o modal não pula enquanto a pessoa
+   digita); sem resultados, o aviso fica no meio da caixa. */
+.check-list[data-int='people'] {
+  height: 184px;
+  max-height: none;
+}
+.check-list[data-int='people']:not(:has(> label)) {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+/* "No Teams: …" no cartão do usuário: ponto de 6px com a forma da presença do chat. */
+[data-int='presence'] > .status-dot {
+  --dot: 6px;
+  margin-right: 6px;
+}
+
+/* ---------- Celular e telas de toque: ações sempre visíveis, cartões na largura toda ---------- */
+@media (hover: none), (pointer: coarse), (max-width: 760px) {
+  .att-jira-row:has(> .att-jira-actions) {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+  .att-jira-row > .att-jira-actions {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    margin: 0 0 0 -6px;
+    opacity: 1;
+  }
+  .att-jira-stack > .icon-btn {
+    opacity: 1;
+  }
+}
+@media (max-width: 760px) {
+  .att-jira-stack,
+  .att-jira-stack:where(:has(> .icon-btn)),
+  .att-meeting {
+    width: 100%;
+    max-width: none;
+  }
+  /* Como o cartão de chamada: sem espaço para o título, "Entrar" e copiar descem para a linha de baixo, alinhados ao texto. */
+  .att-meeting {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+  }
+  .att-meeting > div {
+    flex-basis: calc(100% - 36px - var(--space-3));
+  }
+  .att-meeting > .btn {
+    margin-left: calc(36px + var(--space-3));
+  }
+  /* Celular: margem (4px) + borda + recuo (7px) = os 12px das linhas; no tópico, recuo de 11px = os 16px de lá. */
+  .msg.ephemeral {
+    position: relative;
+    margin: var(--space-1);
+    padding-left: 7px;
+    padding-right: 7px;
+  }
+  .thread-panel div.ephemeral {
+    padding-left: 11px;
+    padding-right: 11px;
+  }
+  /* "Dispensar" no canto: o conteúdo usa a largura toda em vez de uma coluna vazia à direita. */
+  .ephemeral > .icon-btn {
+    position: absolute;
+    top: var(--space-1);
+    right: var(--space-1);
+    margin: 0;
+  }
+  .ephemeral :where(.msg-head) {
+    padding-right: 32px;
+  }
+}
+/* Toque: o "Entrar" mantém o tamanho visível; a área de toque cresce para 44px por baixo. */
+@media (hover: none) {
+  .att-meeting > .btn {
+    position: relative;
+  }
+  .att-meeting > .btn::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--touch));
+    height: max(100%, var(--touch));
+    transform: translate(-50%, -50%);
+  }
+}
+/* Toque: como o .btn.small do DS, a chave e o resumo (os dois abrem a issue) mantêm o desenho e a área de toque
+   cresce para 44px por baixo; a chave fica por cima do resumo. Ações que quebram em duas linhas ficam a 8px uma da
+   outra, para a área de 44px de cada botão não ser coberta pelo de baixo. */
+@media (pointer: coarse) {
+  .att-jira-actions {
+    row-gap: var(--space-2);
+  }
+  .att-jira-key,
+  .att-jira-summary {
+    position: relative;
+  }
+  .att-jira-key {
+    z-index: var(--z-raised);
+  }
+  .att-jira-key::after,
+  .att-jira-summary::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--touch));
+    height: max(100%, var(--touch));
+    transform: translate(-50%, -50%);
+  }
+}
+/* Toque: "Dispensar" com alvo de 44px. */
+@media (pointer: coarse) {
+  .ephemeral > .icon-btn {
+    width: var(--touch);
+    height: var(--touch);
+    margin: -8px -4px 0 auto;
+  }
+}
+@media (pointer: coarse) and (max-width: 760px) {
+  .ephemeral > .icon-btn {
+    top: 0;
+    right: 0;
+    margin: 0;
+  }
+  .ephemeral :where(.msg-head) {
+    padding-right: 40px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .att-jira-row > .att-jira-actions,
+  .att-jira-stack > .icon-btn {
+    transition: none;
+  }
+}

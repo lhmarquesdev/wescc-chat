@@ -11,6 +11,9 @@ import { Icon } from '../components/Icon';
 import { SideFoot, TakeoverBack, TakeoverHead } from '../components/Sidebar';
 import { QrCode } from '../components/QrCode';
 import { DeviceCell, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
+// Integrações (Jira/Teams): Contas conectadas (Jira e Microsoft 365)
+import { useIntegrationsMe } from '../lib/integrations';
+import { ConnectedAccounts } from './account/ConnectedAccounts';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -19,6 +22,9 @@ export function AccountPage() {
   const { section = 'profile' } = useParams();
   const navRef = useActiveNavInView(section);
   const canTokens = useStore((s) => s.me?.permissions.includes('create-personal-access-tokens'));
+  // Integrações (Jira/Teams): o item só aparece quando há uma conta para conectar.
+  const integrations = useIntegrationsMe();
+  const canConnected = !!integrations && ((integrations.jira.enabled && integrations.jira.userAuth !== 'off') || integrations.msteams.presence);
   return (
     <div className="page with-nav takeover account-page">
       <TakeoverHead title="Minha conta" />
@@ -47,6 +53,13 @@ export function AccountPage() {
             Tokens de acesso
           </NavLink>
         )}
+        {/* Integrações (Jira/Teams) */}
+        {canConnected && (
+          <NavLink to="/account/connected">
+            <Icon name="int-linked" />
+            Contas conectadas
+          </NavLink>
+        )}
         <SideFoot />
       </nav>
       <div className="page-body">
@@ -55,6 +68,8 @@ export function AccountPage() {
         {section === 'security' && <Security />}
         {section === 'devices' && <Devices />}
         {section === 'tokens' && <Tokens />}
+        {/* Integrações (Jira/Teams) */}
+        {section === 'connected' && <ConnectedAccounts />}
       </div>
     </div>
   );

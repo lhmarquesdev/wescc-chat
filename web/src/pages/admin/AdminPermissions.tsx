@@ -22,6 +22,8 @@ const GROUP_LABEL: Record<string, string> = {
   retention: 'Retenção',
   omnichannel: 'Atendimento',
   general: 'Geral',
+  // Integrações (Jira/Teams)
+  integrations: 'Integrações',
 };
 
 export function AdminPermissions() {
