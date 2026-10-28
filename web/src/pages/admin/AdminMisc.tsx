@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime, plural } from '../../lib/format';
 import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, FileButton, Modal, Pager, SearchInput, SkeletonList, SkeletonTable, confirmDialog, useAsync } from '../../components/ui';
 import { DeviceCell, PageHead, RoomCell, TableWrap, UserCell, deviceLabel, lastSeen } from './parts';
+// Figurinhas: a figurinha denunciada e "Remover figurinha de todas as conversas".
+import { ReportSticker } from './stickers';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -130,7 +132,13 @@ export function AdminModeration() {
 }
 
 function UserReports({ user, onClose }: { user: any; onClose: () => void }) {
-  const { data, loading } = useAsync(() => api.get('moderation.userReports', { userId: user.userId }), [user.userId]);
+  // Figurinhas: reload para atualizar a lista depois de remover uma figurinha de todas as conversas.
+  const { data, loading, reload } = useAsync(() => api.get('moderation.userReports', { userId: user.userId }), [user.userId]);
+  // Figurinhas: remover de todas as conversas resolve as denúncias da mensagem; sem nenhuma pendente, o modal fecha.
+  const [removed, setRemoved] = useState(false);
+  useEffect(() => {
+    if (removed && !loading && data && !data.reports.length) onClose();
+  }, [removed, loading, data, onClose]);
   const deleteMessages = async () => {
     const yes = await confirmDialog({
       title: 'Apagar as mensagens denunciadas?',
@@ -172,6 +180,8 @@ function UserReports({ user, onClose }: { user: any; onClose: () => void }) {
     >
       {loading && !data ? (
         <SkeletonList n={3} />
+      ) : !data?.reports.length ? (
+        <Empty icon="report" title="Nenhuma denúncia pendente" />
       ) : (
         <ul className="report-list">
           {data?.reports.map((r: any) => (
@@ -187,6 +197,8 @@ function UserReports({ user, onClose }: { user: any; onClose: () => void }) {
                 )}
               </div>
               {r.msg && <blockquote>{r.msg}</blockquote>}
+              {/* Figurinhas */}
+              {r.sticker && <ReportSticker sticker={r.sticker} messageId={r.messageId} onDone={() => (setRemoved(true), reload())} />}
               {r.description && <div className="muted small">Motivo: {r.description}</div>}
             </li>
           ))}

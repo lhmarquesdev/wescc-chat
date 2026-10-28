@@ -32,6 +32,7 @@ import {
 } from '@shared/stickerEdit';
 import { PHASH_RE, phashDistance } from '@shared/stickers';
 import { inflateRawStream, readStickerPack, readZip, zipDisplayName, ZipError, type ZipEntry } from '@shared/zipRead';
+import { createRenderer, outlineRadius, outlineVisible, type Affine } from '../../web/src/lib/stickerWorker';
 import { bytes, le16, le32, png, randomBytes, rng, webp } from './sticker-bytes';
 
 // Editor e importação de figurinhas: funções puras, sem servidor nem banco de dados.
@@ -121,7 +122,19 @@ describe('stickerEdit: margens, fundo e pincel', () => {
     const gapRed = raster(30, 10, (x) => (x === 10 ? RED : WHITE));
     expect(ones(floodFillMask(gapRed, [[0, 0]], 0))).toBe(100);
     // Semente transparente ou fora da imagem não faz nada.
-    expect(ones(floodFillMask(gapClear, [[10, 5], [-1, 3], [99, 2]], 100))).toBe(0);
+    expect(
+      ones(
+        floodFillMask(
+          gapClear,
+          [
+            [10, 5],
+            [-1, 3],
+            [99, 2],
+          ],
+          100,
+        ),
+      ),
+    ).toBe(0);
     expect(toleranceToDistance(24)).toBeCloseTo(28.8);
     expect([toleranceToDistance(-5), toleranceToDistance(100), toleranceToDistance(400), toleranceToDistance(NaN)]).toEqual([0, 120, 120, 0]);
   });
@@ -146,15 +159,19 @@ describe('stickerEdit: margens, fundo e pincel', () => {
     for (let t = 0; t <= 100; t++) {
       const limit = toleranceToDistance(t) ** 2;
       const m = floodFillMask(strip, [[0, 0]], t);
-      const wrong = colors.filter(([r, g, b], x) => (m[w + x] === 1) !== ((r - 120) ** 2 + (g - 120) ** 2 + (b - 120) ** 2 <= limit));
+      const wrong = colors.filter(([r, g, b], x) => (m[w + x] === 1) !== (r - 120) ** 2 + (g - 120) ** 2 + (b - 120) ** 2 <= limit);
       expect(wrong).toEqual([]);
     }
   });
 
   it('edgeLooksUniform', () => {
-    const disc = (bg: (x: number, y: number) => RGBA) =>
-      raster(100, 100, (x, y) => (Math.hypot(x - 50, y - 50) < 30 ? BLUE : bg(x, y)));
-    expect(edgeLooksUniform(disc(() => WHITE), 24)).toBe(true);
+    const disc = (bg: (x: number, y: number) => RGBA) => raster(100, 100, (x, y) => (Math.hypot(x - 50, y - 50) < 30 ? BLUE : bg(x, y)));
+    expect(
+      edgeLooksUniform(
+        disc(() => WHITE),
+        24,
+      ),
+    ).toBe(true);
 
     const noise = rng(7);
     const n = () => Math.round((noise() - 0.5) * 6);
@@ -173,7 +190,12 @@ describe('stickerEdit: margens, fundo e pincel', () => {
     const half = raster(100, 100, (x, y) => (y >= 50 ? [40, 30, 90, 255] : WHITE));
     expect(edgeLooksUniform(half, 24)).toBe(false);
     // Fundo já transparente: nada a remover.
-    expect(edgeLooksUniform(disc(() => CLEAR), 24)).toBe(false);
+    expect(
+      edgeLooksUniform(
+        disc(() => CLEAR),
+        24,
+      ),
+    ).toBe(false);
   });
 
   it('edgeSeeds e backgroundSeeds: o fundo liso não leva junto o que encosta na borda', () => {
@@ -208,7 +230,7 @@ describe('stickerEdit: margens, fundo e pincel', () => {
     };
     const diff = (a: Uint8Array, b: Uint8Array) => a.reduce((n, v, i) => n + (v !== b[i] ? 1 : 0), 0);
     const outside = (a: Uint8Array, b: Uint8Array) => a.reduce((n, v, i) => n + (v && !b[i] ? 1 : 0), 0);
-    const shuffled = <T,>(list: T[], seed: number) => {
+    const shuffled = <T>(list: T[], seed: number) => {
       const n = rng(seed);
       const out = [...list];
       for (let i = out.length - 1; i > 0; i--) {
@@ -222,8 +244,30 @@ describe('stickerEdit: margens, fundo e pincel', () => {
     // à direita pela coluna transparente, que a branca alcança primeiro.
     const two = raster(20, 10, (x, y) => (x === 10 ? CLEAR : x < 10 && y < 5 ? WHITE : RED));
     expect(ones(floodFillMask(two, [[0, 9]], 0))).toBe(150);
-    expect(ones(floodFillMask(two, [[0, 0], [0, 9]], 0))).toBe(200);
-    expect(ones(floodFillMask(two, [[0, 9], [0, 0]], 0))).toBe(200);
+    expect(
+      ones(
+        floodFillMask(
+          two,
+          [
+            [0, 0],
+            [0, 9],
+          ],
+          0,
+        ),
+      ),
+    ).toBe(200);
+    expect(
+      ones(
+        floodFillMask(
+          two,
+          [
+            [0, 9],
+            [0, 0],
+          ],
+          0,
+        ),
+      ),
+    ).toBe(200);
 
     // Fundo com vinheta (claro no meio, 200 nos cantos): o "Remover fundo liso" apaga exatamente a união dos
     // preenchimentos de cada semente com a própria cor, em qualquer ordem das sementes.
@@ -231,7 +275,7 @@ describe('stickerEdit: margens, fundo e pincel', () => {
       const maxD = Math.hypot(150, 150);
       const subject = new Uint8Array(300 * 300);
       const r = raster(300, 300, (x, y) => {
-        if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) < rad) return (subject[y * 300 + x] = 1), color;
+        if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) < rad) return ((subject[y * 300 + x] = 1), color);
         const g = Math.round(255 - 55 * (Math.hypot(x + 0.5 - 150, y + 0.5 - 150) / maxD) ** 2);
         return [g, g, g, 255];
       });
@@ -284,7 +328,11 @@ describe('stickerEdit: margens, fundo e pincel', () => {
 
     // Fundo com ruído no limite da tolerância: cada semente tem uma cor e o teto de trabalho corta antes de rodar todas.
     // Mesmo assim nada fora da união sai, o resultado não depende da ordem e quase toda a união sai.
-    for (const [amp, tol] of [[20, 24], [12, 15], [4, 5]]) {
+    for (const [amp, tol] of [
+      [20, 24],
+      [12, 15],
+      [4, 5],
+    ]) {
       const n = rng(amp * 7 + tol);
       const r = raster(256, 192, (x, y) => {
         const base = Math.hypot(x - 128, y - 96) < 48 ? [180, 60, 50] : [235, 235, 235];
@@ -303,14 +351,28 @@ describe('stickerEdit: margens, fundo e pincel', () => {
 
   it('paintMask apaga e restaura', () => {
     const m = new Uint8Array(100 * 100);
-    paintMask(m, 100, 100, { points: [[20, 50], [80, 50]], radius: 10, erase: true });
+    paintMask(m, 100, 100, {
+      points: [
+        [20, 50],
+        [80, 50],
+      ],
+      radius: 10,
+      erase: true,
+    });
     // O pixel conta quando o centro (x + 0,5, y + 0,5) cai a até 10 px do traço.
     expect([at(m, 100, 50, 50), at(m, 100, 50, 59), at(m, 100, 50, 40), at(m, 100, 10, 50), at(m, 100, 89, 50)]).toEqual([1, 1, 1, 1, 1]);
     expect([at(m, 100, 50, 60), at(m, 100, 50, 39), at(m, 100, 9, 50), at(m, 100, 90, 50)]).toEqual([0, 0, 0, 0]);
     expect(Math.abs(ones(m) - (60 * 20 + Math.PI * 100))).toBeLessThan(40); // cápsula de 60 × 20 com pontas redondas
     const before = Uint8Array.from(m);
 
-    paintMask(m, 100, 100, { points: [[50, 50], [100, 50]], radius: 12, erase: false });
+    paintMask(m, 100, 100, {
+      points: [
+        [50, 50],
+        [100, 50],
+      ],
+      radius: 12,
+      erase: false,
+    });
     for (let y = 0; y < 100; y++) {
       for (let x = 50; x < 100; x++) expect(at(m, 100, x, y)).toBe(0);
       for (let x = 0; x < 38; x++) expect(at(m, 100, x, y)).toBe(before[y * 100 + x]);
@@ -322,10 +384,25 @@ describe('stickerEdit: margens, fundo e pincel', () => {
     expect(ones(dot)).toBe(1);
     expect(at(dot, 20, 5, 5)).toBe(1);
     const thin = new Uint8Array(30 * 30);
-    paintMask(thin, 30, 30, { points: [[0.5, 0.5], [20.5, 7.5], [NaN, 3]], radius: 0.1, erase: true });
+    paintMask(thin, 30, 30, {
+      points: [
+        [0.5, 0.5],
+        [20.5, 7.5],
+        [NaN, 3],
+      ],
+      radius: 0.1,
+      erase: true,
+    });
     for (let x = 0; x <= 20; x++) expect(Array.from({ length: 30 }, (_, y) => at(thin, 30, x, y)).some(Boolean)).toBe(true);
     // Fora da imagem não quebra nada.
-    paintMask(thin, 30, 30, { points: [[-50, -50], [-40, -60]], radius: 5, erase: true });
+    paintMask(thin, 30, 30, {
+      points: [
+        [-50, -50],
+        [-40, -60],
+      ],
+      radius: 5,
+      erase: true,
+    });
     expect(() => paintMask(new Uint8Array(10), 4, 4, { points: [[1, 1]], radius: 1, erase: true })).toThrow(RangeError);
   });
 
@@ -382,14 +459,28 @@ describe('stickerEdit: margens, fundo e pincel', () => {
 
   it('replayMask reaplica as operações depois de mudar o recorte', () => {
     const GREEN: RGBA = [0, 200, 0, 255];
-    const src = raster(160, 120, (x, y) =>
-      x >= 60 && x < 70 && y >= 50 && y < 60 ? GREEN : x >= 40 && x < 120 && y >= 30 && y < 90 ? BLUE : WHITE,
-    );
+    const src = raster(160, 120, (x, y) => (x >= 60 && x < 70 && y >= 50 && y < 60 ? GREEN : x >= 40 && x < 120 && y >= 30 && y < 90 ? BLUE : WHITE));
     const ops: MaskOp[] = [
       { kind: 'flat-bg', tolerance: 24 },
       { kind: 'fill', x: 64.5, y: 54.5, tolerance: 10 },
-      { kind: 'brush', points: [[45, 35], [100, 80]], radius: 4, erase: true },
-      { kind: 'brush', points: [[70, 57], [90, 57]], radius: 3, erase: false },
+      {
+        kind: 'brush',
+        points: [
+          [45, 35],
+          [100, 80],
+        ],
+        radius: 4,
+        erase: true,
+      },
+      {
+        kind: 'brush',
+        points: [
+          [70, 57],
+          [90, 57],
+        ],
+        radius: 3,
+        erase: false,
+      },
     ];
     const full = replayMask(src, ops, (x, y) => [x, y], 1);
     expect(at(full, 160, 0, 0)).toBe(1); // fundo
@@ -441,8 +532,24 @@ describe('stickerEdit: margens, fundo e pincel', () => {
     };
     const flat: MaskOp = { kind: 'flat-bg', tolerance: 24 };
     const click: MaskOp = { kind: 'fill', x: 130, y: 5, tolerance: 10 };
-    const s1: MaskOp = { kind: 'brush', points: [[20, 20], [140, 100]], radius: 6, erase: true };
-    const s2: MaskOp = { kind: 'brush', points: [[70, 50], [90, 70]], radius: 4, erase: false };
+    const s1: MaskOp = {
+      kind: 'brush',
+      points: [
+        [20, 20],
+        [140, 100],
+      ],
+      radius: 6,
+      erase: true,
+    };
+    const s2: MaskOp = {
+      kind: 'brush',
+      points: [
+        [70, 50],
+        [90, 70],
+      ],
+      radius: 4,
+      erase: false,
+    };
     const replay = createMaskReplay();
     const check = (r: Raster, ops: MaskOp[], toWork: (x: number, y: number) => [number, number] = id, scale = 1) =>
       expect(Array.from(replay(r, ops, toWork, scale))).toEqual(Array.from(replayMask(r, ops, toWork, scale)));
@@ -546,6 +653,96 @@ describe('stickerEdit: margens, fundo e pincel', () => {
     const blue = withOutline(r, 3, [0, 0, 255]);
     expect(px(blue, 4 + 40 + 12, 4 + 40)).toEqual(BLUE);
   });
+
+  it('outlineVisible (prévia) dá os mesmos bytes que withOutline na imagem inteira', () => {
+    const noise = rng(5);
+    // Figura no meio, borda semitransparente e cor "escondida" nos pixels apagados (alfa 0), como deixa o applyMask.
+    const shape = raster(160, 120, (x, y) => {
+      const d = Math.hypot(x - 70, y - 64);
+      const hidden = [Math.floor(noise() * 255), 90, 30] as const;
+      if (d <= 22) return [200, 40, Math.floor(noise() * 255), 255];
+      if (d <= 25) return [200, 40, 60, Math.floor(noise() * 127) + 1];
+      return [...hidden, 0];
+    });
+    for (const R of [0, 0.5, 3, 8.7, 16, 40, 300, NaN, -2]) expect(Buffer.from(outlineVisible(shape, R).data)).toEqual(Buffer.from(withOutline(shape, R).data));
+    // Sem nada visível, ou com a figura ocupando quase tudo, cai no withOutline direto.
+    expect(Buffer.from(outlineVisible(createRaster(20, 10), 4).data)).toEqual(Buffer.from(withOutline(createRaster(20, 10), 4).data));
+    const full = raster(40, 30, () => RED);
+    expect(Buffer.from(outlineVisible(full, 6).data)).toEqual(Buffer.from(withOutline(full, 6).data));
+  });
+
+  // Largura da faixa branca na linha do meio: do primeiro pixel visível ao primeiro vermelho.
+  const whiteBand = (o: Raster) => {
+    const y = o.height >> 1;
+    let first = -1;
+    for (let x = 0; x < o.width; x++) {
+      const [r, g, b, a] = px(o, x, y);
+      if (first < 0 && a > 127) first = x;
+      if (a > 200 && r > 200 && g < 80 && b < 80) return x - first;
+    }
+    return -1;
+  };
+  const ID: Affine = [1, 0, 0, 1, 0, 0];
+
+  it('prévia: o contorno sai com a espessura pedida em px da figurinha final, com e sem margens cortadas', () => {
+    // O 8 px do controle é da figurinha salva. Um disco pequeno numa imagem transparente: cortadas as margens, o
+    // encaixe dobra; sem cortar, reduz. Um disco grande numa área de 1000 px: o encaixe reduz nos dois casos.
+    const small = raster(600, 600, (x, y) => (Math.hypot(x + 0.5 - 300, y + 0.5 - 300) < 100 ? RED : CLEAR));
+    const big = raster(1000, 1000, (x, y) => (Math.hypot(x + 0.5 - 500, y + 0.5 - 500) < 320 ? RED : CLEAR));
+    for (const r of [small, big])
+      for (const trim of [true, false])
+        for (const o of [2, 8, 16]) {
+          const res = createRenderer()({ raster: r, ops: [], outlinePx: o, trim, affine: ID, scale: 1 });
+          const band = whiteBand(res.output!);
+          expect(Math.abs(band - o), `${r.width} px, margens ${trim ? 'cortadas' : 'mantidas'}, ${o} px: faixa de ${band}`).toBeLessThanOrEqual(1);
+          expect(Math.max(res.output!.width, res.output!.height)).toBeLessThanOrEqual(512);
+        }
+    expect(outlineRadius(small, 0, true)).toBe(0);
+    expect(outlineRadius(createRaster(50, 50), 8, true)).toBe(0); // nada visível
+  });
+
+  it('prévia com recorte: o palco mostra dentro do recorte a mesma máscara da figurinha salva', () => {
+    // Fundo branco, disco vermelho grande e um quadrado azul no meio. O recorte (30 % a 70 %) tem a borda toda
+    // vermelha: "Remover fundo liso" tira o vermelho da figurinha, e o palco precisa mostrar isso, não o branco.
+    const full = raster(200, 200, (x, y) => (Math.abs(x + 0.5 - 100) < 12 && Math.abs(y + 0.5 - 100) < 12 ? BLUE : Math.hypot(x + 0.5 - 100, y + 0.5 - 100) < 90 ? RED : WHITE));
+    const cut = cropRaster(full, { x: 60, y: 60, width: 80, height: 80 });
+    expect(edgeLooksUniform(cut, 24)).toBe(true);
+    const stage = resizeArea(full, 100, 100); // o palco em meia resolução, como a imagem inteira reduzida
+    const input = {
+      raster: cut,
+      ops: [{ kind: 'flat-bg', tolerance: 24 }] as MaskOp[],
+      outlinePx: 0,
+      trim: false,
+      affine: [1, 0, 0, 1, -60, -60] as Affine,
+      scale: 1,
+      stage: { raster: stage, affine: [0.5, 0, 0, 0.5, 0, 0] as Affine },
+    };
+    const res = createRenderer()(input);
+    const out = res.output!;
+    expect(px(out, out.width >> 1, out.height >> 1)).toEqual(BLUE);
+    expect(px(out, Math.round(out.width * 0.1), out.height >> 1)[3]).toBe(0);
+    const s = res.stage;
+    expect(px(s, 35, 50)[3]).toBe(0); // vermelho dentro do recorte: apagado, como na figurinha
+    expect(px(s, 50, 50)).toEqual(BLUE);
+    expect(px(s, 20, 50)).toEqual(RED); // fora do recorte a imagem fica como está
+    expect(px(s, 2, 2)).toEqual(WHITE);
+    // Cada pixel do palco dentro do recorte tem o alfa da figurinha (antes do encaixe) no mesmo ponto.
+    const masked = applyMask(cut, replayMask(cut, input.ops, (x, y) => [x - 60, y - 60], 1), 1);
+    let diff = 0;
+    for (let y = 30; y < 70; y++) for (let x = 30; x < 70; x++) diff += Number(px(s, x, y)[3] !== px(masked, 2 * x + 1 - 60, 2 * y + 1 - 60)[3]);
+    expect(diff).toBe(0);
+    // Só o palco (gesto em andamento) e depois a figurinha: o mesmo resultado de uma prévia direta.
+    const render = createRenderer();
+    expect(render({ ...input, stageOnly: true }).output).toBeNull();
+    const after = render(input);
+    expect(Buffer.from(after.output!.data)).toEqual(Buffer.from(out.data));
+    expect(Buffer.from(after.stage.data)).toEqual(Buffer.from(s.data));
+    // Sem recorte o palco é a própria máscara, num buffer separado (o Worker o transfere).
+    const plain = render({ ...input, raster: full, affine: ID, stage: undefined });
+    const again = render({ ...input, raster: full, affine: ID, stage: undefined });
+    expect(plain.stage.data).not.toBe(again.stage.data);
+    expect(Buffer.from(plain.stage.data)).toEqual(Buffer.from(again.stage.data));
+  });
 });
 
 describe('stickerEdit: tamanhos, redimensionamento e hash', () => {
@@ -611,7 +808,14 @@ describe('stickerEdit: tamanhos, redimensionamento e hash', () => {
     expect([workSide(Infinity, 0), workSide(-Infinity, 0), workSide(600, NaN), workSide(600, Infinity)]).toEqual([1024, 1, 600, 600]); // contorno infinito conta como nenhum, como em withOutline
     // Raio enorme: imagem vazia continua sem contorno; com um pixel, tudo vira contorno.
     expect(Math.max(...outlineMask(createRaster(4, 4), 1e9))).toBe(0);
-    expect(Math.min(...outlineMask(raster(4, 4, (x, y) => (x === 0 && y === 0 ? RED : CLEAR)), 1e9))).toBe(255);
+    expect(
+      Math.min(
+        ...outlineMask(
+          raster(4, 4, (x, y) => (x === 0 && y === 0 ? RED : CLEAR)),
+          1e9,
+        ),
+      ),
+    ).toBe(255);
     expect(ones(outlineMask(r, NaN))).toBe(16);
     expect(withOutline(r, 1e9).width).toBeLessThanOrEqual(10 + 2 * 257);
   });
@@ -643,12 +847,26 @@ describe('stickerEdit: tamanhos, redimensionamento e hash', () => {
     const small = resizeArea(blocks, 2, 2);
     expect([px(small, 0, 0), px(small, 0, 1), px(small, 1, 0), px(small, 1, 1)]).toEqual([RED, BLUE, WHITE, [0, 0, 0, 255]]);
     // Transparente preto + vermelho opaco = vermelho meio transparente (sem escurecer).
-    expect(px(resizeArea(raster(2, 1, (x) => (x ? RED : CLEAR)), 1, 1), 0, 0)).toEqual([255, 0, 0, 128]);
+    expect(
+      px(
+        resizeArea(
+          raster(2, 1, (x) => (x ? RED : CLEAR)),
+          1,
+          1,
+        ),
+        0,
+        0,
+      ),
+    ).toEqual([255, 0, 0, 128]);
     // Ampliar 2× repete cada pixel.
     const big = resizeArea(small, 4, 4);
     expect(Array.from(big.data)).toEqual(Array.from(blocks.data));
     // 3 → 2: cada destino cobre 1,5 pixel de origem.
-    const ramp = resizeArea(raster(3, 1, (x) => [x * 90, x * 90, x * 90, 255]), 2, 1);
+    const ramp = resizeArea(
+      raster(3, 1, (x) => [x * 90, x * 90, x * 90, 255]),
+      2,
+      1,
+    );
     expect([px(ramp, 0, 0)[0], px(ramp, 1, 0)[0]]).toEqual([30, 150]);
     const same = resizeArea(blocks, 4, 4);
     expect(same.data).not.toBe(blocks.data);
@@ -695,7 +913,23 @@ describe('stickerEdit: tamanhos, redimensionamento e hash', () => {
   it('trabalho de 1024 px fica num tempo de editor', () => {
     const r = raster(1024, 1024, (x, y) => (Math.hypot(x - 512, y - 512) < 300 ? [200, 40, 60, 255] : [250, 250, 248, 255]));
     const t = performance.now();
-    const mask = replayMask(r, [{ kind: 'flat-bg', tolerance: 24 }, { kind: 'brush', points: [[100, 100], [900, 400]], radius: 20, erase: false }], (x, y) => [x, y], 1);
+    const mask = replayMask(
+      r,
+      [
+        { kind: 'flat-bg', tolerance: 24 },
+        {
+          kind: 'brush',
+          points: [
+            [100, 100],
+            [900, 400],
+          ],
+          radius: 20,
+          erase: false,
+        },
+      ],
+      (x, y) => [x, y],
+      1,
+    );
     const outlined = withOutline(applyMask(r, mask), 16);
     expect(alphaBounds(outlined)).not.toBeNull();
     // Folga grande: a máquina de testes é compartilhada; a meta de 150 ms é medida no navegador (§13).
@@ -987,7 +1221,10 @@ describe('zipRead: leitura de ZIP hostil', () => {
     ]);
     expect(Buffer.from(await s[0].read()).equals(a)).toBe(true);
     expect(Buffer.from(await s[1].read()).equals(a)).toBe(true);
-    const handMade = buildZip([{ name: 'e.txt', data: b, method: 8, descriptor: true }, { name: 'f.txt', data: b }]);
+    const handMade = buildZip([
+      { name: 'e.txt', data: b, method: 8, descriptor: true },
+      { name: 'f.txt', data: b },
+    ]);
     expect(Buffer.from(await readZip(handMade, inflate)[1].read()).equals(b)).toBe(true);
 
     // Nomes sem a marca UTF-8: UTF-8 válido continua UTF-8; o resto é a página 850 do Windows em português.
@@ -1029,13 +1266,25 @@ describe('zipRead: leitura de ZIP hostil', () => {
     // ZIP64: o fim do diretório em 64 bits recusa o arquivo inteiro; um arquivo ZIP64 isolado fica de fora.
     const forced = await yazlZip([{ name: 'a.png', data: img }], { forceZip64Format: true });
     expect(zipReason(() => readZip(forced, inflate))).toBe('unsupported');
-    const perEntry = readZip(await yazlZip([{ name: 'grande.png', data: img, zip64: true }, { name: 'normal.png', data: img }]), inflate);
+    const perEntry = readZip(
+      await yazlZip([
+        { name: 'grande.png', data: img, zip64: true },
+        { name: 'normal.png', data: img },
+      ]),
+      inflate,
+    );
     expect(perEntry.map((x) => x.name)).toEqual(['normal.png']);
     expect(perEntry.skipped).toEqual([{ name: 'grande.png', reason: 'unsupported', message: 'formato ZIP64 não suportado' }]);
     for (const opts of [{ total: 0xffff }, { cdOffset: 0xffffffff }, { cdSize: 0xffffffff }, { zip64Locator: true }])
       expect(zipReason(() => readZip(buildZip([{ name: 'a.png', data: img }], opts), inflate))).toBe('unsupported');
     for (const field of [{ size: 0xffffffff }, { compressedSize: 0xffffffff }, { offset: 0xffffffff }, { diskStart: 0xffff }]) {
-      const z = readZip(buildZip([{ name: 'a.png', data: img, ...field }, { name: 'b.png', data: img }]), inflate);
+      const z = readZip(
+        buildZip([
+          { name: 'a.png', data: img, ...field },
+          { name: 'b.png', data: img },
+        ]),
+        inflate,
+      );
       expect(z.map((x) => x.name)).toEqual(['b.png']);
       expect(z.skipped[0].reason).toBe('unsupported');
     }
@@ -1115,7 +1364,18 @@ describe('zipRead: leitura de ZIP hostil', () => {
     const n = readZip(buildZip(names.map((name) => ({ name, data: img }))), inflate);
     expect(n.map((x) => x.name)).toEqual(['boa.png', 'uau...png', long.slice(1)]);
     // Na revisão o nome chega limpo: controle e inversão de direção viram "�", nome longo ganha reticências no meio.
-    const shown = ['../fora.png', 'pasta/../../fora.png', '/absoluto.png', 'C:/windows.png', 'pasta\\barra.png', 'nul�.png', 'tab�ulador.png', 'foto�gnp.exe', 'nova�linha.png', 'c1�.png'];
+    const shown = [
+      '../fora.png',
+      'pasta/../../fora.png',
+      '/absoluto.png',
+      'C:/windows.png',
+      'pasta\\barra.png',
+      'nul�.png',
+      'tab�ulador.png',
+      'foto�gnp.exe',
+      'nova�linha.png',
+      'c1�.png',
+    ];
     expect(n.skipped).toEqual([
       ...shown.map((name) => ({ name, reason: 'name', message: 'nome de arquivo inválido' })),
       { name: `${'a'.repeat(50)}…${'a'.repeat(25)}.png`, reason: 'name', message: 'nome de arquivo inválido' },
@@ -1199,7 +1459,21 @@ describe('zipRead: leitura de ZIP hostil', () => {
     expect(zipReason(() => readZip(buildZip([{ name: 'a.png', data: img, descriptor: true, local: { crc: 77, sizes: [1, 2] } }]), inflate))).toBe('ok');
 
     // Entradas sobrepostas (o truque das bombas que reaproveitam os mesmos bytes).
-    const inner = bytes(le32(0x04034b50), le16(20), le16(0x0800), le16(0), le16(0), le16(0x21), le32(refCrc(img)), le32(img.length), le32(img.length), le16(5), le16(0), 'b.png', img);
+    const inner = bytes(
+      le32(0x04034b50),
+      le16(20),
+      le16(0x0800),
+      le16(0),
+      le16(0),
+      le16(0x21),
+      le32(refCrc(img)),
+      le32(img.length),
+      le32(img.length),
+      le16(5),
+      le16(0),
+      'b.png',
+      img,
+    );
     const outer = Buffer.concat([Buffer.alloc(10), inner, Buffer.alloc(20)]);
     const overlap = buildZip([
       { name: 'a.png', data: outer },
@@ -1207,12 +1481,25 @@ describe('zipRead: leitura de ZIP hostil', () => {
     ]);
     expect(zipReason(() => readZip(overlap, inflate))).toBe('corrupt');
     // Dois registros centrais com o mesmo cabeçalho local: nomes diferentes não conferem, iguais são repetidos.
-    expect(zipReason(() => readZip(buildZip([{ name: 'a.png', data: img }, { name: 'b.png', data: img, noLocal: true, offset: 0 }]), inflate))).toBe('corrupt');
+    expect(
+      zipReason(() =>
+        readZip(
+          buildZip([
+            { name: 'a.png', data: img },
+            { name: 'b.png', data: img, noLocal: true, offset: 0 },
+          ]),
+          inflate,
+        ),
+      ),
+    ).toBe('corrupt');
   });
 
   it('readZip recusa o que não é ZIP ou tem a estrutura quebrada', () => {
     const img = png({ w: 100, h: 100 });
-    const good = buildZip([{ name: 'a.png', data: img }, { name: 'b.png', data: img, method: 8 }]);
+    const good = buildZip([
+      { name: 'a.png', data: img },
+      { name: 'b.png', data: img, method: 8 },
+    ]);
     expect(zipReason(() => readZip(good, inflate))).toBe('ok');
     expect(zipReason(() => readZip(img, inflate))).toBe('format');
     expect(zipReason(() => readZip(new Uint8Array(), inflate))).toBe('format');
@@ -1224,7 +1511,20 @@ describe('zipRead: leitura de ZIP hostil', () => {
     expect(zipReason(() => readZip(buildZip([{ name: 'a.png', data: img }], { comment: text('comentário') }), inflate))).toBe('ok');
     // Contagem, tamanho ou posição do diretório central errados; ZIP dividido em partes.
     expect(zipReason(() => readZip(buildZip([{ name: 'a.png', data: img }], { total: 2 }), inflate))).toBe('format');
-    expect(zipReason(() => readZip(buildZip([{ name: 'a.png', data: img }, { name: 'b.png', data: img }], { total: 1 }), inflate))).toBe('format');
+    expect(
+      zipReason(() =>
+        readZip(
+          buildZip(
+            [
+              { name: 'a.png', data: img },
+              { name: 'b.png', data: img },
+            ],
+            { total: 1 },
+          ),
+          inflate,
+        ),
+      ),
+    ).toBe('format');
     expect(zipReason(() => readZip(buildZip([{ name: 'a.png', data: img }], { cdSize: 10 }), inflate))).toBe('format');
     expect(zipReason(() => readZip(buildZip([{ name: 'a.png', data: img }], { cdOffset: 3 }), inflate))).toBe('format');
     expect(zipReason(() => readZip(buildZip([{ name: 'a.png', data: img }], { cdOffset: 4_000_000 }), inflate))).toBe('format');
@@ -1370,7 +1670,14 @@ describe('zipRead: pacotes', () => {
     const formats = await readStickerPack(
       readZip(
         buildZip([
-          { name: 'pack.json', data: pack([{ file: 'anim.tgs', name: 'Animada' }, { file: 'leia-me.txt', name: 'Leia' }, { file: 'boa.webp', poster: 'leia-me.txt' }]) },
+          {
+            name: 'pack.json',
+            data: pack([
+              { file: 'anim.tgs', name: 'Animada' },
+              { file: 'leia-me.txt', name: 'Leia' },
+              { file: 'boa.webp', poster: 'leia-me.txt' },
+            ]),
+          },
           { name: 'anim.tgs', data: text('{"v":"5.7"}') },
           { name: 'leia-me.txt', data: text('oi') },
           { name: 'boa.webp', data: still },
@@ -1388,7 +1695,17 @@ describe('zipRead: pacotes', () => {
     const posters = await readStickerPack(
       readZip(
         buildZip([
-          { name: 'pack.json', data: pack([{ file: 'b.webp', poster: 'a.webp', name: 'B' }, { file: 'a.webp', name: 'A' }, { file: 'c.webp', poster: 'pack.json', name: 'C' }, { file: 'd.webp', poster: 'd.poster.png' }, { file: 'e.webp', poster: 'd.poster.png' }, { file: 'f.webp', poster: 'notas.txt' }]) },
+          {
+            name: 'pack.json',
+            data: pack([
+              { file: 'b.webp', poster: 'a.webp', name: 'B' },
+              { file: 'a.webp', name: 'A' },
+              { file: 'c.webp', poster: 'pack.json', name: 'C' },
+              { file: 'd.webp', poster: 'd.poster.png' },
+              { file: 'e.webp', poster: 'd.poster.png' },
+              { file: 'f.webp', poster: 'notas.txt' },
+            ]),
+          },
           ...['a', 'b', 'c', 'd', 'e', 'f'].map((n) => ({ name: `${n}.webp`, data: still })),
           { name: 'd.poster.png', data: img },
           { name: 'notas.txt', data: text('oi') },
@@ -1456,7 +1773,13 @@ describe('zipRead: pacotes', () => {
     expect(h.ignored).toHaveLength(1);
     expect(Array.from(h.ignored[0].name).length).toBeLessThanOrEqual(80);
     expect(h.ignored[0].name).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/);
-    const badNames = readZip(buildZip([{ name: 'foto\u202Egnp.exe', data: img }, { name: 'c'.repeat(65_535), data: img }]), inflate);
+    const badNames = readZip(
+      buildZip([
+        { name: 'foto\u202Egnp.exe', data: img },
+        { name: 'c'.repeat(65_535), data: img },
+      ]),
+      inflate,
+    );
     const shown = await readStickerPack(badNames);
     expect(shown.ignored.map((i) => i.name)).toEqual(['foto�gnp.exe', `${'c'.repeat(50)}…${'c'.repeat(29)}`]);
   });
@@ -1475,20 +1798,53 @@ describe('zipRead: pacotes', () => {
     expect([asZip.kind, asZip.items.map((i) => i.entry.name)]).toEqual(['zip', ['1.webp', 'icone.png']]);
     // Ícone acima de 1 MB nem é lido: fica como figurinha (a revisão mostra se passa dos limites).
     const bigTray = png({ w: 96, h: 96, alpha: true, text: 'x'.repeat(1024 * 1024) });
-    const big = await readStickerPack(readZip(buildZip([{ name: '1.webp', data: still }, { name: 'icone.png', data: bigTray }]), inflate), { fileName: 'p.wastickers' });
+    const big = await readStickerPack(
+      readZip(
+        buildZip([
+          { name: '1.webp', data: still },
+          { name: 'icone.png', data: bigTray },
+        ]),
+        inflate,
+      ),
+      { fileName: 'p.wastickers' },
+    );
     expect(big.items.map((i) => i.entry.name)).toEqual(['1.webp', 'icone.png']);
 
     // pack.json acima de 1 MB não é lido; title.txt acima de 1 MB também não.
     const padded = text(JSON.stringify({ format: 'wescc-stickers', version: 1, name: 'Grande', stickers: [{ file: '1.webp', name: 'Um' }] }) + ' '.repeat(1024 * 1024));
-    const tooBig = await readStickerPack(readZip(buildZip([{ name: 'pack.json', data: padded }, { name: '1.webp', data: still }]), inflate));
+    const tooBig = await readStickerPack(
+      readZip(
+        buildZip([
+          { name: 'pack.json', data: padded },
+          { name: '1.webp', data: still },
+        ]),
+        inflate,
+      ),
+    );
     expect([tooBig.kind, tooBig.name, tooBig.items.map((i) => i.name)]).toEqual(['zip', null, ['1']]);
     expect(tooBig.ignored).toEqual([{ name: 'pack.json', reason: 'pack.json inválido' }]);
-    const longTitle = await readStickerPack(readZip(buildZip([{ name: 'title.txt', data: text(`Nome\n${' '.repeat(1024 * 1024)}`) }, { name: '1.webp', data: still }]), inflate));
+    const longTitle = await readStickerPack(
+      readZip(
+        buildZip([
+          { name: 'title.txt', data: text(`Nome\n${' '.repeat(1024 * 1024)}`) },
+          { name: '1.webp', data: still },
+        ]),
+        inflate,
+      ),
+    );
     expect([longTitle.kind, longTitle.name]).toEqual(['wastickers', null]);
 
     // Só os primeiros 1000 itens do pack.json valem: o 1001º vira figurinha solta, com o nome do arquivo.
     const bogus = Array.from({ length: 1000 }, (_, i) => ({ file: `falta-${i}.webp` }));
-    const capped = await readStickerPack(readZip(buildZip([{ name: 'pack.json', data: text(JSON.stringify({ format: 'wescc-stickers', version: 1, stickers: [...bogus, { file: 'ultima.webp', name: 'Nome do pacote' }] })) }, { name: 'ultima.webp', data: still }]), inflate));
+    const capped = await readStickerPack(
+      readZip(
+        buildZip([
+          { name: 'pack.json', data: text(JSON.stringify({ format: 'wescc-stickers', version: 1, stickers: [...bogus, { file: 'ultima.webp', name: 'Nome do pacote' }] })) },
+          { name: 'ultima.webp', data: still },
+        ]),
+        inflate,
+      ),
+    );
     expect(capped.items.map((i) => i.name)).toEqual(['Ultima']);
     expect(capped.ignored).toHaveLength(1000);
   });
@@ -1497,7 +1853,13 @@ describe('zipRead: pacotes', () => {
     // Como zipStore grava: pack.json, depois NNN-nome.webp e, das animadas, NNN-nome.poster.png.
     const exported = (n: number, animated: (i: number) => boolean) => {
       const id = (i: number) => String(i + 1).padStart(3, '0');
-      const stickers = Array.from({ length: n }, (_, i) => ({ file: `${id(i)}-f.webp`, poster: animated(i) ? `${id(i)}-f.poster.png` : null, name: `F ${i + 1}`, emojis: ['😀'], keywords: [] }));
+      const stickers = Array.from({ length: n }, (_, i) => ({
+        file: `${id(i)}-f.webp`,
+        poster: animated(i) ? `${id(i)}-f.poster.png` : null,
+        name: `F ${i + 1}`,
+        emojis: ['😀'],
+        keywords: [],
+      }));
       const parts: Part[] = [{ name: 'pack.json', data: text(JSON.stringify({ format: 'wescc-stickers', version: 1, name: 'Exportado', description: '', stickers })) }];
       for (let i = 0; i < n; i++) {
         parts.push({ name: `${id(i)}-f.webp`, data: Buffer.from([i & 0xff, 1]) });
@@ -1505,14 +1867,41 @@ describe('zipRead: pacotes', () => {
       }
       return buildZip(parts);
     };
-    const all = readZip(exported(150, () => true), inflate); // 301 arquivos
+    const all = readZip(
+      exported(150, () => true),
+      inflate,
+    ); // 301 arquivos
     expect(all).toHaveLength(301);
     const p = await readStickerPack(all, { fileName: 'figurinhas-exportado.zip' });
     expect([p.kind, p.items.length, p.items.every((i) => i.poster?.name === i.entry.name.replace('.webp', '.poster.png')), p.ignored]).toEqual(['wescc', 150, true, []]);
-    expect(readZip(exported(300, (i) => i % 2 === 0), inflate)).toHaveLength(451);
-    expect(readZip(exported(300, () => true), inflate)).toHaveLength(601);
-    expect(zipReason(() => readZip(exported(301, () => false), inflate))).toBe('too-many');
-    expect(zipReason(() => readZip(exported(301, () => true), inflate))).toBe('too-many');
+    expect(
+      readZip(
+        exported(300, (i) => i % 2 === 0),
+        inflate,
+      ),
+    ).toHaveLength(451);
+    expect(
+      readZip(
+        exported(300, () => true),
+        inflate,
+      ),
+    ).toHaveLength(601);
+    expect(
+      zipReason(() =>
+        readZip(
+          exported(301, () => false),
+          inflate,
+        ),
+      ),
+    ).toBe('too-many');
+    expect(
+      zipReason(() =>
+        readZip(
+          exported(301, () => true),
+          inflate,
+        ),
+      ),
+    ).toBe('too-many');
     // Pôster sem a figurinha ao lado conta como imagem, e cada figurinha libera um pôster só.
     const orphans: Part[] = Array.from({ length: 301 }, (_, i) => ({ name: `${i}.poster.png`, data: Buffer.from([1]) }));
     expect(zipReason(() => readZip(buildZip(orphans), inflate))).toBe('too-many');
@@ -1545,21 +1934,40 @@ describe('zipRead: pacotes', () => {
       buildZip(Array.from({ length: n }, (_, i) => names(i).map((name, k) => ({ name, data: Buffer.from([i & 0xff, k]) }))).flat());
 
     // Sem pack.json, readZip lista 600 arquivos (os pôsteres ao lado não contam), mas os 600 viram figurinhas.
-    const pairs = readZip(loose(300, (i) => [`s${i}.png`, `s${i}.poster.png`]), inflate);
+    const pairs = readZip(
+      loose(300, (i) => [`s${i}.png`, `s${i}.poster.png`]),
+      inflate,
+    );
     expect(pairs).toHaveLength(600);
     expect(await packError(pairs)).toBe(tooMany(300));
-    const half = await readStickerPack(readZip(loose(150, (i) => [`s${i}.png`, `s${i}.poster.png`]), inflate));
+    const half = await readStickerPack(
+      readZip(
+        loose(150, (i) => [`s${i}.png`, `s${i}.poster.png`]),
+        inflate,
+      ),
+    );
     expect([half.kind, half.items.length, half.items.some((i) => i.poster)]).toEqual(['zip', 300, false]);
 
     // Pôster de pôster: readZip deixa 402 de 603 fora da conta, e os 603 viram figurinhas.
-    const chain = readZip(loose(201, (i) => [`c${i}.png`, `c${i}.poster.png`, `c${i}.poster.poster.png`]), inflate);
+    const chain = readZip(
+      loose(201, (i) => [`c${i}.png`, `c${i}.poster.png`, `c${i}.poster.poster.png`]),
+      inflate,
+    );
     expect(chain).toHaveLength(603);
     expect(await packError(chain)).toBe(tooMany(300));
 
     // pack.json com 300 figurinhas sem pôster e 300 pôsteres sobrando ao lado.
     const stickers = Array.from({ length: 300 }, (_, i) => ({ file: `s${i}.png`, poster: null, name: `F ${i}` }));
     const pack = { name: 'pack.json', data: text(JSON.stringify({ format: 'wescc-stickers', version: 1, name: 'P', stickers })) };
-    const extra = readZip(buildZip([pack, ...Array.from({ length: 300 }, (_, i) => [`s${i}.png`, `s${i}.poster.png`]).flat().map((name) => ({ name, data: text(name) }))]), inflate);
+    const extra = readZip(
+      buildZip([
+        pack,
+        ...Array.from({ length: 300 }, (_, i) => [`s${i}.png`, `s${i}.poster.png`])
+          .flat()
+          .map((name) => ({ name, data: text(name) })),
+      ]),
+      inflate,
+    );
     expect(extra).toHaveLength(601);
     expect(await packError(extra)).toBe(tooMany(300));
     // Os mesmos 601 arquivos, com o pack.json usando os pôsteres: 300 figurinhas, cada uma com o seu.
@@ -1567,7 +1975,9 @@ describe('zipRead: pacotes', () => {
     const withPosters = readZip(
       buildZip([
         { name: 'pack.json', data: text(JSON.stringify({ format: 'wescc-stickers', version: 1, name: 'P', stickers: used })) },
-        ...Array.from({ length: 300 }, (_, i) => [`s${i}.png`, `s${i}.poster.png`]).flat().map((name) => ({ name, data: text(name) })),
+        ...Array.from({ length: 300 }, (_, i) => [`s${i}.png`, `s${i}.poster.png`])
+          .flat()
+          .map((name) => ({ name, data: text(name) })),
       ]),
       inflate,
     );
@@ -1575,10 +1985,24 @@ describe('zipRead: pacotes', () => {
     expect([ok.kind, ok.items.length, ok.items.every((i) => i.poster?.name === i.entry.name.replace('.png', '.poster.png'))]).toEqual(['wescc', 300, true]);
 
     // O limite é o que readZip recebeu; uma lista comum usa o padrão.
-    const ten = readZip(loose(10, (i) => [`s${i}.png`, `s${i}.poster.png`]), inflate, { maxEntries: 10 });
+    const ten = readZip(
+      loose(10, (i) => [`s${i}.png`, `s${i}.poster.png`]),
+      inflate,
+      { maxEntries: 10 },
+    );
     expect(ten).toHaveLength(20);
     expect(await packError(ten)).toBe(tooMany(10));
-    expect((await readStickerPack(readZip(loose(5, (i) => [`s${i}.png`, `s${i}.poster.png`]), inflate, { maxEntries: 10 }))).items).toHaveLength(10);
+    expect(
+      (
+        await readStickerPack(
+          readZip(
+            loose(5, (i) => [`s${i}.png`, `s${i}.poster.png`]),
+            inflate,
+            { maxEntries: 10 },
+          ),
+        )
+      ).items,
+    ).toHaveLength(10);
     const plain = (n: number): ZipEntry[] =>
       Array.from({ length: n }, (_, i) => ({ name: `${i}.png`, size: 1, compressedSize: 1, method: 0, read: async () => new Uint8Array(1) }));
     expect(await packError(plain(301))).toBe(tooMany(300));

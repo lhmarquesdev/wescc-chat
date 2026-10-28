@@ -11,6 +11,8 @@ import { Icon } from '../components/Icon';
 import { SideFoot, TakeoverBack, TakeoverHead } from '../components/Sidebar';
 import { QrCode } from '../components/QrCode';
 import { DeviceCell, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
+// Figurinhas: a seção /account/stickers.
+import { StickersSection } from './account/StickersSection';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -33,6 +35,11 @@ export function AccountPage() {
           <Icon name="preferences" />
           Preferências
         </NavLink>
+        {/* Figurinhas: preferências, pacotes, favoritas e recentes. */}
+        <NavLink to="/account/stickers">
+          <Icon name="sticker" />
+          Figurinhas
+        </NavLink>
         <NavLink to="/account/security">
           <Icon name="security" />
           Segurança
@@ -52,6 +59,8 @@ export function AccountPage() {
       <div className="page-body">
         {section === 'profile' && <Profile />}
         {section === 'preferences' && <Preferences />}
+        {/* Figurinhas */}
+        {section === 'stickers' && <StickersSection />}
         {section === 'security' && <Security />}
         {section === 'devices' && <Devices />}
         {section === 'tokens' && <Tokens />}

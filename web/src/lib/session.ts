@@ -3,6 +3,7 @@ import { api, getCredentials, setCredentials, setUnauthorizedHandler } from './a
 import { setCustomEmoji } from './emoji';
 import { syncPushSubscription, unsubscribeOnLogout } from './push';
 import { realtime } from './realtime';
+import { handleStickerEvent, initStickers, invalidateStickers, resetStickers } from './stickers';
 import { useStore, type Me } from './store';
 import { roomPath, setRoleDescriptions } from './format';
 
@@ -58,6 +59,8 @@ export async function startSession() {
   useStore.getState().setMe(me);
   // Com troca de senha ou 2FA pendente o servidor só aceita as rotas para resolver isso: o resto fica para depois.
   if (me.requirePasswordChange || me.require2faSetup) return me;
+  // Figurinhas: só o cache local deste usuário; a rede espera o seletor abrir.
+  initStickers(me._id);
   await Promise.all([loadSubscriptions(), loadCustomEmoji(), loadPermissionMap()]);
   void loadPresence();
   void loadLivechat();
@@ -72,16 +75,28 @@ export async function startSession() {
       void loadPresence();
       void api.get('me').then((m) => useStore.getState().setMe(m));
       void loadLivechat();
+      // Eventos de figurinha podem ter se perdido na queda.
+      invalidateStickers('org');
+      invalidateStickers('mine');
     });
     realtime.on((ev) => {
       if (ev.type === 'notification') showNotification(ev);
+      if (ev.type === 'stickers.changed' || ev.type === 'sticker.removed') handleStickerEvent(ev);
       if (ev.type === 'permissions.changed') {
         void api.get('me').then((m) => useStore.getState().setMe(m));
         void loadPermissionMap();
+        invalidateStickers('org');
+        invalidateStickers('mine');
       }
       // Papéis trocados: me.permissions é calculado pelo servidor, então busca de novo.
-      if (ev.type === 'user' && ev.user.roles && ev.user._id === useStore.getState().me?._id) void api.get('me').then((m) => useStore.getState().setMe(m));
+      if (ev.type === 'user' && ev.user.roles && ev.user._id === useStore.getState().me?._id) {
+        void api.get('me').then((m) => useStore.getState().setMe(m));
+        invalidateStickers('org');
+        invalidateStickers('mine');
+      }
       if (ev.type === 'settings.changed' && ev.settings.some((s) => s._id === '__emoji')) void loadCustomEmoji();
+      // A cota e os limites pessoais vêm no catálogo pessoal.
+      if (ev.type === 'settings.changed' && ev.settings.some((s) => s._id.startsWith('Stickers_Personal_'))) invalidateStickers('mine');
     });
   }
   return me;
@@ -104,6 +119,10 @@ export const loginWithSaml = (credentialToken: string) => loginWithSso('saml', c
 export const loginWithOAuth = (credentialToken: string) => loginWithSso('oauth', credentialToken);
 
 export async function logout() {
+  // Ao sair o servidor derruba o socket e o realtime iria para /login antes do endSession: a limpeza vem antes do pedido.
+  realtime.stop();
+  clearDrafts();
+  resetStickers();
   await api.post('logout').catch(() => {});
   endSession();
 }
@@ -115,6 +134,7 @@ export function endSession() {
   started = false;
   useStore.getState().reset();
   clearDrafts();
+  resetStickers();
 }
 
 // Rascunhos ficam no navegador: ao sair, não podem ficar para o próximo usuário do computador.

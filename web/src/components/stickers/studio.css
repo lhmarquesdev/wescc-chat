@@ -1,0 +1,1244 @@
+/* Figurinhas: o estúdio (editor, importação, pacotes na conta e na administração). Só tokens do DS.
+   Borda tracejada só onde se solta ou adiciona algo: a área de soltar e o bloco "Adicionar" dos pacotes. */
+
+/* ---------- Escolher a imagem ---------- */
+.stk-pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.stk-pick > .callout {
+  margin: 0;
+}
+.stk-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: 280px;
+  padding: var(--space-5) var(--space-4);
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-subtle);
+  text-align: center;
+  transition:
+    background-color var(--dur-1) linear,
+    border-color var(--dur-1) linear;
+}
+.stk-drop.small {
+  height: 220px;
+}
+.stk-drop.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+/* A área já diz o que fazer: o status do FileButton ("Nenhum arquivo selecionado") só repetiria. */
+.stk-drop .file-name {
+  display: none;
+}
+.stk-drop-icon {
+  display: inline-flex;
+  color: var(--fg-muted);
+}
+.stk-drop.over .stk-drop-icon {
+  color: var(--accent-text);
+}
+.stk-drop-title {
+  margin: 0;
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+  font-weight: var(--fw-medium);
+  color: var(--fg);
+}
+.stk-drop-or {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+.stk-drop-hint {
+  max-width: 400px;
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+
+/* ---------- Editor: duas colunas ---------- */
+.stk-editor {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 320px);
+  gap: var(--space-5);
+  align-items: start;
+}
+/* O palco fica parado enquanto a coluna da direita rola com o corpo do modal. */
+.stk-stage-col {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.stk-stage {
+  position: relative;
+  width: 360px;
+  height: 360px;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: repeating-conic-gradient(var(--bg-muted) 0 25%, var(--bg-subtle) 0 50%) 0 0 / 16px 16px;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+.stk-stage[data-tool='fill'] {
+  cursor: crosshair;
+}
+.stk-stage[data-tool='brush'] {
+  cursor: none;
+}
+.stk-stage.anim {
+  display: grid;
+  place-items: center;
+  cursor: default;
+}
+.stk-stage.anim img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.stk-stage-img {
+  position: absolute;
+  pointer-events: none;
+}
+.stk-crop {
+  position: absolute;
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--bg-canvas) 55%, transparent);
+  cursor: move;
+}
+.stk-stage[data-tool] .stk-crop {
+  cursor: inherit;
+}
+/* O anel do DS, somado ao véu de fora do recorte (os dois são box-shadow). */
+.stk-crop:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--ring-offset),
+    0 0 0 4px var(--focus),
+    0 0 0 100vmax color-mix(in srgb, var(--bg-canvas) 55%, transparent);
+}
+.stk-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--bg-raised);
+}
+/* Área de toque de 44 px em volta da alça de 12 px. */
+.stk-handle::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+@media (pointer: coarse) {
+  .stk-handle::before {
+    inset: -16px;
+  }
+}
+.stk-handle.nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.stk-handle.n {
+  left: 50%;
+  top: 0;
+  cursor: ns-resize;
+}
+.stk-handle.ne {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.stk-handle.e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.stk-handle.se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.stk-handle.s {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.stk-handle.sw {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.stk-handle.w {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+.stk-brush-cursor {
+  position: absolute;
+  border: 1px solid var(--fg);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--bg-raised);
+  pointer-events: none;
+}
+.stk-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-half);
+}
+
+/* ---------- Coluna da direita ---------- */
+.stk-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.stk-side > .stk-anim-notice .callout {
+  margin: 0;
+}
+.stk-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.stk-section-title {
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-semibold);
+  color: var(--fg);
+}
+.stk-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+/* Botões soltos na coluna (Restaurar tudo) ficam do tamanho do rótulo. */
+:is(.stk-section, .stk-section-body) > .btn {
+  align-self: flex-start;
+}
+.stk-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.stk-row > .seg-nav,
+.stk-section > .seg-nav {
+  margin-bottom: 0;
+}
+.stk-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1-5);
+}
+.stk-anim-notice {
+  align-items: stretch;
+  gap: var(--space-3);
+}
+.stk-anim-notice > .callout {
+  margin: 0;
+}
+.stk-hint {
+  margin: 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.stk-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-sm);
+  color: var(--fg-muted);
+}
+.stk-toggle-row > :not(.icon) {
+  color: var(--fg);
+}
+/* Ferramenta ligada (Apagar área, Pincel): o mesmo destaque de um chip escolhido. */
+.btn.stk-tool[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent-text);
+}
+.stk-range {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 4.5ch;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-sm);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-2);
+}
+/* Desenhado com tokens nos dois temas: trilho --bg-muted, parte preenchida e alça em --accent (--stk-fill vem do componente).
+   [type] no seletor: vence a caixa dos campos (:read-only e :disabled pintam o fundo). */
+.stk-range input[type='range'] {
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+}
+.stk-range input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(to right, var(--accent) var(--stk-fill, 0%), var(--bg-muted) var(--stk-fill, 0%));
+}
+.stk-range input::-moz-range-track {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--bg-muted);
+}
+.stk-range input::-moz-range-progress {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+}
+.stk-range input::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border: 2px solid var(--bg-raised);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: var(--shadow-1);
+  appearance: none;
+}
+.stk-range input::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--bg-raised);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: var(--shadow-1);
+}
+/* Desligado: cores de desligado, sem opacidade. */
+.stk-range input[type='range']:disabled {
+  cursor: not-allowed;
+}
+.stk-range input:disabled::-webkit-slider-runnable-track {
+  background: var(--bg-muted);
+}
+.stk-range input:disabled::-moz-range-progress {
+  background: transparent;
+}
+.stk-range input:disabled::-webkit-slider-thumb {
+  border-color: var(--border);
+  background: var(--fg-disabled);
+  box-shadow: none;
+}
+.stk-range input:disabled::-moz-range-thumb {
+  border-color: var(--border);
+  background: var(--fg-disabled);
+  box-shadow: none;
+}
+.stk-range:has(input:disabled) {
+  color: var(--fg-disabled);
+}
+/* O anel do DS vai na alça, não na caixa toda do controle (nem o halo dos campos no clique). */
+.stk-range input[type='range']:focus {
+  box-shadow: none;
+}
+.stk-range input:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 2px var(--ring-offset),
+    0 0 0 4px var(--focus);
+}
+.stk-range input:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 0 0 2px var(--ring-offset),
+    0 0 0 4px var(--focus);
+}
+.stk-range output {
+  color: var(--fg-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.stk-previews {
+  display: flex;
+  gap: var(--space-3);
+}
+.stk-previews figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+}
+.stk-previews figcaption {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+/* Cada bloco resolve os tokens light-dark() no seu tema: é o que as outras pessoas veem. */
+.stk-preview {
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-canvas);
+}
+.stk-preview.light {
+  color-scheme: light;
+}
+.stk-preview.dark {
+  color-scheme: dark;
+}
+.stk-size {
+  margin: 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.stk-size.over {
+  color: var(--danger);
+}
+
+/* ---------- Detalhes ---------- */
+.stk-chips > .icon-btn {
+  width: 28px;
+  height: 28px;
+}
+.stk-emoji-chip .emoji {
+  font-size: var(--fs-16);
+  line-height: 1;
+}
+.stk-detail-preview {
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--bg-subtle);
+}
+.stk-modal .stk-error {
+  margin: var(--space-3) 0 0;
+}
+
+/* ---------- Importar ---------- */
+.stk-busy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-8) 0;
+  color: var(--fg-muted);
+}
+.stk-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.stk-review > .callout {
+  margin: 0;
+}
+.stk-count {
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+.stk-import-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.stk-import-list li {
+  display: grid;
+  grid-template-columns: auto 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 52px;
+  padding: var(--space-1-5) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.stk-import-list li:last-child {
+  border-bottom: 0;
+}
+/* Fora dos limites, com erro ou ignorada: o motivo fica embaixo do nome, em 12 px. */
+.stk-import-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-half);
+  min-width: 0;
+}
+.stk-import-reason {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+.stk-thumb {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: repeating-conic-gradient(var(--bg-muted) 0 25%, var(--bg-subtle) 0 50%) 0 0 / 8px 8px;
+  color: var(--fg-muted);
+}
+.stk-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+input.stk-import-name {
+  width: 100%;
+  height: var(--control-sm);
+}
+span.stk-import-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stk-upload {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-6) 0;
+}
+.stk-upload p {
+  margin: 0;
+  color: var(--fg-2);
+}
+.stk-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--bg-muted);
+}
+.stk-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--dur-2) linear;
+}
+.stk-summary p {
+  margin: 0 0 var(--space-3);
+}
+.stk-summary summary {
+  cursor: pointer;
+  color: var(--fg-2);
+}
+.stk-summary summary:focus-visible {
+  border-radius: var(--radius-xs);
+}
+.stk-summary ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-2);
+}
+.stk-summary li + li {
+  margin-top: var(--space-1);
+}
+
+/* ---------- Celular ---------- */
+@media (max-width: 760px) {
+  .stk-drop {
+    height: 240px;
+  }
+  .stk-editor {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+  .stk-stage-col {
+    position: static;
+    align-items: center;
+  }
+  .stk-stage {
+    width: min(360px, 100%);
+    height: auto;
+    aspect-ratio: 1;
+  }
+  .stk-side {
+    gap: 0;
+  }
+  /* Acordeão: Recorte, Fundo, Contorno, Detalhes. */
+  .stk-side > .stk-section {
+    border-bottom: 1px solid var(--border);
+  }
+  .stk-side > .stk-section:first-of-type {
+    border-top: 1px solid var(--border);
+  }
+  .stk-side > .stk-anim-notice {
+    margin-bottom: var(--space-4);
+  }
+  .stk-side > .stk-section:not([data-open]) {
+    gap: 0;
+  }
+  .stk-section-title {
+    font-size: var(--fs-15);
+    line-height: var(--lh-15);
+  }
+  .stk-acc {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: var(--touch);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .stk-acc .icon {
+    color: var(--fg-muted);
+    transition: rotate var(--dur-2) var(--ease-out);
+  }
+  .stk-acc[aria-expanded='true'] .icon {
+    rotate: 180deg;
+  }
+  .stk-acc:focus-visible {
+    border-radius: var(--radius-sm);
+    box-shadow: inset 0 0 0 2px var(--focus);
+  }
+  .stk-section-body {
+    padding-bottom: var(--space-4);
+  }
+  .stk-section-body[hidden] {
+    display: none;
+  }
+  .stk-stage-col > .stk-section {
+    align-self: stretch;
+  }
+}
+
+/* ---------- Reordenar ---------- */
+/* A peça que acompanha o ponteiro; o lugar dela na lista fica como um espaço reservado. */
+.stk-ghost {
+  position: fixed;
+  z-index: var(--z-popover);
+  pointer-events: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+}
+.stk-ghost > .card {
+  height: 100%;
+  margin: 0;
+  border: 0;
+}
+:where(.stk-tiles, .stk-pack-rows, .stk-org-packs) > [data-dragging] {
+  border-radius: var(--radius-md);
+  background: var(--bg-muted);
+}
+:where(.stk-tiles, .stk-pack-rows, .stk-org-packs) > [data-dragging] > * {
+  visibility: hidden;
+}
+:where(.stk-tile-drag, .stk-row-drag) {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  cursor: grab;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity var(--dur-1) linear;
+}
+
+/* ---------- Pacote ---------- */
+/* A barra de 56 px da página (page-head): Voltar | nome | contagem | menu. */
+.page-head.stk-pack-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: var(--space-3);
+}
+.stk-pack-back {
+  margin-left: calc(var(--space-2) * -1);
+}
+.page-head .stk-pack-title {
+  min-width: 0;
+  margin: 0;
+  overflow: visible;
+}
+.stk-pack-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  max-width: 100%;
+  margin-left: calc(var(--space-1-5) * -1);
+  padding: var(--space-half) var(--space-1-5);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+.stk-pack-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stk-pack-name .icon {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  opacity: 0;
+  transition: opacity var(--dur-1) linear;
+}
+.stk-pack-name:hover {
+  background: var(--bg-hover);
+}
+.stk-pack-name:is(:hover, :focus-visible) .icon {
+  opacity: 1;
+}
+input.stk-pack-rename {
+  width: 100%;
+  max-width: 360px;
+  min-width: 0;
+  font-size: var(--fs-18);
+  font-weight: var(--fw-semibold);
+}
+.stk-pack-count {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.stk-pack-org {
+  max-width: 640px;
+}
+.stk-role-chips {
+  align-items: center;
+}
+.stk-role-chips .chip.selectable:disabled {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--fg-disabled);
+  cursor: not-allowed;
+}
+.stk-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 96px);
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  user-select: none;
+}
+.stk-tile,
+.stk-tile-slot {
+  position: relative;
+  width: 96px;
+}
+.stk-tile-open {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  width: 96px;
+  padding: var(--space-1-5) var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--dur-1) linear;
+}
+button.stk-tile-open:hover {
+  background: var(--bg-hover);
+}
+.stk-tile-img {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+}
+.stk-tile-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  min-height: 20px;
+}
+.stk-tile-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-2);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stk-tile-cover {
+  flex-shrink: 0;
+}
+.stk-tile-drag {
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-1);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+.stk-tile-more {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  opacity: 0;
+  transition: opacity var(--dur-1) linear;
+}
+.stk-tile-more .icon-btn {
+  width: 28px;
+  height: 28px;
+  background: var(--bg-raised);
+}
+.stk-tile:is(:hover, :focus-within) :is(.stk-tile-drag, .stk-tile-more),
+.stk-tile-more:has([aria-expanded='true']) {
+  opacity: 1;
+}
+.stk-tile-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: 96px;
+  height: 100%;
+  min-height: 104px;
+  padding: 0;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+.stk-tile-add:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.stk-tile-add:disabled {
+  border-color: var(--border);
+  color: var(--fg-disabled);
+  cursor: not-allowed;
+}
+
+/* "Mover para…": nomes longos com reticências (o title tem o nome inteiro) e a seta no fim do item que abre a lista. */
+.stk-move-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu .stk-menu-chevron {
+  margin-left: auto;
+}
+
+/* ---------- Conta → Figurinhas ---------- */
+.stk-radios {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-half);
+}
+/* .card.action no seletor pelo mesmo motivo de .stk-org-pack: a ordem dos arquivos não decide. */
+.card.action.stk-org-card {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  margin-bottom: var(--space-4);
+}
+.stk-org-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-half);
+  min-width: 0;
+}
+.stk-org-text strong {
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+  font-weight: var(--fw-semibold);
+}
+.stk-org-text .card-desc {
+  margin: 0;
+}
+.stk-note {
+  margin: 0 0 var(--space-4);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+.card .stk-note {
+  margin-bottom: var(--space-3);
+}
+.stk-quota {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  margin-bottom: var(--space-3);
+}
+.stk-quota-text,
+.stk-counter {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.stk-counter {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.stk-pack-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  user-select: none;
+}
+.stk-pack-rows > li + li {
+  border-top: 1px solid var(--border-subtle);
+}
+.stk-pack-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--space-2) var(--space-1);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-1) linear;
+}
+button.stk-pack-row:hover {
+  background: var(--bg-hover);
+}
+.stk-pack-row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+.stk-pack-row > .icon:last-child {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.stk-row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-half);
+  min-width: 0;
+}
+.stk-row-name {
+  overflow: hidden;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stk-row-sub {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.stk-row-drag {
+  width: 24px;
+  height: 32px;
+}
+:is(.stk-pack-row, .stk-org-pack):is(:hover, :focus-visible) .stk-row-drag {
+  opacity: 1;
+}
+.stk-cover {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+}
+.stk-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.stk-favs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 72px);
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.stk-fav {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+}
+.stk-fav-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  opacity: 0;
+  transition: opacity var(--dur-1) linear;
+}
+.icon-btn.stk-fav-remove {
+  width: 28px;
+  height: 28px;
+  background: var(--bg-raised);
+}
+.stk-fav:is(:hover, :focus-within) .stk-fav-remove {
+  opacity: 1;
+}
+.card-head.stk-fav-head {
+  align-items: baseline;
+}
+.stk-recents {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--fg-2);
+}
+
+/* ---------- Administração → Figurinhas ---------- */
+.stk-report {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-2) 0;
+}
+.stk-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-4);
+}
+.stk-org-packs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+  user-select: none;
+}
+.stk-org-packs > * {
+  display: flex;
+  min-width: 0;
+}
+.stk-sk-cover {
+  border-radius: var(--radius-md);
+}
+/* Com .action no seletor: este arquivo carrega sob demanda e pode vir antes de .card.action (coluna). */
+.card.stk-org-pack,
+.card.action.stk-org-pack {
+  display: flex;
+  flex: 1;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+}
+.stk-org-pack-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.stk-org-pack-name {
+  overflow: hidden;
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+  font-weight: var(--fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stk-org-pack-count {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+.stk-org-pack-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+.stk-org-pack-roles {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.stk-removed-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.stk-removed-tile {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+}
+.stk-removed-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.stk-removed-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Sem mouse não há hover: as alças e os menus das peças ficam sempre à vista. */
+@media (hover: none) {
+  :where(.stk-tile-drag, .stk-row-drag),
+  .stk-tile-more,
+  .stk-fav-remove,
+  .stk-pack-name .icon {
+    opacity: 1;
+  }
+  /* A alça e o menu sempre à vista ficam numa faixa acima da imagem, sem cobri-la. */
+  .stk-tile-open {
+    padding-top: calc(32px + var(--space-2));
+  }
+}
+@media (pointer: coarse) {
+  .stk-radios .check {
+    min-height: var(--touch);
+  }
+  .stk-tile-drag {
+    width: 32px;
+    height: 32px;
+  }
+  /* Os botões pequenos das peças mantêm o tamanho e ganham uma área de toque de 44 px em volta. */
+  .stk-tile-more .icon-btn,
+  .stk-chips > .icon-btn {
+    position: relative;
+  }
+  .stk-tile-more .icon-btn::after,
+  .icon-btn.stk-fav-remove::after,
+  .stk-chips > .icon-btn::after {
+    content: '';
+    position: absolute;
+    inset: calc((var(--touch) - 28px) / -2);
+  }
+  .stk-tile-drag::after {
+    content: '';
+    position: absolute;
+    inset: calc((var(--touch) - 32px) / -2);
+  }
+  .stk-pack-name {
+    min-height: var(--touch);
+  }
+  .stk-range input[type='range'] {
+    height: var(--touch);
+  }
+}
+@media (max-width: 1100px) {
+  .stk-org-packs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .stk-org-packs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* Voltar | nome (até duas linhas) | menu, e a contagem embaixo do nome. */
+  .page-head.stk-pack-head {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    row-gap: 0;
+  }
+  .stk-pack-head > .stk-pack-back {
+    grid-area: 1 / 1;
+  }
+  .stk-pack-head > :is(.stk-pack-title, .stk-pack-rename) {
+    grid-area: 1 / 2;
+  }
+  .stk-pack-head > .stk-pack-more {
+    grid-area: 1 / 3;
+  }
+  .stk-pack-head > .stk-pack-count {
+    grid-area: 2 / 2;
+  }
+  .stk-pack-name-text {
+    display: -webkit-box;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .stk-packs-head {
+    flex-wrap: wrap;
+  }
+  .stk-tiles {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  }
+  .stk-tile,
+  .stk-tile-slot,
+  .stk-tile-open,
+  .stk-tile-add {
+    width: 100%;
+  }
+}

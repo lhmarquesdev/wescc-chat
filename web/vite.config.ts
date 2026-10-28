@@ -14,6 +14,8 @@ export default defineConfig({
       '/avatar': target,
       '/file-upload': target,
       '/emoji-custom': target,
+      // Figurinhas: só /sticker/<arquivo>; /stickers… são páginas do app.
+      '^/sticker/': target,
       '/websocket': { target: target.replace('http', 'ws'), ws: true },
       // O widget do visitante abre o websocket dele em /livechat/websocket.
       '/livechat': { target, ws: true },
