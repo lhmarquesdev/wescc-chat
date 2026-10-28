@@ -1,5 +1,5 @@
 // Camadas flutuantes: raiz do portal, posicionamento ancorado, pilha do Esc, foco preso, trava de rolagem e folha (celular).
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { autoUpdate, flip, hide, offset, shift, size, useFloating, type Placement, type ReferenceType } from '@floating-ui/react-dom';
 
@@ -16,8 +16,13 @@ export function overlayRoot(): HTMLElement {
   return el;
 }
 
+// Chamadas em grupo: dentro da chamada, menus, diálogos, folhas e avisos vão para a camada da chamada (acima da
+// janela e dentro da tela cheia). Fora dela o valor é null e tudo segue no #overlay-root.
+export const OverlayRootContext = createContext<HTMLElement | null>(null);
+
 export function Portal({ children }: { children: ReactNode }) {
-  return createPortal(children, overlayRoot());
+  const root = useContext(OverlayRootContext);
+  return createPortal(children, root ?? overlayRoot());
 }
 
 // ---------- Mídia ----------
@@ -83,6 +88,8 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean
   // Quem abriu é lido no primeiro render: um autoFocus dos filhos move o foco antes de qualquer efeito.
   const [opener] = useState(() => (typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null)));
   const first = useRef(true);
+  // Chamadas em grupo: a camada da chamada também é uma camada (menu aberto de dentro de um diálogo dela).
+  const layerRoot = useContext(OverlayRootContext);
   useEffect(() => {
     const root = ref.current;
     if (!active || !root) return;
@@ -110,7 +117,7 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean
     const onFocusIn = (e: FocusEvent) => {
       if (traps[traps.length - 1] !== root) return;
       const t = e.target as Node;
-      if (!root.contains(t) && !overlayRoot().contains(t)) root.focus({ preventScroll: true });
+      if (!root.contains(t) && !overlayRoot().contains(t) && !layerRoot?.contains(t)) root.focus({ preventScroll: true });
     };
     document.addEventListener('keydown', onKey);
     document.addEventListener('focusin', onFocusIn);

@@ -13,6 +13,8 @@ import { FileTile } from './MessageItem';
 import { useEscape, useIsPhone } from './overlay';
 import { UserPicker, type PickedUser } from './Pickers';
 import { Avatar, Empty, Field, GroupAvatar, Menu, Segmented, SearchInput, SkeletonList, Toggle, UserAvatar, confirmDialog, useAsync } from './ui';
+// Chamadas em grupo: "Em chamada" ao lado da presença.
+import { InCallBadge } from './call/LiveIndicators';
 
 export type PanelId = 'livechat' | 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune';
 
@@ -695,7 +697,11 @@ function MemberRow({ m, muted, onClick }: { m: any; muted: boolean; onClick: () 
     <button type="button" className="member" onClick={onClick}>
       <UserAvatar username={m.username} size={32} status={m.status} />
       <span className="member-who">
-        <span className="member-name">{m.name || m.username}</span>
+        <span className="member-name">
+          {/* Chamadas em grupo: o nome encurta com reticências e o "Em chamada" fica sempre à vista. */}
+          <span className="member-name-text">{m.name || m.username}</span>
+          <InCallBadge userId={m._id} />
+        </span>
         <span className="member-sub">
           @{m.username}
           {statusText && ` · ${statusText}`}

@@ -17,13 +17,14 @@ import {
 import { useNavigate } from 'react-router-dom';
 import type { Attachment, Message } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
-import { startCall } from '../lib/calls';
-import { formatBytes, formatDateTime, formatDuration, formatRelative, formatTime, formatWhen, nameList, plural, roomPath, systemIcon, systemText } from '../lib/format';
+import { formatBytes, formatDateTime, formatRelative, formatTime, formatWhen, nameList, plural, roomPath, systemIcon, systemText } from '../lib/format';
 import { resolveEmoji } from '../lib/emoji';
 import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
 import { useNames } from '../lib/names';
 import { avatarBust, useSetting, useStore } from '../lib/store';
 import { EmojiPicker, recentEmoji } from './EmojiPicker';
+// Chamadas em grupo: o cartão da chamada mudou para call/CallCard.tsx (o registro a dois, sem mudanças).
+import { CallCard } from './call/CallCard';
 import { Icon, type IconName } from './Icon';
 import { Portal, Sheet, useEscape, useFocusTrap, useMedia, useScrollLock } from './overlay';
 import { Avatar, confirmDialog, Empty, Field, Menu, Modal, SkeletonList, useAsync } from './ui';
@@ -568,49 +569,6 @@ function PinnedNote({ m }: { m: Message & Record<string, any> }) {
   );
 }
 
-// Registro de chamada (call_ended / call_missed): cartão sob o nome de quem ligou, com "Ligar de volta".
-function CallCard({ m }: { m: Message & Record<string, any> }) {
-  const meId = useStore((s) => s.me?._id);
-  const room = useStore((s) => s.rooms[m.rid]);
-  const callsOn = useSetting<boolean>('Calls_Enabled');
-  const c = (m.call ?? {}) as { kind?: string; status?: string; duration?: number };
-  const video = c.kind === 'video';
-  const missed = m.t === 'call_missed';
-  const caller = m.u._id === meId;
-  const status = c.status ?? 'missed';
-  const title = !missed
-    ? video
-      ? 'Chamada de vídeo'
-      : 'Chamada de voz'
-    : status === 'declined'
-      ? 'Chamada recusada'
-      : caller
-        ? status === 'canceled'
-          ? 'Chamada cancelada'
-          : 'Chamada não atendida'
-        : 'Chamada perdida';
-  // O título já diz o tipo (vídeo ou voz) ou o desfecho: a linha de baixo não repete nenhum dos dois.
-  const meta = missed ? `${video ? 'Vídeo' : 'Voz'} · ${formatTime(m.ts)}` : `${formatDuration(c.duration ?? 0)} · ${formatTime(m.ts)}`;
-  const canCall = !!callsOn && room?.t === 'd' && room.uids?.length === 2 && room.direct?.canCall !== false;
-  return (
-    <div className={missed ? 'call-card missed' : 'call-card'}>
-      <span className="call-card-tile" aria-hidden="true">
-        <Icon name={missed ? 'call-missed' : video ? 'call-video' : 'call-audio'} size={18} />
-      </span>
-      <span className="call-card-text">
-        <span className="call-card-title">{title}</span>
-        <span className="call-card-meta">{meta}</span>
-      </span>
-      {canCall && (
-        <button type="button" className="btn small" onClick={() => void startCall(m.rid, video ? 'video' : 'audio')}>
-          <Icon name={video ? 'call-video' : 'call-audio'} size={14} />
-          {missed && !caller ? 'Ligar de volta' : 'Ligar de novo'}
-        </button>
-      )}
-    </div>
-  );
-}
-
 // Copia para a área de transferência e confirma só depois que deu certo.
 function copyText(text: string, done: string) {
   const { toast } = useStore.getState();
@@ -749,7 +707,8 @@ function noticeTitle(msg: string): { title: string; rest: string } | null {
 }
 
 // Mensagens com o mesmo cartão de sempre (as outras de sistema viram uma linha).
-const CARD_TYPES = new Set(['rm', 'discussion-created', 'call_ended', 'call_missed']);
+// Chamadas em grupo: call_group também é cartão (o da chamada em grupo, em call/CallCard.tsx).
+const CARD_TYPES = new Set(['rm', 'discussion-created', 'call_ended', 'call_missed', 'call_group']);
 
 // Toque longo nestes elementos abre o menu do sistema, e não a folha de ações.
 const NATIVE_PRESS = 'a, img, video, audio, .md-pre';
@@ -794,7 +753,8 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
 
   const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
   const react = (code: string) => api.post('chat.react', { messageId: m._id, emoji: code }).catch(fail);
-  const call = m.t === 'call_ended' || m.t === 'call_missed';
+  // Chamadas em grupo: o cartão da chamada (a dois ou em grupo) fica sob o nome de quem ligou.
+  const call = m.t === 'call_ended' || m.t === 'call_missed' || m.t === 'call_group';
   const notice = !!m.ackRequired && !m.t;
   const lifted = notice ? noticeTitle(m.msg) : null;
   const text = lifted ? lifted.rest : m.msg;
@@ -1043,7 +1003,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
         ) : (
           content
         )}
-        {call && <CallCard m={m} />}
+        {call && <CallCard message={m} />}
         <Reactions m={m} canReact={canReact} onAdd={(anchor) => setPicker({ anchor })} />
         {!inThread && (m.tcount ?? 0) > 0 && <ThreadSummary m={m} onOpen={() => actions.onReplyThread?.(m)} />}
         {m.drid && (

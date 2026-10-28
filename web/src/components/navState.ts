@@ -55,13 +55,13 @@ function ensureMissed(meId: string) {
   api
     .get('calls.list', { offset: 0, count: 30 })
     .then((r: { calls: Call[] }) => {
-      missed = r.calls.filter((c) => c.status === 'missed' && c.callee._id === meId);
+      missed = r.calls.filter((c) => c.status === 'missed' && c.callee?._id === meId);
       emit();
     })
     .catch(() => {});
   offRealtime?.();
   offRealtime = realtime.on((ev) => {
-    if (ev.type !== 'call' || ev.call.callee._id !== meId) return;
+    if (ev.type !== 'call' || ev.call.callee?._id !== meId) return;
     const rest = missed.filter((c) => c._id !== ev.call._id);
     missed = ev.call.status === 'missed' ? [ev.call, ...rest] : rest;
     emit();

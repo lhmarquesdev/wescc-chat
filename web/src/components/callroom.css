@@ -1,0 +1,489 @@
+/* Chamadas em grupo vistas da sala: pílula do cabeçalho, faixa, cartão na conversa, sinais da barra lateral, "Em chamada",
+   a seção "Em andamento" da página Chamadas e Administração › Chamadas. Só tokens; tudo parado (sem pulsar). */
+
+/* ---------- Cabeçalho: pílula Entrar / Ouvir / Na chamada ---------- */
+.call-join-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  height: 32px;
+  padding: 0 var(--space-3) 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: var(--ok-solid);
+  color: var(--fg-on-accent);
+  font: inherit;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) linear,
+    border-color var(--dur-1) linear;
+}
+.call-join-pill:where(:hover) {
+  background: color-mix(in srgb, var(--ok-solid) 88%, var(--fg));
+}
+.call-join-pill:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+}
+.call-join-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg-on-accent) 22%, transparent);
+  font-size: var(--fs-11);
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* Já estou nesta chamada: a pílula só abre a janela. */
+.call-join-pill.in {
+  background: var(--ok-soft);
+  border-color: color-mix(in srgb, var(--ok) 35%, transparent);
+  color: var(--ok);
+}
+.call-join-pill.in:where(:hover) {
+  background: color-mix(in srgb, var(--ok-soft) 80%, var(--ok));
+}
+.call-join-pill.in .call-join-count {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+/* Barrada (motivo no leitor de tela e num aviso ao clicar): continua focável. */
+.call-join-pill[aria-disabled='true'] {
+  background: var(--bg-muted);
+  border-color: var(--border);
+  color: var(--fg-muted);
+  cursor: not-allowed;
+}
+.call-join-pill[aria-disabled='true'] .call-join-count {
+  background: var(--border);
+}
+/* No toque a pílula mantém os 32 px à vista; a área cresce para 44 px por baixo, como os botões pequenos. */
+@media (pointer: coarse) {
+  .call-join-pill {
+    position: relative;
+  }
+  .call-join-pill::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--touch));
+    height: max(100%, var(--touch));
+    transform: translate(-50%, -50%);
+  }
+}
+/* Entrar numa chamada viva tem um só jeito em toda a sala: o verde da pílula (faixa, cartão e "Em andamento").
+   O barrado continua o de .btn. */
+.btn.call-join:not(:disabled, [aria-disabled='true']) {
+  background: var(--ok-solid);
+  border-color: transparent;
+  color: var(--fg-on-accent);
+}
+.btn.call-join:not(:disabled, [aria-disabled='true']):hover {
+  background: color-mix(in srgb, var(--ok-solid) 88%, var(--fg));
+}
+.btn.call-join:not(:disabled, [aria-disabled='true']):active {
+  background: color-mix(in srgb, var(--ok-solid) 80%, var(--fg));
+}
+/* Iniciar barrado no cabeçalho: o mesmo cursor da pílula, da faixa e do menu. */
+.icon-btn.call-start[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+.menu button.call-menu-item[aria-disabled='true'] {
+  color: var(--fg-disabled);
+  cursor: not-allowed;
+}
+.menu button.call-menu-item[aria-disabled='true'] .icon {
+  color: var(--fg-disabled);
+}
+/* O motivo dos itens barrados, logo abaixo deles (alinhado com o texto dos itens, depois do ícone). */
+.menu .call-menu-why {
+  margin: 0;
+  padding: 2px 10px var(--space-2) calc(10px + 16px + 10px);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+  white-space: normal;
+}
+.menu.sheet .call-menu-why {
+  padding-left: calc(10px + 20px + 10px);
+}
+
+/* ---------- Faixa da chamada viva, abaixo do cabeçalho ---------- */
+.call-room-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 52px;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--ok-soft);
+  color: var(--fg);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  --ring-offset: var(--ok-soft);
+  animation: fade-in var(--dur-3) var(--ease-out);
+}
+.call-room-banner-icon {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--ok-solid);
+  color: var(--fg-on-accent);
+}
+.call-room-banner-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.call-room-banner-title {
+  font-weight: var(--fw-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.call-room-banner-meta {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.call-banner-why {
+  margin-top: 2px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.call-room-banner-people {
+  display: flex;
+  flex-shrink: 0;
+}
+.call-room-banner-people > * + * {
+  margin-left: -6px;
+}
+.call-room-banner-people .avatar {
+  box-shadow: 0 0 0 2px var(--ok-soft);
+}
+.call-room-banner > .btn {
+  flex-shrink: 0;
+}
+.call-room-banner > .icon-btn {
+  margin-left: calc(var(--space-1) * -1);
+}
+/* Pausada pela trava: cor de aviso; o Entrar fica (um supervisor destrava ao entrar). */
+.call-room-banner.warn {
+  background: var(--warn-soft);
+  --ring-offset: var(--warn-soft);
+}
+.call-room-banner.warn .call-room-banner-icon {
+  background: var(--warn-solid);
+  color: var(--warn-on-solid);
+}
+.call-room-banner.warn .call-room-banner-people .avatar {
+  box-shadow: 0 0 0 2px var(--warn-soft);
+}
+@media (max-width: 760px) {
+  /* Uma linha só: sem rostos, o motivo some atrás do aviso do botão. */
+  .call-room-banner {
+    min-height: 48px;
+    gap: var(--space-2);
+    padding: var(--space-1-5) var(--space-1) var(--space-1-5) var(--space-4);
+  }
+  .call-room-banner-icon {
+    width: 28px;
+    height: 28px;
+  }
+  /* Uma linha: os detalhes só aparecem se couberem inteiros (senão quebram para uma segunda linha escondida);
+     o título nunca perde espaço para eles. */
+  .call-room-banner-text {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: var(--space-1-5);
+    max-height: var(--lh-13);
+    overflow: hidden;
+  }
+  .call-room-banner-title {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .call-room-banner-meta {
+    flex: 0 0 auto;
+  }
+  .call-banner-why {
+    display: none;
+  }
+  .call-room-banner > .icon-btn {
+    width: var(--touch);
+    height: var(--touch);
+    margin-left: 0;
+  }
+  /* Pausada pela trava ou com a entrada barrada: o aviso importa mais que caber numa linha. O título quebra inteiro e
+     o motivo aparece embaixo, sem precisar tocar no botão. */
+  .call-room-banner:is(.warn, .blocked) {
+    padding-block: var(--space-2);
+  }
+  .call-room-banner:is(.warn, .blocked) .call-room-banner-text {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    max-height: none;
+    overflow: visible;
+  }
+  .call-room-banner:is(.warn, .blocked) .call-room-banner-title {
+    white-space: normal;
+    overflow: visible;
+  }
+  .call-room-banner:is(.warn, .blocked) .call-banner-why {
+    display: block;
+  }
+}
+
+/* ---------- Cartão da chamada em grupo na conversa ---------- */
+/* Mais largo que o 1:1: "Chamada de vídeo em andamento" e o "Na chamada" cabem numa linha. */
+.call-card.group {
+  width: 420px;
+}
+.call-card.group .call-card-tile {
+  background: var(--bg-muted);
+  color: var(--fg-muted);
+}
+.call-card.group.live .call-card-tile {
+  background: var(--ok-solid);
+  color: var(--fg-on-accent);
+}
+.call-card.group .call-card-meta {
+  font-variant-numeric: tabular-nums;
+}
+.call-card-people {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  margin-top: var(--space-1);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.call-card-faces {
+  display: flex;
+}
+.call-card-faces > * + * {
+  margin-left: calc(var(--space-1-5) * -1);
+}
+.call-card-faces .avatar {
+  box-shadow: 0 0 0 2px var(--bg-surface);
+}
+.call-card-reason {
+  margin-top: 2px;
+}
+.call-card .btn[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+/* ---------- Barra lateral e "Em chamada" ---------- */
+.side-live {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--call-accept);
+}
+.side-live.in {
+  color: var(--ok);
+}
+.in-call-badge {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--ok);
+  vertical-align: -2px;
+}
+.user-card-status .in-call-badge,
+.member-name .in-call-badge {
+  margin-left: var(--space-1);
+}
+/* Com o texto (cartão da pessoa): ícone e "Em chamada" na cor de chamada viva. */
+.in-call-badge.labelled {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: var(--space-2);
+  font-weight: var(--fw-medium);
+  vertical-align: baseline;
+}
+.in-call-badge.labelled .icon {
+  flex-shrink: 0;
+}
+/* Membros: o nome encurta, o selo fica sempre à vista. */
+.member-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.member-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Página Chamadas: "Em andamento" ---------- */
+.calls-live {
+  margin-bottom: var(--space-5);
+}
+.calls-live .call-list li {
+  min-height: 64px;
+}
+.calls-room-tile {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--bg-muted);
+  color: var(--fg-muted);
+}
+.calls-live .calls-room-tile {
+  background: var(--ok-solid);
+  color: var(--fg-on-accent);
+}
+.call-list-meta.tabular {
+  font-variant-numeric: tabular-nums;
+}
+.calls-live .call-list-actions {
+  position: relative;
+  top: auto;
+  right: auto;
+  transform: none;
+  opacity: 1;
+}
+.calls-live .call-list-actions .btn {
+  flex-shrink: 0;
+}
+/* Vão no lugar da rediscagem das linhas em grupo: some com mouse (lá as ações cobrem a hora só ao passar). */
+.call-list-gap {
+  visibility: hidden;
+  pointer-events: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .call-list-gap {
+    display: none;
+  }
+  /* Sem ações para trazer, a hora da linha em grupo fica no lugar ao passar o mouse. */
+  .call-list li:has(> .call-list-gap) .call-time {
+    visibility: visible;
+  }
+}
+
+/* ---------- Administração › Chamadas ---------- */
+.admin-calls .card-head .pill {
+  flex-shrink: 0;
+}
+.admin-calls-rows {
+  display: grid;
+  grid-template-columns: minmax(180px, max-content) minmax(0, 1fr);
+  gap: var(--space-2) var(--space-5);
+  margin: 0 0 var(--space-4);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+.admin-calls-rows dt {
+  color: var(--fg-muted);
+}
+.admin-calls-rows dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.admin-calls-rows .cell-sub {
+  display: block;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.admin-calls-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.admin-calls-actions .admin-calls-link {
+  margin-left: auto;
+}
+.admin-calls-error {
+  margin-bottom: var(--space-4);
+}
+/* O aviso que fecha o cartão não soma margem ao respiro do próprio cartão. */
+.admin-calls .card > .callout:last-child {
+  margin-bottom: 0;
+}
+/* Esqueletos com a altura das linhas de verdade. */
+.admin-calls-rows.skeleton-group :is(dt, dd) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: var(--lh-14);
+}
+.admin-calls-rows.skeleton-group dd:first-of-type {
+  min-height: calc(var(--lh-14) + var(--lh-12));
+}
+.admin-calls-sk-callout {
+  border-radius: var(--radius-md);
+}
+.admin-calls .table td.num {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 760px) {
+  .admin-calls-rows {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .admin-calls-rows dd + dt {
+    margin-top: var(--space-2);
+  }
+  .admin-calls-actions .admin-calls-link {
+    margin-left: 0;
+  }
+}
+@media (pointer: coarse) {
+  /* O link ao lado dos botões tem a mesma área de toque deles. */
+  .admin-calls-actions .admin-calls-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch);
+  }
+}
+@media (max-width: 760px) {
+  /* A linha empilhada já está dentro do cartão: alinha com o título dele, sem traço depois da última. O Encerrar
+     tem borda, então não leva o recuo do botão fantasma. */
+  .admin-calls .table.stack tr {
+    padding-inline: 0;
+  }
+  .admin-calls .table.stack tr:last-child {
+    border-bottom: 0;
+  }
+  .admin-calls .stack td.actions-col {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .call-room-banner {
+    animation: none;
+  }
+}

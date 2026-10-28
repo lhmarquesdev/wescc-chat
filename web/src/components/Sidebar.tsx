@@ -11,7 +11,10 @@ import { AgentStatusToggle } from '../pages/omnichannel/OmnichannelPage';
 import { BrandMark } from './BrandIcons';
 import { CreateModal, type CreateKind } from './CreateModal';
 import { Icon, type IconName } from './Icon';
-import { isMentionBadge, useForYou, useMissedCalls, type ForYouItem } from './navState';
+import { isMentionBadge, useForYou, type ForYouItem } from './navState';
+// Chamadas em grupo: ponto da sala com chamada viva, "Em chamada" nas conversas a dois e o selo de perdidas.
+import { CallsNavBadge, InCallBadge, RoomLiveDot } from './call/LiveIndicators';
+import { useDirectPeer } from '../lib/roomcall';
 import { useIsPhone, type Placement } from './overlay';
 import { Empty, Field, GroupAvatar, Menu, Modal, UserAvatar } from './ui';
 
@@ -63,6 +66,8 @@ function SidebarItem({ s, big }: { s: Subscription; big?: boolean }) {
   // Sala silenciada ou com o contador oculto: só o selo de menção aparece.
   const count = s.unread > 0 && (mention || (!silenced && !s.notifications?.hideUnreadStatus)) ? s.unread : 0;
   const kind = mention ? 'mention' : s.groupMentions > 0 ? 'group' : '';
+  // Chamadas em grupo: a outra pessoa da conversa a dois, para o "Em chamada".
+  const otherId = useDirectPeer(s.rid, !!dmUser);
   return (
     <NavLink
       to={roomPath(s)}
@@ -78,6 +83,8 @@ function SidebarItem({ s, big }: { s: Subscription; big?: boolean }) {
         </span>
       )}
       <span className="side-name">{s.fname || s.name}</span>
+      {/* Chamadas em grupo: */}
+      {dmUser ? <InCallBadge userId={otherId} /> : <RoomLiveDot rid={s.rid} />}
       {typing ? (
         <span className="side-typing" role="img" aria-label="digitando">
           <i />
@@ -457,7 +464,26 @@ export function TakeoverHead({ title }: { title: string }) {
 
 // ---------- Navegação principal ----------
 
-function NavRow({ to, match, icon, label, badge, badgeKind, onNavigate }: { to: string; match?: string; icon: IconName; label: string; badge?: number; badgeKind?: string; onNavigate?: () => void }) {
+// Chamadas em grupo: `extra` leva um selo próprio (o de chamadas perdidas, com o rótulo para leitores de tela).
+function NavRow({
+  to,
+  match,
+  icon,
+  label,
+  badge,
+  badgeKind,
+  extra,
+  onNavigate,
+}: {
+  to: string;
+  match?: string;
+  icon: IconName;
+  label: string;
+  badge?: number;
+  badgeKind?: string;
+  extra?: ReactNode;
+  onNavigate?: () => void;
+}) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const active = pathname === to || pathname.startsWith(`${match ?? to}/`) || (!!match && pathname === match);
@@ -474,6 +500,7 @@ function NavRow({ to, match, icon, label, badge, badgeKind, onNavigate }: { to: 
       </span>
       <span className="side-name">{label}</span>
       {!!badge && <span className={badgeKind ? `badge ${badgeKind}` : 'badge'}>{badgeCount(badge)}</span>}
+      {extra}
     </button>
   );
 }
@@ -528,7 +555,6 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
   const callsEnabled = useSetting<boolean>('Calls_Enabled');
   const { omni, isAgent, takesChats } = useAgent();
   const queueCount = useStore((st) => Object.keys(st.queue).length);
-  const missed = useMissedCalls().count;
   const phone = useIsPhone();
   const list = mode === 'list';
   const [filter, setFilter] = useState('');
@@ -649,7 +675,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
       {!list && (
         <nav className="side-actions" aria-label="Navegação principal">
           <NavRow to="/home" icon="nav-home" label="Início" onNavigate={onNavigate} />
-          {callsEnabled && <NavRow to="/calls" icon="nav-calls" label="Chamadas" badge={missed} badgeKind="mention" onNavigate={onNavigate} />}
+          {callsEnabled && <NavRow to="/calls" icon="nav-calls" label="Chamadas" extra={<CallsNavBadge />} onNavigate={onNavigate} />}
           {omni && isAgent && <NavRow to="/omnichannel/queue" match="/omnichannel" icon="nav-omnichannel" label="Atendimento" badge={queueCount} badgeKind="group" onNavigate={onNavigate} />}
           <NavRow to="/directory" icon="nav-directory" label="Diretório" onNavigate={onNavigate} />
         </nav>

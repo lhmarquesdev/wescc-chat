@@ -5,7 +5,9 @@
 
 /* Ilhas escuras nos dois temas: os tokens light-dark() aqui dentro resolvem para o valor escuro. */
 .call-incoming,
-.call-window {
+.call-window,
+.call-preflight,
+.call-note {
   color-scheme: dark;
   color: var(--call-fg);
   /* Tamanho dos controles: cada modo troca só estas variáveis. */
@@ -411,7 +413,11 @@
   cursor: grabbing;
   user-select: none;
 }
-:where(.call-window:not(.big, .phone)) .call-stage {
+/* Janela solta (canto ou pílula): sem seleção de texto, que viraria um arraste do navegador no lugar do da janela. */
+:where(.call-window:not(.big, .phone, .g-big)) {
+  user-select: none;
+}
+:where(.call-window:not(.big, .phone, .g-big)) .call-stage {
   cursor: grab;
   touch-action: none;
 }
@@ -634,13 +640,15 @@
   font-weight: var(--fw-medium);
 }
 :where(.call-window.idle) .call-bar,
-:where(.call-window.idle) .call-chip {
+:where(.call-window.idle) .call-chip,
+:where(.call-window.idle) .call-head {
   opacity: 0;
 }
 /* No toque, o primeiro toque só traz os controles de volta (não aperta um botão invisível).
    Com mouse, o movimento já os traz antes do clique. */
 @media (pointer: coarse) {
-  :where(.call-window.idle) .call-bar {
+  :where(.call-window.idle) .call-bar,
+  :where(.call-window.idle) .call-head {
     pointer-events: none;
   }
 }
@@ -760,6 +768,1312 @@
   content: '';
   position: absolute;
   inset: -4px;
+}
+
+/* ---------- Chamadas em grupo: raiz, camada e avisos ----------
+   A raiz (.call-root) não gera caixa: janela (600), camada (640) e chamada recebida (700) seguem na ordem global.
+   Em tela cheia ela vira o bloco que cobre a tela, com tudo dentro. */
+:root {
+  --z-call-popover: 640;
+  --z-call-modal: 660;
+  --z-call-toast: 680;
+}
+.call-root {
+  display: contents;
+}
+.call-root:fullscreen {
+  display: block;
+  background: var(--call-bg);
+}
+/* Menus, diálogos, folhas e avisos abertos de dentro da chamada: uma ilha escura com a própria escala. */
+.call-layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-call-popover);
+  pointer-events: none;
+  color-scheme: dark;
+  color: var(--fg);
+}
+.call-layer > * {
+  pointer-events: auto;
+}
+:where(.call-layer) > .menu {
+  z-index: var(--z-call-popover);
+}
+:where(.call-layer) > :is(.modal-backdrop, .sheet-backdrop) {
+  z-index: var(--z-call-modal);
+}
+:where(.call-layer) > .menu[data-layer='modal'] {
+  z-index: calc(var(--z-call-modal) + 10);
+}
+/* Janela ampliada ou em tela cheia: os avisos do chat aparecem na camada da chamada, não atrás dela. */
+:where(html[data-call='big']) .toasts {
+  visibility: hidden;
+}
+:where(.call-toasts) > .toasts {
+  z-index: var(--z-call-toast);
+  visibility: visible;
+}
+/* Dentro da chamada o gatilho de menu não deixa folga de linha embaixo do botão. */
+:where(.call-window, .call-preflight) .menu-wrap,
+:where(.call-window, .call-preflight) .menu-wrap > span {
+  display: flex;
+}
+
+/* Selo "ao vivo" (sala com chamada em andamento). */
+.call-badge-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 20px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+
+/* ---------- Quadros ---------- */
+.call-tile {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  color: var(--call-fg);
+}
+/* O anel de quem fala fica por cima do vídeo (o box-shadow do quadro ficaria embaixo dele). Sem animação. */
+.call-tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.call-tile.speaking::after {
+  box-shadow: inset 0 0 0 2px var(--call-accept);
+}
+.call-tile > .call-tile-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.call-tile-video.contain {
+  object-fit: contain;
+  background: var(--call-bg);
+}
+/* Câmera que cabe inteira no destaque: a cópia borrada atrás aparece no lugar das faixas. */
+.call-tile-video.contain.over {
+  background: none;
+}
+.call-tile-video.mirror {
+  transform: scaleX(-1);
+}
+.call-tile-face {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+.call-tile-paused {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--call-fg-muted);
+}
+/* Nome embaixo à esquerda, no mesmo chip escuro do nome da chamada a dois. */
+.call-tile-name {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: var(--z-raised);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: calc(100% - 16px);
+  height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: rgb(0 0 0 / 0.5);
+  color: var(--call-fg);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-medium);
+}
+:where(.call-tile[data-size='sm']) .call-tile-name {
+  left: 4px;
+  bottom: 4px;
+  max-width: calc(100% - 8px);
+  height: 20px;
+  padding: 0 var(--space-1-5);
+  font-size: var(--fs-11);
+  line-height: var(--lh-11);
+}
+.call-muted {
+  color: var(--danger);
+}
+.call-hand-up {
+  color: var(--warn);
+}
+/* Menu da pessoa: no canto, aparece com o mouse em cima ou o foco dentro; no toque fica sempre. */
+:where(.call-tile) > .menu-wrap {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: var(--z-raised);
+  opacity: 0;
+  transition: opacity var(--dur-2) linear;
+}
+:where(.call-tile:is(:hover, :focus-within)) > .menu-wrap,
+:where(.call-tile) > .menu-wrap:has(:where([aria-expanded='true'])) {
+  opacity: 1;
+}
+@media (hover: none) {
+  :where(.call-tile) > .menu-wrap {
+    opacity: 1;
+  }
+}
+/* Controles escondidos (parado): o menu do quadro some junto. */
+:where(.call-window.idle) .call-tile > .menu-wrap {
+  opacity: 0;
+}
+.call-tile-menu {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: rgb(0 0 0 / 0.5);
+  color: var(--call-fg);
+  cursor: pointer;
+  transition: background-color var(--dur-1) linear;
+}
+/* Só com mouse: no toque o :hover gruda depois do toque. */
+@media (hover: hover) {
+  .call-tile-menu:hover {
+    background: rgb(0 0 0 / 0.7);
+  }
+}
+/* "+N": abre a lista de participantes. */
+.call-more-tile {
+  border: 0;
+  padding: 0;
+  background: var(--call-control);
+  color: var(--call-fg);
+  font: inherit;
+  font-size: var(--fs-22);
+  line-height: var(--lh-22);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color var(--dur-1) linear;
+}
+/* Só com mouse: no toque o :hover gruda depois do toque. */
+@media (hover: hover) {
+  .call-more-tile:hover {
+    background: var(--call-control-hover);
+  }
+}
+
+/* ---------- Palco: grade, destaque, sozinho ---------- */
+.call-stage-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Grade: quadros do tamanho calculado (--tile-w x --tile-h); a última linha fica centrada. */
+.call-grid {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 8px;
+}
+.call-grid-item {
+  width: var(--tile-w);
+  height: var(--tile-h);
+  flex: none;
+}
+/* Destaque: o quadro grande e a faixa dos demais à direita. */
+.call-spot {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  gap: 8px;
+}
+.call-spot.solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+.call-spot-main {
+  min-width: 0;
+  min-height: 0;
+}
+.call-strip {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+  gap: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.call-strip-item,
+.call-strip > .call-more-tile {
+  flex: none;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+/* Sozinho na chamada. */
+.call-alone {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--call-fg-muted);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+.call-alone strong {
+  color: var(--call-fg);
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+  font-weight: var(--fw-semibold);
+}
+.call-alone-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: var(--space-2);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--call-control);
+  color: var(--call-fg);
+}
+.call-alone-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+/* Sua prévia, enquanto ninguém mais chegou. */
+.call-self-tile {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 240px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-lg);
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 1px rgb(255 255 255 / 0.08);
+}
+/* Falar segurando Espaço. */
+.call-ptt {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  translate: -50% 0;
+  z-index: var(--z-raised);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  height: 28px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--call-accept);
+  color: var(--fg-on-accent);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-medium);
+}
+
+/* ---------- Faixas: trava, reconectando, som bloqueado ---------- */
+.call-banners {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.call-banners:empty {
+  display: none;
+}
+.call-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  color: var(--fg);
+  box-shadow: var(--shadow-2);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  text-align: left;
+}
+.call-banner > .icon {
+  color: var(--fg-muted);
+}
+.call-banner.warn {
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn-solid) 45%, transparent);
+}
+.call-banner.warn > .icon {
+  color: var(--warn);
+}
+.call-banner.err {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.call-banner.err > .icon {
+  color: var(--danger);
+}
+.call-banner-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.call-banner-text strong {
+  font-weight: var(--fw-semibold);
+}
+.call-banner > .btn {
+  flex: none;
+}
+
+/* ---------- Cabeçalho da chamada em grupo ---------- */
+.call-people-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--call-control);
+  color: var(--call-fg);
+  font: inherit;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color var(--dur-1) linear;
+}
+/* Só com mouse: no toque o :hover gruda depois do toque. */
+@media (hover: hover) {
+  .call-people-chip:hover {
+    background: var(--call-control-hover);
+  }
+}
+.call-people-chip[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--fg-on-accent);
+}
+.call-signal {
+  flex: none;
+  display: inline-flex;
+  color: var(--warn);
+}
+.call-room-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* ---------- Janela encaixada (grupo): só o quadro em destaque ---------- */
+:where(.call-window.group:not(.g-big)) .call-stage {
+  cursor: pointer;
+}
+.call-stage > .call-tile,
+.call-stage > .call-alone {
+  position: absolute;
+  inset: 0;
+}
+:where(.call-window.group:not(.g-big)) .call-tile {
+  border-radius: 0;
+}
+:where(.call-window.group:not(.g-big)) .call-alone {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.call-stage > .call-banners {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: var(--z-raised);
+}
+:where(.call-stage) .call-banner {
+  padding: var(--space-2) 10px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+}
+
+/* ---------- Ampliada (grupo): palco, cabeçalho e barra por cima, lista de participantes à direita ---------- */
+.call-window.g-big {
+  inset: 0;
+  width: auto;
+  max-width: none;
+  border-radius: 0;
+  box-shadow: none;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  animation-name: call-fade;
+}
+.g-big.with-panel {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+:where(.call-window.g-big) .call-stage {
+  grid-area: 1 / 1;
+  aspect-ratio: auto;
+  height: 100%;
+  min-height: 0;
+  padding: 64px 16px 92px;
+  outline: none;
+  display: flex;
+  flex-direction: column;
+}
+:where(.call-window.g-big) .call-stage > .call-stage-body {
+  flex: 1 1 0;
+  height: auto;
+}
+/* O palco é focável (Espaço para falar): o anel fica por dentro, a janela cobre a área toda. */
+:where(.call-window.g-big) .call-stage:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+.call-head {
+  grid-area: 1 / 1;
+  align-self: start;
+  z-index: var(--z-raised);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4) var(--space-6);
+  background: linear-gradient(to bottom, rgb(0 0 0 / 0.6), transparent);
+  transition: opacity var(--dur-4) var(--ease-out);
+}
+.call-head .call-who strong {
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+}
+:where(.call-window.g-big) .call-tools {
+  gap: var(--space-2);
+}
+:where(.call-window.g-big) .call-tool {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--call-control);
+  color: var(--call-fg);
+}
+/* Só com mouse: no toque o :hover gruda depois do toque. */
+@media (hover: hover) {
+  :where(.call-window.g-big) .call-tool:hover {
+    background: var(--call-control-hover);
+  }
+}
+/* Faixas da ampliada: no alto do palco, acima dos quadros (empurram a grade para baixo, não a cobrem). */
+.call-banners-slot {
+  flex: none;
+  align-self: center;
+  width: min(560px, 100%);
+}
+.call-banners-slot > .call-banners {
+  margin-bottom: var(--space-2);
+}
+:where(.call-window.g-big) .call-bar {
+  grid-area: 1 / 1;
+  align-self: end;
+  z-index: var(--z-raised);
+  flex-direction: row;
+  justify-content: center;
+  align-items: flex-end;
+  min-height: 72px;
+  padding: var(--space-8) var(--space-4) var(--space-3);
+  background: linear-gradient(to top, rgb(0 0 0 / 0.6), transparent);
+  transition: opacity var(--dur-4) var(--ease-out);
+}
+/* Lista de participantes (computador): coluna à direita do palco. */
+.g-big > .call-people {
+  grid-area: 1 / 2;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+/* Tela: o botão e a seta de opções no canto dele. */
+.call-split {
+  position: relative;
+  display: flex;
+}
+/* O menu de opções sai de cima do botão inteiro (a referência é a caixa toda), não da seta no canto: assim não cobre
+   a barra. Só a seta recebe o clique. */
+.call-split > .menu-wrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.call-split-arrow {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  pointer-events: auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--call-bg);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--call-fg) 18%, var(--call-bg));
+  color: var(--call-fg);
+  cursor: pointer;
+  transition: background-color var(--dur-1) linear;
+}
+.call-split-arrow > .icon {
+  rotate: 180deg;
+}
+/* Só com mouse: no toque o :hover gruda depois do toque. */
+@media (hover: hover) {
+  .call-split-arrow:hover {
+    background: color-mix(in srgb, var(--call-fg) 28%, var(--call-bg));
+  }
+}
+/* Controle indisponível: continua focável e explica o motivo ao clicar. */
+.call-btn.blocked {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.call-menu {
+  min-width: 260px;
+}
+
+/* ---------- Participantes ---------- */
+.call-people {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  color: var(--fg);
+}
+.sheet.call-people {
+  height: 80dvh;
+}
+.call-people-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2) var(--space-2) var(--space-4);
+}
+.call-people-head h2 {
+  margin: 0;
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+  font-weight: var(--fw-semibold);
+}
+.call-people-search {
+  flex: none;
+  padding: 0 var(--space-4) var(--space-2);
+}
+.call-people-search > .search-field {
+  margin: 0;
+}
+.call-people-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--space-2) var(--space-2);
+}
+.call-people-section + .call-people-section {
+  margin-top: var(--space-2);
+}
+.call-people-title {
+  margin: 0;
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-muted);
+}
+.call-people-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border-radius: var(--radius-md);
+  outline: none;
+}
+/* Só com mouse: no toque o :hover gruda depois do toque. */
+@media (hover: hover) {
+  .call-people-row:hover {
+    background: var(--bg-hover);
+  }
+}
+.call-people-row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+.call-people-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.call-people-who strong {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+}
+.call-people-badges {
+  display: flex;
+  gap: var(--space-1);
+}
+.call-people-badges:empty {
+  display: none;
+}
+.call-people-sub {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.call-people-state {
+  flex: none;
+  display: flex;
+  gap: var(--space-1-5);
+}
+.call-people-foot {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.call-people-foot > .btn {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+/* ---------- Chamar pessoas ---------- */
+.call-ring-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(360px, 50dvh);
+  margin: var(--space-2) calc(var(--space-2) * -1) 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.call-ring-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+/* Só com mouse: no toque o :hover gruda depois do toque. */
+@media (hover: hover) {
+  .call-ring-row:hover {
+    background: var(--bg-hover);
+  }
+}
+.call-ring-row.disabled {
+  cursor: default;
+  background: none;
+}
+:where(.call-ring-row.disabled) > * {
+  opacity: 0.6;
+}
+.call-ring-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.call-ring-who strong {
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+}
+.call-ring-who span {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.call-ring-check {
+  color: var(--accent-text);
+}
+.call-ring-empty {
+  display: flex;
+  justify-content: center;
+  margin: 0;
+  padding: var(--space-6) var(--space-2);
+  color: var(--fg-muted);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+
+/* ---------- Aparelhos, atalhos e teste de conexão ---------- */
+/* Um aparelho por linha, o nome à esquerda e o botão no resto: em três colunas o botão encurtava até
+   "Padrão do sistema". */
+.call-devices {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+}
+.call-device {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+}
+.call-device-label {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-medium);
+  color: var(--fg-muted);
+}
+/* O gatilho ocupa a coluna inteira e o nome do aparelho encurta com reticências. */
+.call-device > .menu-wrap {
+  min-width: 0;
+}
+:where(.call-device) .menu-wrap > span {
+  flex: 1;
+  min-width: 0;
+}
+.call-device-btn {
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
+}
+.call-device-btn > .ellipsis {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.call-device-btn > .call-device-caret {
+  color: var(--fg-muted);
+}
+.call-keys {
+  margin: 0 0 var(--space-4);
+}
+.call-key-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+.call-key-row dd {
+  margin: 0;
+  flex: none;
+}
+.call-selftest-steps {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+/* O veredito tem lugar desde o começo (até 4 linhas; 5 no celular): o diálogo não cresce nem pula quando ele chega. */
+.call-selftest-verdict {
+  min-height: calc(4 * var(--lh-14) + 2 * var(--space-3) + 2px);
+}
+.call-selftest-verdict > .callout {
+  margin-bottom: 0;
+}
+@media (max-width: 760px) {
+  .call-selftest-verdict {
+    min-height: calc(5 * var(--lh-14) + 2 * var(--space-3) + 2px);
+  }
+}
+.call-selftest-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+.call-selftest-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--fg-muted);
+}
+:where(.call-selftest-step.success) .call-selftest-icon {
+  color: var(--ok);
+}
+:where(.call-selftest-step.failed) .call-selftest-icon {
+  color: var(--danger);
+}
+:where(.call-selftest-step.running) .call-selftest-icon {
+  color: var(--accent-text);
+}
+.call-selftest-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+:where(.call-selftest-step.idle) .call-selftest-dot {
+  background: var(--border-strong);
+}
+.call-selftest-label {
+  flex: 1;
+  min-width: 0;
+}
+.call-selftest-status {
+  flex: none;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+:where(.call-selftest-step.failed) .call-selftest-status {
+  color: var(--danger);
+}
+
+/* ---------- Tela de entrada ---------- */
+.call-preflight {
+  --ring-offset: var(--bg-raised);
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-call);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-6) var(--space-4);
+  background: var(--call-bg);
+  animation: call-fade var(--dur-3) var(--ease-out);
+}
+/* margin: auto centra sem cortar o alto quando o cartão é maior que a tela. */
+.call-preflight-card {
+  width: min(560px, 100%);
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-raised);
+  color: var(--fg);
+  box-shadow: var(--shadow-3), var(--highlight-top);
+}
+.call-preflight-head h2 {
+  margin: 0;
+  font-size: var(--fs-18);
+  line-height: var(--lh-18);
+  font-weight: var(--fw-semibold);
+}
+.call-preflight-room {
+  margin: 2px 0 0;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  color: var(--fg-2);
+}
+.call-preflight-who {
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+.call-preflight-preview {
+  --ring-offset: var(--call-bg);
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--call-bg);
+}
+.call-preflight-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+.call-preflight-off {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding-bottom: var(--space-12);
+  color: var(--call-fg-muted);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+.call-preflight-toggles {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  display: flex;
+  justify-content: center;
+  gap: var(--space-3);
+}
+.call-preflight-note {
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
+}
+.call-preflight-card > .callout {
+  margin: 0;
+}
+.call-preflight-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-1);
+}
+.call-preflight-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+/* Nível do microfone: a barra cresce com a voz (escala, sem animação própria). */
+.call-meter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--fg-muted);
+}
+.call-meter-track {
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--border-strong);
+}
+.call-meter-bar {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--call-accept);
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+:where(.call-meter.off) .call-meter-bar {
+  background: var(--fg-muted);
+}
+
+/* ---------- Chamada recebida em grupo ---------- */
+.call-by {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-2);
+}
+:where(.call-incoming.full) .call-by {
+  margin-top: var(--space-1);
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+}
+.call-queue {
+  flex: none;
+  align-self: flex-start;
+}
+:where(.call-hero) > .call-queue {
+  align-self: center;
+  margin-top: var(--space-4);
+}
+
+/* ---------- Fim da chamada, outro aparelho, "Voltar" e outra aba ---------- */
+.call-end {
+  grid-area: 1 / 1;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--call-fg-muted);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+.call-end strong {
+  color: var(--call-fg);
+  font-size: var(--fs-16);
+  line-height: var(--lh-16);
+  font-weight: var(--fw-semibold);
+}
+.call-end-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: var(--space-2);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--call-control);
+  color: var(--call-fg);
+}
+.call-end-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.call-note {
+  --ring-offset: var(--call-bg);
+  position: fixed;
+  top: 72px;
+  right: 16px;
+  z-index: var(--z-call);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 32px));
+  min-height: 48px;
+  padding: var(--space-1-5) var(--space-4) var(--space-1-5) var(--space-1-5);
+  border-radius: var(--radius-full);
+  background: var(--call-bg);
+  box-shadow:
+    var(--shadow-3),
+    0 0 0 1px rgb(255 255 255 / 0.06);
+  animation: call-rise var(--dur-3) var(--ease-out);
+}
+.call-note:has(> button) {
+  padding-right: var(--space-1-5);
+}
+.call-note-icon {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--call-control);
+  color: var(--call-fg);
+}
+.call-note-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-medium);
+}
+.call-note > .btn {
+  flex: none;
+}
+.call-note.phone {
+  inset: calc(env(safe-area-inset-top) + 4px) 8px auto;
+  max-width: none;
+  animation-name: call-drop;
+}
+
+/* ---------- Nova versão do chat ---------- */
+.call-version {
+  color-scheme: dark;
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  translate: -50% 0;
+  z-index: calc(var(--z-toast) - 1);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: var(--space-1-5) var(--space-1-5) var(--space-1-5) 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-inverse);
+  color: var(--fg-inverse);
+  box-shadow: var(--shadow-3);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  animation: call-drop var(--dur-3) var(--ease-out);
+}
+.call-version-icon {
+  color: var(--info);
+}
+.call-version-text {
+  min-width: 0;
+}
+.call-version-action {
+  flex: none;
+  padding: var(--space-1) var(--space-1-5);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+/* Só com mouse: no toque o :hover gruda depois do toque. */
+@media (hover: hover) {
+  .call-version-action:hover {
+    background: rgb(255 255 255 / 0.08);
+  }
+}
+.call-version-close {
+  --ring-offset: var(--bg-inverse);
+  width: 28px;
+  height: 28px;
+  color: var(--call-fg-muted);
+}
+
+/* ---------- Chamada em grupo no celular ---------- */
+.call-window.g-phone {
+  --ctl: 48px;
+  --hang-w: 56px;
+}
+:where(.call-window.g-phone) .call-stage {
+  padding: calc(env(safe-area-inset-top) + 60px) 8px calc(env(safe-area-inset-bottom) + 108px);
+}
+:where(.call-window.g-phone) .call-head {
+  padding: calc(env(safe-area-inset-top) + 8px) var(--space-2) var(--space-6) var(--space-4);
+}
+:where(.call-window.g-phone) .call-tool {
+  width: var(--touch);
+  height: var(--touch);
+}
+:where(.call-window.g-phone) .call-bar {
+  padding: var(--space-8) var(--space-2) calc(env(safe-area-inset-bottom) + 16px);
+}
+:where(.call-window.g-phone) .call-buttons {
+  gap: var(--space-2);
+}
+/* Destaque no celular: o quadro grande em cima e a faixa dos demais embaixo, de lado. */
+:where(.call-window.g-phone) .call-spot {
+  grid-template: minmax(0, 1fr) auto / minmax(0, 1fr);
+}
+:where(.call-window.g-phone) .call-spot.solo {
+  grid-template-rows: minmax(0, 1fr);
+}
+:where(.call-window.g-phone) .call-strip {
+  flex-direction: row;
+  justify-content: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+:where(.call-window.g-phone) :is(.call-strip-item, .call-strip > .call-more-tile) {
+  width: 128px;
+}
+:where(.call-window.g-phone) .call-self-tile {
+  width: 96px;
+  aspect-ratio: 3 / 4;
+}
+:where(.call-preflight.phone) .call-preflight-card {
+  margin: 0 auto auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.call-preflight.phone {
+  inset: 0;
+  padding: calc(env(safe-area-inset-top) + 16px) var(--space-4) calc(env(safe-area-inset-bottom) + 16px);
+}
+:where(.call-preflight.phone) .call-preflight-foot {
+  flex-direction: column-reverse;
+  align-items: stretch;
+}
+:where(.call-preflight.phone) .call-preflight-actions > .btn {
+  flex: 1;
+  justify-content: center;
+}
+:where(.call-preflight.phone) .call-preflight-test {
+  align-self: center;
+}
+@media (max-width: 760px) {
+  .call-version {
+    top: auto;
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 8px);
+  }
+}
+@media (pointer: coarse) {
+  .call-tile-menu {
+    position: relative;
+    width: 36px;
+    height: 36px;
+  }
+  /* Alvos de toque de 44 px sem mudar o tamanho à vista (o mesmo recurso do .btn.small). */
+  .call-tile-menu::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+  }
+  .call-people-chip {
+    position: relative;
+  }
+  .call-people-chip::after {
+    content: '';
+    position: absolute;
+    inset: -8px 0;
+  }
+  .call-version-action,
+  .call-version-close {
+    position: relative;
+  }
+  .call-version-action::after,
+  .call-version-close::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--touch));
+    height: max(100%, var(--touch));
+    transform: translate(-50%, -50%);
+  }
+  /* Controles escondidos: o menu do quadro, invisível, também não recebe o toque (o toque só acorda os controles). */
+  :where(.call-window.idle) .call-tile > .menu-wrap {
+    pointer-events: none;
+  }
+  .call-split-arrow::after {
+    content: '';
+    position: absolute;
+    inset: -8px;
+  }
 }
 
 /* ---------- Página de chamadas ---------- */
@@ -1540,8 +2854,8 @@ td.queue-act > .row-actions {
 /* ---------- Responsivo ---------- */
 @media (max-width: 760px) {
   /* A pílula da chamada fica sob a barra de status: a tela desce para ela não cobrir o cabeçalho. */
-  .layout:has(> .call-pill) {
-    padding-top: calc(env(safe-area-inset-top) + 56px);
+  .layout:has(> :where(.call-root) :is(.call-pill, .call-note)) {
+    padding-top: calc(env(safe-area-inset-top) + max(56px, var(--call-note-h, 0px) + 8px));
   }
   .call-history {
     max-width: none;

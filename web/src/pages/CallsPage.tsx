@@ -1,59 +1,75 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Call } from '@shared/index';
+import type { Call, CallRoomRef } from '@shared/index';
+import { callsRowView, liveCallIcon, liveRowMeta } from '@shared/call-view';
 import { api } from '../lib/api';
-import { startCall } from '../lib/calls';
-import { formatDateTime, formatDay, formatDuration, formatTime } from '../lib/format';
+import { callRoomName, expandCall, isInCall, openJoin, useCallStore } from '../lib/call/store';
+import { prefetchSfu, startCall } from '../lib/calls';
+import { formatDateTime, formatDay, formatTime, roomIconName, roomPath } from '../lib/format';
+import { namesIn } from '../lib/names';
 import { realtime } from '../lib/realtime';
+import { explainCall, markCallsSeen, useLiveCalls, useMissedCalls, useNow } from '../lib/roomcall';
 import { useSetting, useStore } from '../lib/store';
 import { Icon, type IconName } from '../components/Icon';
 import { Empty, Pager, Segmented, Skeleton, UserAvatar, useAsync, useDelay } from '../components/ui';
+import '../components/callroom.css';
 
 const COUNT = 50;
-// Com filtro, o servidor não filtra: vêm as últimas chamadas de uma vez e a página é feita aqui.
-const FILTER_WINDOW = 500;
 
-const STATUS: Record<string, string> = { ended: '', missed: 'não atendida', declined: 'recusada', canceled: 'cancelada', busy: 'ocupado', ringing: 'tocando', ongoing: 'em andamento' };
-
-type Filter = 'all' | 'missed' | 'received' | 'made';
+type Filter = 'all' | 'missed' | 'incoming' | 'outgoing';
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'Todas' },
   { id: 'missed', label: 'Perdidas' },
-  { id: 'received', label: 'Recebidas' },
-  { id: 'made', label: 'Feitas' },
+  { id: 'incoming', label: 'Recebidas' },
+  { id: 'outgoing', label: 'Feitas' },
 ];
-const FILTER_EMPTY: Record<Exclude<Filter, 'all'>, [string, string]> = {
-  missed: ['Nenhuma chamada perdida', 'As chamadas que você não atender aparecem aqui.'],
-  received: ['Nenhuma chamada recebida', 'As chamadas que você atender ou recusar aparecem aqui.'],
-  made: ['Nenhuma chamada feita', 'Abra uma conversa direta e use Chamada de voz ou Chamada de vídeo.'],
+const FILTER_EMPTY: Record<Exclude<Filter, 'all'>, string> = {
+  missed: 'Nenhuma chamada perdida.',
+  incoming: 'Nenhuma chamada recebida.',
+  outgoing: 'Nenhuma chamada feita.',
 };
 
-// Perdida é a recebida que não foi atendida (não atendida, ocupado ou desistência de quem ligou), como na conversa,
-// onde elas viram "Chamada perdida". A que a própria pessoa recusou não é perdida: fica como "Recusada", entre as
-// recebidas.
-function direction(c: Call, me: string) {
-  const outgoing = c.caller._id === me;
-  const answered = c.duration != null || c.status === 'ongoing' || c.status === 'ended';
-  const declined = !outgoing && c.status === 'declined';
-  const missed = !outgoing && !answered && !declined && c.status !== 'ringing';
-  return { outgoing, missed, declined, other: outgoing ? c.callee : c.caller };
+const toast = explainCall;
+
+// Sala da chamada para o ícone, o nome e o link (calls.list e calls.active trazem; a assinatura cobre o resto).
+function roomOf(c: Call): CallRoomRef {
+  if (c.room) return c.room;
+  const sub = useStore.getState().subscriptions[c.rid];
+  return { _id: c.rid, t: sub?.t ?? (c.scope === 'direct' ? 'd' : 'c'), name: sub?.name ?? null, fname: sub?.fname ?? null, prid: sub?.prid ?? null, teamMain: sub?.teamMain, notice: sub?.notice };
 }
 
-// Histórico de chamadas da pessoa (feitas e recebidas), agrupado por dia.
+const roomTitle = (r: CallRoomRef) => callRoomName(r) || 'Sala';
+
+// Histórico de chamadas da pessoa (feitas, recebidas e em grupo), agrupado por dia, com as chamadas vivas no alto.
 export function CallsPage() {
   const me = useStore((s) => s.me)!;
   const enabled = useSetting<boolean>('Calls_Enabled');
   const navigate = useNavigate();
   const [offset, setOffset] = useState(0);
   const [filter, setFilter] = useState<Filter>('all');
-  const all = filter === 'all';
   const { data, loading, error, reload } = useAsync(
-    () => api.get('calls.list', all ? { offset, count: COUNT } : { offset: 0, count: FILTER_WINDOW }) as Promise<{ calls: Call[]; total: number }>,
-    [all ? offset : -1],
+    () => api.get('calls.list', { offset, count: COUNT, filter }) as Promise<{ calls: Call[]; total: number }>,
+    [offset, filter],
   );
-  // Quem pode ligar depende dos papéis das duas pessoas e da regra de conversas diretas: quando mudam, busca de novo.
-  const people = data ? data.calls.map((c) => `${c.caller._id},${c.callee._id}`).join(',') : '';
+
+  // Abrir a página zera o selo; uma perdida que chega com a página aberta também já foi vista.
+  const missed = useMissedCalls();
   useEffect(() => {
+    void markCallsSeen();
+  }, []);
+  useEffect(() => {
+    if (missed > 0) void markCallsSeen();
+  }, [missed]);
+
+  // Quem pode ligar depende dos papéis das duas pessoas e da regra de conversas diretas: quando mudam, busca de novo.
+  // Uma chamada que termina entra no histórico: a primeira página busca de novo.
+  const people = data ? data.calls.flatMap((c) => [c.caller._id, c.callee?._id ?? '']).join(',') : '';
+  useEffect(() => {
+    let timer = 0;
+    const later = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(reload, 1000);
+    };
     const off = realtime.on((ev) => {
       if (
         ev.type === 'permissions.changed' ||
@@ -61,33 +77,29 @@ export function CallsPage() {
         (ev.type === 'settings.changed' && ev.settings.some((s) => s._id === 'Direct_Restriction_Scope'))
       )
         reload();
+      else if (offset === 0 && ((ev.type === 'call' && ev.call.status !== 'ongoing' && ev.call.status !== 'ringing') || (ev.type === 'call.room' && !ev.call))) later();
     });
     return () => {
+      clearTimeout(timer);
       off();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [people, me._id]);
+  }, [people, me._id, offset]);
 
-  const filtered = useMemo(() => {
-    if (!data) return null;
-    if (all) return { calls: data.calls, total: data.total };
-    const calls = data.calls.filter((c) => {
-      const d = direction(c, me._id);
-      return filter === 'made' ? d.outgoing : filter === 'missed' ? d.missed : !d.outgoing && !d.missed;
-    });
-    return { calls: calls.slice(offset, offset + COUNT), total: calls.length };
-  }, [data, all, filter, offset, me._id]);
   const days = useMemo(() => {
     const out: { day: string; calls: Call[] }[] = [];
-    for (const c of filtered?.calls ?? []) {
+    for (const c of data?.calls ?? []) {
       const day = formatDay(c.createdAt);
       const last = out[out.length - 1];
       if (last?.day === day) last.calls.push(c);
       else out.push({ day, calls: [c] });
     }
     return out;
-  }, [filtered]);
+  }, [data]);
   const pick = (f: Filter) => (setFilter(f), setOffset(0));
+  // Com uma chamada viva logo acima, o histórico vazio não diz "Nenhuma chamada ainda" em destaque.
+  const live = useLiveCalls();
+  const hasLive = !!enabled && Object.values(live).some((c) => c.scope === 'group' && c.status === 'ongoing');
 
   let body;
   if (loading && !data) body = <CallsSkeleton />;
@@ -108,43 +120,46 @@ export function CallsPage() {
         </Empty>
       </div>
     );
-  else if (!filtered?.calls.length)
-    body = all ? (
-      <div className="card call-empty">
-        <Empty
-          icon="calls-empty"
-          title="Nenhuma chamada ainda"
-          action={
-            <button type="button" className="btn" onClick={() => navigate('/directory')}>
-              Abrir diretório
-            </button>
-          }
-        >
-          Abra uma conversa direta e use Chamada de voz ou Chamada de vídeo.
-        </Empty>
-      </div>
-    ) : (
-      <div className="card call-empty">
-        <Empty
-          icon="calls-empty"
-          title={FILTER_EMPTY[filter as Exclude<Filter, 'all'>][0]}
-          action={
-            <button type="button" className="btn" onClick={() => pick('all')}>
-              Mostrar todas
-            </button>
-          }
-        >
-          {FILTER_EMPTY[filter as Exclude<Filter, 'all'>][1]}
-        </Empty>
-      </div>
-    );
+  else if (!data?.calls.length)
+    body =
+      filter === 'all' && hasLive ? (
+        <div className="card call-empty">
+          <Empty>Nenhuma chamada no histórico.</Empty>
+        </div>
+      ) : filter === 'all' ? (
+        <div className="card call-empty">
+          <Empty
+            icon="calls-empty"
+            title="Nenhuma chamada ainda"
+            action={
+              <button type="button" className="btn" onClick={() => navigate('/directory')}>
+                Abrir diretório
+              </button>
+            }
+          >
+            Ligue de uma mensagem direta ou inicie uma chamada em um canal.
+          </Empty>
+        </div>
+      ) : (
+        <div className="card call-empty">
+          <Empty
+            icon="calls-empty"
+            title={FILTER_EMPTY[filter]}
+            action={
+              <button type="button" className="btn" onClick={() => pick('all')}>
+                Mostrar todas
+              </button>
+            }
+          />
+        </div>
+      );
   else
     body = days.map((g) => (
       <section key={g.day} className="call-day">
         <h2 className="call-day-title">{g.day}</h2>
         <ul className="call-list">
           {g.calls.map((c) => (
-            <CallRow key={c._id} c={c} me={me._id} enabled={!!enabled} onOpen={() => navigate(`/direct/${c.rid}`)} />
+            <CallRow key={c._id} c={c} me={me._id} enabled={!!enabled} onOpen={() => navigate(roomPath(roomOf(c)))} />
           ))}
         </ul>
       </section>
@@ -157,12 +172,73 @@ export function CallsPage() {
       </header>
       <div className="page-body">
         <div className="call-history">
+          {enabled && <LiveCalls onOpen={(c) => navigate(roomPath(roomOf(c)))} />}
           <Segmented label="Filtrar chamadas" value={filter} onChange={pick} items={FILTERS} />
           {body}
-          {filtered && <Pager offset={offset} count={COUNT} total={filtered.total} onChange={setOffset} />}
+          {data && <Pager offset={offset} count={COUNT} total={data.total} onChange={setOffset} />}
         </div>
       </div>
     </div>
+  );
+}
+
+// "Em andamento": as chamadas em grupo vivas nas minhas salas, com Entrar, Ouvir ou Na chamada.
+function LiveCalls({ onOpen }: { onOpen: (c: Call) => void }) {
+  const byRoom = useLiveCalls();
+  const tabCall = useCallStore((s) => s.tabCall);
+  // A fase muda o botão (Entrar ↔ Na chamada).
+  useCallStore((s) => s.phase);
+  const list = Object.values(byRoom)
+    .filter((c) => c.scope === 'group' && c.status === 'ongoing')
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const now = useNow(list.length > 0);
+  if (!list.length) return null;
+  return (
+    <section className="call-day calls-live" aria-labelledby="calls-live-title">
+      <h2 className="call-day-title" id="calls-live-title">
+        Em andamento
+      </h2>
+      <ul className="call-list">
+        {list.map((c) => {
+          const room = roomOf(c);
+          const mine = isInCall(c._id) || tabCall?.callId === c._id;
+          const text = mine ? 'Na chamada' : c.mine?.listenOnly ? 'Ouvir' : 'Entrar';
+          const go = () => {
+            if (!mine) return void openJoin(c._id, c.rid);
+            if (!isInCall(c._id)) return toast('Chamada em andamento em outra aba.');
+            expandCall();
+          };
+          return (
+            <li key={c._id}>
+              <button type="button" className="call-list-main" title={roomTitle(room)} onClick={() => onOpen(c)}>
+                <span className="calls-room-tile" aria-hidden="true">
+                  <Icon name={roomIconName(room)} size={20} />
+                </span>
+                <span className="call-list-text">
+                  <strong className="call-list-name">{roomTitle(room)}</strong>
+                  <span className="call-list-meta tabular">
+                    <Icon name={liveCallIcon(c)} size={14} />
+                    <span className="ellipsis">{liveRowMeta(c, now)}</span>
+                  </span>
+                </span>
+              </button>
+              <span className="call-list-actions">
+                <button
+                  type="button"
+                  className={mine ? 'btn small' : 'btn small primary call-join'}
+                  title={mine ? 'Abrir a chamada' : undefined}
+                  onPointerEnter={() => prefetchSfu()}
+                  onFocus={() => prefetchSfu()}
+                  onClick={go}
+                >
+                  {text}
+                </button>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -193,31 +269,43 @@ function CallsSkeleton() {
   );
 }
 
+function dirIcon(c: Call, me: string, missed: boolean): IconName {
+  if (c.caller._id === me) return 'call-outgoing';
+  if (missed) return 'call-missed';
+  if (c.mine?.state === 'declined' || (c.scope === 'direct' && c.status === 'declined')) return 'call-hangup';
+  return c.scope === 'group' ? 'call-people' : 'call-incoming';
+}
+
 function CallRow({ c, me, enabled, onOpen }: { c: Call; me: string; enabled: boolean; onOpen: () => void }) {
-  const { outgoing, missed, declined, other } = direction(c, me);
-  const name = other.name || other.username;
-  const dir: [IconName, string] = outgoing
-    ? ['call-outgoing', 'Feita']
-    : missed
-      ? ['call-missed', 'Perdida']
-      : declined
-        ? ['call-hangup', 'Recusada']
-        : ['call-incoming', 'Recebida'];
-  // "Perdida · não atendida" ou "Recusada · recusada" diriam a mesma coisa duas vezes.
-  const extra = c.duration != null ? formatDuration(c.duration) : missed || declined ? '' : STATUS[c.status];
+  const room = roomOf(c);
+  const v = callsRowView(c, me, roomTitle(room));
+  const reasonId = useId();
+  const other = c.scope === 'direct' ? (c.caller._id === me ? c.callee : c.caller) : null;
+  // A direção vai separada: no celular o ícone e a cor já a dizem, e a palavra fica só para leitores de tela.
+  const cut = v.meta.indexOf(' · ');
+  const dir = cut < 0 ? v.meta : v.meta.slice(0, cut);
+  const rest = cut < 0 ? '' : v.meta.slice(cut + 3);
+  const redial = (kind: 'audio' | 'video') => (v.redialReason ? toast(v.redialReason) : void startCall(c.rid, kind));
   return (
-    <li className={missed ? 'missed' : ''}>
-      <button type="button" className="call-list-main" title={`${name} · ${formatDateTime(c.createdAt)}`} onClick={onOpen}>
-        <UserAvatar username={other.username} size={40} />
+    <li className={v.missed ? 'missed' : ''}>
+      <button type="button" className="call-list-main" title={`${v.title} · ${formatDateTime(c.createdAt)}`} onClick={onOpen}>
+        {other ? (
+          <UserAvatar username={other.username} size={40} />
+        ) : (
+          <span className="calls-room-tile" aria-hidden="true">
+            <Icon name={roomIconName(room)} size={20} />
+          </span>
+        )}
         <span className="call-list-text">
-          <strong className="call-list-name">{name}</strong>
+          <strong className="call-list-name">{v.title}</strong>
           <span className="call-list-meta">
-            <Icon name={dir[0]} size={14} />
+            <Icon name={dirIcon(c, me, v.missed)} size={14} />
             <span className="ellipsis">
-              {/* No celular o ícone e a cor já dizem a direção: a palavra sai da vista para a duração caber. */}
-              <span className="call-dir">{dir[1]} · </span>
-              {c.kind === 'video' ? 'Vídeo' : 'Voz'}
-              {extra ? ` · ${extra}` : ''}
+              <span className="call-dir">
+                {dir}
+                {rest ? ' · ' : ''}
+              </span>
+              {rest}
             </span>
           </span>
         </span>
@@ -225,28 +313,43 @@ function CallRow({ c, me, enabled, onOpen }: { c: Call; me: string; enabled: boo
       <time className="call-time" dateTime={c.createdAt}>
         {formatTime(c.createdAt)}
       </time>
-      {enabled && (
+      {enabled && v.redial && (
         <span className="call-list-actions">
           <button
             type="button"
             className={c.kind === 'video' ? 'icon-btn call-alt' : 'icon-btn'}
-            title={c.canCall === false ? c.callBlockedReason : 'Chamada de voz'}
-            aria-label={c.canCall === false ? c.callBlockedReason : 'Chamada de voz'}
-            disabled={c.canCall === false}
-            onClick={() => void startCall(c.rid, 'audio')}
+            title="Chamada de voz"
+            aria-label="Chamada de voz"
+            aria-disabled={v.redialReason ? true : undefined}
+            aria-describedby={v.redialReason ? reasonId : undefined}
+            onClick={() => redial('audio')}
           >
             <Icon name="call-audio" size={18} />
           </button>
           <button
             type="button"
             className={c.kind === 'video' ? 'icon-btn' : 'icon-btn call-alt'}
-            title={c.canCall === false ? c.callBlockedReason : 'Chamada de vídeo'}
-            aria-label={c.canCall === false ? c.callBlockedReason : 'Chamada de vídeo'}
-            disabled={c.canCall === false}
-            onClick={() => void startCall(c.rid, 'video')}
+            title="Chamada de vídeo"
+            aria-label="Chamada de vídeo"
+            aria-disabled={v.redialReason ? true : undefined}
+            aria-describedby={v.redialReason ? reasonId : undefined}
+            onClick={() => redial('video')}
           >
             <Icon name="call-video" size={18} />
           </button>
+          {v.redialReason && (
+            <span id={reasonId} className="visually-hidden">
+              {namesIn(v.redialReason)}
+            </span>
+          )}
+        </span>
+      )}
+      {/* Em grupo não há rediscagem: um vão do mesmo tamanho deixa a hora na coluna das outras linhas (no toque, onde
+          as ações ficam à vista). */}
+      {enabled && !v.redial && (
+        <span className="call-list-actions call-list-gap" aria-hidden="true">
+          <span className="icon-btn" />
+          <span className="icon-btn call-alt" />
         </span>
       )}
     </li>
