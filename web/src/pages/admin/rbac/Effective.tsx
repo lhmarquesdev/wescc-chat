@@ -8,6 +8,7 @@ import { usePermission } from '../../../lib/store';
 import { Icon } from '../../../components/Icon';
 import { SkeletonTable, useAsync } from '../../../components/ui';
 import { GROUP_ICON } from './reach';
+import { Section } from './shell';
 
 export function EffectiveAccess({ userId }: { userId: string }) {
   const can = usePermission(['view-user-administration', 'view-permissions', 'access-permissions', 'manage-roles']);
@@ -16,12 +17,8 @@ export function EffectiveAccess({ userId }: { userId: string }) {
   if (!can) return null;
   const areas: EffectiveArea[] = data?.areas ?? [];
   return (
-    <section className="form-section rbac-effective">
-      <h3 className="form-section-title">
-        <Icon name="rbac-effective" size={16} />
-        Acesso efetivo
-      </h3>
-      <p className="field-hint">O que a pessoa pode hoje, somando os papéis globais salvos. Os papéis de sala (Dono, Moderador) valem só nas salas deles.</p>
+    <Section icon="rbac-effective" title="Acesso efetivo" hint="O que a pessoa pode hoje, somando os papéis globais salvos. Os papéis de sala (Dono, Moderador) valem só nas salas deles. Toque numa área para ver de qual papel vem.">
+      <div className="rbac-effective">
       {loading && !data ? (
         <SkeletonTable rows={4} cols={2} />
       ) : error ? (
@@ -68,6 +65,7 @@ export function EffectiveAccess({ userId }: { userId: string }) {
           );
         })
       )}
-    </section>
+      </div>
+    </Section>
   );
 }

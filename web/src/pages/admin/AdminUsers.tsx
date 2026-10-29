@@ -1,20 +1,20 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime, plural, roleLabel, setRoleDescriptions } from '../../lib/format';
 import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
-import { Empty, Field, Menu, Modal, Pager, SearchInput, Segmented, SkeletonTable, Toggle, confirmDialog, useAsync } from '../../components/ui';
-import { ActivePill, DeviceCell, PageHead, RolePills, RowMenu, TableWrap, UserCell, lastSeen } from './parts';
+import { Empty, Field, Menu, Modal, Pager, SkeletonTable, Toggle, Tooltip, confirmDialog, useAsync } from '../../components/ui';
+import { ActivePill, RolePills, RowMenu, UserCell, lastSeen } from './parts';
 import type { LockReason } from '@shared/rbac';
-import { EffectiveAccess } from './rbac/Effective';
-import { loadGrant, lockText, rbacFail, type Grant } from './rbac/data';
+import { loadGrant, lockText, rbacFail } from './rbac/data';
+import { Chips, ListStrip } from './rbac/shell';
+import { UserEditor } from './rbac/UserEditor';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
 
 const AUTH_LABEL: Record<string, string> = { local: 'Local', ldap: 'LDAP', saml: 'SAML' };
-const nf = new Intl.NumberFormat('pt-BR');
 
 function origin(u: any) {
   if (u.authSource === 'oauth') return u.authProvider ? `OAuth · ${u.authProvider}` : 'OAuth';
@@ -36,8 +36,21 @@ function toCsv(users: any[]) {
 }
 
 export function AdminUsers() {
+  const { view, param } = useParams();
+  const [params] = useSearchParams();
+  // Links antigos (?edit=id) abrem o editor em página.
+  const legacy = params.get('edit');
+  if (legacy) return <Navigate to={`/admin/users/edit/${encodeURIComponent(legacy)}`} replace />;
+  if (view === 'edit' && param) return <UserEditor key={param} id={param} />;
+  return <UserList />;
+}
+
+// Lista (guia de layout): faixa única com busca, contador, status, papel, exportar e Novo usuário; a linha abre o
+// editor; a seleção abre a barra flutuante das ações em lote.
+function UserList() {
   const me = useStore((s) => s.me)!;
-  const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [filter, setFilter] = useState('');
   const [status, setStatus] = useState<Status>('');
   const [role, setRole] = useState(params.get('role') ?? '');
@@ -46,7 +59,6 @@ export function AdminUsers() {
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
-  const editId = params.get('edit');
   const { data, loading, reload } = useAsync(() => api.get('users.list', { filter, status, role, offset, count }), [filter, status, role, offset, count]);
   // Contagens do controle segmentado (com a busca e o papel aplicados).
   const counts = useAsync(
@@ -62,6 +74,7 @@ export function AdminUsers() {
   // Hierarquia de concessão: papéis que quem está usando a tela pode dar ou tirar (os outros aparecem com cadeado).
   const grant = useAsync(loadGrant, []);
   const globalRoles: any[] = (roles.data?.roles ?? []).filter((r: any) => r.scope === 'Users');
+  const open = (u: any) => navigate(`/admin/users/edit/${encodeURIComponent(u._id)}`);
 
   useEffect(() => setSelected(new Set()), [filter, status, role, offset, count]);
 
@@ -189,20 +202,19 @@ export function AdminUsers() {
 
   const c = counts.data;
   return (
-    <>
-      <PageHead title="Usuários" count={c?.all}>
-        <button className="btn" onClick={exportCsv} disabled={exporting} aria-busy={exporting || undefined}>
-          <Icon name={exporting ? 'loading' : 'download'} className={exporting ? 'spin' : undefined} />
-          Exportar CSV
-        </button>
-        <button className="btn primary" onClick={() => setCreating(true)}>
-          <Icon name="add-people" />
-          Novo usuário
-        </button>
-      </PageHead>
-      <div className="filters admin-filters">
-        <SearchInput value={filter} onChange={(v) => (setFilter(v), setOffset(0))} placeholder="Buscar por nome, usuário ou e-mail" />
-        <select aria-label="Papel" value={role} onChange={(e) => (setRole(e.target.value), setOffset(0))}>
+    <div className="rbac-shell list">
+      <ListStrip eyebrow="Usuários e papéis" title="Usuários" search={filter} onSearch={(v) => (setFilter(v), setOffset(0))} placeholder="Buscar por nome, usuário ou e-mail" count={data?.total}>
+        <Chips<Status>
+          label="Status"
+          value={status}
+          onChange={(v) => (setStatus(v), setOffset(0))}
+          items={[
+            { id: '', label: 'Todos', count: c?.all },
+            { id: 'active', label: 'Ativos', count: c?.active },
+            { id: 'deactivated', label: 'Desativados', count: c?.off },
+          ]}
+        />
+        <select className="rbac-strip-select" aria-label="Papel" value={role} onChange={(e) => (setRole(e.target.value), setOffset(0))}>
           <option value="">Qualquer papel</option>
           {globalRoles.map((r: any) => (
             <option key={r._id} value={r._id}>
@@ -210,85 +222,35 @@ export function AdminUsers() {
             </option>
           ))}
         </select>
-        <Segmented<Status>
-          label="Status"
-          value={status}
-          onChange={(v) => (setStatus(v), setOffset(0))}
-          items={[
-            { id: '', label: <>Todos{c && <span className="seg-count">{nf.format(c.all)}</span>}</> },
-            { id: 'active', label: <>Ativos{c && <span className="seg-count">{nf.format(c.active)}</span>}</> },
-            { id: 'deactivated', label: <>Desativados{c && <span className="seg-count">{nf.format(c.off)}</span>}</> },
-          ]}
-        />
-      </div>
-      {selected.size > 0 && (
-        <div className="bulk-bar" role="toolbar" aria-label="Ações em lote">
-          <span className="bulk-count">
-            <Icon name="check" />
-            {plural(selected.size, 'selecionado', 'selecionados')}
-          </span>
-          <span className="bulk-sep" aria-hidden="true" />
-          <Menu
-            align="left"
-            label="Adicionar papel"
-            trigger={
-              <button type="button" className="btn small ghost">
-                <Icon name="admin-permissions" />
-                Adicionar papel
-              </button>
+        <Tooltip label="Exportar CSV">
+          <button className="icon-btn" aria-label="Exportar CSV" onClick={exportCsv} disabled={exporting} aria-busy={exporting || undefined}>
+            <Icon name={exporting ? 'loading' : 'download'} className={exporting ? 'spin' : undefined} />
+          </button>
+        </Tooltip>
+        <button className="btn primary" onClick={() => setCreating(true)}>
+          <Icon name="add-people" />
+          Novo usuário
+        </button>
+      </ListStrip>
+      <div className="rbac-list-body flush">
+        {loading && !data ? (
+          <SkeletonTable rows={8} cols={6} />
+        ) : !users.length ? (
+          <Empty
+            icon="search"
+            title="Nenhum usuário encontrado"
+            action={
+              (filter || status || role) && (
+                <button className="btn" onClick={resetFilters}>
+                  Limpar filtros
+                </button>
+              )
             }
           >
-            {(close) => globalRoles.map((r) => <BulkRoleItem key={r._id} role={r} lock={grant.data?.roleLocks[r._id]} onPick={() => (close(), void bulkRoles(r._id, 'add'))} />)}
-          </Menu>
-          <Menu
-            align="left"
-            label="Remover papel"
-            trigger={
-              <button type="button" className="btn small ghost">
-                <Icon name="remove-user" />
-                Remover papel
-              </button>
-            }
-          >
-            {(close) => globalRoles.map((r) => <BulkRoleItem key={r._id} role={r} lock={grant.data?.roleLocks[r._id]} onPick={() => (close(), void bulkRoles(r._id, 'remove'))} />)}
-          </Menu>
-          <button type="button" className="btn small ghost" onClick={setActive(true)}>
-            <Icon name="success" />
-            Ativar
-          </button>
-          <button type="button" className="btn small ghost" disabled={!others.length} onClick={() => void logoutSelected()}>
-            <Icon name="logout" />
-            Encerrar sessões
-          </button>
-          <button type="button" className="btn small ghost danger" disabled={!others.length} onClick={setActive(false)}>
-            <Icon name="disabled-user" />
-            Desativar
-          </button>
-          <button type="button" className="btn small ghost bulk-clear" onClick={() => setSelected(new Set())}>
-            <Icon name="close" />
-            Limpar seleção
-          </button>
-        </div>
-      )}
-      {loading && !data ? (
-        <SkeletonTable rows={8} cols={6} />
-      ) : !users.length ? (
-        <Empty
-          icon="search"
-          title="Nenhum usuário encontrado"
-          action={
-            (filter || status || role) && (
-              <button className="btn" onClick={resetFilters}>
-                Limpar filtros
-              </button>
-            )
-          }
-        >
-          Confira a grafia ou mude os filtros.
-        </Empty>
-      ) : (
-        <TableWrap>
-          <table className="table stack kv users-table">
+            Confira a grafia ou mude os filtros.
+          </Empty>
+        ) : (
+          <table className="table stack kv users-table rbac-users">
             <thead>
               <tr>
                 <th className="sel-col">
@@ -317,7 +279,7 @@ export function AdminUsers() {
                 const from = origin(u);
                 const tag = u._id === me._id ? 'Você' : u.type === 'bot' ? 'Bot' : null;
                 return (
-                  <tr key={u._id} className={selected.has(u._id) ? 'clickable selected' : 'clickable'} onClick={() => setParams({ edit: u._id })}>
+                  <tr key={u._id} className={selected.has(u._id) ? 'clickable selected' : 'clickable'} onClick={() => open(u)}>
                     <td className="sel-col" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" aria-label={`Selecionar @${u.username}`} checked={selected.has(u._id)} onChange={() => toggle(u._id)} />
                     </td>
@@ -336,15 +298,15 @@ export function AdminUsers() {
                     <td className="nowrap col-lg" data-label="Último acesso">
                       {u.lastLogin ? lastSeen(u.lastLogin) : <span className="muted">—</span>}
                     </td>
-                    <td className="actions-col">
+                    <td className="actions-col" onClick={(e) => e.stopPropagation()}>
                       <div className="row-actions">
-                        <button type="button" className="btn small ghost" onClick={(e) => (e.stopPropagation(), setParams({ edit: u._id }))}>
-                          <Icon name="edit" />
-                          Editar
-                        </button>
                         <RowMenu>
                           {(close) => (
                             <>
+                              <button onClick={() => (close(), open(u))}>
+                                <Icon name="edit" />
+                                Editar
+                              </button>
                               <button disabled={u._id === me._id} title={u._id === me._id ? 'Você não pode desativar a própria conta.' : undefined} onClick={() => (close(), void setOneActive(u))}>
                                 <Icon name={u.active ? 'disabled-user' : 'success'} />
                                 {u.active ? 'Desativar' : 'Ativar'}
@@ -367,12 +329,64 @@ export function AdminUsers() {
               })}
             </tbody>
           </table>
-        </TableWrap>
+        )}
+        {data && data.total > 0 && (
+          <div className="rbac-pager">
+            <Pager offset={offset} count={count} total={data.total} onChange={setOffset} sizes={[10, 25, 50, 100]} onCountChange={(n) => (setCount(n), setOffset(0))} />
+          </div>
+        )}
+      </div>
+      {selected.size > 0 && (
+        <div className="rbac-bulk" role="toolbar" aria-label="Ações em lote">
+          <span className="rbac-bulk-count">
+            <Icon name="check" />
+            {plural(selected.size, 'selecionado', 'selecionados')}
+          </span>
+          <Menu
+            align="left"
+            placement="top"
+            label="Adicionar papel"
+            trigger={
+              <button type="button" className="btn small ghost">
+                <Icon name="admin-permissions" />
+                <span>Adicionar papel</span>
+              </button>
+            }
+          >
+            {(close) => globalRoles.map((r) => <BulkRoleItem key={r._id} role={r} lock={grant.data?.roleLocks[r._id]} onPick={() => (close(), void bulkRoles(r._id, 'add'))} />)}
+          </Menu>
+          <Menu
+            align="left"
+            placement="top"
+            label="Remover papel"
+            trigger={
+              <button type="button" className="btn small ghost">
+                <Icon name="remove-user" />
+                <span>Remover papel</span>
+              </button>
+            }
+          >
+            {(close) => globalRoles.map((r) => <BulkRoleItem key={r._id} role={r} lock={grant.data?.roleLocks[r._id]} onPick={() => (close(), void bulkRoles(r._id, 'remove'))} />)}
+          </Menu>
+          <button type="button" className="btn small ghost" onClick={setActive(true)}>
+            <Icon name="success" />
+            <span>Ativar</span>
+          </button>
+          <button type="button" className="btn small ghost" disabled={!others.length} onClick={() => void logoutSelected()}>
+            <Icon name="logout" />
+            <span>Encerrar sessões</span>
+          </button>
+          <button type="button" className="btn small ghost danger" disabled={!others.length} onClick={setActive(false)}>
+            <Icon name="disabled-user" />
+            <span>Desativar ({others.length})</span>
+          </button>
+          <button type="button" className="btn small ghost" aria-label="Limpar seleção" onClick={() => setSelected(new Set())}>
+            <Icon name="close" />
+          </button>
+        </div>
       )}
-      {data && data.total > 0 && <Pager offset={offset} count={count} total={data.total} onChange={setOffset} sizes={[10, 25, 50, 100]} onCountChange={(n) => (setCount(n), setOffset(0))} />}
-      {creating && <UserForm roles={globalRoles} grant={grant.data} onClose={() => setCreating(false)} onSaved={reload} />}
-      {editId && <UserForm id={editId} roles={globalRoles} grant={grant.data} onClose={() => setParams({})} onSaved={reload} />}
-    </>
+      {creating && <CreateUser roles={globalRoles} onClose={() => setCreating(false)} onCreated={(id) => (reload(), navigate(`/admin/users/edit/${encodeURIComponent(id)}`))} />}
+    </div>
   );
 }
 
@@ -385,236 +399,63 @@ function BulkRoleItem({ role, lock, onPick }: { role: any; lock?: LockReason; on
   );
 }
 
-function UserForm({ id, roles, grant, onClose, onSaved }: { id?: string; roles: any[]; grant: Grant | null; onClose: () => void; onSaved: () => void }) {
-  const me = useStore((s) => s.me)!;
-  const [f, setF] = useState<any>({
-    name: '',
-    username: '',
-    email: '',
-    password: '',
-    roles: ['user'],
-    active: true,
-    verified: true,
-    requirePasswordChange: false,
-    joinDefaultChannels: true,
-    type: 'user',
-  });
-  const [loaded, setLoaded] = useState(!id);
-  const [sessions, setSessions] = useState<any[]>([]);
-  const [initialRoles, setInitialRoles] = useState<string[]>([]);
-  useEffect(() => {
-    if (!id) return;
-    void api.get('users.info', { userId: id }).then((r) => {
-      setF({ ...r.user, email: r.user.email ?? '', password: '', verified: r.user.emailVerified });
-      setInitialRoles(r.user.roles ?? []);
-      setLoaded(true);
-    });
-    void api
-      .get('sessions.list.all', { userId: id, count: 50 })
-      .then((r) => setSessions(r.sessions))
-      .catch(() => {});
-  }, [id]);
-
-  const save = async () => {
+// Criação por modal curto (guia de layout): o básico para a conta existir; papéis, segurança e o resto ficam no editor,
+// que abre logo em seguida.
+function CreateUser({ roles, onClose, onCreated }: { roles: any[]; onClose: () => void; onCreated: (id: string) => void }) {
+  const [f, setF] = useState({ name: '', username: '', email: '', password: '', type: 'user', joinDefaultChannels: true, verified: true });
+  const [busy, setBusy] = useState(false);
+  const hasUser = roles.some((r) => r._id === 'user');
+  const valid = f.name.trim() && f.username.trim() && f.password;
+  const create = async () => {
+    setBusy(true);
     try {
-      if (id) {
-        const data: any = { name: f.name, username: f.username, email: f.email, active: f.active, verified: f.verified, requirePasswordChange: f.requirePasswordChange, bio: f.bio };
-        // Papéis só vão quando mudaram: assim editar o nome de alguém não esbarra na trava dos papéis.
-        if ([...f.roles].sort().join() !== [...initialRoles].sort().join()) data.roles = f.roles;
-        if (f.password) data.password = f.password;
-        await api.post('users.update', { userId: id, data });
-      } else {
-        await api.post('users.create', f);
-      }
-      ok('Usuário salvo.');
-      onSaved();
-      onClose();
+      const r = await api.post('users.create', { ...f, roles: hasUser ? ['user'] : [], requirePasswordChange: false, active: true });
+      ok(`@${r.user.username} criado.`);
+      onCreated(r.user._id);
     } catch (e) {
       rbacFail(e);
+    } finally {
+      setBusy(false);
     }
   };
-  const remove = async () => {
-    const yes = await confirmDialog({ title: `Excluir @${f.username}?`, body: 'A conta é apagada. As mensagens dela permanecem nas conversas.', confirmLabel: 'Excluir', danger: true });
-    if (!yes) return;
-    api
-      .post('users.delete', { userId: id })
-      .then(() => (onSaved(), onClose()))
-      .catch(fail);
-  };
-  // Ninguém mexe nos próprios papéis (só o administrador); pessoa com papel acima do ator fica só para leitura.
-  const selfLocked = !!id && id === me._id && !grant?.root;
-  const targetLock = id && !grant?.root ? initialRoles.map((r) => grant?.roleLocks[r]).find(Boolean) : null;
-  const toggleRole = (r: string) => setF({ ...f, roles: f.roles.includes(r) ? f.roles.filter((x: string) => x !== r) : [...f.roles, r] });
-  // O papel user dá create-p, create-team e start-discussion: com ele, pessoas restritas abrem salas privadas entre si.
-  const restrictedWithUser = f.roles.includes('user') && roles.some((r) => r.restrictDirect && f.roles.includes(r._id));
-
   return (
     <Modal
-      wide
-      title={id ? `Editar @${f.username}` : 'Novo usuário'}
+      size="sm"
+      title="Novo usuário"
+      description="Começa com o papel Usuário. Papéis, segurança e o resto você ajusta no editor, que abre em seguida."
       onClose={onClose}
       footer={
         <>
-          {id && (
-            <button className="btn danger left" onClick={remove}>
-              <Icon name="delete" />
-              Excluir
-            </button>
-          )}
           <button className="btn" onClick={onClose}>
             Cancelar
           </button>
-          <button className="btn primary" onClick={save}>
-            Salvar
+          <button className="btn primary" disabled={busy || !valid} aria-busy={busy || undefined} onClick={() => void create()}>
+            Criar e abrir
           </button>
         </>
       }
     >
-      {!loaded ? (
-        <SkeletonTable rows={6} cols={1} />
-      ) : (
-        <div className="form user-form">
-          <section className="form-section">
-            <h3 className="form-section-title">Conta</h3>
-            <div className="two-col">
-              <Field label="Nome">
-                <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
-              </Field>
-              <Field label="Nome de usuário">
-                <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} />
-              </Field>
-              <Field label="E-mail">
-                <input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
-              </Field>
-              <Field label={id ? 'Nova senha' : 'Senha'} hint={id ? 'Deixe vazio para manter a atual.' : undefined}>
-                <input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" />
-              </Field>
-              {!id && (
-                <Field label="Tipo">
-                  <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
-                    <option value="user">Pessoa</option>
-                    <option value="bot">Bot</option>
-                  </select>
-                </Field>
-              )}
-            </div>
-          </section>
-          <section className="form-section">
-            <h3 className="form-section-title">Papéis</h3>
-            {selfLocked && (
-              <p className="field-hint">
-                <Icon name="rbac-lock" size={12} /> {lockText('self')}
-              </p>
-            )}
-            {targetLock && !selfLocked && (
-              <div className="callout warn">
-                <Icon name="rbac-lock" />
-                <span>{lockText(targetLock)} Você pode ver, mas não alterar esta pessoa.</span>
-              </div>
-            )}
-            <div className="chips">
-              {roles.map((r) => {
-                const lock = grant?.roleLocks[r._id];
-                const disabled = selfLocked || !!targetLock || !!lock;
-                const tip = selfLocked ? lockText('self') : lock ? lockText(lock) : r.restrictDirect ? 'Restrito em conversas diretas' : undefined;
-                return (
-                  <label key={r._id} className={`chip selectable ${f.roles.includes(r._id) ? 'on' : ''} ${disabled ? 'disabled' : ''}`} title={tip}>
-                    <input type="checkbox" hidden checked={f.roles.includes(r._id)} disabled={disabled} onChange={() => toggleRole(r._id)} />
-                    {lock && !selfLocked && <Icon name="rbac-lock" size={12} />}
-                    {roleLabel(r._id)}
-                    {r.restrictDirect && <span className="chip-note">Restrito</span>}
-                  </label>
-                );
-              })}
-            </div>
-            {roles.some((r) => r.restrictDirect) && <p className="field-hint">Restrito: quem tem o papel não abre conversas diretas nem chamadas com outras pessoas restritas.</p>}
-            {restrictedWithUser && (
-              <div className="callout warn">
-                <Icon name="warning" />
-                <span>O papel Usuário permite criar grupos privados, times e discussões. Pessoas com papel restrito em conversas diretas normalmente não devem tê-lo.</span>
-              </div>
-            )}
-          </section>
-          <section className="form-section">
-            <h3 className="form-section-title">Acesso</h3>
-            <div className="toggle-list">
-              <Toggle
-                checked={f.active}
-                onChange={(v) => setF({ ...f, active: v })}
-                label="Ativo"
-                description={f.active ? 'A pessoa consegue entrar no chat.' : 'Desligado, a pessoa não consegue entrar.'}
-              />
-              <Toggle checked={f.verified} onChange={(v) => setF({ ...f, verified: v })} label="E-mail verificado" />
-              <Toggle checked={f.requirePasswordChange} onChange={(v) => setF({ ...f, requirePasswordChange: v })} label="Exigir troca de senha no próximo login" />
-              {!id && <Toggle checked={f.joinDefaultChannels} onChange={(v) => setF({ ...f, joinDefaultChannels: v })} label="Entrar nos canais padrão" />}
-            </div>
-          </section>
-          {id && <EffectiveAccess userId={id} />}
-          {id && (
-            <section className="form-section">
-              <h3 className="form-section-title">
-                Sessões ativas <span className="pill head-count">{sessions.length}</span>
-              </h3>
-              {sessions.length ? (
-                <ul className="session-list">
-                  {sessions.map((s) => (
-                    <li key={s._id}>
-                      <DeviceCell device={s.device} />
-                      <span className="muted small nowrap">último uso {lastSeen(s.lastActiveAt).toLowerCase()}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="muted small">Nenhuma sessão ativa.</p>
-              )}
-              <div className="row-actions wrap">
-                {sessions.length > 0 && (
-                  <button
-                    className="btn small"
-                    onClick={() =>
-                      api
-                        .post('users.logout', { userId: id })
-                        .then((r) => (ok(r.message), setSessions([])))
-                        .catch(fail)
-                    }
-                  >
-                    <Icon name="logout" />
-                    Encerrar todas as sessões
-                  </button>
-                )}
-                {f.twoFactorEnabled && (
-                  <button
-                    className="btn small"
-                    onClick={() =>
-                      api
-                        .post('users.resetTOTP', { userId: id })
-                        .then(() => ok('2FA redefinido.'))
-                        .catch(fail)
-                    }
-                  >
-                    <Icon name="security" />
-                    Redefinir 2FA
-                  </button>
-                )}
-                {f.avatarETag && (
-                  <button
-                    className="btn small"
-                    onClick={() =>
-                      api
-                        .post('users.resetAvatar', { userId: id })
-                        .then(() => (ok('Avatar removido.'), setF((x: any) => ({ ...x, avatarETag: undefined }))))
-                        .catch(fail)
-                    }
-                  >
-                    <Icon name="image-remove" />
-                    Remover avatar
-                  </button>
-                )}
-              </div>
-            </section>
-          )}
-        </div>
-      )}
+      <div className="form">
+        <Field label="Nome">
+          <input value={f.name} autoFocus onChange={(e) => setF({ ...f, name: e.target.value })} />
+        </Field>
+        <Field label="Nome de usuário">
+          <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} />
+        </Field>
+        <Field label="E-mail">
+          <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+        </Field>
+        <Field label="Senha">
+          <input type="password" value={f.password} autoComplete="new-password" onChange={(e) => setF({ ...f, password: e.target.value })} />
+        </Field>
+        <Field label="Tipo">
+          <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
+            <option value="user">Pessoa</option>
+            <option value="bot">Bot</option>
+          </select>
+        </Field>
+        <Toggle checked={f.joinDefaultChannels} onChange={(v) => setF({ ...f, joinDefaultChannels: v })} label="Entrar nos canais padrão" />
+      </div>
     </Modal>
   );
 }

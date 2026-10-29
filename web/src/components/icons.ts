@@ -606,6 +606,8 @@ export const ICONS = {
   'rbac-omni': Headset,
   'rbac-technical': Wrench,
   'rbac-areas': Layers,
+  'rbac-id': IdCard,
+  'rbac-power': Sparkles,
 } as const;
 
 export type IconName = keyof typeof ICONS;

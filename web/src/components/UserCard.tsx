@@ -269,7 +269,7 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
                     </button>
                   ))}
                   {admin && (
-                    <button onClick={() => (close(), navigate(`/admin/users?edit=${data.u._id}`), onClose())}>
+                    <button onClick={() => (close(), navigate(`/admin/users/edit/${data.u._id}`), onClose())}>
                       <Icon name="manage-user" />
                       Administrar
                     </button>

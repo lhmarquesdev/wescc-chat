@@ -107,9 +107,11 @@ export function ChangeList({ changes }: { changes: Change[]; entityType?: 'role'
   );
 }
 
-export function RbacHistory({ onChanged }: { onChanged: () => void }) {
+// `entity` fixa o histórico de um papel ou de uma pessoa (aba Histórico dos editores); `embedded` deixa os filtros
+// mais enxutos, sem o filtro por tipo nem o chip da entidade.
+export function RbacHistory({ onChanged, entity: fixed, embedded }: { onChanged: () => void; entity?: string; embedded?: boolean }) {
   const [params, setParams] = useSearchParams();
-  const entity = params.get('entity') ?? '';
+  const entity = fixed ?? params.get('entity') ?? '';
   const [type, setType] = useState<'' | 'role' | 'user'>('');
   const [actor, setActor] = useState('');
   const [start, setStart] = useState('');
@@ -145,8 +147,9 @@ export function RbacHistory({ onChanged }: { onChanged: () => void }) {
   }, [rows]);
 
   return (
-    <div className="rbac-history">
+    <div className={embedded ? 'rbac-history embedded' : 'rbac-history'}>
       <div className="filters admin-filters">
+        {!embedded && (
         <Segmented<'' | 'role' | 'user'>
           label="Tipo"
           value={type}
@@ -157,6 +160,7 @@ export function RbacHistory({ onChanged }: { onChanged: () => void }) {
             { id: 'user', label: 'Pessoas' },
           ]}
         />
+        )}
         <select aria-label="Autor" value={actor} onChange={(e) => setActor(e.target.value)}>
           <option value="">Qualquer autor</option>
           <option value="system">Sistema e sincronizações</option>
@@ -168,7 +172,7 @@ export function RbacHistory({ onChanged }: { onChanged: () => void }) {
         </select>
         <input type="date" aria-label="De" value={start} onChange={(e) => setStart(e.target.value)} />
         <input type="date" aria-label="Até" value={end} onChange={(e) => setEnd(e.target.value)} />
-        {entity && (
+        {entity && !fixed && (
           <button className="chip" onClick={() => setParams({})}>
             {roleLabel(entity) || entity}
             <Icon name="close" size={12} />
