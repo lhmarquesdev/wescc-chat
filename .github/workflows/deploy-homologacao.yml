@@ -40,6 +40,9 @@ jobs:
           test -d /opt/wescchat-hml/.git
           docker info >/dev/null
 
+      - name: Validar a retenção das imagens
+        run: python3 -B -m unittest discover -s deploy -p 'test_prune_images.py'
+
       - name: Compilar, fazer backup e publicar
         env:
           TARGET_SHA: ${{ github.sha }}
