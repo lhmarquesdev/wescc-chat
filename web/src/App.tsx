@@ -18,6 +18,9 @@ import { AccountPage, applyTheme, TwoFactorCard } from './pages/AccountPage';
 import { AdminPage } from './pages/admin/AdminPage';
 import { OmnichannelPage } from './pages/omnichannel/OmnichannelPage';
 import { CallsPage } from './pages/CallsPage';
+import { CalendarPage } from './pages/CalendarPage';
+import { MeetPage } from './pages/MeetPage';
+import { CalendarNotices } from './components/calendar/CalendarNotices';
 
 function useCustomCss() {
   const css = useStore((s) => s.settings.Layout_Custom_CSS as string | undefined);
@@ -254,6 +257,7 @@ function Protected() {
       </main>
       {phone && view !== 'room' && <MobileTabBar />}
       <CallOverlay />
+      <CalendarNotices />
     </div>
   );
 }
@@ -299,6 +303,8 @@ function Shell() {
             <Route key={t} path={`/${t}/:rid/*`} element={<RoomPage />} />
           ))}
           <Route path="/calls" element={<CallsPage />} />
+          <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/meet/:code" element={<MeetPage />} />
           <Route path="/account" element={<Navigate to="/account/profile" replace />} />
           <Route path="/account/:section" element={<AccountPage />} />
           <Route path="/admin" element={<Navigate to="/admin/info" replace />} />

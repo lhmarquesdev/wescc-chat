@@ -556,6 +556,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
   const connected = useStore((s) => s.connected);
   const siteName = useSetting<string>('Site_Name');
   const callsEnabled = useSetting<boolean>('Calls_Enabled');
+  const calendarOn = useSetting<boolean>('Calendar_Enabled') !== false;
   const { omni, isAgent, takesChats } = useAgent();
   const queueCount = useStore((st) => Object.keys(st.queue).length);
   const phone = useIsPhone();
@@ -679,6 +680,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
         <nav className="side-actions" aria-label="Navegação principal">
           <NavRow to="/home" icon="nav-home" label="Início" onNavigate={onNavigate} />
           {callsEnabled && <NavRow to="/calls" icon="nav-calls" label="Chamadas" extra={<CallsNavBadge />} onNavigate={onNavigate} />}
+          {calendarOn && <NavRow to="/calendar" icon="nav-calendar" label="Agenda" onNavigate={onNavigate} />}
           {omni && isAgent && <NavRow to="/omnichannel/queue" match="/omnichannel" icon="nav-omnichannel" label="Atendimento" badge={queueCount} badgeKind="group" onNavigate={onNavigate} />}
           <NavRow to="/directory" icon="nav-directory" label="Diretório" onNavigate={onNavigate} />
         </nav>

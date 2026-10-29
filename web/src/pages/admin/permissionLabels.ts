@@ -30,6 +30,8 @@ export const PERMISSION_LABEL: Record<string, string> = {
   'manage-sticker-packs': 'Gerenciar os pacotes de figurinhas da empresa',
   // Chamadas em grupo
   'manage-calls': 'Gerenciar o servidor de chamadas e as chamadas em andamento',
+  // Agenda
+  'create-calendar-meeting': 'Criar reuniões na Agenda (com sala e link)',
   // Usuários
   'view-user-administration': 'Ver a administração de usuários',
   'view-full-other-user-info': 'Ver dados completos de outras pessoas',

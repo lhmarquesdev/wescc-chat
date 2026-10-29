@@ -53,6 +53,7 @@ export function Hub() {
   const canTeams = usePermission('manage-msteams');
   const canAllHooks = usePermission('manage-integrations');
   const canHooks = usePermission(['manage-integrations', 'manage-own-integrations']);
+  const canCalendar = usePermission('edit-privileged-setting');
   const isAdmin = useStore((s) => !!s.me?.roles?.includes('admin'));
   // Quem só gerencia os próprios webhooks não lê a visão geral (403): o cartão aparece sem os números.
   const canOverview = canJira || canTeams || canAllHooks;
@@ -122,6 +123,11 @@ export function Hub() {
             meta={canOverview ? meta(data ? `${data.webhooks.incoming.toLocaleString('pt-BR')} de entrada · ${data.webhooks.outgoing.toLocaleString('pt-BR')} de saída` : null) : null}
           >
             Webhooks de entrada e de saída para outros sistemas, no formato do Slack.
+          </HubCard>
+        )}
+        {canCalendar && (
+          <HubCard to="/admin/integrations/calendar" icon="nav-calendar" title="Agenda" meta={null}>
+            Cada pessoa conecta o Google Agenda ou o Outlook / Teams e escolhe o sentido da sincronização.
           </HubCard>
         )}
       </div>

@@ -372,8 +372,9 @@ export interface MessageBridge {
   editedAt?: string | null;
 }
 
+// provider wescc: reunião da agenda do chat (meetingId = id do evento, joinUrl = /meet/<código> com o endereço do site).
 export interface MessageMeeting {
-  provider: 'msteams';
+  provider: 'msteams' | 'wescc';
   kind: 'created' | 'linked';
   meetingId: string; // id em meetings
   joinUrl: string;

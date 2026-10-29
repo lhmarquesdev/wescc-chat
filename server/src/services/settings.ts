@@ -471,6 +471,13 @@ add('MSTeams', 'Reuniões', 'MSTeams_Meeting_Minutes', 'int', 30, { label: 'Dura
 add('MSTeams', 'Presença', 'MSTeams_Presence_Enabled', 'boolean', false, { label: 'Mostrar a presença do Teams no chat' });
 add('MSTeams', 'Presença', 'MSTeams_Presence_Minutes', 'int', 5, { label: 'Intervalo de leitura da presença no modo consulta (minutos)', validate: intRange(5, 30) });
 
+// Agenda (tela própria em Administração › Integrações › Agenda; a tela genérica esconde o grupo).
+add('Calendar', 'Agenda', 'Calendar_Enabled', 'boolean', true, { public: true, label: 'Agenda e reuniões do chat' });
+add('Calendar', 'Agenda', 'Calendar_Sync_Minutes', 'int', 5, { label: 'Intervalo da sincronização com o Google e o Outlook (minutos)', validate: intRange(1, 60) });
+add('Calendar', 'Google', 'Calendar_Google_Enabled', 'boolean', false, { label: 'Permitir conectar o Google Agenda' });
+add('Calendar', 'Google', 'Calendar_Google_Client_Id', 'string', '', { label: 'ID do cliente OAuth do Google' });
+add('Calendar', 'Microsoft', 'Calendar_Microsoft_Enabled', 'boolean', false, { label: 'Permitir conectar o Outlook / Teams (usa o aplicativo do Teams)' });
+
 const cache = new Map<string, unknown>();
 
 export async function loadSettings() {

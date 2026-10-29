@@ -34,7 +34,7 @@ const GROUP_LABEL: Record<string, string> = {
 
 // Integrações (Jira/Teams): estes grupos têm página própria em Administração → Integrações. MSTeams_Inbound_Mode =
 // polling só pode ser ligado com o aceite de lá, então eles somem da navegação e da busca daqui.
-const HIDDEN_GROUPS = ['Jira', 'MSTeams'];
+const HIDDEN_GROUPS = ['Jira', 'MSTeams', 'Calendar'];
 
 // Nomes das seções que o servidor manda em inglês.
 const SECTION_LABEL: Record<string, string> = {

@@ -117,6 +117,7 @@ export const DEFAULT_PERMISSIONS: [string, string, string[]][] = [
   ['videoconf-ring-users', 'rooms', [A, O, M]],
   ['moderate-call', 'rooms', [A, O, M]],
   ['manage-calls', 'admin', [A]],
+  ['create-calendar-meeting', 'rooms', [A, U]], // reuniões da Agenda (sala própria e link)
   // Mensagens
   ['post-readonly', 'messages', [A, O, M]],
   ['edit-message', 'messages', [A, O, M]],

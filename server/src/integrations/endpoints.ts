@@ -7,11 +7,15 @@ export const endpoints = {
   atlassianAuth: () => pick('ATLASSIAN_AUTH_URL', 'https://auth.atlassian.com'),
   msLogin: () => pick('MS_LOGIN_URL', 'https://login.microsoftonline.com'),
   msGraph: () => pick('MS_GRAPH_URL', 'https://graph.microsoft.com'),
+  // Agenda (Google)
+  googleAuth: () => pick('GOOGLE_AUTH_URL', 'https://accounts.google.com'),
+  googleToken: () => pick('GOOGLE_TOKEN_URL', 'https://oauth2.googleapis.com'),
+  googleApi: () => pick('GOOGLE_API_URL', 'https://www.googleapis.com'),
 };
 
 // Únicos hosts de fornecedores que safeFetch alcança (além de INTEGRATIONS_ALLOWED_HOSTS).
 export const VENDOR_HOSTS = {
-  exact: ['api.atlassian.com', 'auth.atlassian.com', 'login.microsoftonline.com', 'graph.microsoft.com'],
+  exact: ['api.atlassian.com', 'auth.atlassian.com', 'login.microsoftonline.com', 'graph.microsoft.com', 'oauth2.googleapis.com', 'www.googleapis.com'],
   suffixes: ['.atlassian.net', '.jira.com', '.environment.api.powerplatform.com'],
 };
 

@@ -17,7 +17,8 @@ export type SecretId =
   | 'jira.webhookSecret'
   | 'msteams.clientSecret'
   | 'msteams.serviceRefreshToken'
-  | 'msteams.notifyToken';
+  | 'msteams.notifyToken'
+  | 'calendar.googleClientSecret';
 
 const UNREADABLE = 'Não foi possível ler um segredo das integrações (a chave de segredos mudou). Cadastre o segredo de novo.';
 const MISSING = 'O servidor não tem a chave de segredos das integrações. Defina SECRETS_KEY_FILE com o caminho completo de um arquivo de chave e reinicie o serviço.';
@@ -43,6 +44,7 @@ export const aadFor = {
   linked: (userId: string, provider: 'jira' | 'microsoft', field: 'access' | 'refresh', origin?: string | null) =>
     provider === 'jira' ? `linked:${userId}:jira:${field}:${origin ?? ''}` : `linked:${userId}:microsoft:${field}`,
   oauth: (stateHash: string) => `oauth:${stateHash}`,
+  calendar: (accountId: string, field: 'access' | 'refresh') => `calendar:${accountId}:${field}`,
 };
 
 // ---------- Chave ----------
@@ -376,6 +378,13 @@ export async function reencryptAll(o: { discardUnreadable?: boolean } = {}): Pro
       const col = field === 'access' ? 'access_token' : 'refresh_token';
       const v = redo(r[col], aadFor.linked(r.user_id, r.provider, field, r.site));
       if (v && (await query(`UPDATE linked_accounts SET ${col} = $3 WHERE user_id = $1 AND provider = $2 AND ${col} = $4`, [r.user_id, r.provider, v, r[col]])).rowCount) count++;
+    }
+  }
+  for (const r of await many('SELECT id, access_token, refresh_token FROM calendar_accounts WHERE access_token IS NOT NULL OR refresh_token IS NOT NULL')) {
+    for (const field of ['access', 'refresh'] as const) {
+      const col = field === 'access' ? 'access_token' : 'refresh_token';
+      const v = redo(r[col], aadFor.calendar(r.id, field));
+      if (v && (await query(`UPDATE calendar_accounts SET ${col} = $2 WHERE id = $1 AND ${col} = $3`, [r.id, v, r[col]])).rowCount) count++;
     }
   }
   for (const r of await many('SELECT state_hash, code_verifier FROM integration_oauth_states WHERE code_verifier IS NOT NULL')) {

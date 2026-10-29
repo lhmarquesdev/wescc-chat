@@ -3,6 +3,8 @@
 import type { MessageSticker } from './stickers';
 // Integrações (Jira/Teams)
 import type { EphemeralMessage, ExternalPresence, IntegrationAlert, MessageBridge, MessageJira, MessageMeeting } from './integrations';
+// Agenda
+import type { CalendarEvent } from './calendar';
 
 export type UserStatus = 'online' | 'away' | 'busy' | 'offline';
 export type RoomType = 'c' | 'p' | 'd' | 'l';
@@ -404,6 +406,10 @@ export type ServerEvent =
   | { type: 'integrations.changed'; scope: 'config' | 'account' }
   | { type: 'presence.external'; userId: string; presence: ExternalPresence | null }
   | { type: 'integrations.alert'; alert: IntegrationAlert }
+  // Agenda: algo mudou na agenda da pessoa, convite novo e lembrete antes do início
+  | { type: 'calendar.changed' }
+  | { type: 'calendar.invite'; event: CalendarEvent; by: UserRef }
+  | { type: 'calendar.reminder'; event: CalendarEvent }
   | { type: 'pong' };
 
 // ---------- Importação de dados ----------

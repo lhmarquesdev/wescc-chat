@@ -5,6 +5,7 @@
 //   727111 figurinhas (limpeza diária)
 //   727120–727124 integrações Jira/Teams
 //   727125 integrações: reserva da fila de tarefas (pg_advisory_xact_lock, só na transação curta da reserva)
+//   727130 agenda (rodada de sincronização) · 727131 com hashtext(id): a trava de cada conta de agenda · 727132 lembretes
 import cron from 'node-cron';
 import { pool, query } from './db/pool';
 import { recoverInterrupted } from './importer/operations';
@@ -84,6 +85,20 @@ export function startScheduler(log: (m: string) => void) {
   // Integrações (Jira/Teams)
   tasks.push(startIntegrationsRuntime(log));
 
+  // Agenda: sincronização com o Google/Outlook (cada conta no seu intervalo) e lembretes antes do início.
+  const calendarSync = setInterval(() => {
+    void withLock(727130, async () => {
+      const { syncDue } = await import('./calendar/sync');
+      await syncDue(log);
+    }).catch((e) => log(`agenda falhou: ${e.message}`));
+  }, 60_000);
+  const calendarReminders = setInterval(() => {
+    void withLock(727132, async () => {
+      const { sendDueReminders } = await import('./calendar/reminders');
+      await sendDueReminders();
+    }).catch((e) => log(`lembretes da agenda falharam: ${e.message}`));
+  }, 30_000);
+
   let retentionExpr = '';
   let retentionTask: { stop(): void } | null = null;
   let ldapExpr = '';
@@ -118,6 +133,8 @@ export function startScheduler(log: (m: string) => void) {
     clearInterval(omni);
     clearInterval(calls);
     clearInterval(re);
+    clearInterval(calendarSync);
+    clearInterval(calendarReminders);
     clearTimeout(stickersBoot);
     for (const t of tasks) t.stop();
     retentionTask?.stop();

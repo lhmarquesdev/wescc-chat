@@ -971,3 +971,33 @@ Atlassian nem a Microsoft.
 - Avatares exigem login por padrão (`Accounts_AvatarBlockUnauthenticatedAccess`); avatares de salas privadas só para
   quem tem acesso.
 - O LDAP só vincula uma conta local com o mesmo nome de usuário com `LDAP_Merge_Existing_Users` ligado.
+
+## Agenda e reuniões
+
+Em **Agenda** cada pessoa vê os próprios eventos (mês, semana ou lista), cria eventos e reuniões e responde aos
+convites (vou, talvez, não vou). Uma **reunião com link** cria uma sala privada com os convidados (chat e chamada de
+vídeo em grupo) e um link `https://<site>/meet/<código>`. Em "Quem entra pelo link", "Só convidados" barra quem não
+foi convidado; "Qualquer pessoa do chat" deixa entrar quem tiver o link (e a pessoa passa a ser convidada). As regras
+da Operação valem também aqui: quem não pode chamar alguém numa conversa direta também não o convida. Criar reuniões
+com link pede a permissão `create-calendar-meeting` (papéis `admin` e `user`). Os lembretes chegam no chat e por push
+(padrão 10 minutos antes). A chamada da reunião usa o servidor das chamadas em grupo (veja **Chamadas em grupo**).
+
+### Google Agenda e Outlook/Teams
+
+Cada pessoa conecta a própria agenda em Agenda › Agendas conectadas e escolhe o sentido: **os dois** (padrão),
+**trazer** (os eventos de lá aparecem no chat, só leitura) ou **levar** (os eventos e reuniões do chat vão para lá). O
+sentido pode ser trocado depois sem conectar de novo. O que muda no chat vai na hora; o que muda no Google ou no
+Outlook chega no intervalo de Administração › Integrações › Agenda (padrão 5 minutos). Ao desconectar, os eventos
+trazidos saem do chat e as cópias de eventos futuros são apagadas de lá.
+
+O administrador libera os fornecedores em Administração › Integrações › Agenda (precisa da chave de segredos, veja
+**Integrações: Jira e Microsoft Teams**):
+
+- **Google**: no Google Cloud Console, ative a Google Calendar API, configure a tela de permissão OAuth (Interno, escopo
+  `calendar.events`) e crie um ID do cliente OAuth do tipo Aplicativo da Web com a URI de redirecionamento
+  `https://<site>/integrations/calendar/google/callback`. Cole o ID e a chave secreta na tela.
+- **Outlook/Teams**: usa o aplicativo do Microsoft Entra já cadastrado para o Teams. Adicione a URI
+  `https://<site>/integrations/calendar/microsoft/callback` em Autenticação › Web e as permissões delegadas
+  `Calendars.ReadWrite`, `User.Read` e `offline_access` do Microsoft Graph (com o consentimento do administrador).
+- **Firewall**: além dos endereços da Microsoft, libere a saída https do servidor para `oauth2.googleapis.com` e
+  `www.googleapis.com` (o login em `accounts.google.com` acontece no navegador de cada pessoa).
