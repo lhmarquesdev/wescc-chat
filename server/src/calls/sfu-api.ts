@@ -9,6 +9,7 @@ import { tlsStatus } from '../tls';
 import { hit } from './limits';
 import { joinToken, sfu, sfuConfig, sfuHealth, verifyWebhook } from './livekit';
 import { currentCallOf, totalPresent } from './model';
+import { ERR } from './policy';
 import { handleSfuEvent } from './presence';
 import { bridgeStats, closeBridges, sfuAdmission } from './sfu-bridge';
 
@@ -18,7 +19,6 @@ import { bridgeStats, closeBridges, sfuAdmission } from './sfu-bridge';
 // Só a raiz (o HEAD que o cliente manda) e o validate; o resto do LiveKit não aparece no /sfu.
 const PASSTHROUGH = /^\/sfu(?:\/rtc(?:\/v1)?\/validate)?\/?$/;
 const UNAVAILABLE = 'Servidor de chamadas indisponível.';
-const SFU_DOWN = 'O servidor de chamadas não está respondendo. Tente de novo em instantes ou avise o administrador.';
 
 function text(reply: FastifyReply, status: number, body: string) {
   return reply.code(status).header('cache-control', 'no-store').type('text/plain; charset=utf-8').send(body);
@@ -105,14 +105,14 @@ export function sfuRoutes(app: FastifyInstance): void {
   // fonte e abre uma sala nova por etapa com o mesmo token). A varredura apaga essas salas depois de 10 min.
   route(app, 'POST', 'calls.selfTest', {}, async (_req, _rep, ctx) => {
     if (!getSetting('Calls_Enabled')) throw forbidden('As chamadas estão desativadas.');
-    if (!sfuConfig().configured) throw new ApiError(503, 'error-call-sfu-unavailable', SFU_DOWN);
+    if (!sfuConfig().configured) throw ERR.sfuNotConfigured();
     if (await currentCallOf(ctx.userId)) throw new ApiError(409, 'error-call-in-progress', 'Saia da chamada para testar a conexão.');
     hit(ctx.userId, 'selftest', 3, 60_000);
     const room = `wc_test_${newId()}`;
     try {
       await sfu.createRoom(room, { emptyTimeout: 60, departureTimeout: 10, maxParticipants: 3 });
     } catch {
-      throw new ApiError(503, 'error-call-sfu-unavailable', SFU_DOWN);
+      throw ERR.sfu();
     }
     return joinToken({ room, identity: ctx.userId, canPublish: true, sources: null, hidden: false, ttlSeconds: CALL_LIMITS.selfTestTokenSeconds });
   });

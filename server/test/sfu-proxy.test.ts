@@ -655,7 +655,7 @@ describe('rotas HTTP do servidor de chamadas', () => {
     }
     await settings({ Calls_SFU_Api_Secret: '' });
     try {
-      expect(await api('POST', 'calls.selfTest', {}, u)).toMatchObject({ status: 503, errorType: 'error-call-sfu-unavailable' });
+      expect(await api('POST', 'calls.selfTest', {}, u)).toMatchObject({ status: 503, errorType: 'error-call-sfu-not-configured' });
       expect(await api('GET', 'calls.sfu.status', undefined, A)).toMatchObject({ configured: false, reachable: false, error: 'Servidor de chamadas não configurado.' });
     } finally {
       await settings({ Calls_SFU_Api_Secret: fake.secret });

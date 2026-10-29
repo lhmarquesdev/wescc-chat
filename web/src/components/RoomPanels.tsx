@@ -6,6 +6,7 @@ import { api, errorMessage } from '../lib/api';
 import { partyOf, useDirect } from '../lib/direct';
 import { formatBytes, formatDateTime, formatRelative, formatWhen, plural, roleLabel, roomDisplayName, roomIconName, roomPath, STATUS_LABEL } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
+import { authorName } from '../lib/messageRules';
 import { useNames } from '../lib/names';
 import { canWithRoles, useStore } from '../lib/store';
 import { Icon, type IconName } from './Icon';
@@ -17,6 +18,8 @@ import { StickerView } from './stickers/StickerView';
 import { Avatar, Empty, Field, GroupAvatar, Menu, Segmented, SearchInput, SkeletonList, Toggle, UserAvatar, confirmDialog, useAsync } from './ui';
 // Chamadas em grupo: "Em chamada" ao lado da presença.
 import { InCallBadge } from './call/LiveIndicators';
+// Integrações (Jira/Teams): pílula "Teams" das mensagens copiadas do Teams, como na conversa.
+import { BridgeBadge } from './integrations/BridgeBadge';
 
 export type PanelId = 'livechat' | 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune';
 
@@ -139,17 +142,26 @@ function resultBody(m: Message) {
   return renderMarkdown(m.msg, { me: useStore.getState().me?.username, mentions: m.mentions });
 }
 
+// Autor e hora de um resultado como no cabeçalho da mensagem: o alias (webhooks, cópias do Teams) no lugar do robô, a
+// imagem própria da mensagem e a pílula "Teams" ou "Bot".
+function ResultHead({ m }: { m: Message }) {
+  return (
+    <div className="result-head">
+      {m.avatar ? <img className="avatar" src={m.avatar} width={20} height={20} style={{ width: 20, height: 20 }} alt="" /> : <Avatar username={m.u.username} size={20} />}
+      <strong title={`@${m.u.username}`}>{authorName(m)}</strong>
+      {m.bridge ? <BridgeBadge /> : m.alias && <span className="pill msg-bot">Bot</span>}
+      <time className="muted" dateTime={m.ts} title={formatDateTime(m.ts)}>
+        {formatWhen(m.ts)}
+      </time>
+    </div>
+  );
+}
+
 function MessageResult({ m }: { m: Message }) {
   const navigate = useNavigate();
   return (
     <button type="button" className="result" onClick={() => navigate(`${location.pathname.split('/thread/')[0]}?msg=${m._id}`)}>
-      <div className="result-head">
-        <Avatar username={m.u.username} size={20} />
-        <strong title={`@${m.u.username}`}>{m.u.name || m.u.username}</strong>
-        <time className="muted" dateTime={m.ts} title={formatDateTime(m.ts)}>
-          {formatWhen(m.ts)}
-        </time>
-      </div>
+      <ResultHead m={m} />
       <div className="result-body">{m.sticker ? <StickerView sticker={m.sticker} size="small" /> : resultBody(m)}</div>
     </button>
   );
@@ -546,13 +558,7 @@ function ThreadsPanel({ room }: Props) {
       ) : (
         data.threads.map((m: Message) => (
           <button key={m._id} type="button" className="result thread-row" onClick={() => navigate(`${roomPath(room)}/thread/${m._id}`)}>
-            <div className="result-head">
-              <Avatar username={m.u.username} size={20} />
-              <strong title={`@${m.u.username}`}>{m.u.name || m.u.username}</strong>
-              <time className="muted" dateTime={m.ts} title={formatDateTime(m.ts)}>
-                {formatWhen(m.ts)}
-              </time>
-            </div>
+            <ResultHead m={m} />
             <div className="result-body clamp">{!m.msg && m.sticker ? stickerPreviewText(m.sticker) : resultBody(m)}</div>
             <div className="result-foot">
               <Icon name="panel-threads" size={14} />

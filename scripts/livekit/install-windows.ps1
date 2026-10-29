@@ -719,7 +719,7 @@ if ($Uninstall) {
   }
 
   Write-Host ''
-  Info 'Rode scripts\windows\install-chat-service.ps1 -Reconfigure: o chat deixa de oferecer chamadas em grupo ("Servidor de chamadas não configurado.").'
+  Info 'Rode scripts\windows\install-chat-service.ps1 -Reconfigure: o chat deixa de oferecer chamadas em grupo (Administração › Chamadas mostra "Não configurado").'
   Info "Ficaram em $InstallDir os logs e install.json (para instalar de novo com as mesmas escolhas); apague a pasta quando não precisar mais deles."
   Write-Host ''
   if ($Simulate) {

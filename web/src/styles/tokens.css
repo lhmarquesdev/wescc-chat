@@ -84,6 +84,8 @@
   --skeleton: light-dark(#eef0f3, #222731);
   --skeleton-shine: light-dark(rgb(255 255 255 / 0.6), rgb(255 255 255 / 0.05));
   --scrim: light-dark(rgb(12 14 18 / 0.48), rgb(0 0 0 / 0.64));
+  /* Visualizador de imagens: o mesmo nos dois temas e sem desfoque (o desfoque pesa nos PCs do atendimento). */
+  --scrim-lightbox: rgb(0 0 0 / 0.9);
   --shadow-color: light-dark(rgb(16 24 40 / 0.1), rgb(0 0 0 / 0.5));
   --shadow-color-strong: light-dark(rgb(16 24 40 / 0.18), rgb(0 0 0 / 0.6));
 

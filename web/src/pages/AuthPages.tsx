@@ -4,7 +4,7 @@ import type { OAuthProviderPublic, OAuthProviderType } from '@shared/index';
 import { api, ApiError, errorMessage, getCredentials } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
 import { login, loginWithOAuth, loginWithSaml } from '../lib/session';
-import { useSetting } from '../lib/store';
+import { useSetting, useStore } from '../lib/store';
 import { BrandMark, ProviderIcon } from '../components/BrandIcons';
 import { Icon } from '../components/Icon';
 import { confirmAction, Field } from '../components/ui';
@@ -148,11 +148,18 @@ export function LoginPage() {
     e.preventDefault();
     setBusy(true);
     setError('');
+    const before = getCredentials();
     try {
       await login(user, password, needCode ? code : undefined);
       navigate(next, { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.errorType === 'totp-required') setNeedCode(true);
+      // O login passou (credencial nova) e só a abertura falhou sem recusar a sessão (limite de requisições, queda):
+      // segue para o chat, que abre a sessão de novo sozinho (sem o "me" pela metade), em vez de pedir outro login.
+      else if (getCredentials() && getCredentials() !== before && !(err instanceof ApiError && err.status === 401)) {
+        useStore.getState().setMe(null);
+        navigate(next, { replace: true });
+      }
       else setError(errorMessage(err));
     } finally {
       setBusy(false);

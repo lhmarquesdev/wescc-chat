@@ -3,6 +3,7 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { useMemo } from 'react';
 import type { EphemeralMessage } from '@shared/integrations';
 import { openIntegrationModal, useIntegrations, type IntegrationModalRequest } from './integrations';
+import { directMeetingOkNow } from './roomcall';
 import { useStore } from './store';
 
 const MAX_PER_ROOM = 20;
@@ -101,9 +102,9 @@ function autoOpen(m: EphemeralMessage) {
   const action = m.actions?.find((a) => a.kind === 'modal' && a.autoOpen);
   if (!action || action.kind !== 'modal') return;
   if (action.modal === 'msteams-meeting') {
-    // Na DM, a mesma política das chamadas (rooms.info calcula room.direct para quem pergunta).
+    // Na DM, o mesmo estado dos botões de chamada da sala (calls.roomCall; antes dele, room.direct de rooms.info).
     const room = useStore.getState().rooms[m.rid];
-    if (room?.t === 'd' && room.direct?.canCall === false) return;
+    if (room?.t === 'd' && !directMeetingOkNow(room)) return;
   }
   openIntegrationModal({ modal: action.modal, rid: m.rid, tmid: m.tmid ?? null, params: action.params, ephemeralId: m._id });
 }

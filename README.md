@@ -438,7 +438,7 @@ No Windows, no PowerShell como Administrador:
 # Primeiro só mostra o que seria feito
 powershell -ExecutionPolicy Bypass -File .\scripts\livekit\install-windows.ps1 -Uninstall -WhatIf
 powershell -ExecutionPolicy Bypass -File .\scripts\livekit\install-windows.ps1 -Uninstall
-# Tira o LiveKit do chat ("Servidor de chamadas não configurado.")
+# Tira o LiveKit do chat (Administração › Chamadas passa a mostrar "Não configurado")
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-chat-service.ps1 -Reconfigure
 # De novo, para apagar o segredo, que o chat já não usa
 powershell -ExecutionPolicy Bypass -File .\scripts\livekit\install-windows.ps1 -Uninstall
@@ -555,7 +555,7 @@ faz eco para todos da chamada.
 
 | Sintoma | O que conferir |
 | --- | --- |
-| "Servidor de chamadas não configurado." | Se `C:\Wescc\livekit\chat-livekit.env` existe e se o `install-chat-service.ps1 -Reconfigure` rodou depois dele (no Linux: `EnvironmentFile=/etc/wescc/chat-livekit.env` no serviço do chat e o chat reiniciado) |
+| Administração › Chamadas mostra "Não configurado" (na sala: "As chamadas em grupo ainda não foram configuradas.") | Se `C:\Wescc\livekit\chat-livekit.env` existe e se o `install-chat-service.ps1 -Reconfigure` rodou depois dele (no Linux: `EnvironmentFile=/etc/wescc/chat-livekit.env` no serviço do chat e o chat reiniciado) |
 | "Sem resposta de http://127.0.0.1:7880." | O serviço `wescc-livekit` (`Get-Service wescc-livekit`), o log em `C:\Wescc\livekit\logs`, e se o antivírus ou o AppLocker bloqueou `livekit-server.exe` ou `wescc-livekit.exe` (libere pelo SHA-256 de `versions.json`) |
 | Teste de conexão: "A mídia passa só por TCP." | UDP 7882 a 7885 no firewall da filial ou na VPN |
 | Teste de conexão: "O navegador não alcança o servidor de chamadas." | Se o chat abre por HTTPS e se o endereço do chat está na lista de exceções do proxy |

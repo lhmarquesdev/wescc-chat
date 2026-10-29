@@ -6,6 +6,7 @@ import { drainJobs, enqueue, sweepJobs } from '../src/integrations/jobs';
 import { runPollerOnce } from '../src/integrations/runtime';
 import { getState, mergeState, setState } from '../src/integrations/state';
 import { reloadSecretsKey } from '../src/lib/secrets';
+import { plainIntegrationText } from '../src/services/notifications';
 import { getSetting } from '../src/services/settings';
 import { startFakeJira, type FakeAccount, type FakeJira, type IssueInput } from './fake-jira';
 import { admin, api, connectWs, newUser, sleep, startServer, stopServer, urlOf, type Auth } from './helpers';
@@ -522,6 +523,31 @@ describe('Jira: avisos de ponta a ponta', () => {
     expect(list).toHaveLength(3);
     expect(list[2]).toMatchObject({ tmid: list[0].id, msg: `**Ana Teste** resolveu [${i.key}](${url}) como **Feito**` });
     expect(list[2].extra.tshow).toBe(true);
+  });
+
+  it('a notificação do aviso (desktop, push e e-mail) vai sem markdown: sem ** e com a chave no lugar do [link](url)', async () => {
+    const p = newProject();
+    const room = await channel(A, [anaU.username]);
+    expect((await api('POST', 'rooms.saveNotification', { roomId: room._id, notifications: { desktop: 'all' } }, anaU)).status).toBe(200);
+    const ws = await online(anaU);
+    try {
+      await onlyRule({ projects: [p], roomIds: [room._id] });
+      const i = issue(p, { summary: 'Servidor de arquivos lento', status: 'Em andamento' });
+      J.addHistory(i.key, [status('Aberta', 'Em andamento')], { author: J.ana });
+      await poll();
+      const [post] = await posts(room._id);
+      expect(post.msg).toBe(`**Ana Teste** moveu [${i.key}](${urlOfIssue(i.key)}) de **Aberta** para **Em andamento**`);
+      const n = await ws.waitFor((e) => e.type === 'notification' && e.messageId === post.id);
+      const bot = await one('SELECT username FROM users WHERE id = $1', [await botId()]);
+      expect(n).toMatchObject({ title: `#${room.name}`, text: `${bot.username}: Ana Teste moveu ${i.key} de Aberta para Em andamento` });
+    } finally {
+      ws.close();
+    }
+    // Resumo (sem extra.jira, mas do robô): as linhas também. Texto de fora com "](" quebrado (U+200B) fica como está.
+    expect(plainIntegrationText('[OPS-1](https://x.atlassian.net/browse/OPS-1) Chamado 1: **Ana Teste** moveu de **Aberta** para **Em análise**')).toBe(
+      'OPS-1 Chamado 1: Ana Teste moveu de Aberta para Em análise',
+    );
+    expect(plainIntegrationText('comentou: “veja [aqui]\u200b(https://evil.example/x)”')).toBe('comentou: “veja [aqui]\u200b(https://evil.example/x)”');
   });
 
   it('comentário restrito e issue com nível de segurança não são avisados', async () => {

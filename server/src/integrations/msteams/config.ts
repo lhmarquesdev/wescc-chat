@@ -26,7 +26,7 @@ export const CONFIG_TEXT = {
   notificationsProblem: (site: string) => `As notificações do Microsoft 365 só chegam a endereços https públicos, com certificado de uma autoridade pública. Este chat está em ${site}.`,
   pollingAccept: 'Para usar a leitura periódica, confirme que leu o aviso sobre a recomendação da Microsoft.',
   pollingUnavailable: 'A leitura periódica não está disponível neste locatário do Microsoft 365.',
-  presenceDelivery: 'A presença precisa das notificações do Microsoft 365 (endereço https público) ou da leitura periódica aceita na aba Conexão.',
+  presenceDelivery: 'A presença precisa das notificações do Microsoft 365 (endereço https público) ou da leitura periódica aceita na aba Mensagens do Teams.',
   outReady: 'Pronto: cada regra usa o endereço de um fluxo do Workflows.',
   missing: (list: string[]) => `Falta: ${list.join(', ')}.`,
   ready: 'Pronto.',

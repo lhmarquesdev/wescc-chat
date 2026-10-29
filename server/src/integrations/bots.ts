@@ -208,10 +208,12 @@ export async function prepareTargets(ctx: Ctx, kind: BotKind, roomIds: string[],
 }
 
 // Uma mensagem do robô na sala, sem menção a ninguém. Uma falha (sala arquivada, robô silenciado) vira atividade.
+// Só textos fixos do servidor (regra criada ou removida): o aviso sai também num canal de avisos ou numa sala somente
+// leitura em que o robô só lê (Sala → Teams), sem torná-lo publicador; os membros precisam saber para onde vão as mensagens.
 export async function announce(kind: BotKind, roomId: string, text: string): Promise<void> {
   const bot = await ensureBotUser(kind);
   try {
-    await sendMessage(botCtx(bot), { rid: roomId, msg: text }, { skipCommands: true, trusted: true, integration: true });
+    await sendMessage(botCtx(bot), { rid: roomId, msg: text }, { skipCommands: true, trusted: true, integration: true, ignoreReadOnly: true });
   } catch (e) {
     if (!(e instanceof ApiError)) throw e;
     const room = await getRoom(roomId).catch(() => null);

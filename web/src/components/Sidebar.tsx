@@ -7,6 +7,7 @@ import { useInstallPrompt } from '../lib/install';
 import { logout } from '../lib/session';
 import { usePermission, useSetting, useStore } from '../lib/store';
 import { applyTheme } from '../pages/AccountPage';
+import { ADMIN_MENU_PERMS } from '../pages/admin/sections';
 import { AgentStatusToggle } from '../pages/omnichannel/OmnichannelPage';
 import { BrandMark } from './BrandIcons';
 import { CreateModal, type CreateKind } from './CreateModal';
@@ -321,8 +322,8 @@ async function setTheme(theme: Theme) {
 }
 
 function useAdminHome() {
-  // Figurinhas: curadoria, emojis e moderação também abrem a Administração.
-  const canAdmin = usePermission(['view-administration', 'view-user-administration', 'view-room-administration', 'access-permissions', 'view-statistics', 'can-audit', 'view-engagement-dashboard', 'run-import', 'view-import-operations', 'manage-sticker-packs', 'manage-emoji', 'view-moderation-console', 'manage-moderation-actions']);
+  // Quem abre qualquer seção da Administração vê o item (figurinhas, chamadas, Jira/Teams...): a lista sai das seções.
+  const canAdmin = usePermission(ADMIN_MENU_PERMS);
   const canStats = usePermission('view-statistics');
   const canImport = usePermission(['run-import', 'view-import-operations']);
   // Quem só cuida de importações cai direto nelas, não em Informações (que exige view-statistics).

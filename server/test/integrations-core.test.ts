@@ -30,6 +30,7 @@ import {
   setSecret,
 } from '../src/lib/secrets';
 import { alertText, clearAlert, raiseAlert } from '../src/integrations/alerts';
+import { OUT_TEXT } from '../src/integrations/msteams/outgoing';
 import { rawClient } from '../src/integrations/jira/client';
 import { BOT_AVATAR } from '../src/integrations/assets';
 import { BOTS, botCtx, botIds, checkTargets, ensureBotUser, prepareTargets, releaseTargets } from '../src/integrations/bots';
@@ -1434,6 +1435,18 @@ describe('Núcleo: leases e consultas periódicas', () => {
     expect(alertText('As integrações estão paradas', 'Falta a chave.')).toBe('As integrações estão paradas: Falta a chave.');
     expect(alertText('A consulta falha', 'HTTP 500')).toBe('A consulta falha: HTTP 500.');
     expect(alertText('A consulta falha', '')).toBe('A consulta falha.');
+  });
+
+  it('alertText não põe ponto depois de frase terminada dentro de parênteses ou aspas (".)." ficava assim)', () => {
+    const t = alertText('O envio “Avisos” para o Teams falhou', OUT_TEXT.authNone('oid-1'));
+    expect(t).toBe(`O envio “Avisos” para o Teams falhou: ${OUT_TEXT.authNone('oid-1')}`);
+    expect(t.endsWith('Qualquer pessoa.)')).toBe(true);
+    expect(t).not.toContain('.).');
+    expect(alertText('Falhou', 'Ele respondeu “tente depois.”')).toBe('Falhou: Ele respondeu “tente depois.”');
+    expect(alertText('Falhou', 'Sem resposta?')).toBe('Falhou: Sem resposta?');
+    // Parêntese sem frase terminada dentro: o ponto final continua.
+    expect(alertText('A consulta falha', 'sem resposta (HTTP 500)')).toBe('A consulta falha: sem resposta (HTTP 500).');
+    expect(alertText('A consulta falha', 'o Jira disse “erro”')).toBe('A consulta falha: o Jira disse “erro”.');
   });
 });
 

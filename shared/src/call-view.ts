@@ -103,6 +103,9 @@ export const CALL_HTTPS_REASON = 'Chamadas exigem HTTPS. Peça ao administrador 
 // confere de novo de tempos em tempos enquanto uma delas aparece.
 export const CALL_SFU_DOWN = 'O servidor de chamadas não está respondendo. Tente de novo em instantes ou avise o administrador.';
 export const CALL_SERVER_FULL = 'O servidor de chamadas está no limite agora. Tente em alguns minutos.';
+// Sem servidor de chamadas configurado (ERR.sfuNotConfigured): não passa sozinho, só quando o administrador configurar;
+// a sala não fica conferindo. As chamadas a dois (P2P) seguem sem ele.
+export const CALL_SFU_NOT_CONFIGURED = 'As chamadas em grupo ainda não foram configuradas. Peça ao administrador para ativá-las em Administração › Chamadas.';
 export function callReasonPasses(reason: string | null | undefined): boolean {
   return reason === CALL_SFU_DOWN || reason === CALL_SERVER_FULL;
 }

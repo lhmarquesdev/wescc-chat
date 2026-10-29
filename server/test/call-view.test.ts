@@ -14,6 +14,7 @@ import {
   CALL_HTTPS_REASON,
   CALL_SERVER_FULL,
   CALL_SFU_DOWN,
+  CALL_SFU_NOT_CONFIGURED,
   crossesCallLimit,
   guessStart,
   headerView,
@@ -367,6 +368,23 @@ describe('apresentação das chamadas na sala (call-view)', () => {
     expect(roomCallNeedsPoll(state({ call: call(), canStart: false, startBlockedReason: 'Já existe uma chamada em andamento nesta sala.', canJoin: false, joinBlockedReason: CALL_SERVER_FULL }))).toBe(true);
     expect(roomCallNeedsPoll(state({ call: call(), canStart: false, canJoin: true }))).toBe(false);
     expect(roomCallNeedsPoll(null)).toBe(false);
+  });
+
+  it('sem servidor de chamadas configurado: motivo próprio nos botões, que não passa sozinho', () => {
+    expect(CALL_SFU_NOT_CONFIGURED).toBe(ERR.sfuNotConfigured().message);
+    expect(ERR.sfuNotConfigured().errorType).toBe('error-call-sfu-not-configured');
+    expect(ERR.sfu().errorType).toBe('error-call-sfu-unavailable');
+    expect(CALL_SFU_NOT_CONFIGURED).not.toBe(CALL_SFU_DOWN);
+    // O caminho do menu é o da administração da web (item Chamadas).
+    expect(CALL_SFU_NOT_CONFIGURED).toContain('Administração › Chamadas');
+    expect(callReasonPasses(CALL_SFU_NOT_CONFIGURED)).toBe(false);
+    const s = state({ canStart: false, startBlockedReason: CALL_SFU_NOT_CONFIGURED });
+    expect(roomCallNeedsPoll(s)).toBe(false);
+    expect(headerView(s, env())).toEqual({ kind: 'start', transmission: false, reason: CALL_SFU_NOT_CONFIGURED });
+    // Provisório (estado guardado): o motivo do servidor fica até a resposta.
+    expect(headerView(s, env(), { start: { show: true }, settled: false })).toEqual({ kind: 'start', transmission: false, pending: true, reason: CALL_SFU_NOT_CONFIGURED });
+    // Sem HTTPS, o motivo do HTTPS vem antes.
+    expect(headerView(s, env({ secure: false }))).toEqual({ kind: 'start', transmission: false, reason: CALL_HTTPS_REASON });
   });
 
   it('limite de pessoas: só cruzar o limite (para cima ou para baixo) pede a visão do servidor', () => {

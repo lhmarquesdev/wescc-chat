@@ -23,6 +23,8 @@ let loadedAt = 0;
 let inflight: Promise<IntegrationsMe | null> | null = null;
 // Cada logout troca a geração: uma resposta que chega depois não grava o estado da pessoa anterior.
 let generation = 0;
+// Pedidos forçados seguidos (permissões e papéis mudando em sequência): só o último grava, nunca uma resposta mais velha.
+let latest = 0;
 
 // Cache de 60 s; force ignora.
 export async function loadIntegrationsMe(force?: boolean): Promise<IntegrationsMe | null> {
@@ -30,10 +32,12 @@ export async function loadIntegrationsMe(force?: boolean): Promise<IntegrationsM
   if (!force && useIntegrations.getState().me && Date.now() - loadedAt < CACHE_MS) return useIntegrations.getState().me;
   if (inflight && !force) return inflight;
   const gen = generation;
+  const seq = ++latest;
   const p = api
     .get<IntegrationsMe & { success?: boolean }>('integrations.me')
     .then((r) => {
       if (gen !== generation) return null;
+      if (seq !== latest) return useIntegrations.getState().me;
       const { success: _ok, ...me } = r;
       loadedAt = Date.now();
       useIntegrations.setState({ me: me as IntegrationsMe });

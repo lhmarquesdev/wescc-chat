@@ -5,6 +5,7 @@ import { watchAcks } from '../lib/acks';
 import { api } from '../lib/api';
 import { formatDateTime, formatDay, formatTime, nameList, plural, roomDisplayName, roomIconName } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
+import { continuesGroup } from '../lib/messageRules';
 import { rememberName, useNames } from '../lib/names';
 import { useSetting, useStore } from '../lib/store';
 import { AckBar } from './AckBar';
@@ -374,11 +375,8 @@ export function MessageList({
         !newDay &&
         !unread &&
         !!prev &&
-        !prev.t &&
-        !m.t &&
-        prev.u._id === m.u._id &&
-        prev.alias === m.alias &&
-        time(m) - time(prev) < groupingPeriod * 1000 &&
+        // continuesGroup: a mesma regra do painel do tópico (mesmo usuário e alias, sem sistema, mesmo dia, intervalo)
+        continuesGroup(prev, m, groupingPeriod * 1000) &&
         !(prev.tcount ?? 0) &&
         !prev.ackRequired &&
         !m.ackRequired &&

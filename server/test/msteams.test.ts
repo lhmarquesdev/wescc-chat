@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { stickerPreviewText, type MessageSticker } from '@shared/stickers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { many, one, query } from '../src/db/pool';
@@ -409,6 +411,36 @@ describe('Envio para o Teams pelo Workflows (§5.3)', () => {
     expect(c.body.at(-1).text).toBe(`Este aviso pede confirmação de leitura no ${siteName()}.`);
   });
 
+  it('canal de avisos e sala somente leitura: o robô avisa na sala que as mensagens vão para o Teams (e que deixaram de ir), sem virar publicador', async () => {
+    const bot = await botId();
+    const notice = await channel(A, [ana.username], { extraData: { notice: true, noticeAck: true } });
+    const ro = await channel(A, [ana.username], { readOnly: true });
+    const rule = await saveOut({ name: 'Avisos lidos no Teams', roomIds: [notice._id, ro._id], filter: 'ack', url: M.flowUrl('fluxo-avisos-ro') });
+    const by = await nameOf(A);
+    for (const rid of [notice._id, ro._id]) {
+      const ann = await one(`SELECT msg, mentions FROM messages WHERE room_id = $1 AND user_id = $2 AND t IS NULL ORDER BY created_at DESC LIMIT 1`, [rid, bot]);
+      expect(ann?.msg, rid).toBe(`${OUT_TEXT.announce('Operação › Avisos', by)}${OUT_TEXT.onlyAck}`);
+      expect(ann.mentions ?? []).toEqual([]);
+      // Quem só lê a sala vê o aviso.
+      const hist = await api('GET', 'channels.history', { roomId: rid }, ana);
+      expect((hist.messages as any[]).some((m) => m.u._id === bot && m.msg === ann.msg), rid).toBe(true);
+      // O robô continua só leitor: sem publicador, e qualquer outra mensagem dele na sala é recusada.
+      expect((await one(`SELECT roles FROM subscriptions WHERE room_id = $1 AND user_id = $2`, [rid, bot])).roles ?? []).toEqual([]);
+      await expect(sendMessage(botCtx(await ensureBotUser('msteams')), { rid, msg: 'outra coisa' }, { skipCommands: true, trusted: true, integration: true })).rejects.toThrow(
+        rid === notice._id ? 'Este é um canal de avisos: só os publicadores enviam mensagens.' : 'Esta sala é somente leitura.',
+      );
+    }
+    expect((await api('POST', 'msteams.out.remove', { _id: rule._id }, A)).status).toBe(200);
+    for (const rid of [notice._id, ro._id]) {
+      expect(await one(`SELECT 1 FROM messages WHERE room_id = $1 AND user_id = $2 AND t IS NULL AND msg = $3`, [rid, bot, OUT_TEXT.removed]), rid).toBeTruthy();
+    }
+    const warned = await many(`SELECT text FROM integration_activity WHERE provider = 'msteams' AND (text LIKE $1 OR text LIKE $2)`, [
+      `Não foi possível avisar em #${notice.name}%`,
+      `Não foi possível avisar em #${ro.name}%`,
+    ]);
+    expect(warned).toEqual([]);
+  });
+
   it('filtro keywords: sem diferenciar maiúsculas e acentos', async () => {
     const room = await channel(A, [ana.username]);
     const kw = await saveOut({ name: 'Palavras-chave', roomIds: [room._id], filter: 'keywords', keywords: ['atenção', 'Urgente'], url: M.flowUrl('fluxo-palavras') });
@@ -749,6 +781,41 @@ describe('Mensagens do Teams por notificações (§5.4)', () => {
     // Nada disso volta para o Teams pela regra de envio da mesma sala.
     expect(await one(`SELECT 1 FROM integration_jobs WHERE integration_id = $1`, [echoRule._id])).toBeNull();
     expect(M.flowCalls('fluxo-eco')).toHaveLength(0);
+  });
+
+  it('citação, fixação e notificação de mensagem do Teams levam o nome da pessoa ("{nome} (Teams)"), não o do robô', async () => {
+    const m = await bridgedOf(root.data.id);
+    const bot = await one('SELECT username FROM users WHERE id = $1', [await botId()]);
+    // Citação em outra sala (sem a regra de envio): author_name segue o robô (avatar), author_alias traz a pessoa.
+    const other = await channel(A);
+    const quote: any = await send(A, other._id, 'citando o Teams', { attachments: [{ message_link: `?msg=${m.id}` }] });
+    expect(quote.attachments).toEqual([expect.objectContaining({ author_name: bot.username, author_alias: 'Ana Souza (Teams)', message_link: `?msg=${m.id}` })]);
+    // O apelido só sai da mensagem citada: o cliente não manda author_alias.
+    const forged: any = await send(A, other._id, 'anexo comum', { attachments: [{ text: 'texto', author_name: 'alguem', author_alias: 'Outra Pessoa (Teams)' }] });
+    expect(forged.attachments[0].author_alias).toBeUndefined();
+    const plain: any = await send(A, other._id, 'citando uma pessoa', { attachments: [{ message_link: `?msg=${quote._id}` }] });
+    expect(plain.attachments[0].author_name).toBe(A.username);
+    expect(plain.attachments[0]).not.toHaveProperty('author_alias');
+
+    expect((await api('POST', 'chat.pinMessage', { messageId: m.id }, A)).status).toBe(200);
+    const pin = await one(`SELECT extra FROM messages WHERE room_id = $1 AND t = 'message_pinned' ORDER BY created_at DESC LIMIT 1`, [room._id]);
+    expect(pin.extra.attachments[0]).toMatchObject({ author_name: bot.username, author_alias: 'Ana Souza (Teams)', message_link: `/msg/${m.id}` });
+
+    // Desktop "Todas": a notificação diz quem escreveu no Teams, e o markdown montado pelo servidor sai do texto.
+    expect((await api('POST', 'rooms.saveNotification', { roomId: room._id, notifications: { desktop: 'all' } }, A)).status).toBe(200);
+    try {
+      const next = M.post(CH, {
+        author: brunoMs,
+        html: '<p>Aviso do Teams para <strong>todos</strong>: veja o <a href="https://explorer.sharepoint.com/sites/ops/painel.aspx">painel da operação</a>.</p>',
+      });
+      await deliver(next);
+      const b = await bridgedOf(next.data.id);
+      expect(b.msg).toBe('Aviso do Teams para **todos**: veja o [painel da operação](https://explorer.sharepoint.com/sites/ops/painel.aspx).');
+      const n = await wsA.waitFor((e) => e.type === 'notification' && e.messageId === b.id);
+      expect(n).toMatchObject({ title: `#${room.name}`, text: 'Bruno Teste (Teams): Aviso do Teams para todos: veja o painel da operação.', sender: { username: bot.username } });
+    } finally {
+      await api('POST', 'rooms.saveNotification', { roomId: room._id, notifications: { desktop: 'default' } }, A);
+    }
   });
 
   it('M8: só lastModifiedDateTime (reação) não é edição; um lastEditedDateTime novo é', async () => {
@@ -1491,6 +1558,49 @@ describe('Reuniões do Teams (§5.5, §6)', () => {
     expect(pub.skipped).toEqual([]);
     expect(new URL(pub.url).searchParams.get('content')).toBe(MEETING_TEXT.content(siteName(), room.name));
   });
+
+  it('agendar com "Ocultar a lista de membros": quem não vê a lista não recebe UPN nem nome; quem vê recebe', async () => {
+    const dora = await newUser(A, { name: 'Dora Lista Oculta' });
+    const members = [ana.username, bruno.username, dora.username];
+    // Canal de avisos privado com a lista oculta, e grupo com a lista oculta em que todos escrevem.
+    const notice = (await api('POST', 'groups.create', { name: uniq('avisos'), members, extraData: { notice: true, broadcast: true } }, A)).group;
+    const hidden = (await api('POST', 'groups.create', { name: uniq('oculta'), members, extraData: { broadcast: true } }, A)).group;
+    expect((await api('POST', 'rooms.saveRoomSettings', { rid: hidden._id, readOnly: false }, A)).status).toBe(200);
+    expect(await one(`SELECT ro, broadcast FROM rooms WHERE id = $1`, [hidden._id])).toEqual({ ro: false, broadcast: true });
+    const brunoUpn = await emailOf(bruno);
+    for (const g of [notice, hidden]) {
+      expect((await api('GET', 'groups.members', { roomId: g._id }, bruno)).status).toBe(403);
+      const r = await api('POST', 'msteams.meeting.scheduleLink', { roomId: g._id, includeMembers: true }, bruno);
+      expect(r.status).toBe(200);
+      expect(new URL(r.url).searchParams.get('attendees')).toBeNull();
+      expect(r.skipped).toEqual([]);
+      expect(JSON.stringify(r)).not.toContain(anaEmail);
+      expect(JSON.stringify(r)).not.toContain('Dora');
+    }
+    // O dono (que vê a lista) continua convidando.
+    const own = await api('POST', 'msteams.meeting.scheduleLink', { roomId: hidden._id, includeMembers: true }, A);
+    expect(own.status).toBe(200);
+    expect(new URL(own.url).searchParams.get('attendees')?.split(',').sort()).toEqual([anaEmail, brunoUpn].sort());
+    expect(own.skipped).toEqual(['Dora Lista Oculta']);
+  });
+
+  it('notificação do cartão de reunião sem markdown: o assunto no lugar de [assunto](endereço)', async () => {
+    expect((await api('POST', 'rooms.saveNotification', { roomId: room._id, notifications: { desktop: 'all' } }, ana)).status).toBe(200);
+    try {
+      const r = await api('POST', 'msteams.meeting.link', { roomId: room._id, url: MEET_URL, subject: 'Plantão [noite]' }, bruno);
+      expect(r.status).toBe(200);
+      const n = await ws.waitFor((e) => e.type === 'notification' && e.messageId === r.messageId);
+      expect(n).toMatchObject({ title: `#${room.name}`, text: `${bruno.username}: Reunião do Teams: Plantão (noite)` });
+      // DM com as preferências padrão (DM avisa tudo): o corpo é o assunto, não o endereço da reunião.
+      const dm = await api('POST', 'im.create', { username: ana.username }, bruno);
+      const d = await api('POST', 'msteams.meeting.link', { roomId: dm.room._id, url: MEET_URL }, bruno);
+      expect(d.status).toBe(200);
+      const nd = await ws.waitFor((e) => e.type === 'notification' && e.messageId === d.messageId);
+      expect(nd).toMatchObject({ title: bruno.username, text: `Reunião do Teams: Reunião com ${await nameOf(ana)}` });
+    } finally {
+      await api('POST', 'rooms.saveNotification', { roomId: room._id, notifications: { desktop: 'default' } }, ana);
+    }
+  });
 });
 
 // ---------- Presença ----------
@@ -1599,5 +1709,23 @@ describe('Segredos (§3, §5)', () => {
     for (const r of activity) expect(`${r.text} ${r.detail ?? ''}`).not.toMatch(/tok-teste|\/workflows\/|sig=/);
     const state = await many(`SELECT id, data::text AS data FROM integration_state`);
     for (const r of state) expect(r.data).not.toMatch(/tok-teste|eyJ/);
+  });
+});
+
+describe('Textos que apontam abas de Administração › Integrações › Microsoft Teams', () => {
+  it('cada "aba X" dos textos do servidor é uma aba que existe na página do Teams', () => {
+    const page = fs.readFileSync(path.resolve(import.meta.dirname, '../../web/src/pages/admin/integrations/TeamsAdmin.tsx'), 'utf8');
+    const tabs = [...page.matchAll(/\{ id: '[a-z]+', label: '([^']+)' \}/g)].map((m) => m[1]);
+    expect(tabs).toEqual(expect.arrayContaining(['Conexão', 'Mensagens do Teams', 'Presença']));
+    const dir = path.resolve(import.meta.dirname, '../src/integrations/msteams');
+    const named = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.ts'))
+      .flatMap((f) => [...fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/\baba ([A-ZÀ-Ý][\p{L} ]*?)(?=[.,;:)'`"]|$)/gmu)].map((m) => ({ f, tab: m[1] })));
+    expect(named.length).toBeGreaterThan(0);
+    for (const n of named) expect(tabs, `${n.f}: aba ${n.tab}`).toContain(n.tab);
+    // O modo de recebimento e o aceite da leitura periódica ficam em Mensagens do Teams, não em Conexão.
+    expect(IN_TEXT.modeOff).toBe('Escolha antes como as mensagens do Teams chegam (aba Mensagens do Teams).');
+    expect(CONFIG_TEXT.presenceDelivery).toContain('leitura periódica aceita na aba Mensagens do Teams');
   });
 });

@@ -69,8 +69,12 @@
 }
 
 /* ---------- Cabeçalho da sala ---------- */
+/* Por cima da lista (z-index acima de --z-sticky): a pílula do dia, presa no topo da lista, passa por baixo do
+   cabeçalho e nunca por cima dele, nem quando a lista quica no fim da rolagem (celular) enquanto a pílula some. */
 .room-header {
   container: roomhead / inline-size;
+  position: relative;
+  z-index: calc(var(--z-sticky) + 1);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -568,6 +572,14 @@
 @media (pointer: coarse) {
   .search-tip {
     min-height: var(--touch);
+  }
+  /* "Filtros de busca" com 44px de alvo sem mudar o lugar; aberto, a lista desce o que o alvo avança. */
+  .search-tips > summary {
+    min-height: var(--touch);
+    margin-block: -10px;
+  }
+  .search-help {
+    margin-top: calc(var(--space-1) + 10px);
   }
 }
 
@@ -1426,6 +1438,21 @@
   .ack-bar .link {
     padding-block: 13px;
     margin-block: -13px;
+  }
+  /* "Ver" da faixa é curto: cresce também para os lados (à direita só há o fim da faixa). */
+  .notice-bar-pending .link {
+    padding-inline: var(--space-3);
+    margin-inline: calc(-1 * var(--space-3));
+  }
+  /* Link do subtítulo do painel ("em #sala"): o subtítulo corta com reticências (overflow: hidden), então ele também
+     cresce, sem mudar a linha, para o link alcançar 44px de altura; para os lados, 4px. */
+  .panel-head .sub {
+    padding-block: 14px;
+    margin-block: -14px;
+  }
+  .panel-head :where(.sub) .link {
+    padding: 14px var(--space-1);
+    margin: -14px calc(-1 * var(--space-1));
   }
 }
 @media (hover: none) {

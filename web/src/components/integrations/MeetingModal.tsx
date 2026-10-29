@@ -6,7 +6,7 @@ import { ApiError, errorMessage } from '../../lib/api';
 import { settleEphemeralRequest } from '../../lib/ephemeral';
 import { roomDisplayName } from '../../lib/format';
 import { teamsApi, useIntegrationsMe, type IntegrationModalRequest } from '../../lib/integrations';
-import { useStore } from '../../lib/store';
+import { canWithRoles, useStore } from '../../lib/store';
 import { Icon } from '../Icon';
 import { Field, Modal, Segmented } from '../ui';
 import { FormError } from './JiraFieldInputs';
@@ -33,6 +33,7 @@ export default function MeetingModal({ req, onClose }: { req: IntegrationModalRe
   const tmid = req.params?.tmid || req.tmid || null;
   const room = useStore((s) => s.rooms[rid]);
   const sub = useStore((s) => s.subscriptions[rid]);
+  const myRoles = useStore((s) => s.me?.roles);
   const graph = me?.msteams.meetings === 'graph';
   const name = roomDisplayName(sub, room);
   const defaultSubject = room?.t === 'd' ? `Reunião com ${name}` : `Reunião em #${name}`;
@@ -65,7 +66,9 @@ export default function MeetingModal({ req, onClose }: { req: IntegrationModalRe
 
   // DM ou grupo privado com até 20 pessoas, e só no modo graph (o convite precisa achar a conta de cada um).
   const small = room?.t === 'd' || (room?.t === 'p' && !room.prid && (room.usersCount ?? 0) <= 20);
-  const canInvite = graph && small;
+  // "Ocultar a lista de membros": sem view-broadcast-member-list o servidor não manda os membros como convidados.
+  const listHidden = !!room?.broadcast && !canWithRoles('view-broadcast-member-list', [...(myRoles ?? []), ...(sub?.roles ?? [])]);
+  const canInvite = graph && small && !listHidden;
   const durations = DURATIONS.includes(minutes) ? DURATIONS : [...DURATIONS, minutes].sort((a, b) => a - b);
   const untrusted = way === 'now' && me?.msteams.emailTrusted === false;
 

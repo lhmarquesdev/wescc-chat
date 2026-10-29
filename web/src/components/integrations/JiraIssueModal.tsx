@@ -5,6 +5,7 @@ import type { Message } from '@shared/index';
 import type { JiraCreateMeta, JiraFieldMeta, JiraProjectRef } from '@shared/integrations';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { JIRA_TYPE_ICON, jiraApi, loadIntegrationsMe, useIntegrationsMe, type IntegrationModalRequest } from '../../lib/integrations';
+import { authorName } from '../../lib/messageRules';
 import { useStore } from '../../lib/store';
 import { Icon } from '../Icon';
 import { useIsPhone } from '../overlay';
@@ -200,7 +201,8 @@ export default function JiraIssueModal({ req, onClose }: { req: IntegrationModal
   const count = [...summary].length;
   const summaryOk = summary.trim().length > 0 && count <= 255;
   const ready = !!meta && meta.identity !== 'none' && !!type && !blockers.length && summaryOk;
-  const author = source ? source.u.name || source.u.username : '';
+  // Na cópia do Teams (e em webhooks) o autor é o alias, como no cabeçalho da mensagem.
+  const author = source ? authorName(source) : '';
 
   const linked = () => {
     setLinking(false);

@@ -695,8 +695,14 @@
   .picker > .chips {
     padding: 1px 3px;
   }
+  /* O campo ocupa a caixa toda (44px), por cima do recuo e da borda: a linha continua com 40px. */
   .picker > .chips > input {
-    height: 40px;
+    height: var(--touch);
+    margin-block: -2px;
+  }
+  /* Os X dos chips escolhidos (lista acima do campo) crescem 8px para baixo: o vão até o campo acompanha. */
+  .picker {
+    gap: var(--space-2);
   }
 }
 

@@ -1,6 +1,6 @@
-import { Component, useEffect, useState, type ReactNode } from 'react';
+import { Component, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { getCredentials } from './lib/api';
+import { ApiError, errorMessage, getCredentials } from './lib/api';
 import { loadPublicSettings, logout, requestNotificationPermission, startSession } from './lib/session';
 import { useStore } from './lib/store';
 import { Sidebar } from './components/Sidebar';
@@ -90,6 +90,65 @@ class ErrorBoundary extends Component<{ children: ReactNode; resetKey: string },
   }
 }
 
+// Abertura que falhou sem a sessão ser recusada (limite de requisições, servidor fora do ar, rede): a credencial
+// continua e a tela tenta de novo sozinha, em vez de mandar para o login como se a pessoa tivesse saído da conta.
+interface BootFailure {
+  kind: 'limit' | 'offline' | 'error';
+  text: string;
+  wait: number; // segundos até a próxima tentativa
+}
+
+function bootFailure(e: unknown, attempt: number): BootFailure {
+  if (e instanceof ApiError && e.status === 429) {
+    const after = Number(e.details?.retryAfter);
+    return { kind: 'limit', text: 'O servidor pediu uma pausa nas requisições desta conta. Você continua conectado.', wait: Math.min(120, Math.max(1, Number.isFinite(after) ? after : 30)) };
+  }
+  // Até 30 s entre as tentativas: 5, 10, 20, 30...
+  const wait = Math.min(30, 5 * 2 ** Math.min(attempt, 3));
+  if (!(e instanceof ApiError) || e.status === 0) return { kind: 'offline', text: 'Confira a sua conexão de rede.', wait };
+  return { kind: 'error', text: errorMessage(e), wait };
+}
+
+const BOOT_TITLE: Record<BootFailure['kind'], string> = {
+  limit: 'Muitas requisições em pouco tempo',
+  offline: 'Sem conexão com o servidor',
+  error: 'Não foi possível abrir o chat',
+};
+
+function BootFailed({ failure, onRetry }: { failure: BootFailure; onRetry: () => void }) {
+  const navigate = useNavigate();
+  const [left, setLeft] = useState(failure.wait);
+  useEffect(() => {
+    const t = window.setInterval(() => setLeft((n) => n - 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  useEffect(() => {
+    if (left <= 0) onRetry();
+  }, [left, onRetry]);
+  return (
+    <div className="fullscreen-center boot">
+      <BrandMark size={40} />
+      <Empty
+        icon={failure.kind === 'limit' ? 'wait-time' : failure.kind === 'offline' ? 'offline' : 'error'}
+        tone={failure.kind === 'error' ? 'danger' : undefined}
+        title={BOOT_TITLE[failure.kind]}
+        action={
+          <>
+            <button type="button" className="btn primary" onClick={onRetry}>
+              Tentar agora
+            </button>
+            <button type="button" className="btn ghost" onClick={() => void logout().then(() => navigate('/login'))}>
+              Sair
+            </button>
+          </>
+        }
+      >
+        {failure.text} Tentando de novo em {Math.max(0, left)} s.
+      </Empty>
+    </div>
+  );
+}
+
 const ROOM_ROUTE = /^\/(channel|group|direct|live)\//;
 
 // Abrir Chamadas zera o contador de chamadas perdidas (inclusive as que chegam com a página aberta).
@@ -103,7 +162,9 @@ function useCallsSeen(onCalls: boolean) {
 function Protected() {
   const me = useStore((s) => s.me);
   const connected = useStore((s) => s.connected);
-  const [state, setState] = useState<'loading' | 'ready' | 'anon'>(me ? 'ready' : getCredentials() ? 'loading' : 'anon');
+  const [state, setState] = useState<'loading' | 'ready' | 'anon' | 'failed'>(me ? 'ready' : getCredentials() ? 'loading' : 'anon');
+  const [failure, setFailure] = useState<BootFailure | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -116,10 +177,20 @@ function Protected() {
 
   useEffect(() => {
     if (state !== 'loading') return;
-    startSession()
-      .then(() => setState('ready'))
-      .catch(() => setState('anon'));
+    // As configurações públicas também podem ter recebido o 429 (ou a queda) na abertura.
+    const settings = Object.keys(useStore.getState().settings).length ? null : loadPublicSettings().catch(() => {});
+    Promise.all([startSession(), settings])
+      .then(() => (setAttempt(0), setState('ready')))
+      .catch((e) => {
+        // Só a sessão recusada (401: o handler já limpou a credencial e foi para o login) vale como saída da conta.
+        if (!getCredentials() || (e instanceof ApiError && e.status === 401)) return setState('anon');
+        setFailure(bootFailure(e, attempt));
+        setAttempt((n) => n + 1);
+        setState('failed');
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
+  const retry = useCallback(() => setState('loading'), []);
 
   useEffect(() => {
     if (me) {
@@ -138,6 +209,7 @@ function Protected() {
   }, [phone, pathname]);
 
   if (state === 'anon' || (state === 'ready' && !me)) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+  if (state === 'failed' && failure) return <BootFailed key={attempt} failure={failure} onRetry={retry} />;
   if (state === 'loading' || !me) return <Boot />;
   if (me.requirePasswordChange) return <ChangePasswordPage onDone={() => void startSession()} />;
   if (me.require2faSetup) {

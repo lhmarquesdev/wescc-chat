@@ -20,6 +20,7 @@ import { api, errorMessage } from '../lib/api';
 import { formatBytes, formatDateTime, formatRelative, formatTime, formatWhen, nameList, plural, roomPath, systemIcon, systemText } from '../lib/format';
 import { resolveEmoji } from '../lib/emoji';
 import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
+import { authorName, editableKind } from '../lib/messageRules';
 import { canRemoveEverywhere, useStickers } from '../lib/stickers';
 import { useNames } from '../lib/names';
 import { avatarBust, useSetting, useStore } from '../lib/store';
@@ -181,7 +182,7 @@ function Lightbox({ src, title, download, m, onClose }: { src: string; title?: s
   useEscape(true, onClose);
   useScrollLock(true);
   useFocusTrap(ref, true);
-  const name = m ? m.alias || m.u.name || m.u.username : '';
+  const name = m ? authorName(m) : '';
   return (
     <Portal>
       <div
@@ -364,13 +365,14 @@ function RichAttachment({ a, m }: { a: Attachment; m?: Message }) {
 }
 
 // Citação: o servidor manda o @usuário do autor; aparece o nome, e a data no formato curto ("Ontem 10:24").
+// Mensagem com apelido (ponte do Teams): o nome é o apelido ("Ana Souza (Teams)"), com o avatar da conta que publicou.
 function QuoteAttachment({ a }: { a: Attachment }) {
   const nameOf = useNames();
   return (
     <div className="quote-att">
       <div className="quote-head">
         {a.author_name && <Avatar username={a.author_name} size={16} />}
-        <strong>{a.author_name ? nameOf(a.author_name) : ''}</strong>
+        <strong>{a.author_alias || (a.author_name ? nameOf(a.author_name) : '')}</strong>
         {a.ts && (
           <time className="muted" dateTime={a.ts} title={formatDateTime(a.ts)}>
             {formatWhen(a.ts)}
@@ -797,7 +799,8 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   };
 
   // Itens do "Mais" (e da folha do toque longo), em grupos separados por linha.
-  const canEdit = !m.t && !m.sticker && canReply && ((own && allowEdit) || (!own && perms.includes('edit-message') && canModerate));
+  // editableKind: a mesma regra da seta para cima no compositor (RoomPage.editLast).
+  const canEdit = editableKind(m) && canReply && ((own && allowEdit) || (!own && perms.includes('edit-message') && canModerate));
   const opt = (on: unknown, item: MenuEntry) => (on ? item : null);
   const groups = [
     [
@@ -889,9 +892,10 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   // Toque longo (celular): a folha de ações no lugar da barra que aparece no hover.
   const onPointerDown = (e: ReactPointerEvent) => {
     if (e.pointerType !== 'touch' || !actionable) return;
-    // A figurinha é um botão (abre o cartão), mas o toque longo nela abre a folha de ações como no resto da mensagem.
-    const onSticker = !!(e.target as HTMLElement).closest('.sticker-hit');
-    if (!onSticker && (e.target as HTMLElement).closest(`button, input, textarea, .att-image-box, ${NATIVE_PRESS}`)) return;
+    // A figurinha e o nome são botões (abrem o cartão), mas o toque longo neles abre a folha de ações como no resto da
+    // mensagem. No toque o nome também cobre o alto da primeira linha do corpo (alvo de 44px, room.css).
+    const pressThrough = !!(e.target as HTMLElement).closest('.sticker-hit, .msg-name');
+    if (!pressThrough && (e.target as HTMLElement).closest(`button, input, textarea, .att-image-box, ${NATIVE_PRESS}`)) return;
     const timer = window.setTimeout(() => {
       if (press.current) press.current.fired = true;
       navigator.vibrate?.(10);
@@ -927,21 +931,23 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
     ) : m.t === 'discussion-created' || call ? null : (
       withCopy(renderMarkdown(text, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick }))
     );
-  const name = m.alias || m.u.name || m.u.username;
+  const name = authorName(m);
   const mentioned = m.mentions?.some((x) => x._id === me._id || x._id === 'all' || x._id === 'here');
-  const edited =
-    m.editedAt && showEdited && m.t !== 'rm' ? (
-      <span className="edited" title={`Editada por ${m.editedBy?.username} em ${formatDateTime(m.editedAt)}`}>
-        editada
-      </span>
-    ) : null;
-  // Integrações (Jira/Teams): edição feita no Teams (a cópia não tem editedAt do chat)
+  // Integrações (Jira/Teams): edição feita no Teams. O espelho grava editedAt/editedBy com o robô (o autor da cópia) e a
+  // hora da cópia; a marca mostra a hora do Teams. Uma edição posterior no chat, por outra pessoa, volta à marca de sempre.
   const bridgeEdited =
-    !edited && m.bridge?.editedAt && showEdited && m.t !== 'rm' ? (
+    m.bridge?.editedAt && showEdited && m.t !== 'rm' && (!m.editedAt || m.editedBy?._id === m.u._id) ? (
       <span className="edited" title={`Editada no Teams em ${formatDateTime(m.bridge.editedAt)}`}>
         editada
       </span>
     ) : null;
+  const edited =
+    bridgeEdited ??
+    (m.editedAt && showEdited && m.t !== 'rm' ? (
+      <span className="edited" title={`Editada por ${m.editedBy?.username} em ${formatDateTime(m.editedAt)}`}>
+        editada
+      </span>
+    ) : null);
   const receipt =
     receiptsOn && own && !m.t ? (
       <span className={`receipt ${m.unread ? '' : 'read'}`} title={m.unread ? 'Enviada' : 'Lida por todos'} role="img" aria-label={m.unread ? 'Enviada' : 'Lida por todos'}>
@@ -960,7 +966,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
           <div className={`msg-body ${isEmojiOnly(text) ? 'big-emoji' : ''}`}>
             {body}
             {/* Integrações (Jira/Teams): ou a edição feita no Teams */}
-            {grouped && (edited ?? bridgeEdited)}
+            {grouped && edited}
           </div>
         )
       )}
@@ -1041,7 +1047,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
             <time className="msg-time" dateTime={m.ts} title={formatDateTime(m.ts)}>
               {formatTime(m.ts)}
             </time>
-            {edited ?? bridgeEdited}
+            {edited}
             {m.pinned && (
               <span className="msg-flag pin" title="Fixada" role="img" aria-label="Fixada">
                 <Icon name="pin" size={12} />

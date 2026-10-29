@@ -1,13 +1,9 @@
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
-import { App } from './App';
-import { getCredentials } from './lib/api';
-import { captureInstallPrompt } from './lib/install';
-import { registerServiceWorker } from './lib/push';
 // Fontes servidas pelo próprio app (sem CDN): Inter com tamanho óptico e JetBrains Mono para código.
 import '@fontsource-variable/inter/opsz.css';
 import '@fontsource-variable/jetbrains-mono';
-// Ordem fixa da cascata: cada arquivo só sobrescreve regras dos anteriores.
+// Ordem fixa da cascata: cada arquivo só sobrescreve regras dos anteriores. Vem antes de qualquer componente, para
+// o CSS de cada recurso (figurinhas, chamadas, integrações, avisos), importado pelos próprios componentes, entrar
+// depois do design system.
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/primitives.css';
@@ -17,9 +13,18 @@ import './styles/room.css';
 import './styles/panels.css';
 import './styles/calls.css';
 import './styles/admin.css';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { App } from './App';
+import { getCredentials } from './lib/api';
+import { reloadOnStaleChunks } from './lib/call/build';
+import { captureInstallPrompt } from './lib/install';
+import { registerServiceWorker } from './lib/push';
 
 registerServiceWorker();
 captureInstallPrompt();
+// Aba aberta durante uma atualização: a tela carregada sob demanda do build anterior não existe mais.
+reloadOnStaleChunks();
 
 // Tema manual (Claro ou Escuro): fica guardado neste navegador para o index.html aplicar antes da
 // primeira pintura, sem piscar o tema do sistema; a barra do navegador acompanha o fundo do app.

@@ -1567,9 +1567,10 @@ input[type='checkbox']:checked:where(:disabled) {
     height: max(100%, var(--touch));
     transform: translate(-50%, -50%);
   }
-  /* O X do chip não avança sobre o campo ao lado: só cresce na altura. */
-  .chip button::after {
-    width: max(100%, 32px);
+  /* O X do chip (20px, 4px antes da borda) cresce 12px para cada lado: o vão entre os chips e até o campo ao lado
+     passa a 8px, para o alvo encostar no vizinho sem cobri-lo. */
+  .chips {
+    gap: var(--space-2);
   }
   .search-field .search-clear {
     right: var(--space-2);

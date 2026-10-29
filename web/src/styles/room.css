@@ -1258,10 +1258,8 @@ a.att-title {
   align-items: center;
   justify-content: center;
   padding: 64px 16px 56px;
-  background: rgb(0 0 0 / 0.9);
-  /* Desfoca a sala por trás: sem isso o cabeçalho de uma sala clara ficava legível ao lado do nome de quem enviou. */
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
+  /* Fundo sólido translúcido do design system: sem desfoque da sala por trás. */
+  background: var(--scrim-lightbox);
   cursor: zoom-out;
   animation: fade-in var(--dur-2) var(--ease-out);
 }
@@ -1501,9 +1499,14 @@ a.att-title {
   color: var(--fg-2);
   white-space: nowrap;
 }
+/* Quebra só quando não cabe (o .spacer ocupa a sobra numa linha só): o que desce fica à direita, perto de
+   Enviar, em vez de sair da caixa. A largura da própria barra decide onde vai o contador (veja .counter). */
 .composer-tools {
+  container: composer-tools / inline-size;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
   min-width: 0;
   padding: 4px 8px 8px;
@@ -1559,6 +1562,16 @@ a.att-title {
   color: var(--danger);
   font-weight: var(--fw-semibold);
 }
+/* Barra estreita (celular, painel de conversa): o contador ganha uma linha própria acima das ferramentas,
+   alinhado à direita; na mesma linha ele empurrava Enviar (ou Salvar) para fora da caixa. */
+@container composer-tools (max-width: 480px) {
+  .composer-tools > .counter {
+    order: -1;
+    flex-basis: 100%;
+    margin: 0 4px 0 0;
+    text-align: right;
+  }
+}
 .btn.primary.send {
   flex-shrink: 0;
   width: 36px;
@@ -1572,7 +1585,14 @@ a.att-title {
   height: 28px;
   padding: 0 12px;
 }
-.composer-tools > .btn.ghost {
+/* Cancelar + Salvar da edição: um item da barra, com os mesmos espaços de quando eram dois. */
+.composer-edit-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+.composer-edit-actions > .btn.ghost {
   margin-left: 4px;
 }
 
@@ -2007,7 +2027,7 @@ a.att-title {
     padding: 0 16px;
   }
   .btn.send.save,
-  .composer-tools > .btn.ghost {
+  .composer-edit-actions > .btn.ghost {
     height: var(--touch);
   }
   .composer-row textarea,
@@ -2065,8 +2085,7 @@ a.att-title {
   .reaction::after,
   .reaction-add::after,
   .md-copy::after,
-  .call-card .btn::after,
-  .msg-name.clickable::after {
+  .call-card .btn::after {
     content: '';
     position: absolute;
     top: 50%;
@@ -2075,12 +2094,20 @@ a.att-title {
     height: max(100%, var(--touch));
     transform: translate(-50%, -50%);
   }
-  /* O nome cresce para os lados e só até o meio do vão de cima (o resto é da reação ou do resumo da linha anterior);
-     para baixo não cresce: lá começa o corpo, com links e menções. O avatar ao lado abre o mesmo cartão. */
-  .msg-name.clickable::after {
-    top: -6px;
-    bottom: 0;
-    height: auto;
-    transform: translateX(-50%);
+  /* O nome corta com reticências (overflow: hidden recortaria um ::after): a área de toque é o próprio botão, com
+     preenchimento e margem negativa, e a linha não muda. Cresce 12px para cima (o vão até a linha anterior) e 12px
+     para baixo, sobre o alto da primeira linha do corpo; o toque longo ali continua abrindo a folha (MessageItem). */
+  .msg-name.clickable {
+    padding: 12px var(--space-2);
+    margin: -12px calc(-1 * var(--space-2));
+  }
+  /* Links, menções e botões do corpo e dos anexos ficam por cima do nome (posicionados e depois dele no documento).
+     :where() não pesa: quem já tem posição própria (absolute, sticky) continua com ela. */
+  :where(.msg-head ~ *) :where(a[href], button, [role='button'], .mention, summary, audio, video) {
+    position: relative;
+  }
+  /* Reação logo acima de um nome: os 12px do vão não dão para os 6px de baixo da reação e os 12px de cima do nome. */
+  .msg:has(> .msg-main > .reactions-row:last-child) + .msg:has(> .msg-main > .msg-head) {
+    padding-top: calc(6px + var(--space-3));
   }
 }

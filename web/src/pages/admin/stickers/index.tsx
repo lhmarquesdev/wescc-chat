@@ -11,6 +11,7 @@ import { RemoveEverywhereDialog } from '../../../components/stickers/StickerMenu
 import { StickerView } from '../../../components/stickers/StickerView';
 import '../../../components/stickers/studio.css';
 import { PageHead } from '../parts';
+import { SETTINGS_GROUP, settingsPath } from '../sections';
 
 // As abas carregam sob demanda: só ReportSticker (Moderação) fica no pacote principal.
 const PackManager = lazy(() => import('../../../components/stickers/PackManager'));
@@ -50,8 +51,9 @@ export function AdminStickers() {
   return (
     <>
       <PageHead title="Figurinhas">
+        {/* Abre Configurações já no grupo Mensagens, onde fica a seção Figurinhas. */}
         {canSettings && (
-          <button type="button" className="btn ghost" onClick={() => navigate('/admin/settings')}>
+          <button type="button" className="btn ghost" onClick={() => navigate(settingsPath(SETTINGS_GROUP.stickers))}>
             <Icon name="sticker-manage" />
             Configurações
           </button>

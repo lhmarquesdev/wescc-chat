@@ -1,10 +1,24 @@
 import type { UserRef } from '@shared/index';
 import { messagePreviewText } from '@shared/stickers';
 import { many } from '../db/pool';
+import { truncate } from '../lib/text';
 import { bus } from '../realtime/bus';
 import { sendMail } from './mailer';
 import { getSetting } from './settings';
 import type { Ctx } from './users';
+
+// Avisos do Jira (eventos e resumos), cartões de reunião do Teams e mensagens espelhadas do Teams trazem markdown que o
+// próprio servidor montou: na notificação, no push e no e-mail vão sem ** e com o rótulo do link no lugar de [rótulo](url).
+// Texto de fora já chega com "](" quebrado por U+200B (safeExternalText), então só os links do servidor casam.
+export function plainIntegrationText(s: string): string {
+  return s.replace(/\[([^\]\n]*)\]\([^)\s]*\)/g, '$1').replace(/\*\*([^*\n]+)\*\*/g, '$1');
+}
+
+async function serverBuiltMarkdown(ctx: Ctx, row: any): Promise<boolean> {
+  if (row.extra?.jira || row.extra?.meeting) return true;
+  const { botIds } = await import('../integrations/bots');
+  return (await botIds()).includes(ctx.userId);
+}
 
 // Decide quem recebe notificação (desktop/in-app e e-mail) para uma nova mensagem.
 export async function dispatchNotifications(ctx: Ctx, room: any, row: any, mentions: UserRef[], parent: any) {
@@ -24,13 +38,17 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
     : new Set<string>();
   const followers = new Set<string>(row.tmid && parent ? parent.replies ?? [] : []);
   const isDM = room.t === 'd';
-  const roomName = isDM ? ctx.username : room.fname || room.name || '';
+  // Quem a pessoa vê como autor: o apelido da mensagem (ponte do Teams "Ana Souza (Teams)", webhooks) ou o usuário.
+  // O sender do evento continua a conta que publicou.
+  const senderName: string = row.alias ? truncate(String(row.alias), 100) : ctx.username;
+  const roomName = isDM ? senderName : room.fname || room.name || '';
   const hidePush = getSetting<boolean>('Push_Privacy_Hide_Content');
-  const text = messagePreviewText({ msg: row.msg, sticker: row.extra?.sticker, files: row.files });
+  const preview = messagePreviewText({ msg: row.msg, sticker: row.extra?.sticker, files: row.files });
+  const text = (await serverBuiltMarkdown(ctx, row)) ? plainIntegrationText(preview) : preview;
   const emailEnabled = getSetting<boolean>('Email_Notifications_Enabled');
   const pushTargets: string[] = [];
-  const title = isDM ? (room.uids.length > 2 ? `${ctx.username} em ${roomName}` : ctx.username) : `#${roomName}`;
-  const body = hidePush ? 'Você tem uma nova mensagem' : `${isDM ? '' : `${ctx.username}: `}${text}`.slice(0, 300);
+  const title = isDM ? (room.uids.length > 2 ? `${senderName} em ${roomName}` : senderName) : `#${roomName}`;
+  const body = hidePush ? 'Você tem uma nova mensagem' : `${isDM ? '' : `${senderName}: `}${text}`.slice(0, 300);
 
   for (const m of members) {
     const prefs = m.notifications ?? {};
@@ -54,8 +72,8 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
       const url = `${getSetting<string>('Site_Url')}/${isDM ? 'direct' : room.t === 'p' ? 'group' : 'channel'}/${room.id}`;
       void sendMail({
         to: m.email,
-        subject: `[${site}] ${isDM ? `Mensagem direta de ${ctx.username}` : `Você foi mencionado em #${roomName}`}`,
-        text: `${ctx.username}: ${hidePush ? '(conteúdo oculto)' : text}\n\nAbrir: ${url}`,
+        subject: `[${site}] ${isDM ? `Mensagem direta de ${senderName}` : `Você foi mencionado em #${roomName}`}`,
+        text: `${senderName}: ${hidePush ? '(conteúdo oculto)' : text}\n\nAbrir: ${url}`,
       });
     }
   }

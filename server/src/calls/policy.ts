@@ -30,6 +30,8 @@ export const ERR = {
   groupDisabled: () => new ApiError(400, 'error-call-group-disabled', 'Chamadas em grupo estão desativadas. Só é possível ligar em mensagens diretas entre duas pessoas.'),
   user: () => new ApiError(400, 'error-call-user', 'Este usuário não pode receber chamadas.'),
   sfu: () => new ApiError(503, 'error-call-sfu-unavailable', 'O servidor de chamadas não está respondendo. Tente de novo em instantes ou avise o administrador.'),
+  // Sem LiveKit configurado (endereço, chave e segredo): não é queda, e só o administrador resolve (CALL_SFU_NOT_CONFIGURED).
+  sfuNotConfigured: () => new ApiError(503, 'error-call-sfu-not-configured', 'As chamadas em grupo ainda não foram configuradas. Peça ao administrador para ativá-las em Administração › Chamadas.'),
   capacity: () => new ApiError(503, 'error-call-capacity', 'O servidor de chamadas está no limite agora. Tente em alguns minutos.'),
   notMember: () => new ApiError(403, 'error-call-not-member', 'Entre na sala para participar da chamada.'),
   exists: (callId: string) => new ApiError(409, 'error-call-exists', 'Já existe uma chamada em andamento nesta sala.', { callId }),
@@ -222,7 +224,7 @@ export async function resolveMedia(
 ): Promise<{ allowed: true; media: CallMedia } | { allowed: false; error: ApiError }> {
   if (scope === 'direct') return { allowed: true, media: 'p2p' };
   if (!groupEnabled()) return { allowed: false, error: ERR.groupDisabled() };
-  if (!sfuConfig().configured) return { allowed: false, error: ERR.sfu() };
+  if (!sfuConfig().configured) return { allowed: false, error: ERR.sfuNotConfigured() };
   let h = await lk.health();
   // Resultado guardado de quando estava fora: confere de novo antes de recusar.
   if (!h.ok && o.recheck !== false) h = await lk.health(true);

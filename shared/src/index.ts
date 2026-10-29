@@ -163,6 +163,7 @@ export interface Attachment {
   message_link?: string;
   text?: string;
   author_name?: string;
+  author_alias?: string; // apelido do autor (integração, ponte do Teams); só o servidor preenche
   ts?: string;
   // anexos de integrações e mensagens importadas do Slack
   pretext?: string;

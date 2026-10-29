@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { Call, Message, Subscription } from '@shared/index';
 import { api } from '../lib/api';
 import { formatTime, roomPath } from '../lib/format';
+import { authorName } from '../lib/messageRules';
 import { markCallsSeen as markSeenOnServer, useMissedCalls as useMissedCount } from '../lib/roomcall';
 import { useSetting, useStore } from '../lib/store';
 
@@ -133,7 +134,8 @@ export function useForYou(max = 3): ForYouItem[] {
   return useMemo(() => {
     const mentions: ForYouItem[] = rooms.map((s) => {
       const m = last[s.rid];
-      const who = m ? m.u.name || m.u.username : '';
+      // O alias (cópia do Teams, webhook) no lugar do robô, como no cabeçalho da mensagem.
+      const who = m ? authorName(m) : '';
       return {
         key: `m-${s.rid}`,
         kind: 'mention',

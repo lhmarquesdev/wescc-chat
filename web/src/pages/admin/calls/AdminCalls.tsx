@@ -14,6 +14,7 @@ import { SelfTest } from '../../../components/call/SelfTest';
 import { Icon } from '../../../components/Icon';
 import { Empty, Skeleton, SkeletonTable, confirmDialog, useAsync } from '../../../components/ui';
 import { PageHead, RoomCell, TableWrap, UserCell, num } from '../parts';
+import { SETTINGS_GROUP, settingsPath } from '../sections';
 import '../../../components/callroom.css';
 
 interface SfuStatus {
@@ -135,7 +136,7 @@ function ServerCard({
           <Icon name="call-retry" />
           Atualizar
         </button>
-        <Link className="admin-calls-link" to="/admin/settings?group=VideoConf">
+        <Link className="admin-calls-link" to={settingsPath(SETTINGS_GROUP.calls)}>
           Configurações de chamadas
         </Link>
       </div>

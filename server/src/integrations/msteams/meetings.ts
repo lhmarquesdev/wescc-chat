@@ -7,7 +7,7 @@ import { newId } from '../../lib/ids';
 import { audit } from '../../services/audit';
 import { assertCanCall, directParentFor } from '../../services/direct';
 import { canPostInRoom, sendMessage } from '../../services/messages';
-import { restrictedRoleIds } from '../../services/permissions';
+import { hasPermission, restrictedRoleIds } from '../../services/permissions';
 import { loadRoomForUser } from '../../services/rooms';
 import { getSetting } from '../../services/settings';
 import { actorOf, type Ctx } from '../../services/users';
@@ -218,7 +218,10 @@ export async function scheduleLink(
   const attendees: string[] = [];
   const skipped: string[] = [];
   const small = room.t === 'd' || (room.t === 'p' && !room.prid && Number((await one(`SELECT count(*)::int AS n FROM subscriptions WHERE room_id = $1`, [room.id]))?.n ?? 0) <= MAX_ATTENDEE_ROOM);
-  if (input.includeMembers === true && meetingsMode() === 'graph' && small) {
+  // "Ocultar a lista de membros": sem view-broadcast-member-list, nada dos membros sai por aqui (nem UPN nem nome em
+  // skipped), como em groups.members e nas outras listas. O link sai sem convidados, como num canal.
+  const listHidden = !!room.broadcast && !(await hasPermission(ctx.userId, 'view-broadcast-member-list', room.id));
+  if (input.includeMembers === true && meetingsMode() === 'graph' && small && !listHidden) {
     const bots = new Set(await botIds());
     const ids = room.t === 'd' ? (room.uids ?? []) : (await many(`SELECT user_id FROM subscriptions WHERE room_id = $1`, [room.id])).map((s) => s.user_id);
     const members = await many(

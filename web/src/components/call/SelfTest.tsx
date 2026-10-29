@@ -1,6 +1,7 @@
 // Teste de conexão com o servidor de chamadas: servidor, mídia, caminho (UDP ou TCP), envio de áudio e de vídeo.
 // Fica fora da chamada (U7): com uma chamada aberta, só explica que é preciso sair dela.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CALL_SFU_NOT_CONFIGURED } from '@shared/call-view';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { isInCall } from '../../lib/call/store';
 import type { SelfTestStep } from '../../lib/call/sfu';
@@ -60,7 +61,9 @@ export function SelfTest({ onClose }: { onClose: () => void }) {
     } catch (e) {
       if (!alive.current) return;
       const status = e instanceof ApiError ? e.status : 0;
-      setError(status === 503 ? TEXT.down : status === 409 ? TEXT.inCall : errorMessage(e));
+      // Sem servidor de chamadas configurado (também 503): o texto que diz onde ativar, não o de fora do ar.
+      if (e instanceof ApiError && e.errorType === 'error-call-sfu-not-configured') setError(CALL_SFU_NOT_CONFIGURED);
+      else setError(status === 503 ? TEXT.down : status === 409 ? TEXT.inCall : errorMessage(e));
     } finally {
       if (alive.current) setRunning(false);
     }

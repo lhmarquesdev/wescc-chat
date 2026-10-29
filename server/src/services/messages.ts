@@ -104,21 +104,27 @@ export interface SendInput {
   sticker?: MessageSticker; // figurinha (só chat.sendSticker preenche, com opts.sticker)
 }
 
-export async function canPostInRoom(ctx: Ctx, room: any) {
+export async function canPostInRoom(ctx: Ctx, room: any, opts: WriteOpts = {}) {
   const sub = await getSubscriptionRow(room.id, ctx.userId);
   if (!sub) {
     if (room.t === 'l' && (await hasPermission(ctx.userId, 'view-livechat-rooms'))) return;
     throw forbidden('Você precisa entrar na sala para enviar mensagens.');
   }
-  return assertCanWrite(ctx, room);
+  return assertCanWrite(ctx, room, undefined, opts);
+}
+
+// ignoreReadOnly: só o aviso de transparência dos robôs das integrações (texto fixo do servidor), que precisa sair
+// também num canal de avisos ou numa sala somente leitura em que o robô só lê (Sala → Teams).
+interface WriteOpts {
+  ignoreReadOnly?: boolean;
 }
 
 // Regras de escrita, sem exigir inscrição: valem para enviar, editar e criar discussão. Editar ou abrir uma
 // discussão numa sala em que a pessoa não pode enviar seria outro jeito de publicar texto ali.
-async function assertCanWrite(ctx: Ctx, room: any, roles?: string[]) {
+async function assertCanWrite(ctx: Ctx, room: any, roles?: string[], opts: WriteOpts = {}) {
   if (room.archived) throw badRequest('error-room-archived', 'Esta sala está arquivada.');
   roles ??= await getUserRoles(ctx.userId, room.id);
-  if (room.ro && !rolesHavePermission(roles, 'post-readonly')) {
+  if (room.ro && !opts.ignoreReadOnly && !rolesHavePermission(roles, 'post-readonly')) {
     throw forbidden(room.notice ? 'Este é um canal de avisos: só os publicadores enviam mensagens.' : 'Esta sala é somente leitura.');
   }
   if (room.muted?.includes(ctx.username)) throw forbidden('Você está silenciado nesta sala.');
@@ -148,6 +154,10 @@ function quotedMessageId(link: string) {
   return /[?&]msg=([A-Za-z0-9]{10,24})/.exec(link)?.[1] ?? /\/msg\/([A-Za-z0-9]{10,24})/.exec(link)?.[1] ?? null;
 }
 
+// Mensagem com apelido (ponte do Teams, webhooks): author_name continua o usuário que publicou (avatar e perfil), e o
+// nome que o stream mostra vai em author_alias, para a citação e a fixação não atribuírem o texto ao robô.
+const aliasOf = (m: any): { author_alias?: string } => (m.alias ? { author_alias: truncate(String(m.alias), 200) } : {});
+
 // A citação é montada no servidor a partir da mensagem original (o cliente só indica qual é),
 // e só se quem cita tem acesso à sala dela: assim não dá para inventar o que outra pessoa disse.
 async function quoteAttachment(ctx: Ctx, link: string): Promise<Attachment | null> {
@@ -156,7 +166,7 @@ async function quoteAttachment(ctx: Ctx, link: string): Promise<Attachment | nul
   if (!m || m.t === 'rm') return null;
   if (!(await canAccessRoom(ctx.userId, await getRoom(m.room_id)))) return null;
   const files = (m.files ?? []) as MessageFile[];
-  return { text: messagePreviewText({ msg: m.msg, sticker: m.extra?.sticker, files }, { withName: false }), author_name: m.username, ts: m.created_at, message_link: `?msg=${m.id}` };
+  return { text: messagePreviewText({ msg: m.msg, sticker: m.extra?.sticker, files }, { withName: false }), author_name: m.username, ...aliasOf(m), ts: m.created_at, message_link: `?msg=${m.id}` };
 }
 
 export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Attachment[]> {
@@ -197,11 +207,16 @@ export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Atta
 
 // trusted: mensagens de integrações, que podem definir apelido e avatar próprios.
 // internalAttachments: anexos montados pelo próprio servidor (upload de arquivo).
-export async function sendMessage(ctx: Ctx, input: SendInput, opts: { skipCommands?: boolean; trusted?: boolean; internalAttachments?: boolean; sticker?: boolean; integration?: boolean } = {}) {
+// ignoreReadOnly: veja WriteOpts (só bots.ts announce).
+export async function sendMessage(
+  ctx: Ctx,
+  input: SendInput,
+  opts: { skipCommands?: boolean; trusted?: boolean; internalAttachments?: boolean; sticker?: boolean; integration?: boolean; ignoreReadOnly?: boolean } = {},
+) {
   const sticker = opts.sticker ? input.sticker : undefined; // só o servidor monta figurinhas
   const room = await getRoom(input.rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
-  const roles = (await canPostInRoom(ctx, room)) ?? (await getUserRoles(ctx.userId, room.id));
+  const roles = (await canPostInRoom(ctx, room, { ignoreReadOnly: opts.ignoreReadOnly === true })) ?? (await getUserRoles(ctx.userId, room.id));
   let msg = (input.msg ?? '').trim();
   const max = getSetting<number>('Message_MaxAllowedSize');
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
@@ -577,7 +592,7 @@ export async function setPinned(ctx: Ctx, msgId: string, pinned: boolean) {
   bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
   if (pinned) {
     await sendSystemMessage(m.room_id, 'message_pinned', { id: ctx.userId, username: ctx.username }, '', {
-      attachments: [{ text: m.msg || (m.extra?.sticker ? stickerPreviewText(m.extra.sticker, { withName: false }) : ''), author_name: m.username, ts: m.created_at, message_link: `/msg/${m.id}` }],
+      attachments: [{ text: m.msg || (m.extra?.sticker ? stickerPreviewText(m.extra.sticker, { withName: false }) : ''), author_name: m.username, ...aliasOf(m), ts: m.created_at, message_link: `/msg/${m.id}` }],
       pinnedMessageId: m.id,
     });
   }

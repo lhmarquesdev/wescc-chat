@@ -38,6 +38,16 @@ const snap = async (p, name) => {
   await p.screenshot({ path: path.join(out, `${name}.png`) });
   console.log('shot', name);
 };
+// Troca o tema e espera as transições de cor (80 ms nos botões) terminarem: capturar logo depois do emulateMedia pega
+// os botões no meio do caminho entre o escuro e o claro (quadrados cinza de pouco contraste).
+const scheme = async (p, colorScheme) => {
+  await p.emulateMedia({ colorScheme });
+  await p.evaluate(async () => {
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const finite = document.getAnimations().filter((x) => Number.isFinite(x.effect?.getComputedTiming().endTime));
+    await Promise.race([Promise.all(finite.map((x) => x.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))]);
+  });
+};
 
 await a.click('.room-actions button[title="Chamada de vídeo"]');
 await a.waitForSelector('.call-window');
@@ -56,7 +66,7 @@ await a
 await a.waitForTimeout(1500);
 await snap(a, '72-call-connected--desktop-light');
 await snap(q, '73-call-connected--phone-dark');
-await a.emulateMedia({ colorScheme: 'dark' });
+await scheme(a, 'dark');
 await a.waitForTimeout(300);
 await snap(a, '72-call-connected--desktop-dark');
 await a.click('.call-window button[title="Ampliar"]').catch(() => {});
@@ -71,7 +81,7 @@ await a.waitForTimeout(800);
 await snap(a, '75-call-muted-camoff--desktop-dark');
 await a.click('.call-window .call-btn.hang');
 await a.waitForTimeout(1500);
-await a.emulateMedia({ colorScheme: 'light' });
+await scheme(a, 'light');
 await snap(a, '76-dm-after-call--desktop-light');
 await a.goto(`${BASE}/calls`);
 await a.waitForTimeout(1500);

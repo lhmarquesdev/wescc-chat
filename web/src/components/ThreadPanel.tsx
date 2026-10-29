@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Message, Room } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
 import { plural, roomDisplayName } from '../lib/format';
-import { useStore } from '../lib/store';
+import { continuesGroup } from '../lib/messageRules';
+import { useSetting, useStore } from '../lib/store';
 import { Composer } from './Composer';
 import { Icon } from './Icon';
 import { MessageItem } from './MessageItem';
@@ -45,6 +46,8 @@ export function ThreadPanel({
   // Integrações (Jira/Teams): respostas que só a pessoa vê dentro deste tópico, entre as respostas pela hora
   const ephemeral = useRoomEphemeral(rid, tmid);
   const ephSlots = useMemo(() => placeEphemeral(ephemeral, replies ?? []), [ephemeral, replies]);
+  // Respostas seguidas da mesma pessoa se agrupam como na conversa (continuesGroup, com o mesmo intervalo).
+  const groupingPeriod = useSetting<number>('Message_GroupingPeriod') ?? 300;
 
   useEffect(() => {
     if (rootFromList) setRoot(rootFromList);
@@ -123,7 +126,7 @@ export function ThreadPanel({
             <MessageItem
               key={m._id}
               m={m}
-              grouped={!ephSlots.before.has(m._id) && i > 0 && replies![i - 1].u._id === m.u._id && new Date(m.ts).getTime() - new Date(replies![i - 1].ts).getTime() < 300000}
+              grouped={!ephSlots.before.has(m._id) && i > 0 && continuesGroup(replies![i - 1], m, groupingPeriod * 1000)}
               actions={actions}
               inThread
               canModerate={canModerate}

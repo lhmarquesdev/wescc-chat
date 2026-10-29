@@ -21,35 +21,15 @@ import { AdminLdap } from './ldap';
 // Chamadas em grupo: Administração › Chamadas.
 import { AdminCalls } from './calls/AdminCalls';
 import { useActiveNavInView } from './parts';
+import { ADMIN_SECTIONS } from './sections';
 // Figurinhas: Administração → Figurinhas.
 import { AdminStickers } from './stickers';
 
 export function AdminPage() {
   const { section = 'info' } = useParams();
   const navRef = useActiveNavInView(section);
-  const items: { id: string; icon: IconName; label: string; perm: string[] }[] = [
-    { id: 'info', icon: 'admin-info', label: 'Informações', perm: ['view-statistics'] },
-    { id: 'engagement', icon: 'admin-engagement', label: 'Engajamento', perm: ['view-engagement-dashboard'] },
-    { id: 'users', icon: 'admin-users', label: 'Usuários', perm: ['view-user-administration'] },
-    { id: 'rooms', icon: 'room-channel', label: 'Salas', perm: ['view-room-administration'] },
-    { id: 'permissions', icon: 'admin-permissions', label: 'Papéis e permissões', perm: ['access-permissions'] },
-    { id: 'devices', icon: 'devices', label: 'Dispositivos', perm: ['view-device-management'] },
-    { id: 'audit', icon: 'admin-audit', label: 'Auditoria', perm: ['can-audit', 'can-audit-log'] },
-    { id: 'moderation', icon: 'report', label: 'Moderação', perm: ['view-moderation-console'] },
-    // Integrações (Jira/Teams): quem configura o Jira ou o Teams também vê o item
-    { id: 'integrations', icon: 'admin-integrations', label: 'Integrações', perm: ['manage-integrations', 'manage-own-integrations', 'manage-jira', 'manage-msteams'] },
-    { id: 'oauth', icon: 'tokens', label: 'OAuth', perm: ['manage-oauth-apps'] },
-    { id: 'omnichannel', icon: 'nav-omnichannel', label: 'Atendimento', perm: ['view-livechat-manager'] },
-    { id: 'emoji', icon: 'emoji', label: 'Emojis', perm: ['manage-emoji'] },
-    // Figurinhas: curadoria (gestores) e removidas (moderação).
-    { id: 'stickers', icon: 'sticker', label: 'Figurinhas', perm: ['manage-sticker-packs', 'view-moderation-console', 'manage-moderation-actions'] },
-    { id: 'invites', icon: 'panel-invite', label: 'Convites', perm: ['view-room-administration'] },
-    { id: 'import', icon: 'admin-import', label: 'Importação', perm: ['run-import', 'view-import-operations'] },
-    { id: 'ldap', icon: 'admin-ldap', label: 'LDAP / AD', perm: ['view-privileged-setting'] },
-    // Chamadas em grupo: servidor de chamadas, HTTPS e chamadas em andamento.
-    { id: 'calls', icon: 'call-audio', label: 'Chamadas', perm: ['manage-calls'] },
-    { id: 'settings', icon: 'admin', label: 'Configurações', perm: ['view-privileged-setting'] },
-  ];
+  // A lista fica em sections.ts: o item "Administração" do menu do usuário sai dela também.
+  const items = ADMIN_SECTIONS;
   // Figurinhas: a seção pedida precisa estar entre as que a pessoa vê (o mesmo teste do AdminLink); senão vai para a primeira.
   const perms = useStore((s) => s.me?.permissions);
   const firstVisible = perms ? items.find((i) => i.perm.some((p) => perms.includes(p))) : undefined;

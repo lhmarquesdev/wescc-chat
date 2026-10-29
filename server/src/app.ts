@@ -4,7 +4,7 @@ import type http from 'node:http';
 import type https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
@@ -16,6 +16,7 @@ import { chatRoutes } from './api/chat';
 import { authenticate, errorHandler } from './api/http';
 import { roomsRoutes } from './api/rooms';
 import { usersRoutes } from './api/users';
+import { ApiError } from './lib/errors';
 import { registerWebsocket } from './realtime/ws';
 import { isCorsOriginAllowed } from './services/origins';
 import { getSetting } from './services/settings';
@@ -55,7 +56,12 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
     // Usuário autenticado (o hook de autenticação roda antes) ou IP; nunca o cabeçalho x-user-id sem token.
     keyGenerator: (req) => req.ctx?.userId || req.ip,
     allowList: (req) => !req.url.startsWith('/api/'),
-    errorResponseBuilder: (_req, ctx) => ({ statusCode: 429, success: false, error: `Limite de requisições excedido. Tente novamente em ${Math.ceil(ctx.ttl / 1000)}s.`, errorType: 'error-too-many-requests' }),
+    // O plugin lança o que este construtor devolve: um ApiError passa pelo errorHandler com o texto e o errorType
+    // (um objeto comum saía como { error: undefined, errorType: 'error' } e a web mostrava "Erro 429").
+    errorResponseBuilder: (_req, ctx) => {
+      const retryAfter = Math.ceil(ctx.ttl / 1000); // o mesmo valor do Retry-After
+      return new ApiError(ctx.statusCode, 'error-too-many-requests', `Limite de requisições excedido. Tente novamente em ${retryAfter}s.`, { retryAfter });
+    },
   });
 
   app.decorateRequest('ctx', null);
@@ -92,6 +98,7 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   app.get('/health', async () => ({ ok: true }));
 
   // Cliente web (build do Vite), com fallback para o index.html (SPA).
+  const notFound = (reply: FastifyReply) => reply.status(404).send({ success: false, error: 'Não encontrado.', errorType: 'error-not-found' });
   const webDist = config.webDist ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
   if (fs.existsSync(path.join(webDist, 'index.html'))) {
     await app.register(fastifyStatic, { root: webDist, wildcard: false, index: false });
@@ -104,15 +111,41 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
       return cached.html;
     };
     app.setNotFoundHandler((req, reply) => {
-      if (req.method === 'GET' && !req.url.startsWith('/api/')) {
-        const file = path.join(webDist, decodeURIComponent(req.url.split('?')[0]));
-        if (file.startsWith(webDist) && fs.existsSync(file) && fs.statSync(file).isFile()) return reply.sendFile(path.relative(webDist, file));
-        return reply.type('text/html').header('cache-control', 'no-cache').send(indexHtml());
+      // Upgrades de WebSocket e caminhos do servidor nunca recebem a SPA.
+      if (req.method !== 'GET' || req.headers.upgrade || !isSpaPath(req.url)) return notFound(reply);
+      let rel: string;
+      try {
+        rel = path.relative(webDist, path.join(webDist, decodeURIComponent(req.url.split('?')[0])));
+      } catch {
+        return notFound(reply); // %xx malformado
       }
-      return reply.status(404).send({ success: false, error: 'Não encontrado.', errorType: 'error-not-found' });
+      const file = path.join(webDist, rel);
+      if (rel && !rel.startsWith('..') && !path.isAbsolute(rel) && fs.existsSync(file) && fs.statSync(file).isFile()) return reply.sendFile(rel);
+      // Arquivo do build que não existe (pedaço sob demanda de um build anterior, pedido por uma aba aberta antes da
+      // atualização): 404, nunca o index.html com 200. O import() falha claro e a web recarrega (vite:preloadError).
+      if (/^assets(?:[/\\]|$)/.test(rel)) return notFound(reply);
+      return reply.type('text/html').header('cache-control', 'no-cache').send(indexHtml());
     });
   } else {
-    app.setNotFoundHandler((_req, reply) => reply.status(404).send({ success: false, error: 'Não encontrado.', errorType: 'error-not-found' }));
+    app.setNotFoundHandler((_req, reply) => notFound(reply));
   }
   return app;
+}
+
+// Prefixos do servidor (API, arquivos, webhooks, login externo, servidor de chamadas): um endereço errado neles responde
+// 404 em JSON, nunca o index.html com 200. /twirp é a API do LiveKit, que só existe atrás do /sfu; um cliente que
+// normaliza /sfu/%2e%2e/twirp/... chega aqui com /twirp/... As rotas da SPA (/home, /channel/x, /admin/x...) seguem.
+const SERVER_PREFIXES = ['api', 'twirp', 'sfu', 'sfu-webhook', 'websocket', 'file-upload', 'avatar', 'sticker', 'emoji-custom', 'hooks', 'livechat', 'saml', 'oauth', 'integrations', 'health'];
+const SERVER_PATH = new RegExp(`^/(?:${SERVER_PREFIXES.join('|')})(?:/|$)`, 'i');
+
+export function isSpaPath(url: string): boolean {
+  let p = url.split('?')[0];
+  try {
+    p = decodeURIComponent(p);
+  } catch {
+    // fica o caminho cru
+  }
+  // Barras repetidas e segmentos . e .. resolvidos, como um navegador faria antes de pedir.
+  p = path.posix.normalize(`/${p.replace(/\\/g, '/')}`);
+  return !SERVER_PATH.test(p);
 }
