@@ -4,26 +4,17 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { Call, Message, Subscription } from '@shared/index';
 import { api } from '../lib/api';
 import { formatTime, roomPath } from '../lib/format';
-import { realtime } from '../lib/realtime';
+import { markCallsSeen as markSeenOnServer, useMissedCalls as useMissedCount } from '../lib/roomcall';
 import { useSetting, useStore } from '../lib/store';
 
 // ---------- Chamadas perdidas ----------
 
-const SEEN_KEY = 'wescc.calls.seen';
+// Uma fonte só: o servidor conta as perdidas ainda não vistas (calls.missedCount, o selo de Chamadas) e guarda o
+// "visto" (calls.seen), em todos os aparelhos. Aqui ficam só as mais novas, para os cartões de "Para você".
 const listeners = new Set<() => void>();
 let missed: Call[] = [];
-let seen = readSeen();
-let loadedFor = '';
+let loadedKey = '';
 let version = 0;
-let offRealtime: (() => void) | null = null;
-
-function readSeen() {
-  try {
-    return localStorage.getItem(SEEN_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
 
 function emit() {
   version++;
@@ -37,49 +28,41 @@ const subscribe = (l: () => void) => {
   };
 };
 
-// Abrir a página de chamadas zera o contador (o "visto" fica só neste navegador).
+// Abrir a página de chamadas zera o contador (no servidor: vale para todos os aparelhos).
 export function markCallsSeen() {
-  seen = new Date().toISOString();
-  try {
-    localStorage.setItem(SEEN_KEY, seen);
-  } catch {
-    // sem armazenamento: o contador só zera nesta sessão
-  }
-  emit();
+  void markSeenOnServer();
 }
 
-function ensureMissed(meId: string) {
-  if (loadedFor === meId) return;
-  loadedFor = meId;
-  missed = [];
+function loadMissed(key: string) {
+  if (loadedKey === key) return;
+  loadedKey = key;
   api
-    .get('calls.list', { offset: 0, count: 30 })
+    .get('calls.list', { offset: 0, count: 30, filter: 'missed' })
     .then((r: { calls: Call[] }) => {
-      missed = r.calls.filter((c) => c.status === 'missed' && c.callee._id === meId);
+      if (loadedKey !== key) return;
+      missed = r.calls;
       emit();
     })
-    .catch(() => {});
-  offRealtime?.();
-  offRealtime = realtime.on((ev) => {
-    if (ev.type !== 'call' || ev.call.callee._id !== meId) return;
-    const rest = missed.filter((c) => c._id !== ev.call._id);
-    missed = ev.call.status === 'missed' ? [ev.call, ...rest] : rest;
-    emit();
-  });
+    .catch(() => {
+      if (loadedKey === key) loadedKey = '';
+    });
 }
 
 export function useMissedCalls() {
   const meId = useStore((s) => s.me?._id ?? '');
   const enabled = useSetting<boolean>('Calls_Enabled');
+  const count = useMissedCount();
+  // A lista acompanha a contagem: uma perdida nova (a dois ou em grupo) muda o número e busca as mais novas.
   useEffect(() => {
-    if (enabled && meId) ensureMissed(meId);
-  }, [enabled, meId]);
+    if (!count) loadedKey = '';
+    else if (enabled && meId) loadMissed(`${meId}:${count}`);
+  }, [enabled, meId, count]);
   const v = useSyncExternalStore(subscribe, () => version);
   return useMemo(() => {
-    const recent = enabled ? missed.filter((c) => !seen || c.createdAt > seen) : [];
-    return { count: recent.length, recent };
+    const n = enabled ? count : 0;
+    return { count: n, recent: n ? missed.slice(0, n) : [] };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, v]);
+  }, [enabled, count, v]);
 }
 
 // ---------- Menções ----------
@@ -162,15 +145,19 @@ export function useForYou(max = 3): ForYouItem[] {
         to: m ? `${roomPath(s)}?msg=${m._id}` : roomPath(s),
       };
     });
-    const calls: ForYouItem[] = recent.map((c) => ({
-      key: `c-${c._id}`,
-      kind: 'missed',
-      title: c.kind === 'video' ? 'Chamada de vídeo perdida' : 'Chamada perdida',
-      sub: `${c.caller.name || c.caller.username} · ${when(c.createdAt)}`,
-      ts: c.createdAt,
-      to: roomPath({ _id: c.rid, t: 'd' }),
-      username: c.caller.username,
-    }));
+    const calls: ForYouItem[] = recent.map((c) => {
+      // Em grupo, a sala diz onde foi (uma DM com várias pessoas não tem nome: fica só quem chamou).
+      const where = c.scope === 'group' && c.room && c.room.t !== 'd' ? `${c.room.t === 'c' && !c.room.prid ? '#' : ''}${c.room.fname || c.room.name || ''}` : '';
+      return {
+        key: `c-${c._id}`,
+        kind: 'missed',
+        title: c.kind === 'video' ? 'Chamada de vídeo perdida' : 'Chamada perdida',
+        sub: [c.caller.name || c.caller.username, where, when(c.createdAt)].filter(Boolean).join(' · '),
+        ts: c.createdAt,
+        to: roomPath(c.room ?? { _id: c.rid, t: 'd' }),
+        username: c.caller.username,
+      };
+    });
     return [...mentions, ...calls].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, max);
   }, [rooms, last, recent, max]);
 }

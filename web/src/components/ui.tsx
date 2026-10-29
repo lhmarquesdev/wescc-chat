@@ -22,6 +22,8 @@ import { Icon, type IconName } from './Icon';
 import { Portal, Sheet, focusables, useAnchored, useEscape, useFocusTrap, useIsPhone, useScrollLock, useSheetDrag, type Placement } from './overlay';
 
 export { Portal } from './overlay';
+// Chamadas em grupo: a camada da chamada (CallRoot) passa a raiz dos portais por este contexto.
+export { OverlayRootContext } from './overlay';
 
 // ---------- Presença (saída animada) ----------
 

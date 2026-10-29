@@ -92,7 +92,8 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stri
 export function AdminSettings() {
   const { data, loading, reload } = useAsync(() => api.get('settings'), []);
   const phone = useIsPhone();
-  const [picked, setPicked] = useState<string | null>(null);
+  // Chamadas em grupo: ?group= abre um grupo direto (o link "Configurações de chamadas" de Administração › Chamadas).
+  const [picked, setPicked] = useState<string | null>(() => new URLSearchParams(location.search).get('group'));
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [filter, setFilter] = useState('');
   const [saving, setSaving] = useState(false);

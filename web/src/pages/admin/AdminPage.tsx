@@ -15,6 +15,8 @@ import { AdminOAuth } from './AdminOAuth';
 import { AdminOmnichannel } from './AdminOmnichannel';
 import { AdminImport } from './import';
 import { AdminLdap } from './ldap';
+// Chamadas em grupo: Administração › Chamadas.
+import { AdminCalls } from './calls/AdminCalls';
 import { useActiveNavInView } from './parts';
 
 export function AdminPage() {
@@ -36,6 +38,8 @@ export function AdminPage() {
     { id: 'invites', icon: 'panel-invite', label: 'Convites', perm: ['view-room-administration'] },
     { id: 'import', icon: 'admin-import', label: 'Importação', perm: ['run-import', 'view-import-operations'] },
     { id: 'ldap', icon: 'admin-ldap', label: 'LDAP / AD', perm: ['view-privileged-setting'] },
+    // Chamadas em grupo: servidor de chamadas, HTTPS e chamadas em andamento.
+    { id: 'calls', icon: 'call-audio', label: 'Chamadas', perm: ['manage-calls'] },
     { id: 'settings', icon: 'admin', label: 'Configurações', perm: ['view-privileged-setting'] },
   ];
   return (
@@ -65,6 +69,8 @@ export function AdminPage() {
         {section === 'invites' && <AdminInvites />}
         {section === 'import' && <AdminImport />}
         {section === 'ldap' && <AdminLdap />}
+        {/* Chamadas em grupo: */}
+        {section === 'calls' && <AdminCalls />}
         {section === 'settings' && <AdminSettings />}
       </div>
     </div>

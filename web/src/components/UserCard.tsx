@@ -9,6 +9,8 @@ import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { Icon } from './Icon';
 import { Portal, Sheet, useAnchored, useEscape, useFocusTrap, useIsPhone } from './overlay';
 import { Menu, Skeleton, UserAvatar, confirmDialog, useAsync } from './ui';
+// Chamadas em grupo: "Em chamada" ao lado da presença.
+import { InCallBadge } from './call/LiveIndicators';
 
 // Camadas que abrem a partir do cartão (menu, confirmação, avisos): um clique nelas não o fecha.
 const KEEP_OPEN = '.menu, .modal-backdrop, .sheet-backdrop, .toasts';
@@ -200,6 +202,8 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
           <div className="user-card-status">
             {STATUS_LABEL[status] ?? status}
             {statusText && <span> · {statusText}</span>}
+            {/* Chamadas em grupo: "Em chamada" ao lado da presença, escrito. */}
+            <InCallBadge userId={data.u._id} label />
           </div>
         </div>
       </div>

@@ -1,4 +1,5 @@
-import type { Message, Room, Subscription } from '@shared/index';
+import type { CallCard, CallSummary, Message, Room, Subscription } from '@shared/index';
+import { callCardSummary } from '@shared/calls';
 import type { IconName } from '../components/icons';
 
 export function roomPath(r: { _id?: string; rid?: string; t: string }) {
@@ -202,7 +203,16 @@ export function systemText(m: Message & Record<string, any>, nameOf: (username: 
     case 'call_missed': {
       const what = m.call?.kind === 'video' ? 'Chamada de vídeo' : 'Chamada de voz';
       const why: Record<string, string> = { missed: 'não atendida', declined: 'recusada', canceled: 'cancelada', busy: 'não atendida (ocupado)' };
-      return `${what} de ${u} ${why[m.call?.status] ?? 'não atendida'}`;
+      // Chamadas em grupo: m.call agora também pode ser o cartão do grupo; aqui (t = call_missed) é sempre o resumo a dois.
+      const status = (m.call as CallSummary | undefined)?.status ?? 'missed';
+      return `${what} de ${u} ${why[status] ?? 'não atendida'}`;
+    }
+    // Chamadas em grupo: o texto do cartão (notificações, buscas, respostas e a última mensagem da sala).
+    case 'call_group': {
+      const c = m.call as CallCard | undefined;
+      if (!c) return m.msg;
+      if (c.status === 'ongoing') return c.listenOnly ? `${u} iniciou uma transmissão` : `${u} iniciou uma chamada de ${c.kind === 'video' ? 'vídeo' : 'voz'}`;
+      return callCardSummary(c);
     }
     case 'livechat_navigation_history':
       return `Visitante navegou para ${m.msg}`;
@@ -274,6 +284,9 @@ export function systemIcon(m: Message & Record<string, any>): IconName | null {
       return m.call?.kind === 'video' ? 'call-video' : 'call-audio';
     case 'call_missed':
       return 'call-missed';
+    // Chamadas em grupo: o mesmo ícone do cartão.
+    case 'call_group':
+      return (m.call as CallCard | undefined)?.listenOnly ? 'call-broadcast' : m.call?.kind === 'video' ? 'call-video' : 'call-audio';
     case 'livechat_navigation_history':
       return 'link';
     default:

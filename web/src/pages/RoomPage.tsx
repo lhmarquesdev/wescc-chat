@@ -6,20 +6,22 @@ import { nameList, roomDisplayName, roomIconName, roomPath, STATUS_LABEL } from 
 import { namesIn } from '../lib/names';
 import { realtime } from '../lib/realtime';
 import { renderMarkdown } from '../lib/markdown';
-import { startCall } from '../lib/calls';
 import { sendText } from '../lib/direct';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { Composer } from '../components/Composer';
 import { Icon, type IconName } from '../components/Icon';
 import { LIVECHAT_STATUS, LivechatActions } from '../components/LivechatPanel';
 import { CreateModal } from '../components/CreateModal';
+// Chamadas em grupo: ações do cabeçalho, itens do Mais e a faixa da chamada viva.
+import { CallBanner } from '../components/call/CallBanner';
+import { RoomCallActions, RoomCallMenuItems, useRoomCallHeader } from '../components/call/RoomCallActions';
 import { MessageGateContext } from '../components/MessageItem';
 import { MessageList } from '../components/MessageList';
 import { NoticeBar } from '../components/NoticeBar';
 import { RoomPanel, type PanelId } from '../components/RoomPanels';
 import { ThreadPanel } from '../components/ThreadPanel';
 import { UserCard } from '../components/UserCard';
-import { useIsPhone, useMedia } from '../components/overlay';
+import { useIsPhone } from '../components/overlay';
 import { Empty, GroupAvatar, Menu, Skeleton, SkeletonMessages, UserAvatar, confirmDialog, useDelay } from '../components/ui';
 
 const notLive = (r: Room) => r.t !== 'l';
@@ -222,10 +224,11 @@ export function RoomPage() {
   const panel = params.get('tab') as PanelId | null;
   const presence = useStore((s) => (room?.t === 'd' && sub && !sub.name.includes(',') ? s.presence[sub.name] : undefined));
   const threadsOn = useSetting<boolean>('Threads_enabled');
-  const callsEnabled = useSetting<boolean>('Calls_Enabled');
   const [setHeader, headerWidth] = useWidth();
   const phone = useIsPhone();
-  const coarse = useMedia('(pointer: coarse)');
+  // Chamadas em grupo: o que o cabeçalho mostra sobre a chamada da sala (nada, iniciar ou a pílula). A conversa a dois
+  // já reserva voz e vídeo antes da resposta do servidor.
+  const callHeader = useRoomCallHeader(rid || null, room);
   // Quem está offline não vem no mapa de presença: o texto de status (que continua valendo) vem de users.info.
   const dmName = room?.t === 'd' && sub && !sub.name.includes(',') ? sub.name : null;
   const [dmStatusText, setDmStatusText] = useState('');
@@ -438,11 +441,16 @@ export function RoomPage() {
       useStore.getState().toast(errorMessage(e), 'error');
     }
   };
-  const callBlocked = room.direct?.canCall === false ? room.direct.callBlockedReason : undefined;
   const dmUser = room.t === 'd' && sub && !sub.name.includes(',') ? sub.name : null;
   const panels = PANELS.filter((p) => (!p.when || p.when(room)) && (!p.perm || canWithRoles(p.perm, roles)) && !(p.id === 'members' && membersHidden));
-  const hasCalls = !!(dmUser && callsEnabled && room.uids?.length === 2);
+  // Chamadas em grupo: a conversa a dois mantém voz e vídeo no cabeçalho em qualquer largura. Nas outras salas, abaixo
+  // de 440 px iniciar vai para o Mais; a pílula de uma chamada viva fica e toma o lugar de Membros (que vai para o Mais).
+  const pairDm = room.t === 'd' && room.uids?.length === 2;
+  const callCompact = !pairDm && headerWidth < 440;
+  const callInHeader = callHeader.kind === 'pill' || (callHeader.kind === 'start' && !callCompact);
+  const hasCalls = pairDm ? callHeader.kind !== 'hidden' : callHeader.kind === 'pill';
   const inHeader = new Set(shortcutsFor(headerWidth, hasCalls));
+  if (phone && callHeader.kind === 'pill') inHeader.delete('members');
   const shortcuts = SHORTCUTS.map((id) => panels.find((p) => p.id === id)).filter((p): p is (typeof PANELS)[number] => !!p && inHeader.has(p.id));
   const menuPanels = panels.filter((p) => !shortcuts.includes(p));
   const hasInfo = panels.some((p) => p.id === 'info');
@@ -539,33 +547,9 @@ export function RoomPage() {
             </div>
             <div className="room-actions">
               {room.t === 'l' && <LivechatActions rid={rid} onPanel={() => setPanel(panel === 'livechat' ? null : 'livechat')} />}
-              {hasCalls && (
-                <>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    title={callBlocked ?? 'Chamada de voz'}
-                    aria-label="Chamada de voz"
-                    disabled={!!callBlocked && !coarse}
-                    aria-disabled={callBlocked ? true : undefined}
-                    onClick={() => (callBlocked ? explain(callBlocked) : void startCall(rid, 'audio'))}
-                  >
-                    <Icon name="call-audio" size={18} />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    title={callBlocked ?? 'Chamada de vídeo'}
-                    aria-label="Chamada de vídeo"
-                    disabled={!!callBlocked && !coarse}
-                    aria-disabled={callBlocked ? true : undefined}
-                    onClick={() => (callBlocked ? explain(callBlocked) : void startCall(rid, 'video'))}
-                  >
-                    <Icon name="call-video" size={18} />
-                  </button>
-                  {shortcuts.length > 0 && <span className="room-actions-sep" aria-hidden="true" />}
-                </>
-              )}
+              {/* Chamadas em grupo: iniciar, entrar, ouvir ou voltar para a chamada (call-view.ts decide). */}
+              <RoomCallActions room={room} sub={sub} compact={callCompact} />
+              {callInHeader && shortcuts.length > 0 && <span className="room-actions-sep" aria-hidden="true" />}
               {shortcuts.map((p) => (
                 <button
                   key={p.id}
@@ -580,7 +564,7 @@ export function RoomPage() {
                   {p.id === 'members' && room.usersCount ? <span className="count">{room.usersCount.toLocaleString('pt-BR')}</span> : null}
                 </button>
               ))}
-              {(shortcuts.length > 0 || hasCalls || room.t === 'l') && <span className="room-actions-sep" aria-hidden="true" />}
+              {(shortcuts.length > 0 || callInHeader || room.t === 'l') && <span className="room-actions-sep" aria-hidden="true" />}
               <Menu
                 label="Mais opções da sala"
                 trigger={
@@ -591,6 +575,8 @@ export function RoomPage() {
               >
                 {(close) => (
                   <>
+                    {/* Chamadas em grupo: no cabeçalho estreito, voz e vídeo (ou a transmissão) entram aqui. */}
+                    {callCompact && <RoomCallMenuItems room={room} sub={sub} onDone={close} />}
                     {menuPanels.length > 0 && <div className="menu-label">Painéis</div>}
                     {menuPanels.map((p) => (
                       <button key={p.id} onClick={() => (setPanel(p.id), close())}>
@@ -630,6 +616,8 @@ export function RoomPage() {
             </div>
           </header>
           {room.notice && <NoticeBar room={room} canPost={canPostRO} />}
+          {/* Chamadas em grupo: a faixa da chamada viva, depois da faixa de avisos e antes do anúncio. */}
+          <CallBanner room={room} />
           {room.announcement && <Announcement text={room.announcement} />}
           <MessageList key={rid} rid={rid} sub={sub} actions={actions} canModerate={canModerate} notice={room.notice ? { ack: room.noticeAck, canPost: canPostRO } : undefined} />
           <TypingIndicator id={rid} />
