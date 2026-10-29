@@ -7,6 +7,8 @@ import { RoomPicker, UserPicker, type PickedRoom, type PickedUser } from '../../
 import { Icon } from '../../components/Icon';
 import { Avatar, Empty, Field, Pager, SearchInput, SkeletonTable, Tabs, useAsync } from '../../components/ui';
 import { PageHead, TableWrap } from './parts';
+// Figurinhas: mensagens com figurinha mostram a figurinha no lugar do texto.
+import { StickerView } from '../../components/stickers/StickerView';
 
 const json = (v: unknown) => (v === undefined || v === null || (typeof v === 'object' && !Object.keys(v as object).length) ? '—' : JSON.stringify(v));
 const pretty = (v: unknown) => (v === undefined || v === null ? '—' : JSON.stringify(v, null, 2));
@@ -142,6 +144,8 @@ function MessagesAudit() {
                       <em className="muted">
                         [{m.t}] {m.msg}
                       </em>
+                    ) : /* Figurinhas */ m.sticker ? (
+                      <StickerView sticker={m.sticker} size="small" />
                     ) : (
                       renderMarkdown(m.msg)
                     )}

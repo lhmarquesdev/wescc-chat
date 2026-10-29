@@ -1,16 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import { disablePushHere, enablePushHere, pushEnabledHere, pushSupported, syncPushSubscription } from '../lib/push';
 import { endSession, startSession } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
-import { Avatar, Empty, Field, Modal, Segmented, SkeletonTable, Toggle, confirmDialog, useAsync } from '../components/ui';
+import { Avatar, Empty, Field, Modal, Segmented, SkeletonList, SkeletonTable, Toggle, confirmDialog, useAsync } from '../components/ui';
 import { useMedia } from '../components/overlay';
 import { Icon } from '../components/Icon';
 import { SideFoot, TakeoverBack, TakeoverHead } from '../components/Sidebar';
 import { QrCode } from '../components/QrCode';
 import { DeviceCell, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
+// Figurinhas: o item some com a função desligada.
+import { useStickerCaps } from '../lib/stickers';
+
+// Figurinhas: a seção /account/stickers carrega sob demanda, como o editor (§8: o pacote principal fica menor).
+const StickersSection = lazy(() => import('./account/StickersSection'));
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -19,6 +24,8 @@ export function AccountPage() {
   const { section = 'profile' } = useParams();
   const navRef = useActiveNavInView(section);
   const canTokens = useStore((s) => s.me?.permissions.includes('create-personal-access-tokens'));
+  // Figurinhas: com a função desligada a seção some (quem cuida dos pacotes continua vendo).
+  const stickerCaps = useStickerCaps();
   return (
     <div className="page with-nav takeover account-page">
       <TakeoverHead title="Minha conta" />
@@ -33,6 +40,13 @@ export function AccountPage() {
           <Icon name="preferences" />
           Preferências
         </NavLink>
+        {/* Figurinhas: preferências, pacotes, favoritas e recentes. */}
+        {(stickerCaps.on || stickerCaps.canManage) && (
+          <NavLink to="/account/stickers">
+            <Icon name="sticker" />
+            Figurinhas
+          </NavLink>
+        )}
         <NavLink to="/account/security">
           <Icon name="security" />
           Segurança
@@ -52,6 +66,12 @@ export function AccountPage() {
       <div className="page-body">
         {section === 'profile' && <Profile />}
         {section === 'preferences' && <Preferences />}
+        {/* Figurinhas */}
+        {section === 'stickers' && (
+          <Suspense fallback={<SkeletonList n={4} />}>
+            <StickersSection />
+          </Suspense>
+        )}
         {section === 'security' && <Security />}
         {section === 'devices' && <Devices />}
         {section === 'tokens' && <Tokens />}

@@ -1,5 +1,7 @@
 import { NavLink, useParams } from 'react-router-dom';
-import { usePermission } from '../../lib/store';
+// Figurinhas: Navigate e useStore para mandar quem não pode abrir a seção para a primeira que pode.
+import { Navigate } from 'react-router-dom';
+import { usePermission, useStore } from '../../lib/store';
 import { Icon, type IconName } from '../../components/Icon';
 import { SideFoot, TakeoverBack, TakeoverHead } from '../../components/Sidebar';
 import { AdminInfo } from './AdminInfo';
@@ -18,6 +20,8 @@ import { AdminLdap } from './ldap';
 // Chamadas em grupo: Administração › Chamadas.
 import { AdminCalls } from './calls/AdminCalls';
 import { useActiveNavInView } from './parts';
+// Figurinhas: Administração → Figurinhas.
+import { AdminStickers } from './stickers';
 
 export function AdminPage() {
   const { section = 'info' } = useParams();
@@ -35,6 +39,8 @@ export function AdminPage() {
     { id: 'oauth', icon: 'tokens', label: 'OAuth', perm: ['manage-oauth-apps'] },
     { id: 'omnichannel', icon: 'nav-omnichannel', label: 'Atendimento', perm: ['view-livechat-manager'] },
     { id: 'emoji', icon: 'emoji', label: 'Emojis', perm: ['manage-emoji'] },
+    // Figurinhas: curadoria (gestores) e removidas (moderação).
+    { id: 'stickers', icon: 'sticker', label: 'Figurinhas', perm: ['manage-sticker-packs', 'view-moderation-console', 'manage-moderation-actions'] },
     { id: 'invites', icon: 'panel-invite', label: 'Convites', perm: ['view-room-administration'] },
     { id: 'import', icon: 'admin-import', label: 'Importação', perm: ['run-import', 'view-import-operations'] },
     { id: 'ldap', icon: 'admin-ldap', label: 'LDAP / AD', perm: ['view-privileged-setting'] },
@@ -42,6 +48,10 @@ export function AdminPage() {
     { id: 'calls', icon: 'call-audio', label: 'Chamadas', perm: ['manage-calls'] },
     { id: 'settings', icon: 'admin', label: 'Configurações', perm: ['view-privileged-setting'] },
   ];
+  // Figurinhas: a seção pedida precisa estar entre as que a pessoa vê (o mesmo teste do AdminLink); senão vai para a primeira.
+  const perms = useStore((s) => s.me?.permissions);
+  const firstVisible = perms ? items.find((i) => i.perm.some((p) => perms.includes(p))) : undefined;
+  if (perms && !items.some((i) => i.id === section && i.perm.some((p) => perms.includes(p)))) return <Navigate to={firstVisible ? '/admin/' + firstVisible.id : '/home'} replace />;
   return (
     <div className="page with-nav takeover admin-page">
       <TakeoverHead title="Administração" />
@@ -66,6 +76,8 @@ export function AdminPage() {
         {section === 'oauth' && <AdminOAuth />}
         {section === 'omnichannel' && <AdminOmnichannel />}
         {section === 'emoji' && <AdminEmoji />}
+        {/* Figurinhas */}
+        {section === 'stickers' && <AdminStickers />}
         {section === 'invites' && <AdminInvites />}
         {section === 'import' && <AdminImport />}
         {section === 'ldap' && <AdminLdap />}

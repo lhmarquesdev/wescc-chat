@@ -112,11 +112,13 @@ function moveFocus(e: ReactKeyboardEvent<HTMLElement>, root: HTMLElement | null)
   }
 }
 
-function PickerBody({ onPick, phone, ready = false }: { onPick: (code: string) => void; phone: boolean; ready?: boolean }) {
+// Busca, categorias, grade e rodapé, sem o painel em volta: o seletor de expressões do compositor e o editor de
+// figurinhas usam o mesmo corpo. unicodeOnly tira os emojis personalizados (a figurinha guarda só Unicode).
+export function EmojiPickerBody({ onPick, unicodeOnly, autoFocus = false }: { onPick: (code: string, unicode: string | null) => void; unicodeOnly?: boolean; autoFocus?: boolean }) {
   // O painel fica invisível até ser posicionado; o foco na busca só pega depois disso.
   const search = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (!ready || phone) return;
+    if (!autoFocus) return;
     let tries = 0;
     let id = 0;
     const go = () => {
@@ -126,15 +128,15 @@ function PickerBody({ onPick, phone, ready = false }: { onPick: (code: string) =
     };
     go();
     return () => cancelAnimationFrame(id);
-  }, [ready, phone]);
+  }, [autoFocus]);
   const [term, setTerm] = useState('');
   const [hover, setHover] = useState<string | null>(null);
-  const recent = recentEmoji();
+  const recent = unicodeOnly ? recentEmoji().filter((c) => c in EMOJI) : recentEmoji();
   const cats = useMemo(
     () => [
       ...(recent.length ? [{ name: 'Recentes', items: recent }] : []),
       ...EMOJI_CATEGORIES,
-      ...(customEmoji.length ? [{ name: 'Personalizados', items: customEmoji.map((e) => e.name) }] : []),
+      ...(customEmoji.length && !unicodeOnly ? [{ name: 'Personalizados', items: customEmoji.map((e) => e.name) }] : []),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -146,12 +148,12 @@ function PickerBody({ onPick, phone, ready = false }: { onPick: (code: string) =
     if (!t) return [];
     const pt = Object.entries(PT_WORDS).flatMap(([w, codes]) => (w.startsWith(t) ? codes : []));
     const byCode = Object.keys(EMOJI).filter((k) => k.includes(t));
-    const custom = customEmoji.filter((e) => e.name.includes(t)).map((e) => e.name);
+    const custom = unicodeOnly ? [] : customEmoji.filter((e) => e.name.includes(t)).map((e) => e.name);
     return [...new Set([...pt.filter((c) => c in EMOJI), ...byCode, ...custom])];
-  }, [t]);
+  }, [t, unicodeOnly]);
   const pick = (code: string) => {
     pushRecent(code);
-    onPick(code);
+    onPick(code, EMOJI[code] ?? null);
   };
 
   const onScroll = () => {
@@ -294,7 +296,7 @@ export function EmojiPicker({
     return (
       <Sheet onClose={onClose} className="emoji-sheet" label="Emojis">
         <div className="emoji-picker in-sheet">
-          <PickerBody onPick={onPick} phone />
+          <EmojiPickerBody onPick={(code) => onPick(code)} />
         </div>
       </Sheet>
     );
@@ -309,7 +311,7 @@ export function EmojiPicker({
         data-side={anch.positioned ? anch.side : undefined}
         data-layer={anch.layer}
       >
-        <PickerBody onPick={onPick} phone={false} ready={anch.positioned} />
+        <EmojiPickerBody onPick={(code) => onPick(code)} autoFocus={anch.positioned} />
       </div>
     </Portal>
   );

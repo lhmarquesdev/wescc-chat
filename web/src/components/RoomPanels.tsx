@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Message, Room, Subscription } from '@shared/index';
+import { stickerPreviewText } from '@shared/stickers';
 import { api, errorMessage } from '../lib/api';
 import { partyOf, useDirect } from '../lib/direct';
 import { formatBytes, formatDateTime, formatRelative, formatWhen, plural, roleLabel, roomDisplayName, roomIconName, roomPath, STATUS_LABEL } from '../lib/format';
@@ -12,6 +13,7 @@ import { LivechatInfoPanel } from './LivechatPanel';
 import { FileTile } from './MessageItem';
 import { useEscape, useIsPhone } from './overlay';
 import { UserPicker, type PickedUser } from './Pickers';
+import { StickerView } from './stickers/StickerView';
 import { Avatar, Empty, Field, GroupAvatar, Menu, Segmented, SearchInput, SkeletonList, Toggle, UserAvatar, confirmDialog, useAsync } from './ui';
 // Chamadas em grupo: "Em chamada" ao lado da presença.
 import { InCallBadge } from './call/LiveIndicators';
@@ -148,7 +150,7 @@ function MessageResult({ m }: { m: Message }) {
           {formatWhen(m.ts)}
         </time>
       </div>
-      <div className="result-body">{resultBody(m)}</div>
+      <div className="result-body">{m.sticker ? <StickerView sticker={m.sticker} size="small" /> : resultBody(m)}</div>
     </button>
   );
 }
@@ -551,7 +553,7 @@ function ThreadsPanel({ room }: Props) {
                 {formatWhen(m.ts)}
               </time>
             </div>
-            <div className="result-body clamp">{resultBody(m)}</div>
+            <div className="result-body clamp">{!m.msg && m.sticker ? stickerPreviewText(m.sticker) : resultBody(m)}</div>
             <div className="result-foot">
               <Icon name="panel-threads" size={14} />
               <span className="result-count">{plural(m.tcount ?? 0, 'resposta', 'respostas')}</span>

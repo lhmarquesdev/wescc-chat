@@ -75,6 +75,8 @@ const SECTION_LABEL: Record<string, string> = {
   'Rate Limiter': 'Limite de requisições',
   Calls: 'Chamadas',
   Jitsi: 'Jitsi',
+  // Figurinhas
+  Stickers: 'Figurinhas',
 };
 
 const LANGUAGES = [
