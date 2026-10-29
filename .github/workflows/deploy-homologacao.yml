@@ -1,0 +1,73 @@
+name: Deploy Homologação
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wescchat-homologacao-deploy
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy:
+    name: Publicar Wescchat na homologação
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, wescchat-homologacao-srvtimedevhml]
+    environment:
+      name: homologacao
+      url: https://homolog-wescchat.wescctech.com.br
+    timeout-minutes: 40
+    steps:
+      - name: Baixar a revisão solicitada
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Conferir servidor e instalação
+        run: |
+          set -euo pipefail
+          test "$(hostname -s)" = srvtimedevhml
+          test -f /opt/wescchat-hml-config/compose.yml
+          test -r /opt/wescchat-hml-config/wescchat.env
+          test -d /opt/wescchat-hml/.git
+          docker info >/dev/null
+
+      - name: Compilar, fazer backup e publicar
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          bash deploy/homologacao.sh "$TARGET_SHA" "$GITHUB_WORKSPACE" |& tee deploy-homologacao.log
+
+      - name: Registrar resultado
+        if: always()
+        env:
+          DEPLOY_RESULT: ${{ job.status }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          {
+            echo '## Wescchat — Homologação'
+            echo
+            echo "- Revisão solicitada: $TARGET_SHA"
+            echo "- Resultado: $DEPLOY_RESULT"
+            echo '- URL: https://homolog-wescchat.wescctech.com.br'
+            docker inspect --format '- Imagem atual: {{.Config.Image}}; estado: {{.State.Health.Status}}' wescchat-hml || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Salvar log da implantação
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: wescchat-homologacao-${{ github.run_id }}-${{ github.run_attempt }}
+          path: deploy-homologacao.log
+          if-no-files-found: ignore
+          retention-days: 7
