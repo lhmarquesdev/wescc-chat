@@ -131,21 +131,31 @@ function ComposerView({
     setPicker(true);
   }, [pickerRequest, rid, tmid, disabled]);
 
-  useEffect(() => {
+  const readDraft = () => {
     try {
-      setText(localStorage.getItem(draftKey) ?? '');
+      return localStorage.getItem(draftKey) ?? '';
     } catch {
-      setText('');
+      return '';
     }
+  };
+  useEffect(() => {
+    setText(readDraft());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey]);
 
+  const wasEditing = useRef(false);
   useEffect(() => {
     if (editing) {
       setText(editing.msg);
       ta.current?.focus();
+    } else if (wasEditing.current) {
+      // Fim da edição (salva ou cancelada): volta o rascunho da mensagem nova, que a edição não tocou.
+      setText(readDraft());
     }
+    wasEditing.current = !!editing;
     // A linha da mensagem em edição fica marcada na lista (.msg.editing).
     setEditingMessage(editing?._id ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
   useEffect(() => () => setEditingMessage(null), []);
   useEffect(() => {
@@ -206,6 +216,8 @@ function ComposerView({
   }, [uploadsOn, disabled]);
 
   const saveDraft = (v: string) => {
+    // O texto de uma edição não é rascunho de mensagem nova: depois de uma recarga, o Enter publicaria uma cópia.
+    if (editing) return;
     try {
       if (v) localStorage.setItem(draftKey, v);
       else localStorage.removeItem(draftKey);

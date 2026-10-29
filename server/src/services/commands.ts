@@ -1,6 +1,6 @@
 import { callScopeOf, isTransmissionRoom } from '@shared/calls';
 import { sfuConfig } from '../calls/livekit';
-import { ERR } from '../calls/policy';
+import { ERR, startCheck } from '../calls/policy';
 import { one } from '../db/pool';
 import { ApiError, badRequest, forbidden } from '../lib/errors';
 import { bus } from '../realtime/bus';
@@ -185,8 +185,13 @@ reg('call', '[voz|vídeo]', 'Iniciar uma chamada de voz ou vídeo nesta sala', a
   if (getSetting('VideoConf_Enabled')) return jitsiLink(ctx, room, tmid);
   if (!enabled) throw forbidden('As chamadas estão desativadas.');
   if (room.t === 'l') throw badRequest('error-call-room', 'Chamadas não estão disponíveis em conversas de atendimento.');
-  // Ligadas, mas sem servidor de chamadas configurado: o mesmo motivo que os botões da sala mostram.
-  if (scope === 'group' && getSetting('Calls_Group_Enabled')) throw ERR.sfuNotConfigured();
+  // Ligadas, mas sem servidor de chamadas configurado: o mesmo motivo que os botões da sala mostram, na mesma ordem de
+  // calls.roomCall (a política da sala antes da configuração; numa sala de avisos, "Esta sala não aceita chamadas.").
+  if (scope === 'group' && getSetting('Calls_Group_Enabled')) {
+    const v = await startCheck(ctx, room);
+    if (!v.allowed) throw v.error!;
+    throw ERR.sfuNotConfigured();
+  }
   if (scope === 'group') throw badRequest('error-call-group-disabled', 'Chamadas em grupo estão desativadas. Só é possível ligar em mensagens diretas entre duas pessoas.');
   throw badRequest('error-call-user', 'Este usuário não pode receber chamadas.');
 });

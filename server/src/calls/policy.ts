@@ -263,6 +263,9 @@ export async function joinCheck(
     const by = viewer.row.removed_by ? await one('SELECT username FROM users WHERE id = $1', [viewer.row.removed_by], db) : null;
     return res(no(ERR.removed(by?.username ?? '')), viewer);
   }
+  // Configuração do LiveKit apagada com a chamada viva: ninguém recebe token. O motivo é o de não configurado (como em
+  // iniciar), antes de gravar a entrada; a varredura encerra a chamada com 'sfu' depois de sfuMissingSeconds.
+  if (call.media === 'sfu' && !sfuConfig().configured) return res(no(ERR.sfuNotConfigured()), viewer);
   const g = grantsFor(viewer, call, room, viewer.roles, viewer.row);
   const listenOnly = g.hidden;
   const already = !!viewer.row?.present;

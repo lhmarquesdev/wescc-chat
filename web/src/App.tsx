@@ -1,7 +1,7 @@
 import { Component, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { ApiError, errorMessage, getCredentials } from './lib/api';
-import { loadPublicSettings, logout, requestNotificationPermission, startSession } from './lib/session';
+import { ApiError, errorMessage, getCredentials, syncCredentials } from './lib/api';
+import { loadPublicSettings, logout, requestNotificationPermission, signedOutElsewhere, startSession } from './lib/session';
 import { useStore } from './lib/store';
 import { Sidebar } from './components/Sidebar';
 import { MobileTabBar } from './components/MobileTabBar';
@@ -177,6 +177,10 @@ function Protected() {
 
   useEffect(() => {
     if (state !== 'loading') return;
+    // Nova tentativa depois de uma falha na abertura: se alguém saiu da conta em outra aba enquanto isso, esta não
+    // entra com a credencial que ficou na memória.
+    const cred = syncCredentials();
+    if (cred !== 'ok') return signedOutElsewhere(cred);
     // As configurações públicas também podem ter recebido o 429 (ou a queda) na abertura.
     const settings = Object.keys(useStore.getState().settings).length ? null : loadPublicSettings().catch(() => {});
     Promise.all([startSession(), settings])

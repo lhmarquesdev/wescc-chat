@@ -21,11 +21,11 @@ export async function sweepCalls() {
   // 1 e 2. A dois (P2P): toque esgotado e conexões que sumiram, como sempre.
   const { sweepDirectCalls } = await import('../services/calls');
   await sweepDirectCalls();
-  // 3. Reconciliação de cada chamada viva pelo servidor de chamadas, 4 por vez.
-  if (sfu) {
-    const live = await many(`SELECT id FROM calls WHERE status IN ('ringing', 'ongoing') AND media = 'sfu' ORDER BY created_at`);
-    await inBatches(live, 4, (r) => reconcileCall(r.id));
-  }
+  // 3. Reconciliação de cada chamada viva pelo servidor de chamadas, 4 por vez. Também sem configuração (apagada com
+  // chamadas vivas): a reconciliação conta o servidor como fora do ar, e a chamada acaba com 'sfu' depois de
+  // sfuMissingSeconds, em vez de ficar "em andamento" para sempre.
+  const live = await many(`SELECT id FROM calls WHERE status IN ('ringing', 'ongoing') AND media = 'sfu' ORDER BY created_at`);
+  await inBatches(live, 4, (r) => reconcileCall(r.id));
   // 4. Toques de chamadas em grupo vencidos.
   const rung = await many(
     `SELECT DISTINCT p.call_id FROM call_participants p JOIN calls c ON c.id = p.call_id

@@ -324,6 +324,7 @@ export async function reconcileCall(callId: string): Promise<void> {
   let list: SfuParticipant[] | null = null;
   let missing: 'not_found' | 'unreachable' | null = null;
   try {
+    // Sem configuração, falha na hora com not_configured e conta como fora do ar (ninguém consegue entrar).
     list = await lk.listParticipants(first.sfu_room, { timeoutMs: 2000 });
   } catch (e) {
     missing = e instanceof SfuError && e.code === 'not_found' ? 'not_found' : 'unreachable';

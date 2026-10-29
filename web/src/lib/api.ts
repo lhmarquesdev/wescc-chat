@@ -33,6 +33,35 @@ export function getCredentials() {
   return creds;
 }
 
+// A credencial em memória diante da guardada, que as outras abas deste navegador também usam: 'gone' quando alguém saiu
+// da conta em outra aba (mesmo com o pedido de saída falhando no servidor), 'other' quando outra pessoa entrou lá. A
+// mesma pessoa com um token novo (entrou de novo em outra aba) segue com o novo. Sem armazenamento, nada a comparar.
+export function syncCredentials(): 'ok' | 'gone' | 'other' {
+  if (!creds) return 'ok';
+  let stored: Credentials | null;
+  try {
+    const v = localStorage.getItem(KEY);
+    stored = v ? JSON.parse(v) : null;
+  } catch {
+    return 'ok';
+  }
+  if (!stored) return 'gone';
+  if (stored.userId !== creds.userId) return 'other';
+  if (stored.authToken !== creds.authToken) creds = stored;
+  return 'ok';
+}
+
+let onSignedOutElsewhere: ((why: 'gone' | 'other') => void) | null = null;
+export function setSignedOutElsewhereHandler(fn: (why: 'gone' | 'other') => void) {
+  onSignedOutElsewhere = fn;
+}
+// Outra aba saiu da conta ou entrou com outra: esta não continua com a credencial antiga.
+window.addEventListener('storage', (e) => {
+  if (e.key !== KEY && e.key !== null) return;
+  const why = syncCredentials();
+  if (why !== 'ok') onSignedOutElsewhere?.(why);
+});
+
 export function setCredentials(c: Credentials | null) {
   creds = c;
   try {

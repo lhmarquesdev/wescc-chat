@@ -234,6 +234,26 @@ describe('sem servidor de chamadas configurado', () => {
       expect(await api('POST', 'calls.start', { roomId: general, kind: 'video', connectionId: wa.connectionId }, A)).toMatchObject(notConfigured);
       expect((await pool.query(`SELECT count(*)::int AS n FROM calls WHERE room_id = $1`, [general])).rows[0].n).toBe(0);
       expect(await api('POST', 'chat.sendMessage', { message: { rid: general, msg: '/call' } }, A)).toMatchObject(notConfigured);
+      // Numa sala que não aceita chamadas (avisos, somente leitura) ou para quem não pode iniciar, o /call dá o motivo da
+      // sala, como os botões (calls.roomCall), e não manda pedir ao administrador.
+      const op = await newUser(A, { roles: ['operacao'] });
+      const sends = async (extra: Record<string, unknown>, who: Auth) => {
+        const r = await api('POST', 'channels.create', { name: `sem-lk-${newId().slice(0, 8).toLowerCase()}`, members: [u.username, op.username], ...extra }, A);
+        expect(r.success).toBe(true);
+        const rid = r.channel._id as string;
+        const room = await api('GET', 'calls.roomCall', { roomId: rid }, who);
+        return { room, call: await api('POST', 'chat.sendMessage', { message: { rid, msg: '/call' } }, who) };
+      };
+      for (const extra of [{ extraData: { broadcast: true } }, { readOnly: true }]) {
+        const { room, call } = await sends(extra, A);
+        expect(room).toMatchObject({ canStart: false, hideStart: true, startBlockedReason: 'Esta sala não aceita chamadas.' });
+        expect(call).toMatchObject({ status: 403, errorType: 'error-call-not-allowed', error: 'Esta sala não aceita chamadas.' });
+      }
+      const noPerm = await sends({}, op);
+      expect(noPerm.room).toMatchObject({ canStart: false, hideStart: true, startBlockedReason: 'Você não tem permissão para iniciar chamadas nesta sala.' });
+      expect(noPerm.call).toMatchObject({ status: 403, errorType: 'error-call-not-allowed', error: 'Você não tem permissão para iniciar chamadas nesta sala.' });
+      // Numa sala comum, quem pode iniciar recebe o motivo de não configurado.
+      expect((await sends({}, u)).call).toMatchObject(notConfigured);
       expect(await api('POST', 'calls.selfTest', {}, A)).toMatchObject(notConfigured);
       expect(await api('GET', 'calls.config', {}, A)).toMatchObject({ enabled: true, groupEnabled: false, sfu: false });
       expect(await api('GET', 'calls.sfu.status', undefined, A)).toMatchObject({ configured: false, reachable: false, groupEnabled: true });

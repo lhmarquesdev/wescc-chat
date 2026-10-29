@@ -9,7 +9,7 @@ import { callRoomName } from '../../../lib/call/store';
 import { useNames } from '../../../lib/names';
 import { roomIconName } from '../../../lib/format';
 import { callRoomLabel, useNow } from '../../../lib/roomcall';
-import { useStore } from '../../../lib/store';
+import { usePermission, useStore } from '../../../lib/store';
 import { SelfTest } from '../../../components/call/SelfTest';
 import { Icon } from '../../../components/Icon';
 import { Empty, Skeleton, SkeletonTable, confirmDialog, useAsync } from '../../../components/ui';
@@ -68,6 +68,8 @@ function ServerCard({
   onReload: () => void;
   onTest: () => void;
 }) {
+  // Administração › Configurações exige view-privileged-setting (sem ela, a AdminPage volta em silêncio para esta tela).
+  const canSettings = usePermission('view-privileged-setting');
   const pill = !data ? null : !data.configured ? (
     <span className="pill dot">Não configurado</span>
   ) : data.reachable ? (
@@ -136,9 +138,11 @@ function ServerCard({
           <Icon name="call-retry" />
           Atualizar
         </button>
-        <Link className="admin-calls-link" to={settingsPath(SETTINGS_GROUP.calls)}>
-          Configurações de chamadas
-        </Link>
+        {canSettings && (
+          <Link className="admin-calls-link" to={settingsPath(SETTINGS_GROUP.calls)}>
+            Configurações de chamadas
+          </Link>
+        )}
       </div>
     </section>
   );

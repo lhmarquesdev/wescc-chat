@@ -165,6 +165,54 @@ describe('chamadas em grupo', () => {
     expect((await start(m, rid)).success).toBe(true);
   });
 
+  it('configuração apagada com a chamada viva: entrar dá o motivo de não configurado sem gravar a entrada, e a varredura encerra com sfu', async () => {
+    const [owner, m, w] = [await user(), await user(), await user()];
+    const rid = await channel(owner, [m, w]);
+    const { id } = await startIn(fake, m, rid);
+    expect((await part(id, m.userId)).state).toBe('joined');
+    await setSettings(A, { Calls_SFU_Api_Key: '' });
+    try {
+      // A sala não oferece Entrar (o motivo não passa sozinho), e calls.join responde 503 com o texto, não 500.
+      const state = await api('GET', 'calls.roomCall', { roomId: rid }, w);
+      expect(state).toMatchObject({ call: { _id: id, status: 'ongoing' }, canJoin: false, joinBlockedReason: CALL_SFU_NOT_CONFIGURED });
+      expect(await join(w, id)).toMatchObject({ status: 503, errorType: 'error-call-sfu-not-configured', error: CALL_SFU_NOT_CONFIGURED });
+      expect(await part(id, w.userId)).toBeUndefined();
+      // Quem caiu sem calls.leave fica "joined" (sem webhooks nem reconciliação pelo LiveKit): a varredura conta o servidor
+      // como fora do ar e, passado sfuMissingSeconds sem ninguém entrar, encerra com 'sfu'.
+      await sweep();
+      const row = await callRow(id);
+      expect(row).toMatchObject({ status: 'ongoing' });
+      expect(row.sfu_missing_since).not.toBeNull();
+      // O tempo passa (quem estava dentro entrou antes de o servidor sumir).
+      await pool.query(`UPDATE calls SET sfu_missing_since = now() - interval '91 seconds' WHERE id = $1`, [id]);
+      await pool.query(`UPDATE call_participants SET last_joined_at = now() - interval '2 minutes' WHERE call_id = $1`, [id]);
+      await sweep();
+      expect(await callRow(id)).toMatchObject({ status: 'ended', ended_reason: 'sfu' });
+      expect(await api('GET', 'calls.roomCall', { roomId: rid }, w)).toMatchObject({ call: null });
+    } finally {
+      await setSettings(A, { Calls_SFU_Api_Key: fake.key });
+      resetSfuState();
+    }
+  });
+
+  it('configuração apagada e devolvida antes de sfuMissingSeconds: a chamada segue e Entrar volta', async () => {
+    const [owner, m, w] = [await user(), await user(), await user()];
+    const rid = await channel(owner, [m, w]);
+    const { id } = await startIn(fake, m, rid);
+    await setSettings(A, { Calls_SFU_Api_Key: '' });
+    try {
+      await sweep();
+      expect((await callRow(id)).sfu_missing_since).not.toBeNull();
+    } finally {
+      await setSettings(A, { Calls_SFU_Api_Key: fake.key });
+      resetSfuState();
+    }
+    await sweep();
+    expect(await callRow(id)).toMatchObject({ status: 'ongoing', sfu_missing_since: null });
+    expect(await api('GET', 'calls.roomCall', { roomId: rid }, w)).toMatchObject({ canJoin: true });
+    expect((await join(w, id)).success).toBe(true);
+  });
+
   it('operacao entra mas não inicia nem chama; quem não é membro não entra', async () => {
     const [owner, m, out] = [await user(), await user(), await user()];
     const op = await newUser(A, { roles: ['operacao'] });

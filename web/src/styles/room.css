@@ -2110,4 +2110,9 @@ a.att-title {
   .msg:has(> .msg-main > .reactions-row:last-child) + .msg:has(> .msg-main > .msg-head) {
     padding-top: calc(6px + var(--space-3));
   }
+  /* Linha de sistema logo acima de um nome (as entradas recolhidas, uma mensagem fixada): o vão é de 8px (2px de baixo
+     da linha e 6px de cima do nome) e os 12px de cima do nome cobririam o fim do botão "N entraram". Volta aos 12px. */
+  .msg.system + .msg:has(> .msg-main > .msg-head) {
+    padding-top: calc(6px + var(--space-1));
+  }
 }

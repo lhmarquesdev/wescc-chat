@@ -2,6 +2,7 @@
 // O motor certo só é carregado quando a chamada começa: o LiveKit fica num pedaço próprio do build.
 import type { Call, CallJoin, CallMedia, CallSource, UserRef } from '@shared/index';
 import type { LivePeer } from './store';
+import { useStore } from '../store';
 
 export interface CallEngine {
   readonly media: CallMedia;
@@ -55,14 +56,23 @@ export async function createEngine(media: CallMedia, ctx: EngineContext): Promis
   return createP2pEngine(ctx);
 }
 
-// Carrega o motor de grupo antes de precisar dele (ao passar o mouse num botão de chamada, na faixa da sala).
+// Carrega o motor de grupo antes de precisar dele (ao passar o mouse num botão de chamada, na faixa da sala). Sem o
+// tempo real (servidor fora do ar, na atualização) não tenta: a falha não ajuda ninguém. Uma falha aqui fica aqui: a
+// recarga por pedaço ausente (build.ts) não roda para a pré-carga, e o import de verdade tenta de novo.
 let prefetched = false;
+let prefetching = 0;
+export const isPrefetching = () => prefetching > 0;
 export function prefetchSfu() {
-  if (prefetched) return;
+  if (prefetched || !useStore.getState().connected) return;
   prefetched = true;
-  void import('./sfu').catch(() => {
-    prefetched = false;
-  });
+  prefetching++;
+  void import('./sfu')
+    .catch(() => {
+      prefetched = false;
+    })
+    .finally(() => {
+      prefetching--;
+    });
 }
 
 // Emissor simples para os motores.

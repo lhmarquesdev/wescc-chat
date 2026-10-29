@@ -47,7 +47,14 @@ const userRef = (r: any): UserRef => ({ _id: r.id ?? r.user_id, username: r.user
 async function joinFor(call: any, userId: string): Promise<CallJoin> {
   const row = await one(`SELECT granted_publish, granted_sources, granted_hidden FROM call_participants WHERE call_id = $1 AND user_id = $2`, [call.id, userId]);
   const sources = row.granted_publish ? row.granted_sources : [];
-  const t = joinToken({ room: call.sfu_room, identity: userId, canPublish: row.granted_publish, sources, hidden: row.granted_hidden });
+  let t: ReturnType<typeof joinToken>;
+  try {
+    t = joinToken({ room: call.sfu_room, identity: userId, canPublish: row.granted_publish, sources, hidden: row.granted_hidden });
+  } catch (e) {
+    // Configuração apagada entre a conferência (joinCheck) e o token: o motivo de não configurado, não um erro interno.
+    if (e instanceof SfuError && e.code === 'not_configured') throw ERR.sfuNotConfigured();
+    throw e;
+  }
   return {
     token: t.token,
     expiresAt: t.expiresAt,

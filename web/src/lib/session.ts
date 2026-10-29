@@ -1,5 +1,5 @@
 import type { Role, UserStatus } from '@shared/index';
-import { api, getCredentials, setCredentials, setUnauthorizedHandler } from './api';
+import { api, getCredentials, setCredentials, setSignedOutElsewhereHandler, setUnauthorizedHandler } from './api';
 import { setCustomEmoji } from './emoji';
 import { syncPushSubscription, unsubscribeOnLogout } from './push';
 import { realtime } from './realtime';
@@ -195,6 +195,15 @@ setUnauthorizedHandler(() => {
     if (!location.pathname.startsWith('/login')) location.href = '/login';
   }
 });
+
+// Saiu da conta em outra aba (num computador compartilhado, a pessoa acredita ter saído de todas): esta aba também sai.
+// Outra pessoa entrou lá: a aba abre de novo com a conta dela (limpar aqui a tiraria da conta na outra aba).
+export function signedOutElsewhere(why: 'gone' | 'other') {
+  if (why === 'other') return location.reload();
+  endSession();
+  if (!location.pathname.startsWith('/login')) location.href = '/login';
+}
+setSignedOutElsewhereHandler(signedOutElsewhere);
 
 // ---------- Notificações ----------
 
