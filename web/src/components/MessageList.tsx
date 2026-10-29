@@ -12,6 +12,10 @@ import { Icon } from './Icon';
 import type { IconName } from './icons';
 import { MessageItem, type MessageActions } from './MessageItem';
 import { Avatar, Empty, GroupAvatar, SkeletonMessages } from './ui';
+// Integrações (Jira/Teams)
+import type { ReactNode } from 'react';
+import { placeEphemeral, useRoomEphemeral } from '../lib/ephemeral';
+import { EphemeralRow } from './integrations/EphemeralRow';
 
 const EMPTY: Message[] = [];
 // Entradas, saídas e quem foi adicionado ou removido: em sequência, viram uma linha só (clicável).
@@ -384,6 +388,24 @@ export function MessageList({
     return out;
   }, [list, unreadSince, meId, groupingPeriod, jumpTo]);
 
+  // Integrações (Jira/Teams): respostas que só a pessoa vê, entre as linhas pela hora (fora de não lidas, dias e grupos)
+  const ephemeral = useRoomEphemeral(rid, null);
+  const ephSlots = useMemo(() => placeEphemeral(ephemeral, list), [ephemeral, list]);
+  const lastDay = days[days.length - 1]?.key;
+  // Linhas do dia como irmãs com chave (a efêmera nunca troca de pai ao subir na lista): cada efêmera vem antes da
+  // primeira linha mais nova (numa linha de entradas recolhidas, qualquer uma delas); as mais novas que tudo, no fim do
+  // último dia.
+  const dayItems = (d: Day) => {
+    const items: ReactNode[] = [];
+    for (const r of d.rows) {
+      const before = (r.kind === 'msg' ? [r.m] : r.ms).flatMap((x) => ephSlots.before.get(x._id) ?? []);
+      for (const e of before) items.push(<EphemeralRow key={`eph-${e._id}`} m={e} />);
+      items.push(renderRow(before.length && r.kind === 'msg' ? { ...r, grouped: false } : r));
+    }
+    if (d.key === lastDay) for (const e of ephSlots.end) items.push(<EphemeralRow key={`eph-${e._id}`} m={e} />);
+    return items;
+  };
+
   // Índice da última mensagem que já estava na lista: o que vier depois dela chegou agora.
   let lastSeen = -1;
   if (seen.current) for (let i = 0; i < list.length; i++) if (seen.current.has(list[i]._id)) lastSeen = i;
@@ -489,9 +511,15 @@ export function MessageList({
             <div className="day-sep">
               <span>{formatDay(d.ts)}</span>
             </div>
-            {d.rows.map(renderRow)}
+            {/* Integrações (Jira/Teams): linhas e efêmeras do dia; a linha depois de uma efêmera começa outro grupo */}
+            {dayItems(d)}
           </div>
         ))}
+        {/* Integrações (Jira/Teams): sala sem mensagens carregadas, as efêmeras ficam sozinhas */}
+        {!days.length &&
+          ephSlots.end.map((e) => (
+            <EphemeralRow key={`eph-${e._id}`} m={e} />
+          ))}
       </div>
       {(far || fresh > 0 || !!jumpTo) && (
         <div className="jump-wrap">

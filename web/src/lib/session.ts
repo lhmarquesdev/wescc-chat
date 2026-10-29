@@ -5,6 +5,9 @@ import { syncPushSubscription, unsubscribeOnLogout } from './push';
 import { realtime } from './realtime';
 import { useStore, type Me } from './store';
 import { roomPath, setRoleDescriptions } from './format';
+// Integrações (Jira/Teams)
+import { clearEphemeral, pushEphemeral } from './ephemeral';
+import { loadIntegrationsMe, resetIntegrations, setExternalPresence } from './integrations';
 
 export async function loadPublicSettings() {
   const r = await api.get('settings.public');
@@ -59,6 +62,8 @@ export async function startSession() {
   // Com troca de senha ou 2FA pendente o servidor só aceita as rotas para resolver isso: o resto fica para depois.
   if (me.requirePasswordChange || me.require2faSetup) return me;
   await Promise.all([loadSubscriptions(), loadCustomEmoji(), loadPermissionMap()]);
+  // Integrações (Jira/Teams): o estado da pessoa que acabou de entrar (nunca o da anterior na mesma aba)
+  void loadIntegrationsMe(true);
   void loadPresence();
   void loadLivechat();
   void syncPushSubscription();
@@ -72,6 +77,8 @@ export async function startSession() {
       void loadPresence();
       void api.get('me').then((m) => useStore.getState().setMe(m));
       void loadLivechat();
+      // Integrações (Jira/Teams): integrations.changed pode ter se perdido durante a queda
+      void loadIntegrationsMe(true);
     });
     realtime.on((ev) => {
       if (ev.type === 'notification') showNotification(ev);
@@ -82,6 +89,22 @@ export async function startSession() {
       // Papéis trocados: me.permissions é calculado pelo servidor, então busca de novo.
       if (ev.type === 'user' && ev.user.roles && ev.user._id === useStore.getState().me?._id) void api.get('me').then((m) => useStore.getState().setMe(m));
       if (ev.type === 'settings.changed' && ev.settings.some((s) => s._id === '__emoji')) void loadCustomEmoji();
+      // Integrações (Jira/Teams)
+      if (ev.type === 'ephemeral') pushEphemeral(ev.message);
+      if (ev.type === 'integrations.changed') void loadIntegrationsMe(true);
+      if (ev.type === 'presence.external') setExternalPresence(ev.userId, ev.presence);
+      if (ev.type === 'integrations.alert') {
+        const { href, text } = ev.alert;
+        useStore.getState().toast(text, 'warning', {
+          action: {
+            label: 'Abrir',
+            onClick: () => {
+              history.pushState({}, '', href);
+              dispatchEvent(new PopStateEvent('popstate'));
+            },
+          },
+        });
+      }
     });
   }
   return me;
@@ -114,6 +137,9 @@ export function endSession() {
   realtime.stop();
   started = false;
   useStore.getState().reset();
+  // Integrações (Jira/Teams): nada da pessoa anterior fica na aba
+  resetIntegrations();
+  clearEphemeral();
   clearDrafts();
 }
 

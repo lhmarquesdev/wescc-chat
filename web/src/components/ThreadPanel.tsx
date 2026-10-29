@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Message, Room } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
 import { plural, roomDisplayName } from '../lib/format';
@@ -8,6 +8,9 @@ import { Icon } from './Icon';
 import { MessageItem } from './MessageItem';
 import { PanelHead, refocusRoom, usePanelEscape } from './RoomPanels';
 import { SkeletonMessages } from './ui';
+// Integrações (Jira/Teams)
+import { placeEphemeral, useRoomEphemeral } from '../lib/ephemeral';
+import { EphemeralRow } from './integrations/EphemeralRow';
 
 export function ThreadPanel({
   rid,
@@ -39,6 +42,9 @@ export function ThreadPanel({
   const ref = useRef<HTMLDivElement>(null);
   const following = root?.replies?.includes(me._id);
   const esc = usePanelEscape(onClose);
+  // Integrações (Jira/Teams): respostas que só a pessoa vê dentro deste tópico, entre as respostas pela hora
+  const ephemeral = useRoomEphemeral(rid, tmid);
+  const ephSlots = useMemo(() => placeEphemeral(ephemeral, replies ?? []), [ephemeral, replies]);
 
   useEffect(() => {
     if (rootFromList) setRoot(rootFromList);
@@ -59,7 +65,8 @@ export function ThreadPanel({
 
   useLayoutEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [replies?.length]);
+    // Integrações (Jira/Teams): também quando chega uma resposta efêmera
+  }, [replies?.length, ephemeral.length]);
 
   const actions = { onEdit: setEditing, onQuote: setQuoting, onUserClick };
   const name = roomDisplayName(sub, room);
@@ -108,16 +115,21 @@ export function ThreadPanel({
           <span>{plural(count, 'resposta', 'respostas')}</span>
         </div>
         {!replies && root && count > 0 && <SkeletonMessages n={3} />}
-        {replies?.map((m, i) => (
-          <MessageItem
-            key={m._id}
-            m={m}
-            grouped={i > 0 && replies[i - 1].u._id === m.u._id && new Date(m.ts).getTime() - new Date(replies[i - 1].ts).getTime() < 300000}
-            actions={actions}
-            inThread
-            canModerate={canModerate}
-          />
-        ))}
+        {/* Integrações (Jira/Teams): efêmeras antes da primeira resposta mais nova (que começa outro grupo) ou no fim, todas
+            irmãs com chave das respostas (a efêmera não é montada de novo quando sobe) */}
+        {(replies ?? [])
+          .flatMap((m, i) => [
+            ...(ephSlots.before.get(m._id) ?? []).map((e) => <EphemeralRow key={`eph-${e._id}`} m={e} />),
+            <MessageItem
+              key={m._id}
+              m={m}
+              grouped={!ephSlots.before.has(m._id) && i > 0 && replies![i - 1].u._id === m.u._id && new Date(m.ts).getTime() - new Date(replies![i - 1].ts).getTime() < 300000}
+              actions={actions}
+              inThread
+              canModerate={canModerate}
+            />,
+          ])
+          .concat(ephSlots.end.map((e) => <EphemeralRow key={`eph-${e._id}`} m={e} />))}
       </div>
       {isMember && (
         <Composer

@@ -170,6 +170,30 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+// Integrações (Jira/Teams)
+import {
+  Activity,
+  Bookmark,
+  Bug,
+  CalendarClock,
+  CalendarPlus,
+  Circle,
+  CircleDashed,
+  ClipboardPaste,
+  Layers,
+  Link2,
+  ListChecks,
+  MessageSquareQuote,
+  MonitorPlay,
+  Presentation,
+  Repeat2,
+  SquareCheck,
+  SquareDashed,
+  Ticket,
+  TicketPlus,
+  UserCheck,
+  Webhook,
+} from 'lucide-react';
 
 export const ICONS = {
   // ---------- Dono 1: comuns ----------
@@ -419,6 +443,33 @@ export const ICONS = {
   bot: Bot,
   'rooms-all': LayoutGrid,
   'image-remove': ImageOff,
+
+  // Integrações (Jira/Teams)
+  // integrações (intchat); 'show' (Eye) já existe no registro e é usado como par do 'hide'.
+  'int-jira': Ticket,
+  'int-teams': Presentation,
+  'int-webhook': Webhook,
+  'int-linked': Link2,
+  'int-activity': Activity,
+  'int-retry': RotateCcw,
+  'int-test': RefreshCw,
+  'int-add': Plus,
+  'jira-create': TicketPlus,
+  'jira-comment': MessageSquareQuote,
+  'jira-assign-me': UserCheck,
+  'jira-type-bug': Bug,
+  'jira-type-task': SquareCheck,
+  'jira-type-story': Bookmark,
+  'jira-type-epic': Layers,
+  'jira-type-subtask': ListChecks,
+  'jira-type-other': SquareDashed,
+  'jira-status-new': Circle,
+  'jira-status-progress': CircleDashed,
+  'meeting-teams': CalendarClock,
+  'meeting-schedule': CalendarPlus,
+  'meeting-link': ClipboardPaste,
+  'meeting-join': MonitorPlay,
+  'bridge-teams': Repeat2,
 } as const;
 
 export type IconName = keyof typeof ICONS;

@@ -20,6 +20,8 @@ export default defineConfig({
       '/hooks': target,
       '/saml': target,
       '/oauth': target,
+      // Integrações (Jira/Teams): retornos de OAuth do Jira e da conta de serviço do Teams
+      '/integrations': target,
     },
   },
   build: { outDir: 'dist', sourcemap: false },

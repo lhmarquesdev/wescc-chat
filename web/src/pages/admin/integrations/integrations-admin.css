@@ -1,0 +1,188 @@
+/* Integrações (Jira/Teams): administração e Minha conta → Contas conectadas. Só as classes do contrato (§8.9):
+   .int-hub, .int-steps, .int-targets, .int-target-row e .int-secret. Só tokens do design system; o resto das telas
+   usa as classes dele (.card-head, .toggle-list, .row-actions, .callout, .copy-box…) sem mudá-las. */
+
+/* ---------- Hub e Contas conectadas: ícone, texto e estado na mesma linha (.card-head) ---------- */
+.int-hub .card-head {
+  margin: 0;
+}
+.int-hub .card-head > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.int-hub .card-head p {
+  margin: 0;
+}
+/* Rodapé do cartão ("3 regras de aviso") e linhas secundárias. */
+.int-hub small {
+  color: var(--fg-muted);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+/* Contas conectadas: o ícone é do sistema de fora, não uma ação (no hub o cartão inteiro é o link). */
+.int-hub section .card-icon {
+  background: var(--bg-muted);
+  color: var(--fg);
+}
+/* Ações e a chave da presença afastadas do texto de cima. */
+.int-hub p + .row-actions,
+.int-hub small + .row-actions,
+.int-hub p + .toggle {
+  margin-top: var(--space-2);
+}
+
+/* ---------- Passos numerados ---------- */
+.int-steps {
+  counter-reset: int-step;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+/* No fim do bloco (modal, passo a passo recolhido): sem sobra embaixo. */
+.int-steps:where(:last-child) {
+  margin-bottom: 0;
+}
+/* Cada passo empilha os seus itens com o mesmo espaço; o número fica na altura da primeira linha. */
+.int-steps > li {
+  counter-increment: int-step;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-left: calc(24px + var(--space-3));
+}
+.int-steps > :where(li)::before {
+  content: counter(int-step);
+  position: absolute;
+  /* Círculo de 24px centrado na primeira linha de texto (a altura de linha de 14px). */
+  top: calc((var(--lh-14) - 24px) / 2);
+  left: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: var(--bg-muted);
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+  line-height: 24px;
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+/* O espaço entre os itens vem do gap, não das margens do navegador. */
+.int-steps p {
+  margin: 0;
+}
+/* Texto de atenção dentro dos passos ("Copie agora…"). */
+.int-steps em {
+  color: var(--warn);
+  font-style: normal;
+  font-weight: var(--fw-medium);
+}
+
+/* ---------- Campo de segredo ---------- */
+/* Na coluna do controle (.setting-control alinha à esquerda), o campo ocupa a largura toda. */
+.int-secret {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: stretch;
+  gap: var(--space-2);
+  min-width: 0;
+}
+/* O campo encolhe antes de o botão de mostrar quebrar a linha (no celular também). */
+.int-secret > input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* Guardado: o texto numa linha e os botões sempre embaixo. */
+.int-secret > div {
+  flex-basis: 100%;
+}
+.int-secret > span {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+}
+.int-secret > span > .icon {
+  color: var(--fg-muted);
+}
+
+/* ---------- Salas de destino ---------- */
+.int-targets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.int-targets > ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+.int-target-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--touch);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+}
+.int-target-row + .int-target-row {
+  border-top: 1px solid var(--border-subtle);
+}
+.int-target-row > .icon {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.int-target-row > strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.int-target-row > span {
+  min-width: 0;
+}
+.int-target-row small {
+  color: var(--danger);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+@media (max-width: 760px) {
+  /* Celular: ícone, nome e o botão de remover na primeira linha; o estado da sala sozinho na segunda, alinhado ao
+     nome. */
+  .int-target-row {
+    flex-wrap: wrap;
+  }
+  .int-target-row > strong {
+    flex-basis: calc(100% - 16px - var(--touch) - 2 * var(--space-2));
+  }
+  .int-target-row > .icon-btn {
+    order: 2;
+  }
+  .int-target-row > span {
+    order: 3;
+    margin-left: calc(16px + var(--space-2));
+  }
+}

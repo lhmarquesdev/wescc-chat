@@ -9,6 +9,8 @@ import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { Icon } from './Icon';
 import { Portal, Sheet, useAnchored, useEscape, useFocusTrap, useIsPhone } from './overlay';
 import { Menu, Skeleton, UserAvatar, confirmDialog, useAsync } from './ui';
+// Integrações (Jira/Teams)
+import { TeamsPresenceLine } from './integrations/TeamsPresenceLine';
 
 // Camadas que abrem a partir do cartão (menu, confirmação, avisos): um clique nelas não o fecha.
 const KEEP_OPEN = '.menu, .modal-backdrop, .sheet-backdrop, .toasts';
@@ -201,6 +203,8 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
             {STATUS_LABEL[status] ?? status}
             {statusText && <span> · {statusText}</span>}
           </div>
+          {/* Integrações (Jira/Teams): presença do Teams (fase 3), some quando desligada ou desconhecida */}
+          <TeamsPresenceLine userId={data.u._id} />
         </div>
       </div>
       {(globalRoles.length > 0 || data.roles.length > 0) && (
