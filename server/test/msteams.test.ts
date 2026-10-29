@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { stickerPreviewText, type MessageSticker } from '@shared/stickers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { many, one, query } from '../src/db/pool';
@@ -1599,5 +1601,23 @@ describe('Segredos (§3, §5)', () => {
     for (const r of activity) expect(`${r.text} ${r.detail ?? ''}`).not.toMatch(/tok-teste|\/workflows\/|sig=/);
     const state = await many(`SELECT id, data::text AS data FROM integration_state`);
     for (const r of state) expect(r.data).not.toMatch(/tok-teste|eyJ/);
+  });
+});
+
+describe('Textos que apontam abas de Administração › Integrações › Microsoft Teams', () => {
+  it('cada "aba X" dos textos do servidor é uma aba que existe na página do Teams', () => {
+    const page = fs.readFileSync(path.resolve(import.meta.dirname, '../../web/src/pages/admin/integrations/TeamsAdmin.tsx'), 'utf8');
+    const tabs = [...page.matchAll(/\{ id: '[a-z]+', label: '([^']+)' \}/g)].map((m) => m[1]);
+    expect(tabs).toEqual(expect.arrayContaining(['Conexão', 'Mensagens do Teams', 'Presença']));
+    const dir = path.resolve(import.meta.dirname, '../src/integrations/msteams');
+    const named = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.ts'))
+      .flatMap((f) => [...fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/\baba ([A-ZÀ-Ý][\p{L} ]*?)(?=[.,;:)'`"]|$)/gmu)].map((m) => ({ f, tab: m[1] })));
+    expect(named.length).toBeGreaterThan(0);
+    for (const n of named) expect(tabs, `${n.f}: aba ${n.tab}`).toContain(n.tab);
+    // O modo de recebimento e o aceite da leitura periódica ficam em Mensagens do Teams, não em Conexão.
+    expect(IN_TEXT.modeOff).toBe('Escolha antes como as mensagens do Teams chegam (aba Mensagens do Teams).');
+    expect(CONFIG_TEXT.presenceDelivery).toContain('leitura periódica aceita na aba Mensagens do Teams');
   });
 });

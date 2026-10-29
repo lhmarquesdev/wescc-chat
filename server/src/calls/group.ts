@@ -11,7 +11,7 @@ import { finalCard, postCard, touchCall } from './card';
 import { assertJoinSafe } from './guard';
 import { publishInCall } from './incall';
 import { hit } from './limits';
-import { joinToken } from './livekit';
+import { joinToken, SfuError } from './livekit';
 import {
   activeCallOf,
   currentCallOf,
@@ -169,9 +169,10 @@ export async function startGroupCall(ctx: Ctx, room: any, kind: CallKind): Promi
   const row = await loadCallRow(id);
   try {
     await lk.createRoom(row.sfu_room, roomOptions(row));
-  } catch {
+  } catch (e) {
     await query('DELETE FROM calls WHERE id = $1', [id]);
-    throw ERR.sfu();
+    // Configuração apagada entre a conferência e o CreateRoom: o motivo é o de não configurado, não o de queda.
+    throw e instanceof SfuError && e.code === 'not_configured' ? ERR.sfuNotConfigured() : ERR.sfu();
   }
   markRoomSeen(id);
   await postCard(id);

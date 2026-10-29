@@ -5,7 +5,17 @@ import { useEffect, useMemo, useReducer } from 'react';
 import { create } from 'zustand';
 import type { Call, Room, RoomCallState, ServerEvent, Subscription } from '@shared/index';
 import { CALL_GUARD_JOIN, predictJoinBlocked } from '@shared/calls';
-import { crossesCallLimit, guessStart, isMuteNoticeFor, missedMayChange, roomCallNeedsPoll, type CallViewEnv, type HeaderGuess, type StartGuessRoom } from '@shared/call-view';
+import {
+  CALL_SFU_NOT_CONFIGURED,
+  crossesCallLimit,
+  guessStart,
+  isMuteNoticeFor,
+  missedMayChange,
+  roomCallNeedsPoll,
+  type CallViewEnv,
+  type HeaderGuess,
+  type StartGuessRoom,
+} from '@shared/call-view';
 import { api } from './api';
 import { namesIn } from './names';
 import { callRoomName, isInCall, noteServerTime, openJoin, serverNow, useCallStore } from './call/store';
@@ -225,6 +235,35 @@ export function useHeaderGuess(rid: string | null, room: (StartGuessRoom & { _id
     const canManage = !!allowed && roles.some((x) => allowed.includes(x));
     return { start: guessStart(r, { groupEnabled, canManage, member: !!sub, username: me.username }), settled };
   }, [r, me, sub, allowed, restricted, groupEnabled, settled]);
+}
+
+// Reunião do Teams numa conversa direta (Jira/Teams §8.6 e D11; D20: reunião é chamada): vale o mesmo estado dos
+// botões de chamada da sala. Some com a recusa da política (papel de operação, pessoa inativa ou bot) e com uma
+// chamada já em andamento na conversa. Recusas só do motor de chamadas do Wescc (chamadas desligadas, servidor de
+// chamadas sem configurar, fora do ar ou no limite) não valem para o Teams: aí, e antes da resposta do servidor, fica
+// a regra da conversa direta que rooms.info calcula (room.direct.canCall).
+function directMeetingOk(room: Pick<Room, 't' | 'direct'>, s: RoomCallState | null | undefined): boolean {
+  if (room.t !== 'd') return true;
+  const fallback = room.direct?.canCall !== false;
+  if (!s) return fallback;
+  if (live(s.call)) return false;
+  if (s.canStart) return true;
+  if (s.hideStart || roomCallNeedsPoll(s) || s.startBlockedReason === CALL_SFU_NOT_CONFIGURED) return fallback;
+  return false;
+}
+
+export function useDirectMeetingOk(room: (Pick<Room, 't' | 'direct'> & { _id: string }) | null | undefined): boolean {
+  const s = useRoomCall(room?.t === 'd' ? room._id : null);
+  return !!room && directMeetingOk(room, s);
+}
+
+// Fora do React (o formulário que abre sozinho, lib/ephemeral.ts): o último estado conhecido da sala.
+export function directMeetingOkNow(room: (Pick<Room, 't' | 'direct'> & { _id: string }) | null | undefined): boolean {
+  if (!room) return false;
+  if (room.t !== 'd') return true;
+  const s = useRoomCalls.getState().byRoom[room._id];
+  if (s === undefined && live(useLive.getState().calls[room._id])) return false;
+  return directMeetingOk(room, s);
 }
 
 // ---------- Chamadas vivas (por sala) ----------

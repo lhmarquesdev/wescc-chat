@@ -102,9 +102,10 @@ export async function alertsFor(userId: string, can: { jira: boolean; msteams: b
 
 export const ALERT_DAY_MS = DAY;
 
-// "{prefixo}: {texto}." sem ponto dobrado quando o texto já termina a frase.
+// "{prefixo}: {texto}." sem ponto dobrado quando o texto já termina a frase, mesmo dentro de parênteses ou aspas
+// ("... Qualquer pessoa.)" não vira ".).").
 export function alertText(prefix: string, detail: string): string {
   const d = String(detail ?? '').trim();
   if (!d) return `${prefix}.`;
-  return `${prefix}: ${/[.!?…]$/.test(d) ? d : `${d}.`}`;
+  return `${prefix}: ${/[.!?…][)\]"'”’»]*$/.test(d) ? d : `${d}.`}`;
 }

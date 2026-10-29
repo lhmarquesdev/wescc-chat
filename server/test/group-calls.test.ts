@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { CALL_SFU_DOWN, CALL_SFU_NOT_CONFIGURED } from '@shared/call-view';
 import { resetSfuState, sfuHealth } from '../src/calls/livekit';
 import { touchCall } from '../src/calls/card';
 import { lockViolations } from '../src/calls/model';
@@ -134,6 +135,33 @@ describe('chamadas em grupo', () => {
       resetSfuState();
     }
     // Com o servidor de volta, inicia normalmente.
+    expect((await start(m, rid)).success).toBe(true);
+  });
+
+  it('sem servidor de chamadas configurado o motivo é outro (não é queda); fora do ar segue o de queda', async () => {
+    const [owner, m] = [await user(), await user()];
+    const rid = await channel(owner, [m]);
+    const state = () => api('GET', 'calls.roomCall', { roomId: rid }, m);
+    const from = fake.calls.length;
+    await setSettings(A, { Calls_SFU_Api_Key: '' });
+    try {
+      expect(await state()).toMatchObject({ canStart: false, hideStart: false, startBlockedReason: CALL_SFU_NOT_CONFIGURED });
+      expect(await start(m, rid)).toMatchObject({ status: 503, errorType: 'error-call-sfu-not-configured', error: CALL_SFU_NOT_CONFIGURED });
+      expect(twirpSince(fake, from, 'CreateRoom')).toEqual([]);
+      expect((await pool.query('SELECT count(*)::int AS n FROM calls WHERE room_id = $1', [rid])).rows[0].n).toBe(0);
+    } finally {
+      await setSettings(A, { Calls_SFU_Api_Key: fake.key });
+      resetSfuState();
+    }
+    // Configurado mas fora do ar: o motivo de queda, que passa sozinho.
+    fake.down();
+    try {
+      expect((await sfuHealth(true)).ok).toBe(false);
+      expect(await state()).toMatchObject({ canStart: false, startBlockedReason: CALL_SFU_DOWN });
+    } finally {
+      fake.up();
+      resetSfuState();
+    }
     expect((await start(m, rid)).success).toBe(true);
   });
 

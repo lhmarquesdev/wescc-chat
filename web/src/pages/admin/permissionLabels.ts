@@ -26,6 +26,10 @@ export const PERMISSION_LABEL: Record<string, string> = {
   'manage-email-inbox': 'Gerenciar caixas de e-mail',
   'view-moderation-console': 'Ver o console de moderação',
   'manage-moderation-actions': 'Agir em denúncias',
+  // Figurinhas
+  'manage-sticker-packs': 'Gerenciar os pacotes de figurinhas da empresa',
+  // Chamadas em grupo
+  'manage-calls': 'Gerenciar o servidor de chamadas e as chamadas em andamento',
   // Usuários
   'view-user-administration': 'Ver a administração de usuários',
   'view-full-other-user-info': 'Ver dados completos de outras pessoas',
@@ -90,6 +94,9 @@ export const PERMISSION_LABEL: Record<string, string> = {
   'view-other-user-channels': 'Ver as salas de outras pessoas',
   'view-room-members': 'Ver membros de salas',
   'call-management': 'Fazer chamadas',
+  // Chamadas em grupo
+  'videoconf-ring-users': 'Chamar pessoas para uma chamada em grupo',
+  'moderate-call': 'Moderar chamadas em grupo',
   'post-readonly': 'Escrever em salas somente leitura',
   // Mensagens
   'edit-message': 'Editar mensagens de outras pessoas',
@@ -102,6 +109,8 @@ export const PERMISSION_LABEL: Record<string, string> = {
   'message-impersonate': 'Enviar mensagens em nome de outros (integrações)',
   'send-many-messages': 'Enviar muitas mensagens seguidas',
   'view-message-read-receipts': 'Ver confirmações de leitura',
+  // Figurinhas
+  'create-personal-stickers': 'Criar figurinhas pessoais',
   // Times
   'create-team': 'Criar times',
   'delete-team': 'Excluir times',

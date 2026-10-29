@@ -9,6 +9,7 @@ import { roomPath, setRoleDescriptions } from './format';
 // Integrações (Jira/Teams)
 import { clearEphemeral, pushEphemeral } from './ephemeral';
 import { loadIntegrationsMe, resetIntegrations, setExternalPresence } from './integrations';
+import { invalidateSlashCommands } from './commands';
 
 export async function loadPublicSettings() {
   const r = await api.get('settings.public');
@@ -67,6 +68,8 @@ export async function startSession() {
   await Promise.all([loadSubscriptions(), loadCustomEmoji(), loadPermissionMap()]);
   // Integrações (Jira/Teams): o estado da pessoa que acabou de entrar (nunca o da anterior na mesma aba)
   void loadIntegrationsMe(true);
+  // Comandos de barra: a lista é por pessoa e pode ter mudado desde a última sessão nesta aba.
+  invalidateSlashCommands();
   void loadPresence();
   void loadLivechat();
   void syncPushSubscription();
@@ -85,6 +88,7 @@ export async function startSession() {
       invalidateStickers('mine');
       // Integrações (Jira/Teams): integrations.changed pode ter se perdido durante a queda
       void loadIntegrationsMe(true);
+      invalidateSlashCommands();
     });
     realtime.on((ev) => {
       if (ev.type === 'notification') showNotification(ev);
@@ -94,19 +98,25 @@ export async function startSession() {
         void loadPermissionMap();
         invalidateStickers('org');
         invalidateStickers('mine');
+        invalidateSlashCommands();
       }
       // Papéis trocados: me.permissions é calculado pelo servidor, então busca de novo.
       if (ev.type === 'user' && ev.user.roles && ev.user._id === useStore.getState().me?._id) {
         void api.get('me').then((m) => useStore.getState().setMe(m));
         invalidateStickers('org');
         invalidateStickers('mine');
+        invalidateSlashCommands();
       }
       if (ev.type === 'settings.changed' && ev.settings.some((s) => s._id === '__emoji')) void loadCustomEmoji();
       // A cota e os limites pessoais vêm no catálogo pessoal.
       if (ev.type === 'settings.changed' && ev.settings.some((s) => s._id.startsWith('Stickers_Personal_'))) invalidateStickers('mine');
       // Integrações (Jira/Teams)
       if (ev.type === 'ephemeral') pushEphemeral(ev.message);
-      if (ev.type === 'integrations.changed') void loadIntegrationsMe(true);
+      if (ev.type === 'integrations.changed') {
+        void loadIntegrationsMe(true);
+        // /jira e /teams entram ou saem da lista de comandos com a integração.
+        invalidateSlashCommands();
+      }
       if (ev.type === 'presence.external') setExternalPresence(ev.userId, ev.presence);
       if (ev.type === 'integrations.alert') {
         const { href, text } = ev.alert;
@@ -159,6 +169,7 @@ export function endSession() {
   // Integrações (Jira/Teams): nada da pessoa anterior fica na aba
   resetIntegrations();
   clearEphemeral();
+  invalidateSlashCommands();
   clearDrafts();
   resetStickers();
 }

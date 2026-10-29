@@ -1258,10 +1258,8 @@ a.att-title {
   align-items: center;
   justify-content: center;
   padding: 64px 16px 56px;
-  background: rgb(0 0 0 / 0.9);
-  /* Desfoca a sala por trás: sem isso o cabeçalho de uma sala clara ficava legível ao lado do nome de quem enviou. */
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
+  /* Fundo sólido translúcido do design system: sem desfoque da sala por trás. */
+  background: var(--scrim-lightbox);
   cursor: zoom-out;
   animation: fade-in var(--dur-2) var(--ease-out);
 }

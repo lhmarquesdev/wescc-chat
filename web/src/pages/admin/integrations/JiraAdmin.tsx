@@ -61,8 +61,16 @@ export function JiraAdmin({ tab: raw }: { tab?: string }) {
       setConfig(r.config);
       useStore.getState().toast(enabled ? 'Jira ativado.' : 'Jira desativado.', 'success');
     } catch (e) {
-      if (e instanceof ApiError && e.errorType === 'error-jira-not-configured') useStore.getState().toast('Configure e teste a conexão antes de ativar.', 'error');
-      else fail(e);
+      if (e instanceof ApiError && e.errorType === 'error-jira-not-configured') {
+        // Endereço do site que o servidor não aceita (siteProblem): o aviso diz o motivo, o mesmo que o quadro da aba
+        // Conexão mostra. Busca a configuração de novo, porque o motivo pode ter surgido depois que a página abriu.
+        const fresh = await jiraAdmin
+          .config()
+          .then((r) => r.config)
+          .catch(() => current);
+        if (fresh && fresh !== current) setConfig(fresh);
+        useStore.getState().toast(fresh?.siteProblem || 'Configure e teste a conexão antes de ativar.', 'error');
+      } else fail(e);
     } finally {
       setToggling(false);
     }

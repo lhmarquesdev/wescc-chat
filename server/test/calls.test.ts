@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CALL_SFU_NOT_CONFIGURED, roomCallNeedsPoll } from '@shared/call-view';
+import { sfuConfig } from '../src/calls/livekit';
 import { pool } from '../src/db/pool';
 import { newId } from '../src/lib/ids';
 import { sweepCalls } from '../src/services/calls';
@@ -209,6 +211,48 @@ describe('chamadas em mensagens diretas', () => {
     } finally {
       await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: false } }, A);
       wu.close();
+    }
+  });
+});
+
+// O PC da Wescc roda sem LiveKit por enquanto: as chamadas em grupo ligadas, mas sem servidor de chamadas configurado,
+// explicam isso (não "não está respondendo"), e as chamadas a dois seguem por P2P.
+describe('sem servidor de chamadas configurado', () => {
+  it('chamadas em grupo dão o motivo de não configurado em roomCall, calls.start, /call e no autoteste; a dois seguem por P2P', async () => {
+    expect(sfuConfig().configured).toBe(false);
+    const u = await newUser(A);
+    const v = await newUser(A);
+    const [wa, wu, wv] = await Promise.all([online(A), online(u), online(v)]);
+    const general = await generalId();
+    await api('POST', 'settings', { settings: { Calls_Group_Enabled: true } }, A);
+    try {
+      const notConfigured = { status: 503, errorType: 'error-call-sfu-not-configured', error: CALL_SFU_NOT_CONFIGURED };
+      // Os botões da sala ficam, com o motivo, e a sala não fica conferindo de novo (não passa sozinho).
+      const state = await api('GET', 'calls.roomCall', { roomId: general }, A);
+      expect(state).toMatchObject({ call: null, canStart: false, hideStart: false, startBlockedReason: CALL_SFU_NOT_CONFIGURED });
+      expect(roomCallNeedsPoll(state)).toBe(false);
+      expect(await api('POST', 'calls.start', { roomId: general, kind: 'video', connectionId: wa.connectionId }, A)).toMatchObject(notConfigured);
+      expect((await pool.query(`SELECT count(*)::int AS n FROM calls WHERE room_id = $1`, [general])).rows[0].n).toBe(0);
+      expect(await api('POST', 'chat.sendMessage', { message: { rid: general, msg: '/call' } }, A)).toMatchObject(notConfigured);
+      expect(await api('POST', 'calls.selfTest', {}, A)).toMatchObject(notConfigured);
+      expect(await api('GET', 'calls.config', {}, A)).toMatchObject({ enabled: true, groupEnabled: false, sfu: false });
+      expect(await api('GET', 'calls.sfu.status', undefined, A)).toMatchObject({ configured: false, reachable: false, groupEnabled: true });
+
+      // Mensagem direta a dois: P2P, sem LiveKit.
+      const rid = await dmWith(u, v);
+      expect(await api('GET', 'calls.roomCall', { roomId: rid }, u)).toMatchObject({ canStart: true });
+      const prompt = wu.waitFor((e) => e.type === 'call.prompt');
+      expect((await api('POST', 'chat.sendMessage', { message: { rid, msg: '/call voz' } }, u)).success).toBe(true);
+      expect(await prompt).toEqual({ type: 'call.prompt', rid, kind: 'audio' });
+      const started = await api('POST', 'calls.start', { roomId: rid, kind: 'audio', connectionId: wu.connectionId }, u);
+      expect(started.call).toMatchObject({ status: 'ringing', scope: 'direct', media: 'p2p' });
+      await callEvent(wv, started.call._id, 'ringing');
+      const accepted = await api('POST', 'calls.accept', { callId: started.call._id, connectionId: wv.connectionId }, v);
+      expect(accepted.call).toMatchObject({ status: 'ongoing', media: 'p2p' });
+      expect((await api('POST', 'calls.end', { callId: started.call._id }, u)).call.status).toBe('ended');
+    } finally {
+      await api('POST', 'settings', { settings: { Calls_Group_Enabled: false } }, A);
+      for (const w of [wa, wu, wv]) w.close();
     }
   });
 });

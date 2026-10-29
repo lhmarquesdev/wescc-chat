@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import type { Message } from '@shared/index';
 import { stickerPreviewText } from '@shared/stickers';
 import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
+import { slashCommands } from '../lib/commands';
 import { EMOJI, searchEmoji } from '../lib/emoji';
 import { formatBytes } from '../lib/format';
 import { realtime } from '../lib/realtime';
@@ -29,8 +30,6 @@ interface Suggestion {
 const disabledText = (reason?: string) => (!reason ? 'Você não pode enviar mensagens aqui.' : /canal de avisos/i.test(reason) ? 'Só os publicadores enviam aqui.' : reason);
 
 const SECTION: Record<string, string> = { '@': 'Pessoas', '#': 'Canais', ':': 'Emojis', '/': 'Comandos', '!': 'Respostas prontas' };
-
-let commandsCache: { command: string; params: string; description: string }[] | null = null;
 
 export interface ComposerHandle {
   edit(m: Message): void;
@@ -298,11 +297,12 @@ function ComposerView({
           ':',
         );
       } else if (trig === '/') {
-        commandsCache ??= (await api.get('commands.list').catch(() => ({ commands: [] }))).commands;
+        // A lista é desta pessoa (lib/commands.ts): /jira e /teams entram e saem com as integrações.
+        const list = await slashCommands(me._id);
         // Sinônimos (/part = /leave, /jitsi = /call) têm a mesma descrição: fica só o primeiro, a não ser que a
         // pessoa já esteja digitando o sinônimo.
         const seenDesc = new Set<string>();
-        const cmds = (commandsCache ?? []).filter((c) => {
+        const cmds = list.filter((c) => {
           if (!c.command.startsWith(term)) return false;
           if (c.command !== term && c.description && seenDesc.has(c.description)) return false;
           seenDesc.add(c.description);
@@ -315,7 +315,7 @@ function ComposerView({
       }
       setSel(0);
     },
-    [rid, canned, me.username],
+    [rid, canned, me.username, me._id],
   );
 
   const applySuggestion = (s: Suggestion) => {

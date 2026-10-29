@@ -26,6 +26,7 @@ import { Empty, GroupAvatar, Menu, Skeleton, SkeletonMessages, UserAvatar, confi
 // Integrações (Jira/Teams)
 import { IntegrationModals } from '../components/integrations/IntegrationModals';
 import { meetingAvailable, openIntegrationModal, useIntegrations } from '../lib/integrations';
+import { useDirectMeetingOk } from '../lib/roomcall';
 
 const notLive = (r: Room) => r.t !== 'l';
 // perm: só aparece para quem tem a permissão (global ou da sala), como o servidor exige.
@@ -234,6 +235,8 @@ export function RoomPage() {
   const callHeader = useRoomCallHeader(rid || null, room);
   // Integrações (Jira/Teams): integrations.me para o item "Reunião do Teams" do Mais
   const integrations = useIntegrations((s) => s.me);
+  // Na DM, o item segue o estado dos botões de chamada (política de papéis e chamada já em andamento).
+  const directMeetingOk = useDirectMeetingOk(room && room._id === rid ? room : null);
   // Quem está offline não vem no mapa de presença: o texto de status (que continua valendo) vem de users.info.
   const dmName = room?.t === 'd' && sub && !sub.name.includes(',') ? sub.name : null;
   const [dmStatusText, setDmStatusText] = useState('');
@@ -458,8 +461,9 @@ export function RoomPage() {
   if (phone && callHeader.kind === 'pill') inHeader.delete('members');
   const shortcuts = SHORTCUTS.map((id) => panels.find((p) => p.id === id)).filter((p): p is (typeof PANELS)[number] => !!p && inHeader.has(p.id));
   const menuPanels = panels.filter((p) => !shortcuts.includes(p));
-  // Integrações (Jira/Teams): reunião em canal, grupo ou DM, para quem pode escrever; na DM, só se a chamada é permitida
-  const meetingItem = meetingAvailable(integrations) && ['c', 'p', 'd'].includes(room.t) && !!sub && !disabledReason && room.direct?.canCall !== false;
+  // Integrações (Jira/Teams): reunião em canal, grupo ou DM, para quem pode escrever; na DM, só quando os botões de
+  // chamada também deixam (useDirectMeetingOk, o mesmo calls.roomCall)
+  const meetingItem = meetingAvailable(integrations) && ['c', 'p', 'd'].includes(room.t) && !!sub && !disabledReason && directMeetingOk;
   const hasInfo = panels.some((p) => p.id === 'info');
   const closePanel = () => (tmid ? navigate(roomPath(room)) : setPanel(null));
   const favorite = () => api.post('rooms.favorite', { roomId: rid, favorite: !sub?.f }).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));

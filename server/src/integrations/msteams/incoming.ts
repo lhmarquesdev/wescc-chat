@@ -21,7 +21,7 @@ import { flowOwners } from './outgoing';
 
 export const IN_TEXT = {
   name: 'Dê um nome à regra (até 80 caracteres).',
-  modeOff: 'Escolha antes como as mensagens do Teams chegam (aba Conexão).',
+  modeOff: 'Escolha antes como as mensagens do Teams chegam (aba Mensagens do Teams).',
   channel: 'Escolha a equipe e o canal do Teams.',
   room: 'Escolha a sala do chat que recebe as mensagens.',
   privateAck: (room: string) => `Este canal do Teams é privado. Confirme que as mensagens dele ficarão visíveis para todos os membros de #${room}.`,
