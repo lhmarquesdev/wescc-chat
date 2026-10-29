@@ -232,6 +232,11 @@ import {
   TicketPlus,
   UserCheck,
   Webhook,
+  // Papéis e permissões
+  History,
+  CopyPlus,
+  UserCog,
+  Wrench,
 } from 'lucide-react';
 
 export const ICONS = {
@@ -584,6 +589,23 @@ export const ICONS = {
   'cal-prev': ChevronLeft,
   'cal-next': ChevronRight,
   'cal-direction': ArrowLeftRight,
+
+  // ---------- Papéis e permissões ----------
+  'rbac-lock': Lock,
+  'rbac-history': History,
+  'rbac-revert': Undo2,
+  'rbac-duplicate': CopyPlus,
+  'rbac-effective': ShieldCheck,
+  'rbac-delegation': UserCog,
+  'rbac-root': Crown,
+  'rbac-up': ArrowUp,
+  'rbac-down': ArrowDown,
+  'rbac-chat': MessagesSquare,
+  'rbac-room': SlidersHorizontal,
+  'rbac-admin': Settings,
+  'rbac-omni': Headset,
+  'rbac-technical': Wrench,
+  'rbac-areas': Layers,
 } as const;
 
 export type IconName = keyof typeof ICONS;

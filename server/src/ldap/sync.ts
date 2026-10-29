@@ -1,7 +1,7 @@
 import type { Entry } from 'ldapts';
 import { normalizeDn, ouLabel, splitDn, type LdapGroupRef, type LdapMappingTest, type LdapRuleKey, type LdapRunStatus, type LdapSyncRun } from '@shared/ldap';
 import { config } from '../config';
-import { many, one, query } from '../db/pool';
+import { many, one, pool, query } from '../db/pool';
 import { ApiError, badRequest } from '../lib/errors';
 import { bus } from '../realtime/bus';
 import { audit, type Actor } from '../services/audit';
@@ -31,6 +31,7 @@ import {
 import { loadLdapConfig, type LdapConfig } from './config';
 import { ambiguousKeys, ambiguousMatch, groupNames, matchKeys, planMembership, planRoles, type AmbiguousKey, type MembershipTarget } from './mapping';
 import { finishRun, getRun, insertRun, RunLog, saveProgress, tryLdapLock, type LdapTrigger } from './runs';
+import { recordHistory } from '../services/rbacHistory';
 
 // Sincronização LDAP / Active Directory: uma entrada (login, prévia) ou o diretório inteiro (execução).
 
@@ -528,7 +529,9 @@ export async function syncEntry(s: SyncScope, entry: Entry): Promise<EntryOutcom
       user = await one('UPDATE users SET ldap_deactivated_at = NULL, ldap_deactivated_reason = NULL WHERE id = $1 RETURNING *', [user.id]);
     }
     if (rolesPlanned && p.roles.added.length + p.roles.removed.length > 0) {
+      const beforeRoles = user.roles;
       user = await one('UPDATE users SET roles = $2, updated_at = now() WHERE id = $1 RETURNING *', [user.id, next]);
+      await recordHistory(pool, { entityType: 'user', entityId: user.id, entityLabel: user.username, action: 'update', source: 'ldap', actor: null, changes: [{ field: 'roles', before: beforeRoles, after: user.roles }] });
       log.counts.rolesChanged++;
       log.change(user.username, 'roles', [...p.roles.added.map((r) => `+${r}`), ...p.roles.removed.map((r) => `−${r}`)].join(' '));
       changed = true;

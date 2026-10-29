@@ -12,6 +12,7 @@ import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { config } from './config';
 import { adminRoutes } from './api/admin';
+import { registerRbac } from './api/rbac';
 import { chatRoutes } from './api/chat';
 import { authenticate, errorHandler } from './api/http';
 import { roomsRoutes } from './api/rooms';
@@ -75,6 +76,7 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   roomsRoutes(app);
   chatRoutes(app);
   adminRoutes(app);
+  registerRbac(app);
   registerWebsocket(app);
   const { omnichannelRoutes } = await import('./omnichannel/api');
   omnichannelRoutes(app);

@@ -15,7 +15,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   { id: 'engagement', icon: 'admin-engagement', label: 'Engajamento', perm: ['view-engagement-dashboard'] },
   { id: 'users', icon: 'admin-users', label: 'Usuários', perm: ['view-user-administration'] },
   { id: 'rooms', icon: 'room-channel', label: 'Salas', perm: ['view-room-administration'] },
-  { id: 'permissions', icon: 'admin-permissions', label: 'Papéis e permissões', perm: ['access-permissions'] },
+  { id: 'permissions', icon: 'admin-permissions', label: 'Papéis e permissões', perm: ['view-permissions', 'access-permissions', 'manage-roles'] },
   { id: 'devices', icon: 'devices', label: 'Dispositivos', perm: ['view-device-management'] },
   { id: 'audit', icon: 'admin-audit', label: 'Auditoria', perm: ['can-audit', 'can-audit-log'] },
   { id: 'moderation', icon: 'report', label: 'Moderação', perm: ['view-moderation-console'] },

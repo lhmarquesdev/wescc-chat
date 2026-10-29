@@ -7,7 +7,7 @@ import { SideFoot, TakeoverBack, TakeoverHead } from '../../components/Sidebar';
 import { AdminInfo } from './AdminInfo';
 import { AdminUsers } from './AdminUsers';
 import { AdminRooms } from './AdminRooms';
-import { AdminPermissions } from './AdminPermissions';
+import { AdminPermissions } from './rbac';
 import { AdminSettings } from './AdminSettings';
 import { AdminEngagement } from './AdminEngagement';
 import { AdminAudit } from './AdminAudit';

@@ -7,6 +7,7 @@ import { hasPermission } from '../services/permissions';
 import { removeFiles } from '../services/uploads';
 import { actorOf, type Ctx } from '../services/users';
 import { departmentScope, getAgentStatus, getLivechatRoom, isBusinessHourOpen, mapVisitor, processQueue, setAgentStatus } from './service';
+import { recordHistory } from '../services/rbacHistory';
 
 // Gestão do omnichannel: departamentos, agentes, gerentes, monitores, unidades, respostas prontas,
 // tags, prioridades, SLA, horários, campos personalizados, gatilhos, contatos e relatórios.
@@ -62,7 +63,7 @@ export async function addLivechatUser(ctx: Ctx, type: LivechatUserType, username
   await need(ctx, type === 'agent' ? 'manage-livechat-agents' : type === 'manager' ? 'manage-livechat-managers' : 'manage-livechat-monitors');
   const user = await one('SELECT id, username, name FROM users WHERE lower(username) = lower($1) AND active', [clean(username).replace(/^@/, '')]);
   if (!user) throw notFound('error-invalid-user', 'Usuário não encontrado.');
-  await query('UPDATE users SET roles = array_append(array_remove(roles, $2), $2), updated_at = now() WHERE id = $1', [user.id, ROLE_OF[type]]);
+  await setLivechatRole(ctx, user, ROLE_OF[type], true);
   if (type === 'agent') await query(`INSERT INTO livechat_agents (user_id) VALUES ($1) ON CONFLICT DO NOTHING`, [user.id]);
   await audit(actorOf(ctx), 'livechat.user.added', { type, userId: user.id, username: user.username });
   bus.publish({ user: user.id }, { type: 'permissions.changed' });
@@ -73,7 +74,7 @@ export async function removeLivechatUser(ctx: Ctx, type: LivechatUserType, userI
   await need(ctx, type === 'agent' ? 'manage-livechat-agents' : type === 'manager' ? 'manage-livechat-managers' : 'manage-livechat-monitors');
   const user = await one('SELECT id, username FROM users WHERE id = $1', [userId]);
   if (!user) throw notFound('error-invalid-user', 'Usuário não encontrado.');
-  await query('UPDATE users SET roles = array_remove(roles, $2), updated_at = now() WHERE id = $1', [user.id, ROLE_OF[type]]);
+  await setLivechatRole(ctx, user, ROLE_OF[type], false);
   if (type === 'agent') {
     await query(`UPDATE livechat_agents SET status = 'not-available' WHERE user_id = $1`, [user.id]);
     await query('DELETE FROM livechat_department_agents WHERE user_id = $1', [user.id]);
@@ -770,3 +771,13 @@ export async function realtimeMonitoring(ctx: Ctx) {
   return { agents, chats };
 }
 
+
+// Agentes, gestores e monitores são papéis: a troca fica no histórico de Papéis e permissões (origem Atendimento).
+async function setLivechatRole(ctx: Ctx, user: { id: string; username: string }, role: string, add: boolean) {
+  await tx(async (c) => {
+    const before = (await c.query('SELECT roles FROM users WHERE id = $1 FOR UPDATE', [user.id])).rows[0]?.roles ?? [];
+    const after = add ? [...before.filter((r: string) => r !== role), role] : before.filter((r: string) => r !== role);
+    await c.query('UPDATE users SET roles = $2, updated_at = now() WHERE id = $1', [user.id, after]);
+    await recordHistory(c, { entityType: 'user', entityId: user.id, entityLabel: user.username, action: 'update', source: 'omnichannel', actor: { id: ctx.userId, username: ctx.username }, changes: [{ field: 'roles', before, after }] });
+  });
+}

@@ -6,6 +6,9 @@ import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, Menu, Modal, Pager, SearchInput, Segmented, SkeletonTable, Toggle, confirmDialog, useAsync } from '../../components/ui';
 import { ActivePill, DeviceCell, PageHead, RolePills, RowMenu, TableWrap, UserCell, lastSeen } from './parts';
+import type { LockReason } from '@shared/rbac';
+import { EffectiveAccess } from './rbac/Effective';
+import { loadGrant, lockText, rbacFail, type Grant } from './rbac/data';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -37,7 +40,7 @@ export function AdminUsers() {
   const [params, setParams] = useSearchParams();
   const [filter, setFilter] = useState('');
   const [status, setStatus] = useState<Status>('');
-  const [role, setRole] = useState('');
+  const [role, setRole] = useState(params.get('role') ?? '');
   const [offset, setOffset] = useState(0);
   const [count, setCount] = useState(25);
   const [creating, setCreating] = useState(false);
@@ -56,6 +59,8 @@ export function AdminUsers() {
     [filter, role, data],
   );
   const roles = useAsync(() => api.get('roles.list').then((r) => (setRoleDescriptions(r.roles), r)), []);
+  // Hierarquia de concessão: papéis que quem está usando a tela pode dar ou tirar (os outros aparecem com cadeado).
+  const grant = useAsync(loadGrant, []);
   const globalRoles: any[] = (roles.data?.roles ?? []).filter((r: any) => r.scope === 'Users');
 
   useEffect(() => setSelected(new Set()), [filter, status, role, offset, count]);
@@ -95,6 +100,19 @@ export function AdminUsers() {
     reload();
   };
   const selfNote = selfSelected ? ' Sua própria conta fica de fora.' : '';
+  // Papéis em lote: uma chamada só, tudo ou nada, e um lote no histórico de Papéis e permissões.
+  const bulkRoles = async (roleId: string, mode: 'add' | 'remove') => {
+    const targets = grant.data?.root ? selectedUsers : others;
+    if (!targets.length) return ok('Nada a fazer: você não pode mudar os próprios papéis.');
+    try {
+      await api.post('rbac.users.bulkRoles', { userIds: targets.map((u) => u._id), [mode]: [roleId] });
+      ok(`Papel ${roleLabel(roleId)} ${mode === 'add' ? 'adicionado a' : 'removido de'} ${plural(targets.length, 'pessoa', 'pessoas')}${targets.length < selectedUsers.length ? ' (você não foi incluído)' : ''}.`);
+      setSelected(new Set());
+      reload();
+    } catch (e) {
+      rbacFail(e);
+    }
+  };
   const setActive = (active: boolean) => async () => {
     if (!active) {
       const yes = await confirmDialog({
@@ -220,19 +238,19 @@ export function AdminUsers() {
               </button>
             }
           >
-            {(close) =>
-              globalRoles.map((r) => (
-                <button
-                  key={r._id}
-                  onClick={() => {
-                    close();
-                    void bulk(`Papel ${roleLabel(r._id)} adicionado`, (u) => api.post('users.update', { userId: u._id, data: { roles: [...new Set([...u.roles, r._id])] } }));
-                  }}
-                >
-                  {roleLabel(r._id)}
-                </button>
-              ))
+            {(close) => globalRoles.map((r) => <BulkRoleItem key={r._id} role={r} lock={grant.data?.roleLocks[r._id]} onPick={() => (close(), void bulkRoles(r._id, 'add'))} />)}
+          </Menu>
+          <Menu
+            align="left"
+            label="Remover papel"
+            trigger={
+              <button type="button" className="btn small ghost">
+                <Icon name="remove-user" />
+                Remover papel
+              </button>
             }
+          >
+            {(close) => globalRoles.map((r) => <BulkRoleItem key={r._id} role={r} lock={grant.data?.roleLocks[r._id]} onPick={() => (close(), void bulkRoles(r._id, 'remove'))} />)}
           </Menu>
           <button type="button" className="btn small ghost" onClick={setActive(true)}>
             <Icon name="success" />
@@ -352,13 +370,23 @@ export function AdminUsers() {
         </TableWrap>
       )}
       {data && data.total > 0 && <Pager offset={offset} count={count} total={data.total} onChange={setOffset} sizes={[10, 25, 50, 100]} onCountChange={(n) => (setCount(n), setOffset(0))} />}
-      {creating && <UserForm roles={globalRoles} onClose={() => setCreating(false)} onSaved={reload} />}
-      {editId && <UserForm id={editId} roles={globalRoles} onClose={() => setParams({})} onSaved={reload} />}
+      {creating && <UserForm roles={globalRoles} grant={grant.data} onClose={() => setCreating(false)} onSaved={reload} />}
+      {editId && <UserForm id={editId} roles={globalRoles} grant={grant.data} onClose={() => setParams({})} onSaved={reload} />}
     </>
   );
 }
 
-function UserForm({ id, roles, onClose, onSaved }: { id?: string; roles: any[]; onClose: () => void; onSaved: () => void }) {
+function BulkRoleItem({ role, lock, onPick }: { role: any; lock?: LockReason; onPick: () => void }) {
+  return (
+    <button disabled={!!lock} title={lock ? lockText(lock) : undefined} onClick={onPick}>
+      {lock && <Icon name="rbac-lock" size={12} />}
+      {roleLabel(role._id)}
+    </button>
+  );
+}
+
+function UserForm({ id, roles, grant, onClose, onSaved }: { id?: string; roles: any[]; grant: Grant | null; onClose: () => void; onSaved: () => void }) {
+  const me = useStore((s) => s.me)!;
   const [f, setF] = useState<any>({
     name: '',
     username: '',
@@ -373,10 +401,12 @@ function UserForm({ id, roles, onClose, onSaved }: { id?: string; roles: any[]; 
   });
   const [loaded, setLoaded] = useState(!id);
   const [sessions, setSessions] = useState<any[]>([]);
+  const [initialRoles, setInitialRoles] = useState<string[]>([]);
   useEffect(() => {
     if (!id) return;
     void api.get('users.info', { userId: id }).then((r) => {
       setF({ ...r.user, email: r.user.email ?? '', password: '', verified: r.user.emailVerified });
+      setInitialRoles(r.user.roles ?? []);
       setLoaded(true);
     });
     void api
@@ -388,7 +418,9 @@ function UserForm({ id, roles, onClose, onSaved }: { id?: string; roles: any[]; 
   const save = async () => {
     try {
       if (id) {
-        const data: any = { name: f.name, username: f.username, email: f.email, roles: f.roles, active: f.active, verified: f.verified, requirePasswordChange: f.requirePasswordChange, bio: f.bio };
+        const data: any = { name: f.name, username: f.username, email: f.email, active: f.active, verified: f.verified, requirePasswordChange: f.requirePasswordChange, bio: f.bio };
+        // Papéis só vão quando mudaram: assim editar o nome de alguém não esbarra na trava dos papéis.
+        if ([...f.roles].sort().join() !== [...initialRoles].sort().join()) data.roles = f.roles;
         if (f.password) data.password = f.password;
         await api.post('users.update', { userId: id, data });
       } else {
@@ -398,7 +430,7 @@ function UserForm({ id, roles, onClose, onSaved }: { id?: string; roles: any[]; 
       onSaved();
       onClose();
     } catch (e) {
-      fail(e);
+      rbacFail(e);
     }
   };
   const remove = async () => {
@@ -409,6 +441,9 @@ function UserForm({ id, roles, onClose, onSaved }: { id?: string; roles: any[]; 
       .then(() => (onSaved(), onClose()))
       .catch(fail);
   };
+  // Ninguém mexe nos próprios papéis (só o administrador); pessoa com papel acima do ator fica só para leitura.
+  const selfLocked = !!id && id === me._id && !grant?.root;
+  const targetLock = id && !grant?.root ? initialRoles.map((r) => grant?.roleLocks[r]).find(Boolean) : null;
   const toggleRole = (r: string) => setF({ ...f, roles: f.roles.includes(r) ? f.roles.filter((x: string) => x !== r) : [...f.roles, r] });
   // O papel user dá create-p, create-team e start-discussion: com ele, pessoas restritas abrem salas privadas entre si.
   const restrictedWithUser = f.roles.includes('user') && roles.some((r) => r.restrictDirect && f.roles.includes(r._id));
@@ -466,14 +501,31 @@ function UserForm({ id, roles, onClose, onSaved }: { id?: string; roles: any[]; 
           </section>
           <section className="form-section">
             <h3 className="form-section-title">Papéis</h3>
+            {selfLocked && (
+              <p className="field-hint">
+                <Icon name="rbac-lock" size={12} /> {lockText('self')}
+              </p>
+            )}
+            {targetLock && !selfLocked && (
+              <div className="callout warn">
+                <Icon name="rbac-lock" />
+                <span>{lockText(targetLock)} Você pode ver, mas não alterar esta pessoa.</span>
+              </div>
+            )}
             <div className="chips">
-              {roles.map((r) => (
-                <label key={r._id} className={`chip selectable ${f.roles.includes(r._id) ? 'on' : ''}`} title={r.restrictDirect ? 'Restrito em conversas diretas' : undefined}>
-                  <input type="checkbox" hidden checked={f.roles.includes(r._id)} onChange={() => toggleRole(r._id)} />
-                  {roleLabel(r._id)}
-                  {r.restrictDirect && <span className="chip-note">Restrito</span>}
-                </label>
-              ))}
+              {roles.map((r) => {
+                const lock = grant?.roleLocks[r._id];
+                const disabled = selfLocked || !!targetLock || !!lock;
+                const tip = selfLocked ? lockText('self') : lock ? lockText(lock) : r.restrictDirect ? 'Restrito em conversas diretas' : undefined;
+                return (
+                  <label key={r._id} className={`chip selectable ${f.roles.includes(r._id) ? 'on' : ''} ${disabled ? 'disabled' : ''}`} title={tip}>
+                    <input type="checkbox" hidden checked={f.roles.includes(r._id)} disabled={disabled} onChange={() => toggleRole(r._id)} />
+                    {lock && !selfLocked && <Icon name="rbac-lock" size={12} />}
+                    {roleLabel(r._id)}
+                    {r.restrictDirect && <span className="chip-note">Restrito</span>}
+                  </label>
+                );
+              })}
             </div>
             {roles.some((r) => r.restrictDirect) && <p className="field-hint">Restrito: quem tem o papel não abre conversas diretas nem chamadas com outras pessoas restritas.</p>}
             {restrictedWithUser && (
@@ -497,6 +549,7 @@ function UserForm({ id, roles, onClose, onSaved }: { id?: string; roles: any[]; 
               {!id && <Toggle checked={f.joinDefaultChannels} onChange={(v) => setF({ ...f, joinDefaultChannels: v })} label="Entrar nos canais padrão" />}
             </div>
           </section>
+          {id && <EffectiveAccess userId={id} />}
           {id && (
             <section className="form-section">
               <h3 className="form-section-title">

@@ -275,11 +275,11 @@ describe('Fase 0: configurações e permissões', () => {
     await seedPermissions();
     const rows = (await pool.query('SELECT id, grp, roles FROM permissions WHERE id = ANY($1) ORDER BY id', [five])).rows;
     expect(rows).toEqual([
-      { id: 'create-jira-issue', grp: 'integrations', roles: ['admin', 'user'] },
-      { id: 'manage-jira', grp: 'integrations', roles: ['admin'] },
-      { id: 'manage-msteams', grp: 'integrations', roles: ['admin'] },
-      { id: 'start-msteams-meeting', grp: 'integrations', roles: ['admin', 'user'] },
-      { id: 'use-jira', grp: 'integrations', roles: ['admin', 'user'] },
+      { id: 'create-jira-issue', grp: 'chat', roles: ['admin', 'user'] },
+      { id: 'manage-jira', grp: 'admin', roles: ['admin'] },
+      { id: 'manage-msteams', grp: 'admin', roles: ['admin'] },
+      { id: 'start-msteams-meeting', grp: 'chat', roles: ['admin', 'user'] },
+      { id: 'use-jira', grp: 'chat', roles: ['admin', 'user'] },
     ]);
     expect(five.filter((p) => OPERACAO_PERMISSIONS.includes(p))).toEqual([]);
     const perms = (await api('GET', 'permissions.listAll', {}, A)).update as { _id: string; roles: string[] }[];

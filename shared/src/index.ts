@@ -260,6 +260,8 @@ export interface Role {
   protected: boolean;
   mandatory2fa: boolean;
   restrictDirect: boolean; // "Restrito em conversas diretas" (só papéis globais)
+  root?: boolean; // papel raiz (Administrador): passa pela hierarquia de concessão
+  delegable?: string[]; // papéis que quem tem este pode dar e editar mesmo sem ter tudo o que eles dão
 }
 
 export interface Permission {

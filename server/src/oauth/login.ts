@@ -3,12 +3,13 @@ import dns from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import { many, one, query } from '../db/pool';
+import { many, one, pool, query } from '../db/pool';
 import { ApiError } from '../lib/errors';
 import { newId, randomToken, sha256 } from '../lib/ids';
 import { audit } from '../services/audit';
 import { getSetting } from '../services/settings';
 import { callbackUrl, effectiveEndpoints, effectiveFieldMap, effectiveScope, microsoftMultiTenant } from './providers';
+import { recordHistory } from '../services/rbacHistory';
 
 // Fluxo authorization code + PKCE (S256): /oauth/:id/login guarda state e verificador no Postgres e
 // redireciona ao provedor; /oauth/:id/callback valida o state (uso único, mesmo navegador), troca o
@@ -377,6 +378,7 @@ export async function syncRoles(p: any, user: any, ident: OAuthIdentity, previou
   const same = next.length === user.roles.length && next.every((r) => user.roles.includes(r));
   if (same) return user;
   const row = await one('UPDATE users SET roles = $2, updated_at = now() WHERE id = $1 RETURNING *', [user.id, next]);
+  await recordHistory(pool, { entityType: 'user', entityId: user.id, entityLabel: user.username, action: 'update', source: 'oauth', actor: null, changes: [{ field: 'roles', before: user.roles, after: next }] });
   await audit({ id: user.id, username: user.username }, 'auth.oauth.roles', { userId: user.id, provider: p.id }, { before: user.roles, after: next });
   return row;
 }

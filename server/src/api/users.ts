@@ -1,10 +1,13 @@
 import type { FastifyInstance } from 'fastify';
-import { many, one } from '../db/pool';
+import { many, one, pool } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
 import { audit } from '../services/audit';
 import { mapUser } from '../services/mappers';
 import { getUserRoles, hasPermission, permissionsForRoles } from '../services/permissions';
 import { getSetting } from '../services/settings';
+import { bus } from '../realtime/bus';
+import { assertCanManageUser, assertRoleChange, writeUserRoles } from '../services/rbac';
+import { recordHistory } from '../services/rbacHistory';
 import {
   actorOf,
   createPersonalToken,
@@ -160,7 +163,10 @@ export function usersRoutes(app: FastifyInstance) {
     return { ...r, count: r.sessions.length, offset: paging(query).offset };
   });
   route(app, 'POST', 'sessions.logout', { permissions: ['view-device-management', 'logout-other-user'] }, async (req, _rep, ctx) => {
-    await revokeSession(ctx, str(b(req).sessionId, 'sessionId'), true);
+    const sid = str(b(req).sessionId, 'sessionId');
+    const owner = await one<{ user_id: string }>('SELECT user_id FROM sessions WHERE id = $1', [sid]);
+    if (owner) await assertCanManageUser(ctx, owner.user_id);
+    await revokeSession(ctx, sid, true);
     return {};
   });
 
@@ -220,6 +226,7 @@ export function usersRoutes(app: FastifyInstance) {
     if (body.userId || body.username) {
       const u = await resolveUserParam(body);
       if (u.id !== ctx.userId && !(await hasPermission(ctx.userId, 'edit-other-user-avatar'))) throw forbidden();
+      await assertCanManageUser(ctx, u.id);
       target = u.id;
     }
     await resetAvatar(target);
@@ -248,6 +255,7 @@ export function usersRoutes(app: FastifyInstance) {
       data = Buffer.from(m[2], 'base64');
     }
     if (target !== ctx.userId && !(await hasPermission(ctx.userId, 'edit-other-user-avatar'))) throw forbidden();
+    if (target !== ctx.userId) await assertCanManageUser(ctx, target);
     if (target === ctx.userId && !getSetting('Accounts_AllowUserAvatarChange')) throw forbidden('Alteração de avatar desativada.');
     if (!data) throw badRequest('error-invalid-image', 'Imagem ausente.');
     await setAvatar(target, type, data);
@@ -312,6 +320,8 @@ export function usersRoutes(app: FastifyInstance) {
     const body = b(req);
     const roles = strArray(body.roles);
     if (roles.includes('admin') && !(await hasPermission(ctx.userId, 'assign-admin-role'))) throw forbidden();
+    // Hierarquia de concessão: só dá papéis que cabem no que o ator tem (ou delegados a ele).
+    if (roles.length) await assertRoleChange(ctx, '', [], roles);
     const row = await createUser(
       {
         username: str(body.username, 'username'),
@@ -327,43 +337,58 @@ export function usersRoutes(app: FastifyInstance) {
       },
       actorOf(ctx),
     );
+    if (roles.length) await recordHistory(pool, { entityType: 'user', entityId: row.id, entityLabel: row.username, action: 'create', actor: { id: ctx.userId, username: ctx.username }, changes: [{ field: 'roles', before: null, after: row.roles }] });
     return { user: mapUser(row, { full: true }) };
   });
   route(app, 'POST', 'users.update', { permissions: ['edit-other-user-info'] }, async (req, _rep, ctx) => {
     const body = b(req);
-    const d = body.data ?? {};
+    const d = { ...(body.data ?? {}) };
     const userId = str(body.userId, 'userId');
+    // Hierarquia: não altera quem tem papel acima do ator (inclusive senha e dados).
+    await assertCanManageUser(ctx, userId);
+    let roles: string[] | undefined;
     if (d.roles) {
-      const roles = strArray(d.roles);
-      if (roles.includes('admin') && !(await hasPermission(ctx.userId, 'assign-admin-role'))) throw forbidden();
-      const known = new Set((await many('SELECT id FROM roles')).map((r) => r.id));
-      const bad = roles.filter((r) => !known.has(r));
-      if (bad.length) throw badRequest('error-invalid-role', `Papel inexistente: ${bad.join(', ')}`);
-      d.roles = roles;
+      roles = strArray(d.roles);
+      const current = (await one<{ roles: string[] }>('SELECT roles FROM users WHERE id = $1', [userId]))?.roles ?? [];
+      const changed = [...roles.filter((r) => !current.includes(r)), ...current.filter((r) => !roles!.includes(r))];
+      if (changed.includes('admin') && !(await hasPermission(ctx.userId, 'assign-admin-role'))) throw forbidden();
+      await assertRoleChange(ctx, userId, current, roles);
+      delete d.roles;
     }
     if (d.password && !(await hasPermission(ctx.userId, 'edit-other-user-password'))) throw forbidden();
-    const row = await updateUser(ctx, userId, d, { asAdmin: true });
+    let row = await updateUser(ctx, userId, d, { asAdmin: true });
+    if (roles) {
+      // Os papéis gravam com o histórico, na mesma transação dele.
+      await writeUserRoles(null, userId, roles, { actor: ctx });
+      row = await one('SELECT * FROM users WHERE id = $1', [userId]);
+      bus.publish({ all: true }, { type: 'user', action: 'updated', user: mapUser(row) });
+    }
     return { user: mapUser(row, { full: true }) };
   });
   route(app, 'POST', 'users.setActiveStatus', { permissions: ['edit-other-user-active-status'] }, async (req, _rep, ctx) => {
     const body = b(req);
+    await assertCanManageUser(ctx, str(body.userId, 'userId'));
     const row = await updateUser(ctx, str(body.userId, 'userId'), { active: !!bool(body.activeStatus) }, { asAdmin: true });
     return { user: { _id: row.id, active: row.active } };
   });
   route(app, 'POST', 'users.delete', { permissions: ['delete-user'] }, async (req, _rep, ctx) => {
     const u = await resolveUserParam(b(req));
+    if (u.id === ctx.userId) throw badRequest('error-action-not-allowed', 'Você não pode excluir a própria conta por aqui.');
+    await assertCanManageUser(ctx, u.id);
     await deleteUser(ctx, u.id, { confirmRelinquish: !!bool(b(req).confirmRelinquish) });
     return {};
   });
   route(app, 'POST', 'users.logout', {}, async (req, _rep, ctx) => {
     const userId = b(req).userId ?? ctx.userId;
     if (userId !== ctx.userId && !(await hasPermission(ctx.userId, 'logout-other-user'))) throw forbidden();
+    if (userId !== ctx.userId) await assertCanManageUser(ctx, userId);
     const n = await revokeAllSessions(userId);
     await audit(actorOf(ctx), 'user.logout.all', { userId }, { sessions: n });
     return { message: `Sessões encerradas: ${n}` };
   });
   route(app, 'POST', 'users.resetTOTP', { permissions: ['edit-other-user-totp'] }, async (req, _rep, ctx) => {
     const userId = str(b(req).userId, 'userId');
+    await assertCanManageUser(ctx, userId);
     const { query } = await import('../db/pool');
     await query("UPDATE users SET totp_enabled = false, totp_secret = NULL, backup_codes = '{}' WHERE id = $1", [userId]);
     await audit(actorOf(ctx), 'user.2fa.reset', { userId });

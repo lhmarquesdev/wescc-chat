@@ -13,6 +13,7 @@ import './styles/room.css';
 import './styles/panels.css';
 import './styles/calls.css';
 import './styles/admin.css';
+import './styles/rbac.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';

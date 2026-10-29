@@ -1,10 +1,11 @@
 import { SAML, ValidateInResponseTo, type CacheProvider, type Profile } from '@node-saml/node-saml';
 import type { FastifyInstance } from 'fastify';
-import { many, one } from '../db/pool';
+import { many, one, pool } from '../db/pool';
 import { ApiError } from '../lib/errors';
 import { audit } from '../services/audit';
 import { getSetting } from '../services/settings';
 import { issueSsoCredential, safeRedirect, siteUrl, ssoErrorPage as errorPage, ssoLoginUrl } from '../services/sso';
+import { recordHistory } from '../services/rbacHistory';
 
 // Login único via SAML 2.0 (SP-initiated): /saml/login redireciona ao IdP, /saml/acs recebe a
 // resposta, cria ou atualiza o usuário e devolve ao cliente web uma credencial de uso único
@@ -97,7 +98,10 @@ async function syncSamlRoles(user: any, granted: string[]) {
   }
   const row = await one('UPDATE users SET roles = $2, saml_synced_roles = $3, updated_at = now() WHERE id = $1 RETURNING *', [user.id, next, granted]);
   const same = next.length === user.roles.length && next.every((r) => user.roles.includes(r));
-  if (!same) await audit({ id: user.id, username: user.username }, 'auth.saml.roles', { userId: user.id }, { before: user.roles, after: next });
+  if (!same) {
+    await recordHistory(pool, { entityType: 'user', entityId: user.id, entityLabel: user.username, action: 'update', source: 'saml', actor: null, changes: [{ field: 'roles', before: user.roles, after: next }] });
+    await audit({ id: user.id, username: user.username }, 'auth.saml.roles', { userId: user.id }, { before: user.roles, after: next });
+  }
   return row;
 }
 

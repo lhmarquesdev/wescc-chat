@@ -4,18 +4,17 @@ import { badRequest, forbidden, notFound } from '../lib/errors';
 import { audit, listAuditLog } from '../services/audit';
 import { directRestrictionReport } from '../services/direct';
 import { withExtra } from '../services/messages';
-import { listPermissions, listRoles, mapRole, setPermissionRoles, hasPermission, loadPermissions, roleScope } from '../services/permissions';
+import { listPermissions, listRoles, hasPermission, roleScope } from '../services/permissions';
+import { assertRoleChange, createRole, deleteRole, updatePermissionMatrix, updateRole, writeUserRoles } from '../services/rbac';
 import { getSetting, isKnownSetting, isSecretSetting, listSettings, updateSettings } from '../services/settings';
 import { engagementChannels, engagementMessages, engagementUsers, workspaceStatistics } from '../services/stats';
 import { runRetention } from '../services/retention';
 import { notifySubscription } from '../services/rooms';
 import { mapUser } from '../services/mappers';
-import { actorOf, invalidateMandatory2faCache } from '../services/users';
+import { actorOf } from '../services/users';
 import { bus } from '../realtime/bus';
 import { b, bool, paging, q, route, str, strArray } from './http';
 import { resolveUserParam } from './users';
-
-const RESTRICT_GLOBAL_ONLY = 'Só papéis globais podem ser restritos em conversas diretas.';
 
 // A web recarrega "me" (e as permissões) ao ver os papéis mudarem; as outras telas atualizam a política de DM.
 function publishRoles(user: { id: string; username: string }, roles: string[] | undefined) {
@@ -55,7 +54,8 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'POST', 'permissions.update', { permissions: ['access-permissions'] }, async (req, _rep, ctx) => {
     const perms = b(req).permissions;
     if (!Array.isArray(perms)) throw badRequest('error-invalid-params', 'permissions deve ser uma lista.');
-    await setPermissionRoles(perms.map((p: any) => ({ _id: String(p._id), roles: strArray(p.roles) })));
+    // Mesma hierarquia e mesmo histórico do editor de papéis.
+    await updatePermissionMatrix(ctx, perms.map((p: any) => ({ _id: String(p._id), roles: strArray(p.roles) })));
     await audit(actorOf(ctx), 'permissions.changed', {}, { permissions: perms });
     return { permissions: await listPermissions() };
   });
@@ -63,55 +63,26 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'POST', 'roles.create', { permissions: ['access-permissions', 'manage-roles'] }, async (req, _rep, ctx) => {
     const body = b(req);
     const name = str(body.name, 'name', { max: 60 });
-    if (!/^[a-zA-Z0-9 _.-]+$/.test(name)) throw badRequest('error-invalid-role-name', 'Nome de papel inválido.');
-    if (await one('SELECT 1 FROM roles WHERE lower(id) = lower($1)', [name])) throw badRequest('error-duplicate-role-names-not-allowed', 'Já existe um papel com esse nome.');
-    const scope = body.scope === 'Subscriptions' ? 'Subscriptions' : 'Users';
-    const restrictDirect = !!bool(body.restrictDirect);
-    if (restrictDirect && scope !== 'Users') throw badRequest('error-invalid-params', RESTRICT_GLOBAL_ONLY);
-    const row = await one('INSERT INTO roles (id, description, scope, protected, mandatory_2fa, restrict_direct) VALUES ($1,$2,$3,false,$4,$5) RETURNING *', [
-      name,
-      String(body.description ?? ''),
-      scope,
-      !!body.mandatory2fa,
-      restrictDirect,
-    ]);
-    await loadPermissions();
-    bus.permissionsChanged();
+    const role = await createRole(ctx, name, { description: String(body.description ?? ''), scope: body.scope, mandatory2fa: !!body.mandatory2fa, restrictDirect: !!bool(body.restrictDirect) }, { canEditPermissions: false });
     await audit(actorOf(ctx), 'role.created', { role: name });
-    return { role: mapRole(row) };
+    return { role };
   });
   route(app, 'POST', 'roles.update', { permissions: ['access-permissions', 'manage-roles'] }, async (req, _rep, ctx) => {
     const body = b(req);
     const id = str(body.roleId, 'roleId');
-    const existing = await one('SELECT * FROM roles WHERE id = $1', [id]);
-    if (!existing) throw notFound('error-invalid-roleId', 'Papel não encontrado.');
     // Vale também para papéis protegidos (ex.: restringir o papel user numa instalação só de operação).
-    const restrictDirect = bool(body.restrictDirect);
-    const scope = existing.protected ? existing.scope : (body.scope ?? existing.scope);
-    if ((restrictDirect ?? existing.restrict_direct) && scope !== 'Users') throw badRequest('error-invalid-params', RESTRICT_GLOBAL_ONLY);
-    const row = await one(
-      `UPDATE roles SET description = COALESCE($2, description), mandatory_2fa = COALESCE($3, mandatory_2fa), scope = CASE WHEN protected THEN scope ELSE COALESCE($4, scope) END,
-         restrict_direct = COALESCE($5, restrict_direct)
-       WHERE id = $1 RETURNING *`,
-      [id, body.description ?? null, body.mandatory2fa ?? null, body.scope ?? null, restrictDirect ?? null],
+    const { role } = await updateRole(
+      ctx,
+      id,
+      { description: body.description ?? undefined, mandatory2fa: body.mandatory2fa ?? undefined, scope: body.scope ?? undefined, restrictDirect: bool(body.restrictDirect) },
+      { canEditPermissions: false, canEditRole: true },
     );
-    invalidateMandatory2faCache();
-    await loadPermissions();
-    bus.permissionsChanged();
     await audit(actorOf(ctx), 'role.updated', { role: id }, { fields: Object.keys(body) });
-    return { role: mapRole(row) };
+    return { role };
   });
   route(app, 'POST', 'roles.delete', { permissions: ['access-permissions', 'manage-roles'] }, async (req, _rep, ctx) => {
     const id = str(b(req).roleId, 'roleId');
-    const role = await one('SELECT * FROM roles WHERE id = $1', [id]);
-    if (!role) throw notFound('error-invalid-roleId', 'Papel não encontrado.');
-    if (role.protected) throw badRequest('error-role-protected', 'Papéis do sistema não podem ser excluídos.');
-    const inUse = await one(`SELECT (SELECT count(*) FROM users WHERE $1 = ANY(roles)) + (SELECT count(*) FROM subscriptions WHERE $1 = ANY(roles)) AS n`, [id]);
-    if (Number(inUse.n) > 0) throw badRequest('error-role-in-use', 'O papel ainda está atribuído a usuários.');
-    await query('DELETE FROM roles WHERE id = $1', [id]);
-    await query('UPDATE permissions SET roles = array_remove(roles, $1)', [id]);
-    await loadPermissions();
-    bus.permissionsChanged();
+    await deleteRole(ctx, id);
     await audit(actorOf(ctx), 'role.deleted', { role: id });
     return {};
   });
@@ -127,8 +98,10 @@ export function adminRoutes(app: FastifyInstance) {
       await query('UPDATE subscriptions SET roles = array_append(array_remove(roles, $3), $3), updated_at = now() WHERE room_id = $1 AND user_id = $2', [body.roomId, user.id, role]);
       await notifySubscription(user.id, body.roomId, 'updated');
     } else {
-      const row = await one('UPDATE users SET roles = array_append(array_remove(roles, $2), $2), updated_at = now() WHERE id = $1 RETURNING roles', [user.id, role]);
-      publishRoles(user, row?.roles);
+      const next = [...new Set([...user.roles, role])];
+      await assertRoleChange(ctx, user.id, user.roles, next);
+      const { row } = await writeUserRoles(null, user.id, next, { actor: ctx });
+      publishRoles(user, row.roles);
     }
     await audit(actorOf(ctx), 'role.user.added', { role, userId: user.id, roomId: body.roomId });
     return { role: { _id: role } };
@@ -137,21 +110,20 @@ export function adminRoutes(app: FastifyInstance) {
     const body = b(req);
     const role = str(body.roleId ?? body.roleName, 'roleId');
     const user = await resolveUserParam(body);
-    if (role === 'admin') {
-      const n = await one(`SELECT count(*)::int AS n FROM users WHERE 'admin' = ANY(roles) AND active`);
-      if (n.n <= 1 && user.roles.includes('admin')) throw badRequest('error-action-not-allowed', 'Não é possível remover o último administrador.');
-    }
     if (body.roomId) {
       await query('UPDATE subscriptions SET roles = array_remove(roles, $3), updated_at = now() WHERE room_id = $1 AND user_id = $2', [body.roomId, user.id, role]);
       await notifySubscription(user.id, body.roomId, 'updated');
     } else {
-      const row = await one('UPDATE users SET roles = array_remove(roles, $2), updated_at = now() WHERE id = $1 RETURNING roles', [user.id, role]);
-      publishRoles(user, row?.roles);
+      const next = user.roles.filter((r: string) => r !== role);
+      await assertRoleChange(ctx, user.id, user.roles, next);
+      // writeUserRoles recusa tirar o último administrador.
+      const { row } = await writeUserRoles(null, user.id, next, { actor: ctx });
+      publishRoles(user, row.roles);
     }
     await audit(actorOf(ctx), 'role.user.removed', { role, userId: user.id, roomId: body.roomId });
     return {};
   });
-  route(app, 'GET', 'roles.getUsersInRole', { permissions: ['access-permissions', 'view-user-administration'] }, async (req) => {
+  route(app, 'GET', 'roles.getUsersInRole', { permissions: ['access-permissions', 'view-permissions', 'view-user-administration'] }, async (req) => {
     const role = str(q(req).role, 'role');
     const p = paging(q(req));
     const rid = q(req).roomId;
@@ -164,7 +136,7 @@ export function adminRoutes(app: FastifyInstance) {
     return { users: rows.map((r) => mapUser(r, { full: true })), total: Number(rows[0]?.total ?? 0) };
   });
   // Diagnóstico das conversas diretas restritas: papéis, exceções, brechas por outras permissões e DMs bloqueadas.
-  route(app, 'GET', 'directRestriction.report', { permissions: ['access-permissions'] }, async () => ({ report: await directRestrictionReport() }));
+  route(app, 'GET', 'directRestriction.report', { permissions: ['access-permissions', 'view-permissions'] }, async () => ({ report: await directRestrictionReport() }));
 
   // ---------- Estatísticas e dashboard de engajamento ----------
   route(app, 'GET', 'statistics', { permissions: ['view-statistics'] }, async () => workspaceStatistics());
