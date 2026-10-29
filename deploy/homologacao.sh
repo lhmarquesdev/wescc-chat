@@ -121,3 +121,6 @@ printf '%s\n' "$target_sha" > "$config/deployed-sha"
 echo "Deploy concluído: $target_sha"
 echo "Backup: $backup_dir"
 echo "URL: https://$domain"
+if ! python3 "$source_dir/deploy/prune-images.py" "$new_image" "$old_image" --apply; then
+  echo 'AVISO: deploy concluído, mas a limpeza de imagens precisa de conferência.' >&2
+fi
