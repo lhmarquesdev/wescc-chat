@@ -314,11 +314,13 @@ async function setTheme(theme: Theme) {
 }
 
 function useAdminHome() {
-  const canAdmin = usePermission(['view-administration', 'view-user-administration', 'view-room-administration', 'access-permissions', 'view-statistics', 'can-audit', 'view-engagement-dashboard', 'run-import', 'view-import-operations']);
+  // Figurinhas: curadoria, emojis e moderação também abrem a Administração.
+  const canAdmin = usePermission(['view-administration', 'view-user-administration', 'view-room-administration', 'access-permissions', 'view-statistics', 'can-audit', 'view-engagement-dashboard', 'run-import', 'view-import-operations', 'manage-sticker-packs', 'manage-emoji', 'view-moderation-console', 'manage-moderation-actions']);
   const canStats = usePermission('view-statistics');
   const canImport = usePermission(['run-import', 'view-import-operations']);
   // Quem só cuida de importações cai direto nelas, não em Informações (que exige view-statistics).
-  return canAdmin ? (!canStats && canImport ? '/admin/import' : '/admin/info') : null;
+  // Figurinhas: os outros vão para /admin, e a Administração abre a primeira seção que a pessoa pode ver.
+  return canAdmin ? (!canStats && canImport ? '/admin/import' : '/admin') : null;
 }
 
 // Status, mensagem de status, conta, administração, atendimento, tema, instalar e sair. No celular vira folha.

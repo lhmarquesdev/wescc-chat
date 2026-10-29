@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { Message } from '@shared/index';
+import { stickerPreviewText } from '@shared/stickers';
 import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
 import { EMOJI, searchEmoji } from '../lib/emoji';
 import { formatBytes } from '../lib/format';
 import { realtime } from '../lib/realtime';
+import { registerComposer, useStickers } from '../lib/stickers';
 import { useSetting, useStore } from '../lib/store';
 import { namesIn, useNames } from '../lib/names';
-import { EmojiPicker } from './EmojiPicker';
 import { Icon, type IconName } from './Icon';
 import { fileIconName, FileTile, setEditingMessage } from './MessageItem';
 import { Portal, useAnchored, useIsPhone, useMedia } from './overlay';
+import { ExpressionPicker } from './stickers/ExpressionPicker';
+import { StickerHost } from './stickers/StickerMenuItems';
+import { StickerSuggestions } from './stickers/StickerSuggestions';
 import { Avatar, Modal } from './ui';
 
 interface Suggestion {
@@ -43,7 +47,18 @@ function disabledIconFor(reason?: string): IconName {
   return 'composer-locked';
 }
 
-export function Composer({
+// Os diálogos das figurinhas (editor, novo pacote) abrem do seletor e ficam abertos depois que ele fecha.
+export function Composer(props: ComposerProps) {
+  return (
+    <StickerHost>
+      <ComposerView {...props} />
+    </StickerHost>
+  );
+}
+
+type ComposerProps = Parameters<typeof ComposerView>[0];
+
+function ComposerView({
   rid,
   tmid,
   disabled,
@@ -101,6 +116,21 @@ export function Composer({
   const listId = useId();
   const draftKey = `wescc.draft.${rid}${tmid ? `.${tmid}` : ''}`;
   const anch = useAnchored({ open: sugs.length > 0, placement: 'top-start', gap: 6, minHeight: 120 });
+  // Figurinhas: a sala (onde dá para enviar) e o pedido "Ver no seletor" do cartão da figurinha.
+  const room = useStore((s) => s.rooms[rid]);
+  const pickerRequest = useStickers((s) => s.pickerRequest);
+  const [request, setRequest] = useState<{ packId?: string; seq: number } | null>(null);
+  const seenRequest = useRef(useStickers.getState().pickerRequest?.seq ?? 0);
+  useEffect(() => (disabled ? undefined : registerComposer(rid, tmid ?? null)), [rid, tmid, disabled]);
+  useEffect(() => {
+    const r = pickerRequest;
+    if (!r || r.seq <= seenRequest.current || disabled) return;
+    const here = r.rid ? r.rid === rid && (r.tmid ?? null) === (tmid ?? null) : !tmid;
+    if (!here) return;
+    seenRequest.current = r.seq;
+    setRequest({ packId: r.packId, seq: r.seq });
+    setPicker(true);
+  }, [pickerRequest, rid, tmid, disabled]);
 
   useEffect(() => {
     try {
@@ -406,7 +436,20 @@ export function Composer({
     });
   };
 
-  const closePicker = useCallback(() => setPicker(false), []);
+  const closePicker = useCallback(() => {
+    setPicker(false);
+    setRequest(null);
+  }, []);
+  // Figurinha enviada pela sugestão: o emoji digitado não vai junto.
+  const clearAfterSticker = () => {
+    setText('');
+    saveDraft('');
+    reqSeq.current++;
+    setSugs([]);
+    sendTyping(false);
+    setQuoting(null);
+  };
+  const ackPending = !!ackOption && askAck && !tmid;
   const cancelPending = () => (setPending([]), setFileDesc(''));
   const confirmPending = () => (void doUpload(pending, fileDesc), setPending([]), setFileDesc(''));
 
@@ -459,7 +502,7 @@ export function Composer({
           <span className="composer-bar-text">
             Citando <strong>{quoteName}</strong>
           </span>
-          <span className="composer-bar-excerpt">{quoting.msg.slice(0, 160)}</span>
+          <span className="composer-bar-excerpt">{(quoting.msg || (quoting.sticker ? stickerPreviewText(quoting.sticker, { withName: false }) : '')).slice(0, 160)}</span>
           <button type="button" className="icon-btn" title="Remover citação" aria-label="Remover citação" onClick={() => setQuoting(null)}>
             <Icon name="close" size={16} />
           </button>
@@ -511,6 +554,17 @@ export function Composer({
           </div>
         </Portal>
       )}
+      <StickerSuggestions
+        text={text}
+        room={room}
+        tmid={tmid ?? null}
+        tshow={tmid ? alsoChannel : undefined}
+        quotingId={quoting?._id}
+        anchor={box.current}
+        input={ta.current}
+        hidden={!!editing || uploads.length > 0 || pending.length > 0 || ackPending || sugs.length > 0}
+        onSent={clearAfterSticker}
+      />
       <div className="composer-row">
         <textarea
           ref={ta}
@@ -609,7 +663,23 @@ export function Composer({
         )}
       </div>
       {picker && (
-        <EmojiPicker anchor={emojiBtn.current} reference={box.current} placement="top-start" gap={6} onClose={closePicker} onPick={(c) => (insertAtCaret(`:${c}: `), setPicker(false))} />
+        <ExpressionPicker
+          anchor={emojiBtn.current}
+          reference={box.current}
+          placement="top-start"
+          gap={6}
+          room={room}
+          tmid={tmid ?? null}
+          tshow={tmid ? alsoChannel : undefined}
+          quotingId={quoting?._id}
+          editing={!!editing}
+          ackPending={ackPending}
+          request={request}
+          onClose={closePicker}
+          onEmoji={(c) => (insertAtCaret(`:${c}: `), closePicker())}
+          onSent={() => setQuoting(null)}
+          focusComposer={() => ta.current?.focus({ preventScroll: true })}
+        />
       )}
       {drop && (
         <Portal>

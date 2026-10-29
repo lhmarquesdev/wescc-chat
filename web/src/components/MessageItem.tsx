@@ -21,11 +21,15 @@ import { startCall } from '../lib/calls';
 import { formatBytes, formatDateTime, formatDuration, formatRelative, formatTime, formatWhen, nameList, plural, roomPath, systemIcon, systemText } from '../lib/format';
 import { resolveEmoji } from '../lib/emoji';
 import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
+import { canRemoveEverywhere, useStickers } from '../lib/stickers';
 import { useNames } from '../lib/names';
 import { avatarBust, useSetting, useStore } from '../lib/store';
 import { EmojiPicker, recentEmoji } from './EmojiPicker';
 import { Icon, type IconName } from './Icon';
 import { Portal, Sheet, useEscape, useFocusTrap, useMedia, useScrollLock } from './overlay';
+import { StickerCard } from './stickers/StickerCard';
+import { CreateStickerItem, StickerHost, StickerMenuItems, StickerRemoveItem, useCreateSticker } from './stickers/StickerMenuItems';
+import { StickerView } from './stickers/StickerView';
 import { Avatar, confirmDialog, Empty, Field, Menu, Modal, SkeletonList, useAsync } from './ui';
 
 export interface MessageActions {
@@ -219,7 +223,7 @@ function Lightbox({ src, title, download, m, onClose }: { src: string; title?: s
 }
 
 // Imagem do anexo: caixa reservada (esqueleto até carregar), ampliar e baixar no hover, abre no visualizador.
-function ImageView({ src, title, download, m, thumb }: { src: string; title?: string; download?: string; m?: Message; thumb?: boolean }) {
+function ImageView({ src, title, download, m, thumb, onCreateSticker }: { src: string; title?: string; download?: string; m?: Message; thumb?: boolean; onCreateSticker?: () => void }) {
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const done = () => setLoaded(true);
@@ -238,6 +242,11 @@ function ImageView({ src, title, download, m, thumb }: { src: string; title?: st
               <Icon name="download" size={16} />
             </a>
           )}
+          {onCreateSticker && (
+            <button type="button" className="glass-btn" title="Criar figurinha" aria-label="Criar figurinha" onClick={onCreateSticker}>
+              <Icon name="sticker-create" size={16} />
+            </button>
+          )}
         </span>
       )}
       {open && <Lightbox src={src} title={title} download={download} m={m} onClose={() => setOpen(false)} />}
@@ -248,13 +257,13 @@ function ImageView({ src, title, download, m, thumb }: { src: string; title?: st
 // ---------- Anexos ----------
 
 // Arquivo enviado pelo chat (type 'file'): imagem, vídeo, áudio ou cartão de download.
-function FileAttachment({ a, m }: { a: Attachment; m?: Message }) {
+function FileAttachment({ a, m, createSticker }: { a: Attachment; m?: Message; createSticker?: StickerSource }) {
   const link = safeHref(a.title_link);
   const image = safeHref(a.image_url);
   if (image)
     return (
       <div className="att att-media">
-        <ImageView src={image} title={a.title} download={link} m={m} />
+        <ImageView src={image} title={a.title} download={link} m={m} onCreateSticker={createSticker && createSticker.url === a.image_url ? createSticker.open : undefined} />
         {a.description && <div className="att-desc">{a.description}</div>}
       </div>
     );
@@ -367,7 +376,10 @@ function QuoteAttachment({ a }: { a: Attachment }) {
   );
 }
 
-function AttachmentView({ a, m }: { a: Attachment; m?: Message }) {
+// "Criar figurinha" da imagem enviada (só a do arquivo de origem ganha o botão).
+type StickerSource = { url: string; open: () => void };
+
+function AttachmentView({ a, m, createSticker }: { a: Attachment; m?: Message; createSticker?: StickerSource }) {
   if (a.message_link) return <QuoteAttachment a={a} />;
   // Arquivo de mensagem importada que ainda está na origem ("Baixar arquivos pendentes" na importação). O texto vem
   // do servidor, que sabe se ele ainda vai ser baixado ou se não está disponível (externo, apagado na origem).
@@ -379,7 +391,7 @@ function AttachmentView({ a, m }: { a: Attachment; m?: Message }) {
       </div>
     );
   // Anexos de arquivos sempre têm type 'file'; o link /file-upload/ cobre mensagens antigas.
-  if (a.type === 'file' || a.title_link?.startsWith('/file-upload/')) return <FileAttachment a={a} m={m} />;
+  if (a.type === 'file' || a.title_link?.startsWith('/file-upload/')) return <FileAttachment a={a} m={m} createSticker={createSticker} />;
   return <RichAttachment a={a} m={m} />;
 }
 
@@ -734,7 +746,10 @@ class MessageBoundary extends Component<{ m: Message; children: ReactNode }, { f
 export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
   return (
     <MessageBoundary m={props.m}>
-      <MessageView {...props} />
+      {/* Figurinhas: os diálogos que abrem do menu (que desmonta ao fechar) ficam aqui. */}
+      <StickerHost>
+        <MessageView {...props} />
+      </StickerHost>
     </MessageBoundary>
   );
 });
@@ -761,6 +776,8 @@ interface MenuItem {
   run: () => void;
   danger?: boolean;
 }
+// Itens que são componentes (os das figurinhas): recebem o close do menu e o papel da folha.
+type MenuEntry = MenuItem | { key: string; el: (close: () => void, sheetRole?: boolean) => ReactNode };
 
 function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highlight, footer }: MessageItemProps) {
   const me = useStore((s) => s.me)!;
@@ -770,6 +787,9 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   const [sheet, setSheet] = useState(false);
   const [receipts, setReceipts] = useState(false);
   const [report, setReport] = useState(false);
+  const [stickerCard, setStickerCard] = useState<HTMLElement | null>(null);
+  const stickerGone = useStickers((st) => !!m.sticker && (m.sticker.removed || st.removed.has(m.sticker.fileId)));
+  const createSticker = useCreateSticker(m, inThread);
   const editing = useIsEditing(m._id);
   const coarse = useMedia('(hover: none)');
   const press = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
@@ -810,8 +830,8 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   };
 
   // Itens do "Mais" (e da folha do toque longo), em grupos separados por linha.
-  const canEdit = !m.t && canReply && ((own && allowEdit) || (!own && perms.includes('edit-message') && canModerate));
-  const opt = (on: unknown, item: MenuItem) => (on ? item : null);
+  const canEdit = !m.t && !m.sticker && canReply && ((own && allowEdit) || (!own && perms.includes('edit-message') && canModerate));
+  const opt = (on: unknown, item: MenuEntry) => (on ? item : null);
   const groups = [
     [
       opt(canEdit, { key: 'edit', icon: 'edit', label: 'Editar', run: () => actions.onEdit?.(m) }),
@@ -831,34 +851,46 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
         run: () => void api.post(starred ? 'chat.unStarMessage' : 'chat.starMessage', { messageId: m._id }).catch(fail),
       }),
       { key: 'link', icon: 'copy-link', label: 'Copiar link', run: copyLink } as MenuItem,
-      { key: 'text', icon: 'copy', label: 'Copiar texto', run: () => copyText(m.msg, 'Texto copiado.') } as MenuItem,
+      opt(!m.sticker, { key: 'text', icon: 'copy', label: 'Copiar texto', run: () => copyText(m.msg, 'Texto copiado.') }),
       opt(!own, { key: 'unread', icon: 'mark-unread', label: 'Marcar como não lida', run: () => void api.post('subscriptions.unread', { firstUnreadMessage: { _id: m._id } }).catch(fail) }),
       opt(showReceipts, { key: 'receipts', icon: 'receipts', label: 'Confirmações de leitura', run: () => setReceipts(true) }),
+      opt(m.sticker, { key: 'sticker', el: (close, sheetRole) => <StickerMenuItems message={m} close={close} sheetRole={sheetRole} /> }),
+      opt(createSticker, { key: 'create-sticker', el: (close, sheetRole) => <CreateStickerItem message={m} close={close} sheetRole={sheetRole} inThread={inThread} /> }),
     ],
     [opt(!own, { key: 'report', icon: 'report', label: 'Denunciar', run: () => setReport(true) })],
-    [opt(own ? allowDelete : canModerate || perms.includes('delete-message'), { key: 'del', icon: 'delete', label: 'Apagar', run: () => void del(), danger: true })],
+    [
+      opt(m.sticker && !stickerGone && canRemoveEverywhere(m.sticker), {
+        key: 'remove-all',
+        el: (close, sheetRole) => <StickerRemoveItem message={m} close={close} sheetRole={sheetRole} />,
+      }),
+      opt(own ? allowDelete : canModerate || perms.includes('delete-message'), { key: 'del', icon: 'delete', label: 'Apagar', run: () => void del(), danger: true }),
+    ],
   ]
-    .map((g) => g.filter((x): x is MenuItem => !!x))
+    .map((g) => g.filter((x): x is MenuEntry => !!x))
     .filter((g) => g.length);
   const renderItems = (close: () => void, sheetRole?: boolean) =>
     groups.map((g, i) => (
       <Fragment key={i}>
         {i > 0 && <hr />}
-        {g.map((it) => (
-          <button
-            key={it.key}
-            type="button"
-            role={sheetRole ? 'menuitem' : undefined}
-            className={it.danger ? 'danger' : undefined}
-            onClick={() => {
-              close();
-              it.run();
-            }}
-          >
-            <Icon name={it.icon} size={16} />
-            {it.label}
-          </button>
-        ))}
+        {g.map((it) =>
+          'el' in it ? (
+            <Fragment key={it.key}>{it.el(close, sheetRole)}</Fragment>
+          ) : (
+            <button
+              key={it.key}
+              type="button"
+              role={sheetRole ? 'menuitem' : undefined}
+              className={it.danger ? 'danger' : undefined}
+              onClick={() => {
+                close();
+                it.run();
+              }}
+            >
+              <Icon name={it.icon} size={16} />
+              {it.label}
+            </button>
+          ),
+        )}
       </Fragment>
     ));
 
@@ -879,7 +911,9 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   // Toque longo (celular): a folha de ações no lugar da barra que aparece no hover.
   const onPointerDown = (e: ReactPointerEvent) => {
     if (e.pointerType !== 'touch' || !actionable) return;
-    if ((e.target as HTMLElement).closest(`button, input, textarea, .att-image-box, ${NATIVE_PRESS}`)) return;
+    // A figurinha é um botão (abre o cartão), mas o toque longo nela abre a folha de ações como no resto da mensagem.
+    const onSticker = !!(e.target as HTMLElement).closest('.sticker-hit');
+    if (!onSticker && (e.target as HTMLElement).closest(`button, input, textarea, .att-image-box, ${NATIVE_PRESS}`)) return;
     const timer = window.setTimeout(() => {
       if (press.current) press.current.fired = true;
       navigator.vibrate?.(10);
@@ -929,17 +963,24 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
         <Icon name={m.unread ? 'sent' : 'read'} size={14} />
       </span>
     ) : null;
+  // Figurinha: no lugar do texto, sem o emoji grande; a imagem de reserva (anexo 'sticker') é para outros clientes.
+  const sticker = m.sticker && m.t !== 'rm' ? m.sticker : null;
   const content = (
     <>
-      {!call && (text || !lifted) && (
-        <div className={`msg-body ${isEmojiOnly(text) ? 'big-emoji' : ''}`}>
-          {body}
-          {grouped && edited}
-        </div>
+      {sticker ? (
+        <StickerView sticker={sticker} size="message" playbackKey={m._id} onOpen={setStickerCard} />
+      ) : (
+        !call &&
+        (text || !lifted) && (
+          <div className={`msg-body ${isEmojiOnly(text) ? 'big-emoji' : ''}`}>
+            {body}
+            {grouped && edited}
+          </div>
+        )
       )}
-      {m.attachments?.map((a, i) => (
-        <AttachmentView key={i} a={a} m={m} />
-      ))}
+      {m.attachments?.map((a, i) =>
+        sticker && a.type === 'sticker' ? null : <AttachmentView key={i} a={a} m={m} createSticker={createSticker ?? undefined} />,
+      )}
     </>
   );
 
@@ -974,7 +1015,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
         coarse && actionable
           ? (e) => {
               // Em links, imagens, código e mídia fica o menu do sistema (abrir, copiar, compartilhar, salvar).
-              if ((e.target as HTMLElement).closest(NATIVE_PRESS)) return;
+              if (!(e.target as HTMLElement).closest('.sticker-hit') && (e.target as HTMLElement).closest(NATIVE_PRESS)) return;
               e.preventDefault();
               if (!sheet) setSheet(true);
             }
@@ -1162,6 +1203,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
       )}
       {receipts && <ReadReceipts m={m} onClose={() => setReceipts(false)} />}
       {report && <ReportModal m={m} onClose={() => setReport(false)} />}
+      {stickerCard && sticker && <StickerCard message={m} anchor={stickerCard} onClose={() => setStickerCard(null)} onReport={() => setReport(true)} />}
     </div>
   );
 }
