@@ -1,0 +1,17 @@
+{
+  "value": [
+    {
+      "subscriptionId": "{{subscriptionId}}",
+      "changeType": "{{changeType}}",
+      "clientState": "{{clientState}}",
+      "subscriptionExpirationDateTime": "{{expires}}",
+      "resource": "{{resource}}",
+      "resourceData": {
+        "id": "{{messageId}}",
+        "@odata.type": "#Microsoft.Graph.chatMessage",
+        "@odata.id": "{{resource}}"
+      },
+      "tenantId": "{{tenantId}}"
+    }
+  ]
+}

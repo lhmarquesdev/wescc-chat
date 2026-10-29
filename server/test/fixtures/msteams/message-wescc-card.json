@@ -1,0 +1,16 @@
+{
+  "messageType": "message",
+  "body": { "contentType": "html", "content": "<p>Encaminhando o aviso do chat</p><attachment id=\"9a8b7c6d5e4f30211203f4e5d6c7b8a9\"></attachment>" },
+  "attachments": [
+    {
+      "id": "9a8b7c6d5e4f30211203f4e5d6c7b8a9",
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "contentUrl": null,
+      "content": "{\"type\":\"AdaptiveCard\",\"version\":\"1.4\",\"body\":[{\"type\":\"TextBlock\",\"id\":\"wescc:{{ruleId}}:{{messageId}}\",\"text\":\"#operacao · Wescc Chat · 09:00\",\"size\":\"Small\",\"isSubtle\":true},{\"type\":\"TextBlock\",\"text\":\"Ana Souza\",\"weight\":\"Bolder\"},{\"type\":\"TextBlock\",\"text\":\"Mensagem que saiu do chat\"}]}",
+      "name": null,
+      "thumbnailUrl": null
+    }
+  ],
+  "mentions": [],
+  "reactions": []
+}

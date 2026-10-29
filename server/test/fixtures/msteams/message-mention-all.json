@@ -1,0 +1,18 @@
+{
+  "messageType": "message",
+  "subject": null,
+  "importance": "high",
+  "body": {
+    "contentType": "html",
+    "content": "<div><p><at id=\"0\">Operação</at> atenção @all e @here: o sistema de discagem volta às 14h. Veja também #geral.</p></div>"
+  },
+  "attachments": [],
+  "mentions": [
+    {
+      "id": 0,
+      "mentionText": "Operação",
+      "mentioned": { "application": null, "device": null, "user": null, "tag": null, "conversation": { "id": "{{channelId}}", "displayName": "Operação", "conversationIdentityType": "channel" } }
+    }
+  ],
+  "reactions": []
+}

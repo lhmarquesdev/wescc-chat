@@ -14,6 +14,12 @@ export const PERMISSION_LABEL: Record<string, string> = {
   'manage-emoji': 'Gerenciar emojis personalizados',
   'manage-integrations': 'Gerenciar todas as integrações',
   'manage-own-integrations': 'Gerenciar as próprias integrações',
+  // Integrações (Jira/Teams)
+  'use-jira': 'Usar o Jira no chat',
+  'create-jira-issue': 'Criar issues do Jira',
+  'manage-jira': 'Configurar o Jira',
+  'start-msteams-meeting': 'Marcar reuniões do Teams',
+  'manage-msteams': 'Configurar o Microsoft Teams',
   'manage-oauth-apps': 'Gerenciar provedores OAuth',
   'manage-apps': 'Gerenciar apps',
   'manage-sounds': 'Gerenciar sons personalizados',

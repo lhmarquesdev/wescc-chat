@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { b, paging, q, route, str } from '../api/http';
 import { badRequest } from '../lib/errors';
+import { integrationsCoreRoutes } from './core-api';
+import { jiraRoutes } from './jira/api';
+import { msteamsRoutes } from './msteams/api';
 import {
   clearHistory,
   createIntegration,
@@ -60,4 +63,9 @@ export function integrationsRoutes(app: FastifyInstance) {
       done(e as Error, undefined);
     }
   });
+
+  // Integrações (Jira/Teams)
+  integrationsCoreRoutes(app);
+  jiraRoutes(app);
+  msteamsRoutes(app);
 }

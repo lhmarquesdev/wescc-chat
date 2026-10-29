@@ -196,8 +196,8 @@ export function chatRoutes(app: FastifyInstance) {
   });
 
   // ---------- Comandos ----------
-  route(app, 'GET', 'commands.list', {}, async () => {
-    const commands = listCommands();
+  route(app, 'GET', 'commands.list', {}, async (_req, _rep, ctx) => {
+    const commands = await listCommands(ctx);
     return { commands, count: commands.length, offset: 0, total: commands.length };
   });
   route(app, 'POST', 'commands.run', {}, async (req, _rep, ctx) => {

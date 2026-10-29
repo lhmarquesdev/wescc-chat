@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "Forbidden",
+    "message": "Application is not allowed to perform operations on the user '{{organizerId}}', neither is allowed access through RSC permission evaluation. No application access policy found for this app.",
+    "innerError": { "date": "2026-10-22T12:00:00", "request-id": "00000000-0000-4000-8000-0000000000e5", "client-request-id": "00000000-0000-4000-8000-0000000000e6" }
+  }
+}

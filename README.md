@@ -52,10 +52,19 @@ Para desenvolver o front com recarga automática, rode `npm run dev -w web` em o
 | `INTERNAL_PORT` | `3080` | Só com HTTPS próprio: porta em `127.0.0.1` para os webhooks do servidor de chamadas |
 | `TRUST_PROXY` | `false` com HTTPS próprio, `true` sem | Proxies cujo `X-Forwarded-For` vale: `true`, `false` ou endereços e faixas separados por vírgula |
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET_FILE` | — | Servidor de chamadas em grupo (o instalador do LiveKit grava os valores) |
+| `SECRETS_KEY_FILE` / `SECRETS_KEY` | — | Chave de segredos das integrações Jira e Teams: caminho completo de um arquivo com 32 bytes aleatórios em base64 (ou o valor) |
+| `SECRETS_KEY_PREVIOUS_FILE` / `SECRETS_KEY_PREVIOUS` | — | Chave anterior, só durante a troca da chave de segredos |
+| `INTEGRATIONS_ALLOWED_HOSTS` | — | `host[:porta]` que as integrações podem chamar além do Jira Cloud e do Microsoft 365, separados por vírgula |
+| `INTEGRATIONS_PROXY_FILE` / `INTEGRATIONS_PROXY` | `HTTPS_PROXY` | Proxy das integrações: `http://[usuário:senha@]proxy:porta` |
+| `INTEGRATIONS_PROXY_FOR_ALLOWED` | — | `1` manda também os hosts de `INTEGRATIONS_ALLOWED_HOSTS` pelo proxy |
+| `INTEGRATIONS_DEV_ENDPOINTS` | — | Só em desenvolvimento: `1` deixa `JIRA_API_GATEWAY`, `ATLASSIAN_AUTH_URL`, `MS_LOGIN_URL` e `MS_GRAPH_URL` apontarem para os servidores falsos |
 
 Senhas e chaves podem vir de arquivo: `DATABASE_URL_FILE`, `TLS_PFX_PASSPHRASE_FILE` e `LIVEKIT_API_SECRET_FILE`
 apontam para um arquivo com o valor (espaços e quebras de linha no fim são ignorados) e têm precedência sobre
 `DATABASE_URL`, `TLS_PFX_PASSPHRASE` e `LIVEKIT_API_SECRET`. Um arquivo que não dá para ler impede o chat de subir.
+`SECRETS_KEY_FILE` e `INTEGRATIONS_PROXY_FILE` seguem a mesma regra, mas um problema neles para só as integrações:
+o chat sobe e o hub de Administração › Integrações mostra o motivo (o caminho do arquivo e o erro do sistema ficam
+no log do serviço e, no caso da chave, aparecem também para o papel admin).
 
 Várias instâncias podem rodar contra o mesmo banco: o tempo real entre elas usa LISTEN/NOTIFY do PostgreSQL e as tarefas agendadas usam advisory locks.
 
@@ -169,7 +178,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-chat-service.
 - **Remover**: `-Uninstall` para e remove o serviço, as regras do firewall do grupo "Wescc Chat", as reservas de
   porta que o instalador fez (as anotadas em `install.json`) e o acesso do serviço a `C:\Wescc\secrets`. Ficam os
   logs, os arquivos enviados e `install.json` em `C:\Wescc\chat`, e o `-AppDir`. Com `-RemoveSecrets`, apaga também
-  o certificado, a senha do PFX e o endereço do banco; o segredo do servidor de chamadas fica.
+  o certificado, a senha do PFX, o endereço do banco e o proxy das integrações (`integrations-proxy.txt`); o segredo
+  do servidor de chamadas e a chave de segredos das integrações ficam.
 - **Segredos**: a senha do PFX e o endereço do banco (`postgres://chat:<senha>@127.0.0.1:5432/chat`) são pedidos na
   tela, sem eco (Enter mantém o atual), e gravados em `C:\Wescc\secrets`, pasta que só SYSTEM, os Administradores e o
   serviço leem. O certificado é copiado para lá. A definição do serviço só tem os caminhos (`*_FILE`), nunca os
@@ -813,6 +823,141 @@ ter conta no chat, com os papéis, canais e times da sua operação, e quem sai 
   canais, times e se a pessoa fica restrita em conversas diretas).
 - **Login**: a senha é conferida no AD. A senha local só vale quando o servidor LDAP está fora do ar
   (`LDAP_Login_Fallback`), nunca quando o AD recusa a senha ou a conta.
+
+## Integrações: Jira e Microsoft Teams
+
+Em Administração › Integrações o chat se liga ao Jira Cloud (avisos de issues nas salas, prévias, `/jira`) e ao
+Microsoft Teams (mensagens das salas para canais do Teams, mensagens do Teams nas salas e reuniões). Os avisos são
+publicados pelos usuários robôs `jira.bot` e `msteams.bot`, que entram nas salas como qualquer pessoa (com a mensagem
+de sempre) e seguem as regras da sala. Um robô não recebe conversas diretas novas.
+
+### Chave de segredos
+
+Tokens, segredos de aplicativo e endereços do Workflows ficam cifrados no banco (AES-256-GCM) com a chave de
+`SECRETS_KEY_FILE`. Sem a chave, o chat funciona normalmente, mas nenhuma integração roda e nenhum segredo pode ser
+salvo; o hub de integrações mostra o aviso. A chave nunca é criada na pasta de trabalho do serviço, e um
+`SECRETS_KEY_FILE` sem caminho completo é recusado.
+
+- **Windows**: `install-chat-service.ps1` cria `C:\Wescc\secrets\integrations-key.txt` (com as permissões da pasta dos
+  segredos) na primeira vez e põe `SECRETS_KEY_FILE` no serviço. O equivalente à mão, no PowerShell como
+  Administrador:
+
+  ```powershell
+  $bytes = New-Object byte[] 32
+  [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+  [IO.File]::WriteAllText('C:\Wescc\secrets\integrations-key.txt', [Convert]::ToBase64String($bytes))
+  icacls "C:\Wescc\secrets\integrations-key.txt" /inheritance:r /grant:r "SYSTEM:F" "Administrators:F" "NT SERVICE\wescc-chat:R"
+  ```
+
+  No Windows em português, troque os nomes pelos SIDs: `"*S-1-5-18:F" "*S-1-5-32-544:F"`.
+- **Cópia de segurança**: guarde uma cópia da chave em lugar seguro, separada do backup do banco. Sem ela, os tokens
+  das integrações precisam ser cadastrados de novo. `-Uninstall -RemoveSecrets` não apaga a chave (apaga o proxy das
+  integrações, `integrations-proxy.txt`, que pode ter usuário e senha).
+- **Várias instâncias** usam a mesma chave. Numa instância cuja chave não é a gravada no banco, as integrações ficam
+  paradas e o administrador recebe o alerta “As integrações estão paradas”.
+- **Troca de chave** (só o papel `admin`), no Windows:
+  1. `install-chat-service.ps1 -Reconfigure -RotateSecretsKey`: a chave atual vira
+     `C:\Wescc\secrets\integrations-key-previous.txt` (`SECRETS_KEY_PREVIOUS_FILE`), uma nova é criada em
+     `integrations-key.txt` e o serviço reinicia com as duas.
+  2. No hub, "Cifrar de novo": tudo passa para a chave nova. Confira que nenhum segredo ficou ilegível.
+  3. `install-chat-service.ps1 -Reconfigure -FinishSecretsKeyRotation`: apaga a chave anterior e reinicia o serviço
+     sem ela. Guarde uma cópia da chave nova.
+
+  À mão (ou no Linux): grave a chave nova em `SECRETS_KEY_FILE`, a antiga em `SECRETS_KEY_PREVIOUS_FILE`, reinicie,
+  use "Cifrar de novo" e depois tire `SECRETS_KEY_PREVIOUS_FILE`. Com várias instâncias, todas recebem as duas chaves
+  antes de "Cifrar de novo". Um segredo que não abre com nenhuma das duas aparece como ilegível e precisa ser
+  cadastrado de novo.
+- **Chave perdida** (sem cópia): numa instância com outra chave, "Cifrar de novo" é recusado, para não tirar os
+  segredos das instâncias que ainda têm a chave certa. Se a chave antiga se perdeu de verdade, o papel `admin`
+  confirma o descarte (`POST /api/v1/integrations.secretsKey.reencrypt` com `{"discardUnreadable": true}`; a resposta
+  diz quantos ficaram ilegíveis): a chave atual passa a valer, as integrações voltam a rodar e os segredos que não
+  abrem aparecem como ilegíveis, para cadastrar de novo.
+
+### Rede, proxy e certificados
+
+- **Firewall/proxy**: libere a saída https (443) só para `*.atlassian.net`, `api.atlassian.com`, `auth.atlassian.com`,
+  `login.microsoftonline.com`, `graph.microsoft.com` e `*.environment.api.powerplatform.com`. O chat não chama
+  nenhum outro endereço pelas integrações: outro servidor (um Jira na rede interna, por exemplo) só com
+  `INTEGRATIONS_ALLOWED_HOSTS`, definido no ambiente do servidor (nunca pela tela). Endereços da rede interna são
+  recusados, também quando um nome resolve para eles.
+- **Proxy da empresa**: `INTEGRATIONS_PROXY_FILE` (no instalador, `-IntegrationsProxy http://usuario:senha@proxy:8080`;
+  o arquivo fica em `C:\Wescc\secrets`). Sem ele vale `HTTPS_PROXY`. O chat pede `CONNECT host:443` pelo nome (quem
+  resolve o DNS é o proxy) e manda usuário e senha como `Proxy-Authorization: Basic`; nos logs o proxy aparece só como
+  `http://proxy:porta`. Arquivo PAC ou WPAD não serve: peça à TI o endereço e a porta do proxy.
+  Proxy com autenticação do Windows (NTLM/Kerberos) precisa de um proxy local auxiliar, como px ou cntlm.
+- **Inspeção de https**: se a empresa inspeciona o tráfego, ligue `NODE_USE_SYSTEM_CA=1` (o Node confia nos
+  certificados raiz do Windows; no instalador, `-UseSystemCa`) ou informe o certificado raiz em `NODE_EXTRA_CA_CERTS`
+  (no instalador, `-ExtraCaCerts C:\Temp\raiz.pem`, copiado para `C:\Wescc\secrets\extra-ca.pem`).
+- **O resto do servidor** (login com OAuth, push, prévias de links) não usa `INTEGRATIONS_PROXY`. Para ele, ligue
+  `NODE_USE_ENV_PROXY=1` com `HTTPS_PROXY=http://proxy:porta` e `NO_PROXY=localhost,127.0.0.1,.empresa.local` (no
+  instalador, `-UseEnvProxy -HttpsProxy http://proxy:8080 -NoProxy localhost,127.0.0.1,.empresa.local`; sem usuário e
+  senha, porque `HTTPS_PROXY` fica em texto na definição do serviço).
+
+### Várias instâncias
+
+Fica no banco e vale para todas: a fila de tarefas (com a ordem por regra e sala), as consultas periódicas (uma
+instância por vez, com lease), o orçamento de envios do Workflows, os alertas e a conferência da chave. Fica em cada
+instância: os limites por pessoa (`/jira`, buscas, criação de issues), os limites de chamadas ao Jira e os caches
+(prévias, metadados). As tarefas periódicas só rodam nas instâncias sem `DISABLE_CRON`.
+
+### O que é preciso para ligar cada fase
+
+Em todas as fases: a chave de segredos (acima), com a cópia de segurança fora do backup do banco; como o servidor sai
+para a internet (direto ou por proxy com endereço e porta, não arquivo PAC; o tipo de autenticação do proxy; o
+certificado raiz da empresa, se houver inspeção de https); a liberação no firewall dos endereços de "Rede, proxy e
+certificados"; e por quanto tempo as cópias de mensagens do Teams e os avisos do Jira podem ficar no chat (padrão: o
+mesmo prazo das outras mensagens).
+
+1. **Jira** (avisos nas salas, prévias, `/jira`, criação de issues):
+   - o endereço do Jira Cloud (`https://<nome>.atlassian.net`); Jira Data Center fica para uma etapa futura;
+   - uma conta de serviço da Atlassian com token com escopos (`read:jira-work`, `write:jira-work`, `read:jira-user`):
+     e-mail, token e validade, com o perfil da conta em português (Brasil);
+   - se a organização da Atlassian bloqueia tokens de API das pessoas e se usa lista de IPs permitidos (o IP público de
+     saída do servidor precisa entrar nela);
+   - um projeto de teste, a lista dos projetos que toda a empresa pode ver e quais são do Jira Service Management;
+   - duas pessoas de teste com conta no Jira. Com o chat em https (mesmo interno): um aplicativo OAuth 2.0 em
+     developer.atlassian.com com distribuição ligada e o endereço de retorno `{Site_Url}/integrations/jira/callback`;
+     sem ele, cada pessoa cadastra o próprio token;
+   - só para avisos instantâneos: o chat publicado na internet com https, certificado de autoridade pública e porta 443,
+     e um administrador do Jira para criar o webhook. Sem isso, o chat consulta o Jira a cada 2 minutos
+     (`Jira_Events_Mode = polling`, o padrão);
+   - as decisões: a Operação pode usar `/jira` e criar issues (padrão: não); quem não conectou a conta pode criar
+     issues pela conta da integração (padrão: não).
+2. **Teams: envio, recebimento e reuniões**:
+   - envio: uma equipe e um canal de teste (padrão, não privado) e um fluxo do Workflows nesse canal ("postar em um
+     canal quando uma solicitação de webhook for recebida") criado por uma conta de serviço dedicada, com o endereço
+     gerado; o Workflows liberado no centro de administração do Teams e não bloqueado pela política de dados (DLP) do
+     Power Platform. O envio não precisa de mais nada. A Microsoft desliga fluxos sem uso por 90 dias; o chat avisa
+     quem gerencia o Teams aos 75;
+   - recebimento e reuniões: o registro de aplicativo no Microsoft Entra (ID do locatário, ID do aplicativo, segredo do
+     cliente com a validade, endereço de retorno `{Site_Url}/integrations/msteams/callback`) com consentimento de um
+     Administrador de Função Privilegiada ou Administrador Global para as permissões delegadas `User.Read`,
+     `offline_access`, `Team.ReadBasic.All`, `Channel.ReadBasic.All`, `ChannelMessage.Read.All` e de aplicativo
+     `User.Read.All`, `OnlineMeetings.ReadWrite.All`;
+   - uma conta de serviço do Microsoft 365 com licença do Teams, membro da equipe e do canal de teste, com senha que
+     não expira (ou a data de troca), liberada pelo Acesso Condicional para uso a partir do servidor, e quem aprova o
+     MFA no primeiro login;
+   - para receber mensagens: `{Site_Url}/hooks/msteams/` publicado na internet com https e certificado de autoridade
+     pública (`MSTeams_Inbound_Mode = notifications`). Sem isso, só com o aceite por escrito da leitura periódica a
+     cada 2 minutos, que a Microsoft pode limitar ou suspender (o que também pararia reuniões e presença);
+   - para "Criar agora": um administrador do Teams para a política de acesso de aplicativo, com a lista das pessoas
+     que criam reuniões (a liberação é por pessoa e leva até 30 minutos), e "Permitir alterar e-mail" desligado. Até
+     lá, reuniões por link (`MSTeams_Meetings_Mode = links`, o padrão);
+   - duas pessoas de teste cujo e-mail no chat (vindo do AD) é o e-mail ou o nome de entrada (UPN) no Microsoft 365, e
+     se, na empresa, e-mail e UPN são iguais.
+3. **Presença do Teams**: `Presence.Read.All` (delegada e de aplicativo) no mesmo registro de aplicativo, "Permitir
+   alterar e-mail" desligado e a entrega escolhida (notificações, com o endereço público acima, ou consulta a cada 5
+   minutos só com o aceite da leitura periódica). Padrão: desligada.
+
+### Desenvolvimento sem Jira nem Microsoft 365
+
+`npm run dev:fake-vendors` (em `server/`, com `INTEGRATIONS_DEV_ENDPOINTS=1`) sobe os mesmos servidores falsos dos
+testes: o Jira (com o consentimento do OAuth, as pessoas Ana e Bruno e os campos obrigatórios na criação de issues),
+o login e o Graph da Microsoft (com um time e canais) e um fluxo do Workflows. Ele mostra as variáveis para exportar
+antes de `npm run dev` (com uma `SECRETS_KEY_FILE` de teste fora do projeto), os dados para colar nas telas (os
+identificadores do Entra são GUIDs) e como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue e
+`POST /__fake/teams/message` publica uma mensagem num canal do Teams (e avisa as assinaturas). Os testes nunca chamam a
+Atlassian nem a Microsoft.
 
 ## Segurança
 

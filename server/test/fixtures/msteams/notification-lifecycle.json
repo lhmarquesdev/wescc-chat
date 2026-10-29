@@ -1,0 +1,11 @@
+{
+  "value": [
+    {
+      "subscriptionId": "{{subscriptionId}}",
+      "subscriptionExpirationDateTime": "{{expires}}",
+      "tenantId": "{{tenantId}}",
+      "clientState": "{{clientState}}",
+      "lifecycleEvent": "{{event}}"
+    }
+  ]
+}

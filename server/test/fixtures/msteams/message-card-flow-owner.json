@@ -1,0 +1,16 @@
+{
+  "messageType": "message",
+  "body": { "contentType": "html", "content": "<attachment id=\"0f1e2d3c4b5a69788796a5b4c3d2e1f0\"></attachment>" },
+  "attachments": [
+    {
+      "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "contentUrl": null,
+      "content": "{\"type\":\"AdaptiveCard\",\"version\":\"1.4\",\"body\":[{\"type\":\"TextBlock\",\"text\":\"Aviso do chat publicado como usuário\"}]}",
+      "name": null,
+      "thumbnailUrl": null
+    }
+  ],
+  "mentions": [],
+  "reactions": []
+}

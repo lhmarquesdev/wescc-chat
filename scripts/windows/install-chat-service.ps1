@@ -55,6 +55,31 @@
 .PARAMETER Proxy
   Proxy para baixar o WinSW (por exemplo http://proxy.empresa.local:8080).
 
+.PARAMETER IntegrationsProxy
+  Integrações (Jira/Teams): proxy para o chat falar com o Jira Cloud e o Microsoft 365, por exemplo
+  http://usuario:senha@proxy.empresa.local:8080. Fica em C:\Wescc\secrets\integrations-proxy.txt (o serviço lê
+  INTEGRATIONS_PROXY_FILE). -IntegrationsProxy '' tira o proxy.
+
+.PARAMETER HttpsProxy
+  Integrações (Jira/Teams): HTTPS_PROXY do serviço, para as outras chamadas do chat (com -UseEnvProxy). Sem usuário
+  e senha: ele fica em texto na definição do serviço. -HttpsProxy '' tira.
+
+.PARAMETER NoProxy
+  Integrações (Jira/Teams): NO_PROXY do serviço (o que não passa pelo proxy), por exemplo
+  localhost,127.0.0.1,.empresa.local. -NoProxy '' tira.
+
+.PARAMETER UseEnvProxy
+  Integrações (Jira/Teams): NODE_USE_ENV_PROXY=1, o Node usa HTTPS_PROXY e NO_PROXY nas outras chamadas do chat.
+  -UseEnvProxy:$false desliga.
+
+.PARAMETER UseSystemCa
+  Integrações (Jira/Teams): NODE_USE_SYSTEM_CA=1, o Node confia nos certificados raiz do Windows (necessário quando
+  a empresa inspeciona o tráfego https). -UseSystemCa:$false desliga.
+
+.PARAMETER ExtraCaCerts
+  Integrações (Jira/Teams): certificado raiz da empresa em PEM, copiado para C:\Wescc\secrets\extra-ca.pem
+  (NODE_EXTRA_CA_CERTS). -ExtraCaCerts '' tira.
+
 .PARAMETER Reconfigure
   Reescreve a definição do serviço com as escolhas salvas (e C:\Wescc\livekit\chat-livekit.env, se existir)
   e reinicia o serviço, sem pedir senhas.
@@ -66,6 +91,17 @@
 .PARAMETER RemoveSecrets
   Com -Uninstall, apaga também os segredos do chat em C:\Wescc\secrets (certificado, senha do PFX e endereço do
   banco). O segredo do LiveKit fica.
+  Integrações (Jira/Teams): apaga também o proxy das integrações (integrations-proxy.txt, que pode ter usuário e
+  senha). A chave das integrações (integrations-key.txt) fica.
+
+.PARAMETER RotateSecretsKey
+  Integrações (Jira/Teams): troca a chave de segredos das integrações. A atual vira
+  C:\Wescc\secrets\integrations-key-previous.txt (o chat ainda abre o que foi cifrado com ela) e uma nova é criada.
+  Depois, em Administração > Integrações, use "Cifrar de novo" e rode o script com -FinishSecretsKeyRotation.
+
+.PARAMETER FinishSecretsKeyRotation
+  Integrações (Jira/Teams): termina a troca de chave, apagando integrations-key-previous.txt. Use só depois de
+  "Cifrar de novo" terminar sem segredos ilegíveis.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-chat-service.ps1 -AppDir C:\Wescc\app -SiteUrl https://chat.empresa.local -PfxFile C:\Temp\chat.pfx -LanCidr 10.10.0.0/16,10.20.0.0/16
@@ -78,6 +114,9 @@
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-chat-service.ps1 -Uninstall -RemoveSecrets
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-chat-service.ps1 -Reconfigure -RotateSecretsKey
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -94,6 +133,15 @@ param(
   [string]$UploadDir,
   [string]$Offline,
   [string]$Proxy,
+  # Integrações (Jira/Teams)
+  [string]$IntegrationsProxy,
+  [string]$HttpsProxy,
+  [string]$NoProxy,
+  [switch]$UseEnvProxy,
+  [switch]$UseSystemCa,
+  [string]$ExtraCaCerts,
+  [switch]$RotateSecretsKey,
+  [switch]$FinishSecretsKeyRotation,
   [switch]$Reconfigure,
   [switch]$Uninstall,
   [switch]$RemoveSecrets
@@ -121,6 +169,11 @@ $KeyTarget = Join-Path $SecretsDir 'chat.key'
 $PassFile = Join-Path $SecretsDir 'tls-pfx-passphrase.txt'
 $DbFile = Join-Path $SecretsDir 'database-url.txt'
 $LiveKitSecretFile = Join-Path $SecretsDir 'livekit-api-secret.txt'
+# Integrações (Jira/Teams)
+$IntegrationsKeyFile = Join-Path $SecretsDir 'integrations-key.txt'
+$IntegrationsProxyFile = Join-Path $SecretsDir 'integrations-proxy.txt'
+$IntegrationsKeyPreviousFile = Join-Path $SecretsDir 'integrations-key-previous.txt'
+$ExtraCaTarget = Join-Path $SecretsDir 'extra-ca.pem'
 
 # ---------- Saída e utilitários ----------
 
@@ -443,6 +496,9 @@ if (-not $isAdmin) {
   }
 }
 if ($RemoveSecrets -and -not $Uninstall) { Fail '-RemoveSecrets só vale junto com -Uninstall.' }
+# Integrações (Jira/Teams)
+if (($RotateSecretsKey -or $FinishSecretsKeyRotation) -and $Uninstall) { Fail '-RotateSecretsKey e -FinishSecretsKeyRotation não valem junto com -Uninstall.' }
+if ($RotateSecretsKey -and $FinishSecretsKeyRotation) { Fail 'Troque a chave e termine a troca em execuções separadas: -RotateSecretsKey, depois "Cifrar de novo" em Administração > Integrações, e só então -FinishSecretsKeyRotation.' }
 
 # ---------- Remoção (-Uninstall) ----------
 
@@ -509,6 +565,17 @@ if ($Uninstall) {
     } elseif ($chatSecrets.Count) {
       Info "Os segredos do chat continuam em $SecretsDir ($((@($chatSecrets) | ForEach-Object { Split-Path -Leaf $_ }) -join ', ')). Para apagá-los, rode de novo com -Uninstall -RemoveSecrets."
     }
+    # Integrações (Jira/Teams): a chave fica sempre.
+    if (Test-Path -LiteralPath $IntegrationsKeyFile) { Info "A chave de segredos das integrações continua em $IntegrationsKeyFile (sem ela, os tokens guardados no banco não abrem mais)." }
+    if (Test-Path -LiteralPath $IntegrationsKeyPreviousFile) { Info "A chave anterior das integrações continua em $IntegrationsKeyPreviousFile." }
+    # O proxy das integrações pode ter usuário e senha: sai com os outros segredos.
+    if (Test-Path -LiteralPath $IntegrationsProxyFile) {
+      if ($RemoveSecrets) {
+        Invoke-Step "Apagar $IntegrationsProxyFile" { Remove-Item -LiteralPath $IntegrationsProxyFile -Force }
+      } else {
+        Info "O proxy das integrações continua em $IntegrationsProxyFile. Para apagá-lo, rode de novo com -Uninstall -RemoveSecrets."
+      }
+    }
   }
 
   if (Test-Path -LiteralPath $InstallJson) {
@@ -554,6 +621,22 @@ if (-not $given.ContainsKey('SiteUrl') -and $S['SiteUrl']) { $SiteUrl = [string]
 if (-not $given.ContainsKey('NodeExe') -and $S['NodeExe']) { $NodeExe = [string]$S['NodeExe'] }
 if (-not $given.ContainsKey('UploadDir') -and $S['UploadDir']) { $UploadDir = [string]$S['UploadDir'] }
 if (-not $given.ContainsKey('LanCidr') -and $S['LanCidr']) { $LanCidr = @($S['LanCidr']) }
+
+# Integrações (Jira/Teams): proxy e certificados para o Jira Cloud e o Microsoft 365.
+if (-not $given.ContainsKey('HttpsProxy') -and $S['HttpsProxy']) { $HttpsProxy = [string]$S['HttpsProxy'] }
+if (-not $given.ContainsKey('NoProxy') -and $S['NoProxy']) { $NoProxy = [string]$S['NoProxy'] }
+$useEnvProxy = if ($given.ContainsKey('UseEnvProxy')) { [bool]$UseEnvProxy } else { [bool]$S['UseEnvProxy'] }
+$useSystemCa = if ($given.ContainsKey('UseSystemCa')) { [bool]$UseSystemCa } else { [bool]$S['UseSystemCa'] }
+foreach ($pv in @(@('IntegrationsProxy', $IntegrationsProxy), @('HttpsProxy', $HttpsProxy))) {
+  if ($pv[1] -and $pv[1] -notmatch '^http://[^/\s?#]+/?$') { Fail "-$($pv[0]) precisa ser http://proxy:porta (arquivo PAC ou endereço https:// não servem)." }
+}
+if ($HttpsProxy -and ([uri]$HttpsProxy).UserInfo) { Fail '-HttpsProxy fica em texto na definição do serviço: não ponha usuário e senha nele. Para um proxy com senha, use -IntegrationsProxy (gravado em C:\Wescc\secrets).' }
+$extraCaSource = $null
+if ($ExtraCaCerts) {
+  $extraCaSource = (Resolve-Path -LiteralPath $ExtraCaCerts -ErrorAction SilentlyContinue).ProviderPath
+  if (-not $extraCaSource) { Fail "Não achei o certificado $ExtraCaCerts (-ExtraCaCerts)." }
+  if ([IO.File]::ReadAllText($extraCaSource) -notmatch '-----BEGIN CERTIFICATE-----') { Fail "$ExtraCaCerts não é um certificado em PEM (-----BEGIN CERTIFICATE-----)." }
+}
 
 # Certificado: PFX (recomendado) ou PEM; sem nenhum, HTTP como hoje.
 $certGiven = [bool]($PfxFile -or $CertFile -or $KeyFile)
@@ -955,6 +1038,58 @@ if ($Reconfigure) {
   }
 }
 
+# Integrações (Jira/Teams): chave de segredos das integrações (32 bytes aleatórios em base64), criada uma vez, e o
+# proxy e o certificado raiz da empresa, se informados. Na troca, a chave atual vira a anterior (o chat ainda abre o
+# que foi cifrado com ela) e uma nova é criada logo abaixo; a anterior só sai com -FinishSecretsKeyRotation.
+if ($RotateSecretsKey) {
+  if (Test-Path -LiteralPath $IntegrationsKeyPreviousFile) {
+    Fail "Já há uma troca de chave em andamento ($IntegrationsKeyPreviousFile). Use ""Cifrar de novo"" em Administração > Integrações e rode este script com -FinishSecretsKeyRotation antes de trocar de novo."
+  }
+  if (-not (Test-Path -LiteralPath $IntegrationsKeyFile)) { Fail "Não há chave de segredos das integrações em $IntegrationsKeyFile para trocar." }
+  Invoke-Step "Guardar a chave atual das integrações como anterior em $IntegrationsKeyPreviousFile" {
+    [IO.File]::Move($IntegrationsKeyFile, $IntegrationsKeyPreviousFile)
+  }
+}
+if ($FinishSecretsKeyRotation) {
+  if (Test-Path -LiteralPath $IntegrationsKeyPreviousFile) {
+    Warn 'O que ainda estiver cifrado com a chave anterior deixa de abrir. Confira antes que "Cifrar de novo" terminou sem segredos ilegíveis.'
+    Invoke-Step "Apagar a chave anterior das integrações $IntegrationsKeyPreviousFile" { Remove-Item -LiteralPath $IntegrationsKeyPreviousFile -Force }
+  } else {
+    Ok "Nenhuma troca de chave em andamento ($IntegrationsKeyPreviousFile não existe)."
+  }
+}
+if (Test-Path -LiteralPath $IntegrationsKeyFile) {
+  Ok "Chave de segredos das integrações em $IntegrationsKeyFile."
+} else {
+  Invoke-Step "Criar a chave de segredos das integrações em $IntegrationsKeyFile" {
+    $bytes = New-Object byte[] 32
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    Write-SecretFile $IntegrationsKeyFile ([Convert]::ToBase64String($bytes))
+  }
+  Warn "Guarde uma cópia de $IntegrationsKeyFile em lugar seguro, separada do backup do banco: sem ela, os tokens das integrações precisam ser cadastrados de novo."
+}
+$intProxyOn = Test-Path -LiteralPath $IntegrationsProxyFile
+if ($given.ContainsKey('IntegrationsProxy')) {
+  if ($IntegrationsProxy) {
+    Invoke-Step "Gravar o proxy das integrações em $IntegrationsProxyFile" { Write-SecretFile $IntegrationsProxyFile $IntegrationsProxy }
+    $intProxyOn = $true
+  } elseif ($intProxyOn) {
+    Invoke-Step "Apagar $IntegrationsProxyFile (integrações sem proxy)" { Remove-Item -LiteralPath $IntegrationsProxyFile -Force }
+    $intProxyOn = $false
+  }
+}
+$extraCaOn = Test-Path -LiteralPath $ExtraCaTarget
+if ($given.ContainsKey('ExtraCaCerts')) {
+  if ($extraCaSource) {
+    if (-not (Test-SamePath $extraCaSource $ExtraCaTarget)) { Invoke-Step "Copiar o certificado raiz da empresa para $ExtraCaTarget" { Copy-SecretFile $extraCaSource $ExtraCaTarget } }
+    $extraCaOn = $true
+  } elseif ($extraCaOn) {
+    Invoke-Step "Apagar $ExtraCaTarget" { Remove-Item -LiteralPath $ExtraCaTarget -Force }
+    $extraCaOn = $false
+  }
+}
+
 # Servidor de chamadas: o instalador do LiveKit grava a URL e a chave (nunca o segredo) neste arquivo.
 $liveKit = [ordered]@{}
 if (Test-Path -LiteralPath $LiveKitEnvFile) {
@@ -997,6 +1132,16 @@ if ($Mode -eq 'pfx') {
   $envVars['TLS_KEY_FILE'] = $KeyTarget
 }
 foreach ($k in $liveKit.Keys) { $envVars[$k] = $liveKit[$k] }
+# Integrações (Jira/Teams): chave de segredos, proxy e certificados.
+$envVars['SECRETS_KEY_FILE'] = $IntegrationsKeyFile
+if (Test-Path -LiteralPath $IntegrationsKeyPreviousFile) { $envVars['SECRETS_KEY_PREVIOUS_FILE'] = $IntegrationsKeyPreviousFile }
+if ($intProxyOn) { $envVars['INTEGRATIONS_PROXY_FILE'] = $IntegrationsProxyFile }
+if ($HttpsProxy) { $envVars['HTTPS_PROXY'] = $HttpsProxy }
+if ($NoProxy) { $envVars['NO_PROXY'] = $NoProxy }
+if ($useEnvProxy) { $envVars['NODE_USE_ENV_PROXY'] = '1' }
+if ($useSystemCa) { $envVars['NODE_USE_SYSTEM_CA'] = '1' }
+if ($extraCaOn) { $envVars['NODE_EXTRA_CA_CERTS'] = $ExtraCaTarget }
+if ($useEnvProxy -and -not $HttpsProxy) { Warn '-UseEnvProxy sem -HttpsProxy não muda nada: informe também -HttpsProxy http://proxy:porta.' }
 Info 'Variáveis do serviço (nenhuma traz segredo; os segredos estão nos arquivos *_FILE):'
 foreach ($k in $envVars.Keys) { Info "  $k=$($envVars[$k])" }
 
@@ -1064,6 +1209,8 @@ Invoke-Step "Gravar as escolhas (sem segredos) em $InstallJson" {
     AppDir = $AppDir; SiteUrl = $SiteUrl; Port = $Port; RedirectPorts = @($redirectList); TlsMode = $Mode
     LanCidr = @($LanCidr); NodeExe = $NodeExe; UploadDir = $UploadDir; ReservedPorts = @($allReserved); UpdatedAt = (Get-Date).ToString('s')
   }
+  # Integrações (Jira/Teams)
+  $state['HttpsProxy'] = $HttpsProxy; $state['NoProxy'] = $NoProxy; $state['UseEnvProxy'] = $useEnvProxy; $state['UseSystemCa'] = $useSystemCa
   [IO.File]::WriteAllText($InstallJson, ($state | ConvertTo-Json), $Utf8)
 }
 

@@ -27,7 +27,14 @@ const GROUP_LABEL: Record<string, string> = {
   Omnichannel: 'Atendimento',
   Integrations: 'Integrações',
   Import: 'Importação',
+  // Integrações (Jira/Teams): nomes dos grupos novos (aparecem na busca de outras telas, nunca na navegação daqui)
+  Jira: 'Jira',
+  MSTeams: 'Microsoft Teams',
 };
+
+// Integrações (Jira/Teams): estes grupos têm página própria em Administração → Integrações. MSTeams_Inbound_Mode =
+// polling só pode ser ligado com o aceite de lá, então eles somem da navegação e da busca daqui.
+const HIDDEN_GROUPS = ['Jira', 'MSTeams'];
 
 // Nomes das seções que o servidor manda em inglês.
 const SECTION_LABEL: Record<string, string> = {
@@ -101,7 +108,8 @@ export function AdminSettings() {
   const [saving, setSaving] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
 
-  const all: any[] = data?.settings ?? [];
+  // Integrações (Jira/Teams): sem os grupos que têm página própria (HIDDEN_GROUPS).
+  const all: any[] = useMemo(() => (data?.settings ?? []).filter((s: any) => !HIDDEN_GROUPS.includes(s.group)), [data]);
   const groups = useMemo(() => [...new Set<string>(all.map((s: any) => s.group))], [all]);
   // Abre no primeiro grupo; no celular a troca de grupo é pelo botão no alto, que abre a folha com os grupos.
   const group = picked ?? groups[0] ?? 'General';
@@ -256,6 +264,16 @@ export function AdminSettings() {
           {/* Sem resultados, o título fica com o vazio logo abaixo; no celular o nome do grupo já está no botão. */}
           {(!q || visible.length > 0) && (
             <h2 className={phone && !q ? 'settings-group-title visually-hidden' : 'settings-group-title'}>{q ? `Resultados para “${filter.trim()}”` : (GROUP_LABEL[group] ?? group)}</h2>
+          )}
+          {/* Integrações (Jira/Teams) */}
+          {group === 'Integrations' && !q && (
+            <div className="callout info">
+              <Icon name="info" />
+              <span>Jira e Microsoft Teams ficam em Administração → Integrações. Esta opção liga só os webhooks.</span>
+              <Link className="btn small" to="/admin/integrations">
+                Abrir Integrações
+              </Link>
+            </div>
           )}
           {group === 'LDAP' && !q && (
             <div className="callout info">

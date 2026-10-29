@@ -177,6 +177,12 @@ export const DEFAULT_PERMISSIONS: [string, string, string[]][] = [
   ['edit-livechat-contact', 'omnichannel', [A, 'livechat-manager', 'livechat-agent']],
   ['remove-livechat-contact', 'omnichannel', [A, 'livechat-manager']],
   ['view-livechat-offline-messages', 'omnichannel', [A, 'livechat-manager']],
+  // Integrações (Jira/Teams)
+  ['use-jira', 'integrations', [A, U]],
+  ['create-jira-issue', 'integrations', [A, U]],
+  ['manage-jira', 'integrations', [A]],
+  ['start-msteams-meeting', 'integrations', [A, U]],
+  ['manage-msteams', 'integrations', [A]],
 ];
 
 // Papel "Operação" (criado pela migração 013): lê canais, participa e fala em DM com quem não é restrito.

@@ -32,6 +32,11 @@ import { StickerCard } from './stickers/StickerCard';
 import { CreateStickerItem, StickerHost, StickerMenuItems, StickerRemoveItem, useCreateSticker } from './stickers/StickerMenuItems';
 import { StickerView } from './stickers/StickerView';
 import { Avatar, confirmDialog, Empty, Field, Menu, Modal, SkeletonList, useAsync } from './ui';
+// Integrações (Jira/Teams)
+import { jiraApi, jiraCreateAvailable, openIntegrationModal, useIntegrations } from '../lib/integrations';
+import { BridgeBadge, BridgeUsername } from './integrations/BridgeBadge';
+import { JiraCard } from './integrations/JiraCard';
+import { MeetingCard } from './integrations/MeetingCard';
 
 export interface MessageActions {
   onReplyThread?: (m: Message) => void;
@@ -759,6 +764,8 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   const receiptsOn = useSetting<boolean>('Message_Read_Receipt_Enabled');
   const showEdited = useSetting<boolean>('Message_ShowEditedStatus');
   const closePicker = useCallback(() => setPicker(null), []);
+  // Integrações (Jira/Teams): integrations.me (carregado no login) para o grupo "Integrações" do Mais
+  const integrations = useIntegrations((s) => s.me);
   const own = m.u._id === me._id;
   const perms = me.permissions;
   const gate = useContext(MessageGateContext);
@@ -816,6 +823,17 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
       opt(showReceipts, { key: 'receipts', icon: 'receipts', label: 'Confirmações de leitura', run: () => setReceipts(true) }),
       opt(m.sticker, { key: 'sticker', el: (close, sheetRole) => <StickerMenuItems message={m} close={close} sheetRole={sheetRole} /> }),
       opt(createSticker, { key: 'create-sticker', el: (close, sheetRole) => <CreateStickerItem message={m} close={close} sheetRole={sheetRole} inThread={inThread} /> }),
+    ],
+    // Integrações (Jira/Teams): grupo "Integrações" entre o 2 e o Denunciar (some quando não tem itens)
+    [
+      opt(jiraCreateAvailable(integrations) && !m.t, {
+        key: 'jira-create',
+        icon: 'jira-create',
+        label: 'Criar issue no Jira',
+        run: () => openIntegrationModal({ modal: 'jira-create', rid: m.rid, tmid: m.tmid ?? null, messageId: m._id }),
+      }),
+      opt(m.bridge?.webUrl, { key: 'teams-open', icon: 'open-external', label: 'Ver no Teams', run: () => void window.open(m.bridge?.webUrl ?? '', '_blank', 'noopener,noreferrer') }),
+      opt(m.jira?.kind === 'preview' && (own || canModerate), { key: 'jira-preview', icon: 'close', label: 'Remover prévia', run: () => void jiraApi.removePreview(m._id).catch(fail) }),
     ],
     [opt(!own, { key: 'report', icon: 'report', label: 'Denunciar', run: () => setReport(true) })],
     [
@@ -917,6 +935,13 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
         editada
       </span>
     ) : null;
+  // Integrações (Jira/Teams): edição feita no Teams (a cópia não tem editedAt do chat)
+  const bridgeEdited =
+    !edited && m.bridge?.editedAt && showEdited && m.t !== 'rm' ? (
+      <span className="edited" title={`Editada no Teams em ${formatDateTime(m.bridge.editedAt)}`}>
+        editada
+      </span>
+    ) : null;
   const receipt =
     receiptsOn && own && !m.t ? (
       <span className={`receipt ${m.unread ? '' : 'read'}`} title={m.unread ? 'Enviada' : 'Lida por todos'} role="img" aria-label={m.unread ? 'Enviada' : 'Lida por todos'}>
@@ -934,12 +959,16 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
         (text || !lifted) && (
           <div className={`msg-body ${isEmojiOnly(text) ? 'big-emoji' : ''}`}>
             {body}
-            {grouped && edited}
+            {/* Integrações (Jira/Teams): ou a edição feita no Teams */}
+            {grouped && (edited ?? bridgeEdited)}
           </div>
         )
       )}
+      {/* Integrações (Jira/Teams): o anexo de reserva do Jira e da reunião some quando o cartão existe */}
       {m.attachments?.map((a, i) =>
-        sticker && a.type === 'sticker' ? null : <AttachmentView key={i} a={a} m={m} createSticker={createSticker ?? undefined} />,
+        (sticker && a.type === 'sticker') || (a.type === 'jira' && m.jira) || (a.type === 'meeting' && m.meeting) ? null : (
+          <AttachmentView key={i} a={a} m={m} createSticker={createSticker ?? undefined} />
+        ),
       )}
     </>
   );
@@ -1005,12 +1034,14 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
               {m.emoji ? `${resolveEmoji(m.emoji)?.unicode ?? ''} ` : ''}
               {name}
             </button>
-            {name !== m.u.username && <span className="msg-username">@{m.u.username}</span>}
-            {bot && <span className="pill msg-bot">Bot</span>}
+            {/* Integrações (Jira/Teams): na mensagem copiada do Teams o @ do robô fica de fora no celular */}
+            {name !== m.u.username && (m.bridge ? <BridgeUsername username={m.u.username} /> : <span className="msg-username">@{m.u.username}</span>)}
+            {/* Integrações (Jira/Teams): mensagem copiada do Teams leva "Teams" no lugar de "Bot" */}
+            {m.bridge ? <BridgeBadge /> : bot && <span className="pill msg-bot">Bot</span>}
             <time className="msg-time" dateTime={m.ts} title={formatDateTime(m.ts)}>
               {formatTime(m.ts)}
             </time>
-            {edited}
+            {edited ?? bridgeEdited}
             {m.pinned && (
               <span className="msg-flag pin" title="Fixada" role="img" aria-label="Fixada">
                 <Icon name="pin" size={12} />
@@ -1044,6 +1075,9 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
         ) : (
           content
         )}
+        {/* Integrações (Jira/Teams): cartões depois do corpo e antes das reações; mensagem removida não mostra cartão */}
+        {!m.t && m.jira && <JiraCard jira={m.jira} message={m} />}
+        {!m.t && m.meeting && <MeetingCard meeting={m.meeting} />}
         {call && <CallCard message={m} />}
         <Reactions m={m} canReact={canReact} onAdd={(anchor) => setPicker({ anchor })} />
         {!inThread && (m.tcount ?? 0) > 0 && <ThreadSummary m={m} onOpen={() => actions.onReplyThread?.(m)} />}

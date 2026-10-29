@@ -1,4 +1,5 @@
 import vm from 'node:vm';
+import { stickerPreviewText } from '@shared/stickers';
 import { many, one, query } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
 import { newId, randomToken } from '../lib/ids';
@@ -15,6 +16,15 @@ import { actorOf, type Ctx } from '../services/users';
 
 export const OUTGOING_EVENTS = ['sendMessage', 'fileUploaded', 'roomArchived', 'roomCreated', 'roomJoined', 'roomLeft', 'userCreated'] as const;
 export type OutgoingEvent = (typeof OUTGOING_EVENTS)[number];
+
+// Integrações (Jira/Teams): estes tipos têm telas e serviços próprios; a API genérica não mexe neles.
+export const MANAGED_TYPES = ['jira-events', 'msteams-outgoing', 'msteams-incoming'];
+function refuseManaged(row: any) {
+  if (row && MANAGED_TYPES.includes(row.type)) {
+    const where = row.type === 'jira-events' ? 'Jira' : 'Microsoft Teams';
+    throw badRequest('error-integration-managed', `Esta integração é configurada em Administração → Integrações → ${where}.`);
+  }
+}
 
 export function mapIntegration(r: any) {
   const base = {
@@ -90,6 +100,10 @@ async function validate(input: IntegrationInput) {
   if (!input.name?.trim()) throw badRequest('error-invalid-name', 'Informe um nome.');
   const user = await one('SELECT id, username FROM users WHERE lower(username) = lower($1) AND active', [String(input.username ?? '').replace(/^@/, '')]);
   if (!user) throw badRequest('error-invalid-user', 'Usuário para publicar não encontrado.');
+  // Integrações (Jira/Teams): ninguém publica como o robô oficial do Jira ou do Teams por um webhook genérico.
+  if (await one(`SELECT 1 FROM integration_state WHERE id IN ('bot.jira', 'bot.msteams') AND data->>'id' = $1`, [user.id])) {
+    throw badRequest('error-invalid-user', 'O robô do Jira ou do Teams não pode publicar por um webhook.');
+  }
   const channels = normalizeChannels(input.channel);
   if (input.type === 'webhook-incoming' && !channels.length) throw badRequest('error-invalid-channel', 'Informe o canal de destino (#canal ou @usuário).');
   if (input.type === 'webhook-outgoing') {
@@ -150,6 +164,7 @@ export async function createIntegration(ctx: Ctx, input: IntegrationInput) {
 export async function updateIntegration(ctx: Ctx, id: string, input: IntegrationInput) {
   const cur = await one('SELECT * FROM integrations WHERE id = $1', [id]);
   if (!cur) throw notFound('error-invalid-integration', 'Integração não encontrada.');
+  refuseManaged(cur);
   if (!(await canManage(ctx, cur))) throw forbidden();
   const { user, channels } = await validate({ ...input, type: cur.type });
   const row = await one(
@@ -188,6 +203,7 @@ export async function updateIntegration(ctx: Ctx, id: string, input: Integration
 export async function removeIntegration(ctx: Ctx, id: string) {
   const cur = await one('SELECT * FROM integrations WHERE id = $1', [id]);
   if (!cur) throw notFound('error-invalid-integration', 'Integração não encontrada.');
+  refuseManaged(cur);
   if (!(await canManage(ctx, cur))) throw forbidden();
   await query('DELETE FROM integrations WHERE id = $1', [id]);
   await audit(actorOf(ctx), 'integration.removed', { integrationId: id, name: cur.name });
@@ -199,7 +215,10 @@ export async function listIntegrations(ctx: Ctx, opts: { type?: string; name?: s
   const where: string[] = [];
   const params: unknown[] = [];
   if (!all) where.push(`created_by = $${params.push(ctx.userId)}`);
+  // Integrações (Jira/Teams): os tipos próprios não passam por aqui; sem tipo, só os webhooks genéricos.
+  refuseManaged({ type: opts.type });
   if (opts.type) where.push(`type = $${params.push(opts.type)}`);
+  else where.push(`type IN ('webhook-incoming', 'webhook-outgoing')`);
   if (opts.name) where.push(`name ILIKE $${params.push(`%${opts.name}%`)}`);
   const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const rows = await many(`SELECT * FROM integrations ${w} ORDER BY created_at DESC OFFSET $${params.push(opts.offset)} LIMIT $${params.push(opts.count)}`, params);
@@ -210,6 +229,7 @@ export async function listIntegrations(ctx: Ctx, opts: { type?: string; name?: s
 export async function getIntegration(ctx: Ctx, id: string) {
   const row = await one('SELECT * FROM integrations WHERE id = $1', [id]);
   if (!row) throw notFound('error-invalid-integration', 'Integração não encontrada.');
+  refuseManaged(row);
   if (!(await canManage(ctx, row))) throw forbidden();
   return mapIntegration(row);
 }
@@ -485,12 +505,16 @@ async function fireOutgoing(event: OutgoingEvent, room: any | null, data: Record
   }
 }
 
+// Integrações (Jira/Teams): figurinha chega aos webhooks como o texto da prévia ("😂 Figurinha “Rindo”"), nunca vazia.
+const outgoingText = (message: any): string => message.msg || (message.sticker ? stickerPreviewText(message.sticker) : '');
+
 let registered = false;
 export function registerIntegrationHooks() {
   if (registered) return;
   registered = true;
   on('message.sent', ({ room, message, user }) => {
     if (room.t === 'l' || message.t) return;
+    const text = outgoingText(message);
     return fireOutgoing(
       'sendMessage',
       room,
@@ -501,10 +525,10 @@ export function registerIntegrationHooks() {
         timestamp: message.ts,
         user_id: user?._id,
         user_name: user?.username,
-        text: message.msg,
+        text,
         tmid: message.tmid ?? undefined,
       },
-      { text: message.msg, username: user?.username, userId: user?._id },
+      { text, username: user?.username, userId: user?._id },
     );
   });
   on('message.updated', async ({ room, message }) => {

@@ -6,6 +6,9 @@ import { realtime } from './realtime';
 import { handleStickerEvent, initStickers, invalidateStickers, resetStickers } from './stickers';
 import { useStore, type Me } from './store';
 import { roomPath, setRoleDescriptions } from './format';
+// Integrações (Jira/Teams)
+import { clearEphemeral, pushEphemeral } from './ephemeral';
+import { loadIntegrationsMe, resetIntegrations, setExternalPresence } from './integrations';
 
 export async function loadPublicSettings() {
   const r = await api.get('settings.public');
@@ -62,6 +65,8 @@ export async function startSession() {
   // Figurinhas: só o cache local deste usuário; a rede espera o seletor abrir.
   initStickers(me._id);
   await Promise.all([loadSubscriptions(), loadCustomEmoji(), loadPermissionMap()]);
+  // Integrações (Jira/Teams): o estado da pessoa que acabou de entrar (nunca o da anterior na mesma aba)
+  void loadIntegrationsMe(true);
   void loadPresence();
   void loadLivechat();
   void syncPushSubscription();
@@ -78,6 +83,8 @@ export async function startSession() {
       // Eventos de figurinha podem ter se perdido na queda.
       invalidateStickers('org');
       invalidateStickers('mine');
+      // Integrações (Jira/Teams): integrations.changed pode ter se perdido durante a queda
+      void loadIntegrationsMe(true);
     });
     realtime.on((ev) => {
       if (ev.type === 'notification') showNotification(ev);
@@ -97,6 +104,22 @@ export async function startSession() {
       if (ev.type === 'settings.changed' && ev.settings.some((s) => s._id === '__emoji')) void loadCustomEmoji();
       // A cota e os limites pessoais vêm no catálogo pessoal.
       if (ev.type === 'settings.changed' && ev.settings.some((s) => s._id.startsWith('Stickers_Personal_'))) invalidateStickers('mine');
+      // Integrações (Jira/Teams)
+      if (ev.type === 'ephemeral') pushEphemeral(ev.message);
+      if (ev.type === 'integrations.changed') void loadIntegrationsMe(true);
+      if (ev.type === 'presence.external') setExternalPresence(ev.userId, ev.presence);
+      if (ev.type === 'integrations.alert') {
+        const { href, text } = ev.alert;
+        useStore.getState().toast(text, 'warning', {
+          action: {
+            label: 'Abrir',
+            onClick: () => {
+              history.pushState({}, '', href);
+              dispatchEvent(new PopStateEvent('popstate'));
+            },
+          },
+        });
+      }
     });
   }
   return me;
@@ -133,6 +156,9 @@ export function endSession() {
   realtime.stop();
   started = false;
   useStore.getState().reset();
+  // Integrações (Jira/Teams): nada da pessoa anterior fica na aba
+  resetIntegrations();
+  clearEphemeral();
   clearDrafts();
   resetStickers();
 }

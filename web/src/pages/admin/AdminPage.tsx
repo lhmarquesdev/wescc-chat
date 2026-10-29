@@ -12,7 +12,8 @@ import { AdminSettings } from './AdminSettings';
 import { AdminEngagement } from './AdminEngagement';
 import { AdminAudit } from './AdminAudit';
 import { AdminDevices, AdminEmoji, AdminInvites, AdminModeration } from './AdminMisc';
-import { AdminIntegrations } from './AdminIntegrations';
+// Integrações (Jira/Teams): hub com Jira, Microsoft Teams e os webhooks (AdminIntegrations, agora em /admin/integrations/webhooks)
+import { IntegrationsAdmin } from './integrations';
 import { AdminOAuth } from './AdminOAuth';
 import { AdminOmnichannel } from './AdminOmnichannel';
 import { AdminImport } from './import';
@@ -35,7 +36,8 @@ export function AdminPage() {
     { id: 'devices', icon: 'devices', label: 'Dispositivos', perm: ['view-device-management'] },
     { id: 'audit', icon: 'admin-audit', label: 'Auditoria', perm: ['can-audit', 'can-audit-log'] },
     { id: 'moderation', icon: 'report', label: 'Moderação', perm: ['view-moderation-console'] },
-    { id: 'integrations', icon: 'admin-integrations', label: 'Integrações', perm: ['manage-integrations', 'manage-own-integrations'] },
+    // Integrações (Jira/Teams): quem configura o Jira ou o Teams também vê o item
+    { id: 'integrations', icon: 'admin-integrations', label: 'Integrações', perm: ['manage-integrations', 'manage-own-integrations', 'manage-jira', 'manage-msteams'] },
     { id: 'oauth', icon: 'tokens', label: 'OAuth', perm: ['manage-oauth-apps'] },
     { id: 'omnichannel', icon: 'nav-omnichannel', label: 'Atendimento', perm: ['view-livechat-manager'] },
     { id: 'emoji', icon: 'emoji', label: 'Emojis', perm: ['manage-emoji'] },
@@ -72,7 +74,8 @@ export function AdminPage() {
         {section === 'devices' && <AdminDevices />}
         {section === 'audit' && <AdminAudit />}
         {section === 'moderation' && <AdminModeration />}
-        {section === 'integrations' && <AdminIntegrations />}
+        {/* Integrações (Jira/Teams) */}
+        {section === 'integrations' && <IntegrationsAdmin />}
         {section === 'oauth' && <AdminOAuth />}
         {section === 'omnichannel' && <AdminOmnichannel />}
         {section === 'emoji' && <AdminEmoji />}

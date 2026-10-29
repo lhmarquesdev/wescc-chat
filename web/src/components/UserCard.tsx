@@ -11,6 +11,8 @@ import { Portal, Sheet, useAnchored, useEscape, useFocusTrap, useIsPhone } from 
 import { Menu, Skeleton, UserAvatar, confirmDialog, useAsync } from './ui';
 // Chamadas em grupo: "Em chamada" ao lado da presença.
 import { InCallBadge } from './call/LiveIndicators';
+// Integrações (Jira/Teams)
+import { TeamsPresenceLine } from './integrations/TeamsPresenceLine';
 
 // Camadas que abrem a partir do cartão (menu, confirmação, avisos): um clique nelas não o fecha.
 const KEEP_OPEN = '.menu, .modal-backdrop, .sheet-backdrop, .toasts';
@@ -205,6 +207,8 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
             {/* Chamadas em grupo: "Em chamada" ao lado da presença, escrito. */}
             <InCallBadge userId={data.u._id} label />
           </div>
+          {/* Integrações (Jira/Teams): presença do Teams (fase 3), some quando desligada ou desconhecida */}
+          <TeamsPresenceLine userId={data.u._id} />
         </div>
       </div>
       {(globalRoles.length > 0 || data.roles.length > 0) && (

@@ -23,6 +23,9 @@ import { ThreadPanel } from '../components/ThreadPanel';
 import { UserCard } from '../components/UserCard';
 import { useIsPhone } from '../components/overlay';
 import { Empty, GroupAvatar, Menu, Skeleton, SkeletonMessages, UserAvatar, confirmDialog, useDelay } from '../components/ui';
+// Integrações (Jira/Teams)
+import { IntegrationModals } from '../components/integrations/IntegrationModals';
+import { meetingAvailable, openIntegrationModal, useIntegrations } from '../lib/integrations';
 
 const notLive = (r: Room) => r.t !== 'l';
 // perm: só aparece para quem tem a permissão (global ou da sala), como o servidor exige.
@@ -229,6 +232,8 @@ export function RoomPage() {
   // Chamadas em grupo: o que o cabeçalho mostra sobre a chamada da sala (nada, iniciar ou a pílula). A conversa a dois
   // já reserva voz e vídeo antes da resposta do servidor.
   const callHeader = useRoomCallHeader(rid || null, room);
+  // Integrações (Jira/Teams): integrations.me para o item "Reunião do Teams" do Mais
+  const integrations = useIntegrations((s) => s.me);
   // Quem está offline não vem no mapa de presença: o texto de status (que continua valendo) vem de users.info.
   const dmName = room?.t === 'd' && sub && !sub.name.includes(',') ? sub.name : null;
   const [dmStatusText, setDmStatusText] = useState('');
@@ -453,6 +458,8 @@ export function RoomPage() {
   if (phone && callHeader.kind === 'pill') inHeader.delete('members');
   const shortcuts = SHORTCUTS.map((id) => panels.find((p) => p.id === id)).filter((p): p is (typeof PANELS)[number] => !!p && inHeader.has(p.id));
   const menuPanels = panels.filter((p) => !shortcuts.includes(p));
+  // Integrações (Jira/Teams): reunião em canal, grupo ou DM, para quem pode escrever; na DM, só se a chamada é permitida
+  const meetingItem = meetingAvailable(integrations) && ['c', 'p', 'd'].includes(room.t) && !!sub && !disabledReason && room.direct?.canCall !== false;
   const hasInfo = panels.some((p) => p.id === 'info');
   const closePanel = () => (tmid ? navigate(roomPath(room)) : setPanel(null));
   const favorite = () => api.post('rooms.favorite', { roomId: rid, favorite: !sub?.f }).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
@@ -584,6 +591,14 @@ export function RoomPage() {
                         {p.label}
                       </button>
                     ))}
+                    {/* Integrações (Jira/Teams): "Reunião do Teams" depois dos painéis e antes da linha */}
+                    {meetingItem && (
+                      <button onClick={() => (openIntegrationModal({ modal: 'msteams-meeting', rid }), close())}>
+                        <Icon name="meeting-teams" />
+                        Reunião do Teams
+                      </button>
+                    )}
+                    {meetingItem && menuPanels.length === 0 && sub && <hr />}
                     {sub && (
                       <>
                         {menuPanels.length > 0 && <hr />}
@@ -672,6 +687,8 @@ export function RoomPage() {
         {discussionFrom && (
           <CreateModal kind="discussion" parent={{ _id: room._id, name: room.name ?? '', fname: name, t: room.t }} pmid={discussionFrom._id} onClose={() => setDiscussionFrom(null)} />
         )}
+        {/* Integrações (Jira/Teams): modais pedidos pelas respostas efêmeras, pelo Mais da mensagem e pelo cabeçalho */}
+        <IntegrationModals rid={rid} />
         {userCard && <UserCard key={userCard.username} username={userCard.username} anchor={userCard.anchor} rid={rid} roomRoles={roles} onClose={() => setUserCard(null)} />}
       </div>
     </MessageGateContext.Provider>
