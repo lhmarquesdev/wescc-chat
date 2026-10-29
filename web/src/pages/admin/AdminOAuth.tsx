@@ -508,7 +508,7 @@ function ProviderForm({ provider, preset, existingIds, onClose, onSaved }: { pro
               className="mono"
               rows={7}
               value={f.roleMapping}
-              placeholder={'{\n  "chat-admins": ["admin"],\n  "suporte": ["livechat-agent"]\n}'}
+              placeholder={'{\n  "chat-admins": ["admin"],\n  "central-operacao": ["operacao"]\n}'}
               onChange={(e) => set({ roleMapping: e.target.value })}
             />
           </Field>

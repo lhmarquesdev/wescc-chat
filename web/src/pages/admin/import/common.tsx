@@ -20,11 +20,9 @@ export const ST = {
   preparingUsers: 'importer_preparing_users',
   preparingChannels: 'importer_preparing_channels',
   preparingMessages: 'importer_preparing_messages',
-  preparingContacts: 'importer_preparing_contacts',
   userSelection: 'importer_user_selection',
   importingStarted: 'importer_importing_started',
   importingUsers: 'importer_importing_users',
-  importingContacts: 'importer_importing_contacts',
   importingChannels: 'importer_importing_channels',
   importingMessages: 'importer_importing_messages',
   importingFiles: 'importer_importing_files',
@@ -35,8 +33,8 @@ export const ST = {
 } as const;
 
 const WAITING: string[] = [ST.new, ST.uploading, ST.downloadingFile];
-const PREPARING: string[] = [ST.fileLoaded, ST.preparingStarted, ST.preparingUsers, ST.preparingChannels, ST.preparingMessages, ST.preparingContacts];
-const IMPORTING: string[] = [ST.importingStarted, ST.importingUsers, ST.importingContacts, ST.importingChannels, ST.importingMessages, ST.importingFiles, ST.finishing];
+const PREPARING: string[] = [ST.fileLoaded, ST.preparingStarted, ST.preparingUsers, ST.preparingChannels, ST.preparingMessages];
+const IMPORTING: string[] = [ST.importingStarted, ST.importingUsers, ST.importingChannels, ST.importingMessages, ST.importingFiles, ST.finishing];
 const FINAL: string[] = [ST.done, ST.failed, ST.cancelled];
 
 export const isWaiting = (s: string) => WAITING.includes(s);
@@ -57,11 +55,9 @@ export const STATUS_LABEL: Record<string, string> = {
   [ST.preparingUsers]: 'Lendo os usuários',
   [ST.preparingChannels]: 'Lendo os canais',
   [ST.preparingMessages]: 'Lendo as mensagens',
-  [ST.preparingContacts]: 'Lendo os contatos',
   [ST.userSelection]: 'Pronta para escolher o que importar',
   [ST.importingStarted]: 'Importando os dados',
   [ST.importingUsers]: 'Importando os usuários',
-  [ST.importingContacts]: 'Importando os contatos',
   [ST.importingChannels]: 'Importando os canais',
   [ST.importingMessages]: 'Importando as mensagens',
   [ST.importingFiles]: 'Baixando os arquivos',
@@ -79,7 +75,6 @@ export function stepText(op: Pick<ImportOperation, 'status' | 'importerKey'>) {
   const text: Record<string, string> = {
     [ST.importingStarted]: 'Começando a importação.',
     [ST.importingUsers]: 'Importando os usuários.',
-    [ST.importingContacts]: 'Importando os contatos.',
     [ST.importingChannels]: 'Importando os canais.',
     [ST.importingMessages]: 'Importando as mensagens.',
     [ST.finishing]: 'Finalizando a importação.',

@@ -36,18 +36,6 @@ export async function loadCustomEmoji() {
   if (r) setCustomEmoji(r.emojis.update);
 }
 
-export async function loadLivechat() {
-  const st = useStore.getState();
-  const me = st.me;
-  if (!me || !st.settings.Livechat_enabled) return;
-  if (!me.roles.some((r) => ['livechat-agent', 'livechat-manager', 'livechat-monitor', 'admin'].includes(r))) return;
-  const [q, status] = await Promise.all([api.get('livechat/inquiries.queuedForUser').catch(() => null), me.roles.includes('livechat-agent') ? api.get('livechat/agent.status').catch(() => null) : null]);
-  useStore.setState({
-    queue: q ? Object.fromEntries(q.inquiries.map((i: any) => [i.rid, i])) : {},
-    agentStatus: status?.status ?? null,
-  });
-}
-
 let started = false;
 
 // Quem já está online ao abrir o chat (depois disso, os eventos de presença mantêm o mapa em dia).
@@ -72,7 +60,6 @@ export async function startSession() {
   // Comandos de barra: a lista é por pessoa e pode ter mudado desde a última sessão nesta aba.
   invalidateSlashCommands();
   void loadPresence();
-  void loadLivechat();
   void syncPushSubscription();
   if (!started) {
     started = true;
@@ -83,7 +70,6 @@ export async function startSession() {
       void loadSubscriptions();
       void loadPresence();
       void api.get('me').then((m) => useStore.getState().setMe(m));
-      void loadLivechat();
       // Eventos de figurinha podem ter se perdido na queda.
       invalidateStickers('org');
       invalidateStickers('mine');

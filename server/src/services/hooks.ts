@@ -1,4 +1,4 @@
-// Ganchos internos para módulos que reagem a eventos do chat (integrações, omnichannel).
+// Ganchos internos para módulos que reagem a eventos do chat (integrações).
 // Os ouvintes rodam depois da operação principal e nunca a fazem falhar.
 
 export interface HookEvents {

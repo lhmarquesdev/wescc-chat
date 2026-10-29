@@ -11,7 +11,6 @@ import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { lastOwnEditable } from '../lib/messageRules';
 import { Composer } from '../components/Composer';
 import { Icon, type IconName } from '../components/Icon';
-import { LIVECHAT_STATUS, LivechatActions } from '../components/LivechatPanel';
 import { CreateModal } from '../components/CreateModal';
 // Chamadas em grupo: ações do cabeçalho, itens do Mais e a faixa da chamada viva.
 import { CallBanner } from '../components/call/CallBanner';
@@ -29,23 +28,21 @@ import { IntegrationModals } from '../components/integrations/IntegrationModals'
 import { meetingAvailable, openIntegrationModal, useIntegrations } from '../lib/integrations';
 import { useDirectMeetingOk } from '../lib/roomcall';
 
-const notLive = (r: Room) => r.t !== 'l';
 // perm: só aparece para quem tem a permissão (global ou da sala), como o servidor exige.
 const PANELS: { id: PanelId; icon: IconName; label: string; when?: (r: Room) => boolean; perm?: string }[] = [
-  { id: 'livechat', icon: 'panel-livechat', label: 'Atendimento', when: (r) => r.t === 'l' },
-  { id: 'info', icon: 'panel-info', label: 'Informações', when: notLive },
+  { id: 'info', icon: 'panel-info', label: 'Informações' },
   { id: 'threads', icon: 'panel-threads', label: 'Tópicos' },
-  { id: 'discussions', icon: 'panel-discussions', label: 'Discussões', when: (r) => !r.prid && notLive(r) },
+  { id: 'discussions', icon: 'panel-discussions', label: 'Discussões', when: (r) => !r.prid },
   { id: 'team', icon: 'panel-team', label: 'Canais do time', when: (r) => !!r.teamMain },
-  { id: 'members', icon: 'panel-members', label: 'Membros', when: (r) => notLive(r) && (r.t !== 'd' || (r.uids?.length ?? 0) > 2) },
+  { id: 'members', icon: 'panel-members', label: 'Membros', when: (r) => r.t !== 'd' || (r.uids?.length ?? 0) > 2 },
   { id: 'search', icon: 'panel-search', label: 'Buscar mensagens' },
   { id: 'files', icon: 'panel-files', label: 'Arquivos' },
   { id: 'pinned', icon: 'panel-pinned', label: 'Fixadas' },
   { id: 'starred', icon: 'panel-starred', label: 'Favoritas' },
   { id: 'mentions', icon: 'panel-mentions', label: 'Menções' },
   { id: 'notifications', icon: 'panel-notifications', label: 'Notificações' },
-  { id: 'invite', icon: 'panel-invite', label: 'Link de convite', when: (r) => r.t !== 'd' && notLive(r), perm: 'create-invite-links' },
-  { id: 'prune', icon: 'panel-prune', label: 'Limpar histórico', when: (r) => r.t !== 'd' && notLive(r), perm: 'clean-channel-history' },
+  { id: 'invite', icon: 'panel-invite', label: 'Link de convite', when: (r) => r.t !== 'd', perm: 'create-invite-links' },
+  { id: 'prune', icon: 'panel-prune', label: 'Limpar histórico', when: (r) => r.t !== 'd', perm: 'clean-channel-history' },
 ];
 
 // Atalhos do cabeçalho, na ordem em que aparecem. Os que não cabem vão para o menu Mais.
@@ -139,18 +136,6 @@ function TypingIndicator({ id }: { id: string }) {
         </div>
       )}
     </div>
-  );
-}
-
-function LivechatJoinBar({ rid }: { rid: string }) {
-  const room = useStore((s) => s.livechatRooms[rid]);
-  if (!room) return <span>Conversa de atendimento.</span>;
-  if (room.status === 'closed') return <span>Esta conversa foi encerrada {room.closedAt ? `em ${new Date(room.closedAt).toLocaleString('pt-BR')}` : ''}.</span>;
-  return (
-    <span>
-      {LIVECHAT_STATUS[room.status]}
-      {room.servedBy ? ` com @${room.servedBy.username}` : ''}. Você está acompanhando como supervisor.
-    </span>
   );
 }
 
@@ -475,7 +460,7 @@ export function RoomPage() {
   // No celular, a DM em grupo leva só os primeiros nomes (a de uma pessoa, o nome inteiro, que o CSS corta com
   // reticências se for longo): o texto de exemplo cabe numa linha.
   const firstNames = nameList(name.split(/,\s*/).map((x) => x.split(/\s+/)[0]), 3);
-  const placeholder = room.t === 'd' || room.t === 'l' ? `Mensagem para ${phone && groupDm ? firstNames : name}` : `Mensagem em ${hashName}`;
+  const placeholder = room.t === 'd' ? `Mensagem para ${phone && groupDm ? firstNames : name}` : `Mensagem em ${hashName}`;
   const leave = async () => {
     const ok = await confirmDialog({ title: `Sair de ${hashName}?`, body: 'Você deixa de receber as mensagens desta sala.', confirmLabel: 'Sair da sala', danger: true });
     if (ok) api.post('rooms.leave', { roomId: rid }).then(() => navigate('/home')).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
@@ -559,7 +544,6 @@ export function RoomPage() {
               </div>
             </div>
             <div className="room-actions">
-              {room.t === 'l' && <LivechatActions rid={rid} onPanel={() => setPanel(panel === 'livechat' ? null : 'livechat')} />}
               {/* Chamadas em grupo: iniciar, entrar, ouvir ou voltar para a chamada (call-view.ts decide). */}
               <RoomCallActions room={room} sub={sub} compact={callCompact} />
               {callInHeader && shortcuts.length > 0 && <span className="room-actions-sep" aria-hidden="true" />}
@@ -577,7 +561,7 @@ export function RoomPage() {
                   {p.id === 'members' && room.usersCount ? <span className="count">{room.usersCount.toLocaleString('pt-BR')}</span> : null}
                 </button>
               ))}
-              {(shortcuts.length > 0 || callInHeader || room.t === 'l') && <span className="room-actions-sep" aria-hidden="true" />}
+              {(shortcuts.length > 0 || callInHeader) && <span className="room-actions-sep" aria-hidden="true" />}
               <Menu
                 label="Mais opções da sala"
                 trigger={
@@ -653,7 +637,6 @@ export function RoomPage() {
               quoting={quoting}
               setQuoting={setQuoting}
               onEditLast={editLast}
-              canned={room.t === 'l' ? { contactName: room.fname ?? '', agentName: me.name } : undefined}
               ackOption={!!(room.notice && room.noticeAck && canPostRO)}
             />
           ) : (
@@ -665,8 +648,6 @@ export function RoomPage() {
                     Entrar no canal
                   </button>
                 </>
-              ) : room.t === 'l' ? (
-                <LivechatJoinBar rid={rid} />
               ) : (
                 <span>Você não participa desta sala.</span>
               )}

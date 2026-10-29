@@ -23,12 +23,11 @@ beforeAll(async () => {
 });
 afterAll(() => stopServer());
 
-type Rec = { type: 'user' | 'channel' | 'message' | 'contact'; data: any };
+type Rec = { type: 'user' | 'channel' | 'message'; data: any };
 const U = (data: any): Rec => ({ type: 'user', data });
 const C = (data: any): Rec => ({ type: 'channel', data: { users: [], ...data } });
 const M = (data: any): Rec => ({ type: 'message', data });
-const K = (data: any): Rec => ({ type: 'contact', data: { emails: [], phones: [], ...data } });
-const ALL: ShortSelection = { users: { all: true }, channels: { all: true }, contacts: { all: true } };
+const ALL: ShortSelection = { users: { all: true }, channels: { all: true } };
 
 let seq = 0;
 const tag = () => `${++seq}${Math.random().toString(36).slice(2, 6)}`;
@@ -131,7 +130,7 @@ describe('usuários', () => {
     const byName = await newUser(A);
     await pool.query('UPDATE users SET name = username WHERE id = $1', [byName.userId]);
     const { opId, result, s } = await convert([
-      U({ importIds: [`e-${t}`], emails: [`${byEmail.username.toUpperCase()}@TEST.LOCAL`], username: `outro-${t}`, name: 'Nome Novo', roles: ['livechat-agent', 'nao-existe', 'owner'], bio: 'Bio importada' }),
+      U({ importIds: [`e-${t}`], emails: [`${byEmail.username.toUpperCase()}@TEST.LOCAL`], username: `outro-${t}`, name: 'Nome Novo', roles: ['operacao', 'nao-existe', 'owner'], bio: 'Bio importada' }),
       U({ importIds: [`n-${t}`], emails: [], username: byName.username.toUpperCase(), name: 'Nome Do Slack', statusText: 'Ocupado' }),
       U({ importIds: [`new-${t}`], emails: [`novo-${t}@x.com`], username: `novo.${t}`, name: 'Pessoa Nova', avatarUrl: 'https://img.example/a.png', roles: ['admin'] }),
       U({ importIds: [`bad-${t}`], emails: [] }),
@@ -144,7 +143,7 @@ describe('usuários', () => {
     expect(e.username).toBe(byEmail.username);
     expect(e.email).toBe(`${byEmail.username}@test.local`);
     expect(e.name).toMatch(/^Usuário/);
-    expect(e.roles).toEqual(['user', 'livechat-agent']);
+    expect(e.roles).toEqual(['user', 'operacao']);
     expect(e.bio).toBe('Bio importada');
     expect((await login(byEmail.username, 'senha-forte-1')).userId).toBe(byEmail.userId);
 
@@ -232,14 +231,14 @@ describe('usuários', () => {
     const plain = await newUser(A);
     const { opId } = await convert(
       [
-        U({ importIds: [`E-${t}`], emails: [], username: eve.username, roles: ['admin', 'livechat-agent'] }),
+        U({ importIds: [`E-${t}`], emails: [], username: eve.username, roles: ['admin', 'operacao'] }),
         U({ importIds: [`N-${t}`], emails: [`dono-${t}@fora.example`], username: `dono${t}`, roles: ['admin'] }),
         U({ importIds: [`X-${t}`], emails: [], username: `papel${t}`, roles: ['nao-existe', 'owner'] }),
       ],
       { actor: plain },
     );
     // Conta que já existia, encontrada pelo nome: ganha os outros papéis, nunca o de administrador.
-    expect((await userByName(eve.username)).roles).toEqual(['user', 'livechat-agent']);
+    expect((await userByName(eve.username)).roles).toEqual(['user', 'operacao']);
     // Conta nova, mas quem importa não tem assign-admin-role.
     expect((await userByName(`dono${t}`)).roles).toEqual(['user']);
     expect((await userByName(`papel${t}`)).roles).toEqual(['user']);
@@ -255,7 +254,7 @@ describe('usuários', () => {
       U({ importIds: [`E-${t}`], emails: [], username: eve.username, roles: ['admin'] }),
     ]);
     expect((await userByName(`chefe${t}`)).roles).toEqual(['user', 'admin']);
-    expect((await userByName(eve.username)).roles).toEqual(['user', 'livechat-agent']);
+    expect((await userByName(eve.username)).roles).toEqual(['user', 'operacao']);
     expect((await errorsOf(again.opId))[`E-${t}`]).toEqual(['O papel de administrador não foi dado: a conta já existia.']);
   });
 
@@ -1444,7 +1443,6 @@ describe('seleção e cancelamento', () => {
         C({ importIds: [`SC1-${t}`], t: 'c', name: `sel1-${t}`, users: [`S1-${t}`, `S2-${t}`] }),
         C({ importIds: [`SC2-${t}`], t: 'c', name: `sel2-${t}`, users: [`S1-${t}`] }),
         C({ importIds: [`SD-${t}`], t: 'd', users: [`S1-${t}`, 'admin'] }),
-        K({ importIds: [`SK-${t}`], name: 'Contato' }),
         M({ rid: `SC1-${t}`, u: `S1-${t}`, msg: 'entra' }),
         M({ rid: `SC1-${t}`, u: `S2-${t}`, msg: 'autor não selecionado' }),
         M({ rid: `SC2-${t}`, u: `S1-${t}`, msg: 'sala não selecionada' }),
@@ -1455,14 +1453,13 @@ describe('seleção e cancelamento', () => {
     );
     expect(result.users).toMatchObject({ inserted: 1, skipped: 1 });
     expect(result.channels).toMatchObject({ inserted: 1, skipped: 2 });
-    expect(result.contacts).toMatchObject({ inserted: 0, skipped: 1 });
     expect(result.messages).toMatchObject({ inserted: 1, skipped: 2, failed: 2 });
-    expect(s).toMatchObject({ completed: 3, skipped: 6, error: 2 });
+    expect(s).toMatchObject({ completed: 3, skipped: 5, error: 2 });
     expect(await userByName(`s2${t}`)).toBeUndefined();
     const errs = await errorsOf(opId);
     expect(errs['autor não selecionado']).toEqual([`Autor não encontrado: S2-${t}`]);
     expect(errs['sala desconhecida']).toEqual([`Sala não encontrada: nada-${t}`]);
-    expect((await rows('SELECT 1 FROM import_records WHERE operation_id = $1 AND skipped', [opId])).length).toBe(6);
+    expect((await rows('SELECT 1 FROM import_records WHERE operation_id = $1 AND skipped', [opId])).length).toBe(5);
     // Só o selecionado entrou na sala.
     expect((await rows('SELECT user_id FROM subscriptions WHERE room_id = $1', [await mapped('room', `SC1-${t}`)])).length).toBe(2);
 
@@ -1577,34 +1574,6 @@ describe('seleção e cancelamento', () => {
     expect(result.channels.inserted).toBe(0);
     expect(s.steps).toEqual([ST.importingUsers]);
     expect(await mapped('room', `XC-${t}`)).toBeNull();
-  });
-});
-
-describe('contatos', () => {
-  it('cria contatos novos e completa os que já existem pelo e-mail', async () => {
-    const t = tag();
-    await pool.query(`INSERT INTO livechat_custom_fields (id, label, scope) VALUES ('cpf', 'CPF', 'visitor') ON CONFLICT DO NOTHING`);
-    await pool.query(`INSERT INTO livechat_visitors (id, token, username, name, email) VALUES ($1, $2, $3, 'Cliente Antigo', $4)`, [newId(), newId(24), `guest-old-${t}`, `cliente-${t}@x.com`]);
-    const recs = [
-      K({ importIds: [`K1-${t}`], name: 'Outro Nome', emails: [`CLIENTE-${t}@x.com`, `outro-${t}@x.com`], phones: ['+55 11 9999-0000'], customFields: { cpf: ' 123 ', desconhecido: 'x' } }),
-      K({ importIds: [`K2-${t}`], name: 'Contato Novo', emails: [`novo-${t}@x.com`], phones: ['111', '222'], manager: 'ADMIN' }),
-      K({ importIds: [`K3-${t}`] }),
-    ];
-    const { opId, result } = await convert(recs);
-    expect(result.contacts).toEqual({ inserted: 1, failed: 1, skipped: 0 });
-    const old = await row('SELECT * FROM livechat_visitors WHERE id = $1', [await mapped('contact', `K1-${t}`)]);
-    expect(old).toMatchObject({ name: 'Cliente Antigo', email: `cliente-${t}@x.com`, phone: '+55 11 9999-0000' });
-    expect(old.custom_fields).toEqual({ cpf: '123', importedEmails: `outro-${t}@x.com` });
-    const novo = await row('SELECT * FROM livechat_visitors WHERE id = $1', [await mapped('contact', `K2-${t}`)]);
-    expect(novo).toMatchObject({ name: 'Contato Novo', email: `novo-${t}@x.com`, phone: '111' });
-    expect(novo.username).toMatch(/^guest-\d+-/);
-    expect(novo.token.length).toBeGreaterThan(20);
-    expect(novo.custom_fields).toEqual({ importedPhones: '222', contactManager: 'admin' });
-    expect((await errorsOf(opId))[`K3-${t}`]).toEqual(['Contato sem nome, e-mail e telefone.']);
-
-    const again = await convert(recs.slice(0, 2));
-    expect(again.result.contacts.inserted).toBe(0);
-    expect((await rows('SELECT 1 FROM livechat_visitors WHERE lower(email) = lower($1)', [`novo-${t}@x.com`])).length).toBe(1);
   });
 });
 

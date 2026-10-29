@@ -513,7 +513,7 @@ export function registerIntegrationHooks() {
   if (registered) return;
   registered = true;
   on('message.sent', ({ room, message, user }) => {
-    if (room.t === 'l' || message.t) return;
+    if (message.t) return;
     const text = outgoingText(message);
     return fireOutgoing(
       'sendMessage',
@@ -532,7 +532,7 @@ export function registerIntegrationHooks() {
     );
   });
   on('message.updated', async ({ room, message }) => {
-    if (room.t === 'l' || message.t) return;
+    if (message.t) return;
     const rows = await one(`SELECT 1 FROM integrations WHERE type='webhook-outgoing' AND enabled AND event='sendMessage' AND run_on_edits LIMIT 1`);
     if (!rows) return;
     const editRows = await many(`SELECT * FROM integrations WHERE type='webhook-outgoing' AND enabled AND event='sendMessage' AND run_on_edits`);
@@ -558,14 +558,12 @@ export function registerIntegrationHooks() {
     }
   });
   on('file.uploaded', ({ room, message, file, user }) =>
-    room.t === 'l'
-      ? undefined
-      : fireOutgoing('fileUploaded', room, { channel_id: room.id, channel_name: room.name, message_id: message._id, user_id: user._id, user_name: user.username, text: message.msg, file: { _id: file._id, name: file.name, type: file.type, size: file.size, url: file.url } }, { userId: user._id }),
+    fireOutgoing('fileUploaded', room, { channel_id: room.id, channel_name: room.name, message_id: message._id, user_id: user._id, user_name: user.username, text: message.msg, file: { _id: file._id, name: file.name, type: file.type, size: file.size, url: file.url } }, { userId: user._id }),
   );
-  on('room.created', ({ room, owner }) => (room.t === 'l' || room.t === 'd' ? undefined : fireOutgoing('roomCreated', room, { channel_id: room.id, channel_name: room.name, owner: owner ?? undefined })));
+  on('room.created', ({ room, owner }) => (room.t === 'd' ? undefined : fireOutgoing('roomCreated', room, { channel_id: room.id, channel_name: room.name, owner: owner ?? undefined })));
   on('room.archived', ({ room, by }) => fireOutgoing('roomArchived', room, { channel_id: room.id, channel_name: room.name, user_id: by?._id, user_name: by?.username }));
-  on('room.joined', ({ room, user }) => (room.t === 'd' || room.t === 'l' ? undefined : fireOutgoing('roomJoined', room, { channel_id: room.id, channel_name: room.name, user_id: user._id, user_name: user.username }, { userId: user._id })));
-  on('room.left', ({ room, user }) => (room.t === 'd' || room.t === 'l' ? undefined : fireOutgoing('roomLeft', room, { channel_id: room.id, channel_name: room.name, user_id: user._id, user_name: user.username }, { userId: user._id })));
+  on('room.joined', ({ room, user }) => (room.t === 'd' ? undefined : fireOutgoing('roomJoined', room, { channel_id: room.id, channel_name: room.name, user_id: user._id, user_name: user.username }, { userId: user._id })));
+  on('room.left', ({ room, user }) => (room.t === 'd' ? undefined : fireOutgoing('roomLeft', room, { channel_id: room.id, channel_name: room.name, user_id: user._id, user_name: user.username }, { userId: user._id })));
   on('user.created', ({ user }) => fireOutgoing('userCreated', null, { user_id: user._id, user_name: user.username, name: user.name, email: user.email ?? undefined }));
 }
 

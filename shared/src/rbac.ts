@@ -33,9 +33,6 @@ const O = 'owner';
 const M = 'moderator';
 const P = 'publisher';
 const OP = 'operacao';
-const LA = 'livechat-agent';
-const LM = 'livechat-manager';
-const LMO = 'livechat-monitor';
 
 export const RBAC_KEYS: Record<string, RbacKey> = {
   // Conversas
@@ -147,33 +144,6 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
   'edit-privileged-setting': { label: 'Alterar configurações e LDAP / AD', defaults: [A] },
   'manage-retention-policy': { label: 'Rodar a política de retenção', defaults: [A] },
 
-  // Atendimento (omnichannel)
-  'view-l-room': { label: 'Abrir atendimentos', defaults: [A, LM, LMO, LA] },
-  'view-livechat-queue': { label: 'Ver a fila', defaults: [A, LM, LA] },
-  'take-livechat-room': { label: 'Assumir atendimentos', defaults: [A, LM, LA] },
-  'close-livechat-room': { label: 'Encerrar atendimentos', defaults: [A, LM, LA] },
-  'transfer-livechat-guest': { label: 'Transferir atendimentos', defaults: [A, LM, LA] },
-  'on-hold-livechat-room': { label: 'Pôr atendimentos em espera', defaults: [A, LM, LA] },
-  'view-canned-responses': { label: 'Usar respostas prontas', defaults: [A, LM, LMO, LA] },
-  'manage-livechat-canned-responses': { label: 'Gerenciar respostas prontas', defaults: [A, LM, LMO] },
-  'view-livechat-rooms': { label: 'Ver todos os atendimentos (monitorar)', defaults: [A, LM, LMO] },
-  'view-livechat-analytics': { label: 'Ver a análise de atendimentos', defaults: [A, LM, LMO] },
-  'view-livechat-contacts': { label: 'Ver contatos', defaults: [A, LM, LMO, LA] },
-  'edit-livechat-contact': { label: 'Editar contatos', defaults: [A, LM, LA] },
-  'remove-livechat-contact': { label: 'Remover contatos', defaults: [A, LM] },
-  'view-livechat-manager': { label: 'Ver a gestão do Atendimento', defaults: [A, LM] },
-  'manage-livechat-departments': { label: 'Gerenciar departamentos', defaults: [A, LM] },
-  'manage-livechat-agents': { label: 'Gerenciar agentes', defaults: [A, LM] },
-  'manage-livechat-monitors': { label: 'Gerenciar monitores', defaults: [A, LM] },
-  'manage-livechat-units': { label: 'Gerenciar unidades', defaults: [A, LM] },
-  'manage-livechat-sla': { label: 'Gerenciar SLAs', defaults: [A, LM] },
-  'manage-livechat-priorities': { label: 'Gerenciar prioridades', defaults: [A, LM] },
-  'manage-livechat-business-hours': { label: 'Gerenciar horários de atendimento', defaults: [A, LM] },
-  'manage-livechat-tags': { label: 'Gerenciar etiquetas', defaults: [A, LM] },
-  'manage-livechat-custom-fields': { label: 'Gerenciar campos personalizados', defaults: [A, LM] },
-  'manage-livechat-triggers': { label: 'Gerenciar gatilhos', defaults: [A, LM] },
-  'view-livechat-offline-messages': { label: 'Ver mensagens deixadas fora do horário', defaults: [A, LM] },
-  'manage-livechat-managers': { label: 'Gerenciar gestores do Atendimento', defaults: [A] },
 
   // Técnicas (bots e integrações)
   'message-impersonate': { label: 'Enviar mensagens com outro nome e avatar', defaults: [B, 'app'], technical: true },
@@ -400,56 +370,6 @@ export const RBAC_GROUPS: RbacGroup[] = [
         ],
         extras: ['manage-retention-policy'],
         adminSection: 'settings',
-      },
-    ],
-  },
-  {
-    id: 'omnichannel',
-    label: 'Atendimento',
-    description: 'Atendimento a clientes pelo livechat.',
-    areas: [
-      {
-        id: 'omni-attend',
-        label: 'Atender',
-        description: 'Fila, atendimentos e respostas prontas.',
-        levels: [{ label: 'Atender', keys: ['view-l-room', 'view-livechat-queue', 'take-livechat-room', 'close-livechat-room', 'transfer-livechat-guest', 'on-hold-livechat-room', 'view-canned-responses'] }],
-        extras: ['manage-livechat-canned-responses'],
-      },
-      { id: 'omni-monitor', label: 'Monitorar', description: 'Ver os atendimentos de todos e os números.', levels: [{ label: VIEW, keys: ['view-livechat-rooms', 'view-livechat-analytics'] }], extras: [] },
-      {
-        id: 'omni-contacts',
-        label: 'Contatos',
-        description: 'Cadastro dos clientes atendidos.',
-        levels: [
-          { label: VIEW, keys: ['view-livechat-contacts'] },
-          { label: MANAGE, keys: ['edit-livechat-contact', 'remove-livechat-contact'] },
-        ],
-        extras: [],
-      },
-      {
-        id: 'omni-admin',
-        label: 'Gestão do Atendimento',
-        description: 'Departamentos, agentes, SLAs, horários e o resto da configuração.',
-        levels: [
-          { label: VIEW, keys: ['view-livechat-manager'] },
-          {
-            label: MANAGE,
-            keys: [
-              'manage-livechat-departments',
-              'manage-livechat-agents',
-              'manage-livechat-monitors',
-              'manage-livechat-units',
-              'manage-livechat-sla',
-              'manage-livechat-priorities',
-              'manage-livechat-business-hours',
-              'manage-livechat-tags',
-              'manage-livechat-custom-fields',
-              'manage-livechat-triggers',
-            ],
-          },
-        ],
-        extras: ['view-livechat-offline-messages', 'manage-livechat-managers'],
-        adminSection: 'omnichannel',
       },
     ],
   },

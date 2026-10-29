@@ -106,10 +106,7 @@ export interface SendInput {
 
 export async function canPostInRoom(ctx: Ctx, room: any, opts: WriteOpts = {}) {
   const sub = await getSubscriptionRow(room.id, ctx.userId);
-  if (!sub) {
-    if (room.t === 'l' && (await hasPermission(ctx.userId, 'view-livechat-rooms'))) return;
-    throw forbidden('Você precisa entrar na sala para enviar mensagens.');
-  }
+  if (!sub) throw forbidden('Você precisa entrar na sala para enviar mensagens.');
   return assertCanWrite(ctx, room, undefined, opts);
 }
 

@@ -10,7 +10,7 @@ import { ImportError, type ArchiveEntry, type ArchiveSource, type PrepareContext
 
 const MiB = 1024 * 1024;
 
-// users.csv, channels.csv, contacts.csv e a lista do Slack são lidos aos pedaços, como as mensagens, mas cada linha
+// users.csv, channels.csv e a lista do Slack são lidos aos pedaços, como as mensagens, mas cada linha
 // lida deixa algo na memória (nomes já vistos, para achar repetidos): por isso os limites.
 // Mutável só para os testes poderem usar limites pequenos.
 export const CSV_LIMITS = {
@@ -413,7 +413,7 @@ export interface TableOptions {
   onBytes?: (n: number) => void;
 }
 
-// users.csv, channels.csv, contacts.csv e a lista do Slack, registro a registro. Um erro de formato aqui é fatal: vira
+// users.csv, channels.csv e a lista do Slack, registro a registro. Um erro de formato aqui é fatal: vira
 // ImportError com o nome do arquivo e a linha.
 export async function* csvTable(input: Readable | Buffer, file: string, opts: TableOptions): AsyncGenerator<CsvRow> {
   const source = Buffer.isBuffer(input) ? Readable.from([input]) : input;

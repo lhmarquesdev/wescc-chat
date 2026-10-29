@@ -175,7 +175,7 @@ reg('call', '[voz|vídeo]', 'Iniciar uma chamada de voz ou vídeo nesta sala', a
   const a = args.trim().toLocaleLowerCase('pt-BR');
   const kind = a === 'voz' || a === 'audio' || a === 'áudio' ? 'audio' : 'video';
   const enabled = !!getSetting('Calls_Enabled');
-  const scope = room.t === 'l' ? null : callScopeOf(room);
+  const scope = callScopeOf(room);
   const groupOk = !!getSetting('Calls_Group_Enabled') && sfuConfig().configured;
   if (enabled && scope && (scope === 'direct' || groupOk)) {
     if (scope === 'group' && isTransmissionRoom(room)) throw new ApiError(403, 'error-call-not-allowed', 'Esta sala não aceita chamadas.');
@@ -184,7 +184,6 @@ reg('call', '[voz|vídeo]', 'Iniciar uma chamada de voz ou vídeo nesta sala', a
   }
   if (getSetting('VideoConf_Enabled')) return jitsiLink(ctx, room, tmid);
   if (!enabled) throw forbidden('As chamadas estão desativadas.');
-  if (room.t === 'l') throw badRequest('error-call-room', 'Chamadas não estão disponíveis em conversas de atendimento.');
   // Ligadas, mas sem servidor de chamadas configurado: o mesmo motivo que os botões da sala mostram, na mesma ordem de
   // calls.roomCall (a política da sala antes da configuração; numa sala de avisos, "Esta sala não aceita chamadas.").
   if (scope === 'group' && getSetting('Calls_Group_Enabled')) {

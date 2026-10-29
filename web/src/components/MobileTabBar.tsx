@@ -6,7 +6,7 @@ import { Icon, type IconName } from './Icon';
 import { useMentionTotal } from './navState';
 // Chamadas em grupo: o selo de perdidas vem do servidor (calls.missedCount), com o rótulo para leitores de tela.
 import { CallsNavBadge } from './call/LiveIndicators';
-import { useAgent, useMyStatus, UserMenu } from './Sidebar';
+import { useMyStatus, UserMenu } from './Sidebar';
 import { UserAvatar } from './ui';
 
 function Tab({
@@ -42,13 +42,11 @@ function Tab({
   );
 }
 
-// Barra de abas do celular (fora das salas): Conversas, Chamadas, Agenda, Atendimento, Diretório e Você.
+// Barra de abas do celular (fora das salas): Conversas, Chamadas, Agenda, Diretório e Você.
 export function MobileTabBar() {
   const me = useStore((s) => s.me)!;
   const callsEnabled = useSetting<boolean>('Calls_Enabled');
   const calendarOn = useSetting<boolean>('Calendar_Enabled') !== false;
-  const { omni, isAgent } = useAgent();
-  const queueCount = useStore((st) => Object.keys(st.queue).length);
   const mentions = useMentionTotal();
   const { status } = useMyStatus();
   const { pathname } = useLocation();
@@ -58,7 +56,6 @@ export function MobileTabBar() {
       <Tab to="/home" icon="nav-chats" label="Conversas" badge={mentions} badgeKind="mention" />
       {callsEnabled && <Tab to="/calls" icon="nav-calls" label="Chamadas" extra={<CallsNavBadge />} />}
       {calendarOn && <Tab to="/calendar" icon="nav-calendar" label="Agenda" />}
-      {omni && isAgent && <Tab to="/omnichannel/queue" match="/omnichannel" icon="nav-omnichannel" label="Atendimento" badge={queueCount} badgeKind="group" />}
       <Tab to="/directory" icon="nav-directory" label="Diretório" />
       <UserMenu
         trigger={

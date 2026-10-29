@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { LivechatAgentStatus, LivechatInquiry, LivechatRoomInfo, Message, Room, ServerEvent, Subscription, User, UserStatus } from '@shared/index';
+import type { Message, Room, ServerEvent, Subscription, User, UserStatus } from '@shared/index';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
 export interface ToastItem {
@@ -34,9 +34,6 @@ interface State {
   permMap: Record<string, string[]>;
   restrictedRoles: string[]; // papéis globais com "Restrito em conversas diretas"
   userRoles: Record<string, string[]>; // papéis globais anunciados por eventos "user" desde a conexão (id -> papéis)
-  livechatRooms: Record<string, LivechatRoomInfo>;
-  queue: Record<string, LivechatInquiry>;
-  agentStatus: LivechatAgentStatus | null;
 
   setMe(me: Me | null): void;
   setSettings(s: Record<string, any>): void;
@@ -88,9 +85,6 @@ const initial = {
   permMap: {},
   restrictedRoles: [],
   userRoles: {},
-  livechatRooms: {},
-  queue: {},
-  agentStatus: null,
 };
 
 export const useStore = create<State>((set, get) => ({
@@ -232,25 +226,6 @@ export function applyEvent(ev: ServerEvent) {
       if (st.me && ev.user._id === st.me._id) st.setMe({ ...st.me, ...ev.user } as Me);
       if (ev.user.roles) useStore.setState({ userRoles: { ...st.userRoles, [ev.user._id]: ev.user.roles } });
       if (ev.user.avatarETag !== undefined && ev.user.username) avatarBust[ev.user.username] = String(ev.user.avatarETag ?? Date.now());
-      break;
-    case 'livechat.inquiry': {
-      const queue = { ...st.queue };
-      if (ev.action === 'queued') queue[ev.inquiry.rid] = ev.inquiry;
-      else delete queue[ev.inquiry.rid];
-      useStore.setState({ queue });
-      break;
-    }
-    case 'livechat.room': {
-      useStore.setState({ livechatRooms: { ...st.livechatRooms, [ev.room.rid]: ev.room } });
-      const queue = { ...st.queue };
-      if (ev.room.status !== 'queued' && queue[ev.room.rid]) {
-        delete queue[ev.room.rid];
-        useStore.setState({ queue });
-      }
-      break;
-    }
-    case 'livechat.agentStatus':
-      useStore.setState({ agentStatus: ev.status });
       break;
     case 'settings.changed': {
       const patch: Record<string, unknown> = {};

@@ -7,12 +7,9 @@ import { Empty, SkeletonStats, SkeletonTable, Tabs, useAsync } from '../../compo
 import { BarChart, LineChart } from './charts';
 import { PageHead, RoomCell, TableWrap, UserCell, num } from './parts';
 
-// A análise do Omnichannel usa o mesmo gráfico de barras.
-export { BarChart as Bars } from './charts';
-
 const WEEKDAYS = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
-const TYPE_LABEL: Record<string, string> = { c: 'Canais públicos', p: 'Grupos privados', d: 'Mensagens diretas', l: 'Atendimentos' };
-const TYPE_ICON: Record<string, 'room-channel' | 'room-private' | 'room-direct' | 'room-livechat'> = { c: 'room-channel', p: 'room-private', d: 'room-direct', l: 'room-livechat' };
+const TYPE_LABEL: Record<string, string> = { c: 'Canais públicos', p: 'Grupos privados', d: 'Mensagens diretas' };
+const TYPE_ICON: Record<string, 'room-channel' | 'room-private' | 'room-direct'> = { c: 'room-channel', p: 'room-private', d: 'room-direct' };
 const HINT = 'Escolha outro período.';
 
 // "2026-10-22" → "22/10".

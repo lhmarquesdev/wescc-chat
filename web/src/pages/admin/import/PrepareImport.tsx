@@ -6,7 +6,7 @@ import { usePermission, useSetting } from '../../../lib/store';
 import { Icon } from '../../../components/Icon';
 import { Empty, SkeletonTable } from '../../../components/ui';
 import { fail, ImportTitle, isImporting, isReading, isWaiting, num, ok, plural, ProgressBar, ST, Stat, StatusPill, statusLabel, useImportEvents, usePolling, Warnings } from './common';
-import type { ImportFileData, ImportOperation, SelectionChannel, SelectionContact, SelectionUser, ShortSelectionPart } from './types';
+import type { ImportFileData, ImportOperation, SelectionChannel, SelectionUser, ShortSelectionPart } from './types';
 
 const DIRECT_MESSAGES_ID = '__directMessages__';
 
@@ -121,7 +121,7 @@ export function PrepareImport() {
   }
 
   const c = op.count;
-  const readSoFar = c.users + c.channels + c.messages + c.contacts > 0;
+  const readSoFar = c.users + c.channels + c.messages > 0;
   return (
     <>
       <ImportTitle title="Lendo o arquivo" />
@@ -135,7 +135,6 @@ export function PrepareImport() {
             <Stat label="Usuários" value={num(c.users)} />
             <Stat label="Canais" value={num(c.channels)} />
             <Stat label="Mensagens" value={num(c.messages)} />
-            {c.contacts > 0 && <Stat label="Contatos" value={num(c.contacts)} />}
           </div>
         )}
         {loadError && <div className="field-hint neg">Sem resposta do servidor ({loadError}). Tentando de novo…</div>}
@@ -152,7 +151,7 @@ export function PrepareImport() {
 
 // ---------- Seleção ----------
 
-type Tab = 'users' | 'channels' | 'contacts';
+type Tab = 'users' | 'channels';
 
 function part(ids: string[], sel: Set<string>): ShortSelectionPart {
   if (!ids.length) return { all: false };
@@ -176,21 +175,18 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
   const canGrantAdmin = usePermission('assign-admin-role');
   const users = data.users ?? [];
   const channels = data.channels ?? [];
-  const contacts = data.contacts ?? [];
   const messageCount = data.message_count ?? 0;
   const [selUsers, setSelUsers] = useState(() => new Set(users.map((u) => u.user_id)));
   const [selChannels, setSelChannels] = useState(() => new Set(channels.map((c) => c.channel_id)));
-  const [selContacts, setSelContacts] = useState(() => new Set(contacts.map((c) => c.id)));
-  const [tab, setTab] = useState<Tab>(users.length || !(channels.length || contacts.length) ? 'users' : channels.length ? 'channels' : 'contacts');
+  const [tab, setTab] = useState<Tab>(users.length || !channels.length ? 'users' : 'channels');
   const [sendEmails, setSendEmails] = useState(false);
   const [starting, setStarting] = useState(false);
 
   const nUsers = countSelected(users, (u) => u.user_id, selUsers);
   const nChannels = countSelected(channels, (c) => c.channel_id, selChannels);
-  const nContacts = countSelected(contacts, (c) => c.id, selContacts);
   // Mensagens de canais trazidos por uma importação anterior (o arquivo não lista canais): entram sem precisar de seleção.
   const looseMessages = !channels.length && messageCount > 0;
-  const nothing = nUsers + nChannels + nContacts === 0 && !looseMessages;
+  const nothing = nUsers + nChannels === 0 && !looseMessages;
 
   const start = async () => {
     setStarting(true);
@@ -204,10 +200,6 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
           channels: part(
             channels.map((c) => c.channel_id),
             selChannels,
-          ),
-          contacts: part(
-            contacts.map((c) => c.id),
-            selContacts,
           ),
         },
         options: { sendPasswordEmails: sendEmails },
@@ -225,7 +217,6 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
     nUsers && plural(nUsers, 'usuário', 'usuários'),
     nRooms && plural(nRooms, 'canal', 'canais'),
     dmSelected && 'as mensagens diretas',
-    nContacts && plural(nContacts, 'contato', 'contatos'),
     looseMessages && plural(messageCount, 'mensagem', 'mensagens'),
   ].filter(Boolean) as string[];
 
@@ -244,9 +235,9 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
         </div>
       )}
       <Warnings list={op.warnings} />
-      {/* Só as abas do que o arquivo traz: um CSV de contatos não mostra "Usuários (0)" nem "Canais (0)". */}
+      {/* Só as abas do que o arquivo traz: uma lista de membros não mostra "Canais (0)". */}
       <div className="tabs" role="tablist">
-        {(users.length > 0 || (!channels.length && !contacts.length)) && (
+        {(users.length > 0 || !channels.length) && (
           <TabButton active={tab === 'users'} onClick={() => setTab('users')}>
             Usuários ({selectedLabel(nUsers)})
           </TabButton>
@@ -254,11 +245,6 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
         {channels.length > 0 && (
           <TabButton active={tab === 'channels'} onClick={() => setTab('channels')}>
             Canais ({selectedLabel(nChannels)})
-          </TabButton>
-        )}
-        {contacts.length > 0 && (
-          <TabButton active={tab === 'contacts'} onClick={() => setTab('contacts')}>
-            Contatos ({selectedLabel(nContacts)})
           </TabButton>
         )}
         {messageCount > 0 && (
@@ -352,45 +338,6 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
                     Já existe
                   </span>
                 )}
-              </td>
-            </>
-          )}
-        />
-      )}
-      {tab === 'contacts' && (
-        <SelectTable<SelectionContact>
-          key="contacts"
-          rows={contacts}
-          idOf={(c) => c.id}
-          selected={selContacts}
-          onChange={setSelContacts}
-          placeholder="Filtrar por nome, e-mail ou telefone"
-          match={(c, q) => [c.name, ...c.emails, ...c.phones].some((v) => v?.toLowerCase().includes(q))}
-          empty="Nenhum contato no arquivo."
-          head={
-            <>
-              <th>Nome</th>
-              <th>E-mails</th>
-              <th className="imp-opt">Telefones</th>
-            </>
-          }
-          row={(c) => (
-            <>
-              <td className="imp-strong">{c.name || <span className="muted">(sem nome)</span>}</td>
-              <td className="imp-lines">
-                {c.emails.map((e) => (
-                  <div key={e}>{e}</div>
-                ))}
-                {c.phones.map((p) => (
-                  <div key={p} className="imp-phone-only muted">
-                    {p}
-                  </div>
-                ))}
-              </td>
-              <td className="imp-opt imp-lines">
-                {c.phones.map((p) => (
-                  <div key={p}>{p}</div>
-                ))}
               </td>
             </>
           )}

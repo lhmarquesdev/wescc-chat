@@ -396,7 +396,7 @@ describe('ponte do /sfu', () => {
     expect((await c3).code).toBe(1011);
   });
 
-  it('quadro de 300 KB passa no /sfu; no /websocket do chat e no /livechat/websocket acima de 64 KB fecha com 1009', async () => {
+  it('quadro de 300 KB passa no /sfu; no /websocket do chat acima de 64 KB fecha com 1009', async () => {
     const u = await newUser(A);
     const s = await seat(u);
     const pending = up.next();
@@ -421,15 +421,6 @@ describe('ponte do /sfu', () => {
     const cc = closed(chat.ws);
     chat.ws.send(Buffer.alloc(100 * 1024, 65));
     expect((await cc).code).toBe(1009);
-
-    await settings({ Livechat_enabled: true });
-    const token = `visitante-${newId()}`;
-    expect((await api('POST', 'livechat/visitor', { visitor: { token, name: 'Cliente da ponte', email: 'ponte@ex.com' } })).success).toBe(true);
-    const lc = await opened(`/livechat/websocket?token=${token}`);
-    const lcc = closed(lc);
-    lc.send(Buffer.alloc(100 * 1024, 65));
-    expect((await lcc).code).toBe(1009);
-    await settings({ Livechat_enabled: false });
   });
 
   it('upstream lento demais ou com buffer acima de 8 MiB fecha os dois lados', async () => {

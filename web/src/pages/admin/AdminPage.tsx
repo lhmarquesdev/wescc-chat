@@ -15,7 +15,6 @@ import { AdminDevices, AdminEmoji, AdminInvites, AdminModeration } from './Admin
 // Integrações (Jira/Teams): hub com Jira, Microsoft Teams e os webhooks (AdminIntegrations, agora em /admin/integrations/webhooks)
 import { IntegrationsAdmin } from './integrations';
 import { AdminOAuth } from './AdminOAuth';
-import { AdminOmnichannel } from './AdminOmnichannel';
 import { AdminImport } from './import';
 import { AdminLdap } from './ldap';
 // Chamadas em grupo: Administração › Chamadas.
@@ -57,7 +56,6 @@ export function AdminPage() {
         {/* Integrações (Jira/Teams) */}
         {section === 'integrations' && <IntegrationsAdmin />}
         {section === 'oauth' && <AdminOAuth />}
-        {section === 'omnichannel' && <AdminOmnichannel />}
         {section === 'emoji' && <AdminEmoji />}
         {/* Figurinhas */}
         {section === 'stickers' && <AdminStickers />}

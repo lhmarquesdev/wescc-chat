@@ -31,7 +31,6 @@ vi.mock('../src/importer/registry', async (importOriginal) => {
     await ctx.setStep('importer_preparing_messages');
     await ctx.setMessagesStatus('geral/2024-01-01');
     for (const m of spec.messages ?? []) await ctx.message(m);
-    for (const c of spec.contacts ?? []) await ctx.contact(c);
     for (let i = 0; i < (spec.warnings ?? 0); i++) ctx.warn(`Aviso ${i + 1}`);
     for (const w of spec.warnTexts ?? []) ctx.warn(w);
     ctx.progress(50);
@@ -190,7 +189,6 @@ describe('envio e leitura do arquivo', () => {
       { importId: 'm2', rid: 'c1', u: 'u2', msg: 'olá' },
       { importId: 'm3', rid: 'd1', u: 'u1', msg: 'tudo bem?' },
     ],
-    contacts: [{ importIds: ['k1'], name: 'Cliente', emails: ['cliente@ex.com'], phones: ['+5511999990000'] }],
     warnings: 3,
   };
 
@@ -202,7 +200,7 @@ describe('envio e leitura do arquivo', () => {
     const id = r.operation._id;
     const op = await waitOp((o) => settled(o));
     expect(op.status).toBe('importer_user_selection');
-    expect(op.count).toMatchObject({ users: 4, channels: 4, messages: 3, contacts: 1, total: 12, completed: 0 });
+    expect(op.count).toMatchObject({ users: 4, channels: 4, messages: 3, total: 11, completed: 0 });
     expect(op.warnings).toEqual(['Aviso 1', 'Aviso 2', 'Aviso 3']);
     expect(op.messagesstatus).toBeNull();
     // Nome no disco só com caracteres seguros, dentro da pasta da operação.
@@ -210,7 +208,7 @@ describe('envio e leitura do arquivo', () => {
     expect(path.dirname(row.file_path)).toBe(operationDir(id));
     expect(path.basename(row.file_path)).toMatch(/^[A-Za-z0-9._-]+\.json$/);
     expect(row.file_size).toBe(Buffer.byteLength(json(spec)));
-    expect((await opRows(id)).map((x) => x.data_type)).toEqual(['user', 'user', 'user', 'user', 'channel', 'channel', 'channel', 'channel', 'message', 'message', 'message', 'contact']);
+    expect((await opRows(id)).map((x) => x.data_type)).toEqual(['user', 'user', 'user', 'user', 'channel', 'channel', 'channel', 'channel', 'message', 'message', 'message']);
 
     const data = await api('GET', 'getImportFileData', undefined, A);
     expect(data.waiting).toBeUndefined();
@@ -229,7 +227,6 @@ describe('envio e leitura do arquivo', () => {
       { channel_id: 'c2', name: 'geral', is_archived: true, is_private: true, is_direct: false, members: 1, exists: false, do_import: true },
       { channel_id: '__directMessages__', name: 'Mensagens diretas', is_archived: false, is_private: true, is_direct: true, members: 2, exists: false, do_import: true },
     ]);
-    expect(data.contacts).toEqual([{ id: 'k1', name: 'Cliente', emails: ['cliente@ex.com'], phones: ['+5511999990000'], do_import: true }]);
     expect((await current()).status).toBe('importer_user_selection');
     const audit = await pool.query(`SELECT data FROM audit_log WHERE action = 'import.uploaded' AND target->>'operationId' = $1`, [id]);
     expect(audit.rows[0].data).toMatchObject({ importer: 'test', source: 'upload', file: 'meus dados (1).json' });
@@ -391,7 +388,7 @@ describe('importação com o conversor de teste', () => {
       }
       await o.sink.step('importer_finishing');
       const zero = { inserted: 0, updated: 0, failed: 0, skipped: 0 };
-      return { users: { ...zero, inserted: 1, failed: 1, skipped: 1 }, channels: zero, messages: zero, contacts: { inserted: 0, failed: 0, skipped: 0 }, roomIds: [], newUserIds: ['x'] };
+      return { users: { ...zero, inserted: 1, failed: 1, skipped: 1 }, channels: zero, messages: zero, roomIds: [], newUserIds: ['x'] };
     };
     const op = await apiOperation(users);
     const r = await api('POST', 'startImport', { input: { users: { list: ['p1', 'p2'] } }, options: { sendPasswordEmails: true } }, A);
@@ -419,7 +416,7 @@ describe('importação com o conversor de teste', () => {
         o.sink.inc({ completed: 1 });
         await sleep(10);
       }
-      return { users: {}, channels: {}, messages: {}, contacts: {}, roomIds: [], newUserIds: [] };
+      return { users: {}, channels: {}, messages: {}, roomIds: [], newUserIds: [] };
     };
     await apiOperation(users);
     await api('POST', 'startImport', { input: { users: { all: true } } }, A);
@@ -643,7 +640,7 @@ describe('arquivo ou pasta no servidor', () => {
   it('importers.list mostra a origem "path" só com IMPORT_SERVER_DIR', async () => {
     delete process.env.IMPORT_SERVER_DIR;
     const off = await api('GET', 'importers.list', undefined, A);
-    expect(off.importers.map((i: any) => i.key)).toEqual(['csv', 'slack', 'slack-users', 'omnichannel_contact']);
+    expect(off.importers.map((i: any) => i.key)).toEqual(['csv', 'slack', 'slack-users']);
     expect(off.maxFileSize).toBe(1073741824);
     for (const i of off.importers) {
       expect(i.sources).toEqual(['upload', 'url']);
@@ -976,7 +973,7 @@ describe('correções da revisão', () => {
     conv.fake = async (o) => {
       await o.sink.step('importer_importing_users');
       while (!o.sink.cancelled()) await sleep(20);
-      return { users: {}, channels: {}, messages: {}, contacts: {}, roomIds: [], newUserIds: [] };
+      return { users: {}, channels: {}, messages: {}, roomIds: [], newUserIds: [] };
     };
     await apiOperation([{ importIds: ['hb2'], emails: ['hb2@ex.com'] }]);
     await pool.query(`UPDATE instances SET last_seen = now() - interval '5 minutes' WHERE id = $1`, [bus.origin]);
@@ -1010,7 +1007,7 @@ describe('correções da revisão', () => {
         await sleep(10);
       }
       exited = true;
-      return { users: {}, channels: {}, messages: {}, contacts: {}, roomIds: [], newUserIds: [] };
+      return { users: {}, channels: {}, messages: {}, roomIds: [], newUserIds: [] };
     };
     const op = await apiOperation([{ importIds: ['f2'], emails: ['f2@ex.com'] }]);
     await api('POST', 'startImport', { input: { users: { all: true } } }, A);
@@ -1025,7 +1022,7 @@ describe('correções da revisão', () => {
     conv.fake = async (o) => {
       await o.sink.step('importer_importing_users');
       const zero = { inserted: 0, updated: 0, failed: 0, skipped: 0 };
-      return { users: zero, channels: zero, messages: zero, contacts: { inserted: 0, failed: 0, skipped: 0 }, roomIds: [], newUserIds: [] };
+      return { users: zero, channels: zero, messages: zero, roomIds: [], newUserIds: [] };
     };
     const op = await apiOperation([{ importIds: ['r1'], emails: ['r1@ex.com'], username: 'corrida1' }]);
     // Força a ordem: startImport muda a operação entre a conferência do import.new e a invalidação.
@@ -1194,7 +1191,7 @@ describe('correções da revisão', () => {
         }
       }
       const zero = { inserted: 0, updated: 0, failed: 0, skipped: 0 };
-      return { users: { ...zero, failed: 1 }, channels: zero, messages: zero, contacts: { inserted: 0, failed: 0, skipped: 0 }, roomIds: [], newUserIds: [] };
+      return { users: { ...zero, failed: 1 }, channels: zero, messages: zero, roomIds: [], newUserIds: [] };
     };
     await apiOperation([{ importIds: ['nota1'], emails: ['nota1@ex.com'], username: 'nota1' }]);
     expect((await api('POST', 'startImport', { input: { users: { all: true } } }, A)).success).toBe(true);

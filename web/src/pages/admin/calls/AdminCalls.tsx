@@ -93,7 +93,7 @@ function ServerCard({
       {data && !data.configured && (
         <div className="callout info admin-calls-error">
           <Icon name="info" />
-          <span>Chamadas em grupo precisam do servidor de chamadas LiveKit. Veja a seção “Chamadas em grupo” do README para instalar no Windows ou no Linux.</span>
+          <span>Chamadas em grupo precisam de um servidor de áudio e vídeo, o LiveKit (programa gratuito instalado num computador da empresa, com HTTPS). Chamadas a dois não precisam dele. Veja a seção “Chamadas em grupo” do README para instalar no Windows ou no Linux.</span>
         </div>
       )}
       {data && (

@@ -33,7 +33,7 @@ afterAll(() => stopServer());
 
 describe('ninguém ganha, ninguém perde', () => {
   it('os papéis padrão continuam com exatamente as permissões padrão; a chave nova só vai para quem já geria papéis', async () => {
-    for (const role of ['user', 'operacao', 'owner', 'publisher', 'livechat-agent', 'bot', 'guest']) {
+    for (const role of ['user', 'operacao', 'owner', 'publisher', 'bot', 'guest']) {
       const expected = Object.entries(RBAC_KEYS).filter(([, k]) => k.defaults.includes(role)).map(([id]) => id).sort();
       expect(await grants(role), role).toEqual(expected);
     }
@@ -140,7 +140,7 @@ describe('hierarquia de concessão', () => {
   it('o contexto de concessão diz à tela o que fica travado e por quê', async () => {
     const g = await api('GET', 'rbac.grantContext', {}, sup);
     expect(g.root).toBe(false);
-    expect(g.roleLocks).toMatchObject({ admin: 'root-only', auditor: null, user: null, 'livechat-manager': 'superior' });
+    expect(g.roleLocks).toMatchObject({ admin: 'root-only', auditor: null, user: null, bot: 'superior' });
     expect(g.deleteLocks.supervisor).toBe('own-role');
   });
 });

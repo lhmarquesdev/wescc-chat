@@ -20,7 +20,7 @@ import { lockText, people, rbacFail, rbacOk, type Grant, type RbacRole } from '.
 const ROOT_KEEP = ['view-permissions', 'access-permissions', 'manage-roles'];
 const KNOWN = Object.keys(RBAC_KEYS);
 
-type Tab = 'identity' | 'chat' | 'room' | 'admin' | 'omnichannel' | 'power' | 'people' | 'history';
+type Tab = 'identity' | 'chat' | 'room' | 'admin' | 'power' | 'people' | 'history';
 
 const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((x) => b.has(x));
 
@@ -168,7 +168,6 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
     { id: 'chat', label: 'Conversas', icon: 'rbac-chat' },
     { id: 'room', label: 'Salas', icon: 'rbac-room' },
     { id: 'admin', label: 'Administração', icon: 'rbac-admin' },
-    { id: 'omnichannel', label: 'Atendimento', icon: 'rbac-omni' },
     { id: 'power', label: 'Mapa de poder', icon: 'rbac-power' },
     { id: 'people', label: 'Pessoas', icon: 'admin-users' },
     { id: 'history', label: 'Histórico', icon: 'rbac-history' },
@@ -353,7 +352,7 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
             )}
           </div>
         )}
-        {(tab === 'chat' || tab === 'room' || tab === 'admin' || tab === 'omnichannel') && (
+        {(tab === 'chat' || tab === 'room' || tab === 'admin') && (
           <div className="rbac-stack">
             <GroupPanel group={groupOf(tab)} count={reachText(tab)} onGroup={(m) => setGroup(groupOf(tab), m)} {...groupProps} />
             {tab === 'chat' && (showTechnical || [...draft.permissions].some((k) => KEY_AREA[k] === 'bots')) && (

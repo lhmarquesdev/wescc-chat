@@ -590,14 +590,14 @@ describe('OAuth: papéis e canais', () => {
       rolesClaim: 'realm.roles',
       syncRoles: true,
       mergeRoles: false,
-      roleMapping: { 'chat-admins': 'admin', suporte: ['livechat-agent'], fantasma: 'papel-inexistente' },
+      roleMapping: { 'chat-admins': 'admin', suporte: ['operacao'], fantasma: 'papel-inexistente' },
     });
-    expect(await roles(['suporte', 'fantasma'])).toEqual(['livechat-agent', 'user']);
+    expect(await roles(['suporte', 'fantasma'])).toEqual(['operacao', 'user']);
     expect(await roles(['chat-admins'])).toEqual(['admin', 'user']);
     expect(await roles([])).toEqual(['user']);
 
     // Valores fora do mapa nunca viram papéis (ex.: um grupo "auditor" criado pelo próprio usuário no GitLab).
-    expect(await roles(['auditor', 'livechat-manager', 'admin', 'constructor', 'toString'])).toEqual(['user']);
+    expect(await roles(['auditor', 'auditor-log', 'admin', 'constructor', 'toString'])).toEqual(['user']);
     // Sincronizar sem mapa é recusado.
     const empty = await update('mock', { roleMapping: {} });
     expect(empty.status).toBe(400);
@@ -606,42 +606,42 @@ describe('OAuth: papéis e canais', () => {
     // Provedor salvo antes desta regra (sincronização ligada, mapa vazio): o login não mexe nos papéis.
     await pool.query(`UPDATE oauth_providers SET role_mapping = '{}' WHERE id = 'mock'`);
     const manual = await loginAs('mock', { sub: 'r-9', preferred_username: 'papel-manual' });
-    expect((await api('POST', 'roles.addUserToRole', { roleId: 'livechat-agent', userId: manual.userId }, A)).success).toBe(true);
-    expect((await loginAs('mock', { sub: 'r-9', realm: { roles: ['auditor', 'livechat-manager'] } })).me.roles.slice().sort()).toEqual(['livechat-agent', 'user']);
+    expect((await api('POST', 'roles.addUserToRole', { roleId: 'operacao', userId: manual.userId }, A)).success).toBe(true);
+    expect((await loginAs('mock', { sub: 'r-9', realm: { roles: ['auditor', 'auditor-log'] } })).me.roles.slice().sort()).toEqual(['operacao', 'user']);
     // Texto separado por vírgula também vale.
-    await update('mock', { roleMapping: { suporte: 'livechat-agent', gestao: 'livechat-manager' } });
-    expect((await loginAs('mock', { sub: 'r-2', realm: { roles: 'gestao, suporte, auditor' } })).me.roles.slice().sort()).toEqual(['livechat-agent', 'livechat-manager', 'user']);
+    await update('mock', { roleMapping: { suporte: 'operacao', gestao: 'auditor-log' } });
+    expect((await loginAs('mock', { sub: 'r-2', realm: { roles: 'gestao, suporte, auditor' } })).me.roles.slice().sort()).toEqual(['auditor-log', 'operacao', 'user']);
   });
 
   it('mesclar papéis mantém os atribuídos à mão; sem mesclar, o provedor manda', async () => {
-    await update('mock', { roleMapping: { suporte: 'livechat-agent', gestao: 'livechat-manager' }, mergeRoles: true });
+    await update('mock', { roleMapping: { suporte: 'operacao', gestao: 'auditor-log' }, mergeRoles: true });
     const first = await loginAs('mock', { sub: 'r-3', preferred_username: 'mescla', realm: { roles: ['suporte'] } });
     expect((await api('POST', 'roles.addUserToRole', { roleId: 'auditor', userId: first.userId }, A)).success).toBe(true);
-    expect(await roles(['suporte', 'gestao'], 'r-3')).toEqual(['auditor', 'livechat-agent', 'livechat-manager', 'user']);
-    expect(await roles(['gestao'], 'r-3')).toEqual(['auditor', 'livechat-manager', 'user']);
+    expect(await roles(['suporte', 'gestao'], 'r-3')).toEqual(['auditor', 'auditor-log', 'operacao', 'user']);
+    expect(await roles(['gestao'], 'r-3')).toEqual(['auditor', 'auditor-log', 'user']);
     expect(await roles([], 'r-3')).toEqual(['auditor', 'user']);
 
     await update('mock', { mergeRoles: false });
-    expect(await roles(['suporte'], 'r-3')).toEqual(['livechat-agent', 'user']);
+    expect(await roles(['suporte'], 'r-3')).toEqual(['operacao', 'user']);
     await update('mock', { syncRoles: false });
     // Com a sincronização desligada os papéis não mudam.
-    expect(await roles(['gestao'], 'r-3')).toEqual(['livechat-agent', 'user']);
+    expect(await roles(['gestao'], 'r-3')).toEqual(['operacao', 'user']);
   });
 
   it('papéis e canais configurados já na criação do provedor', async () => {
     const r = await api(
       'POST',
       'oauth-providers',
-      { _id: 'sync', ...provider({ rolesClaim: 'grupos', syncRoles: true, roleMapping: { suporte: 'livechat-agent' }, mapChannels: true, channelMapping: { suporte: 'canal-suporte' } }) },
+      { _id: 'sync', ...provider({ rolesClaim: 'grupos', syncRoles: true, roleMapping: { suporte: 'operacao' }, mapChannels: true, channelMapping: { suporte: 'canal-suporte' } }) },
       A,
     );
     expect(r.provider.rolesClaim).toBe('grupos');
-    expect(r.provider.roleMapping).toEqual({ suporte: 'livechat-agent' });
+    expect(r.provider.roleMapping).toEqual({ suporte: 'operacao' });
     const gl = await api('POST', 'oauth-providers', { _id: 'gl', type: 'gitlab', clientId: CLIENT_ID, serverUrl: 'https://gitlab.empresa.com.br' }, A);
     expect(gl.provider.rolesClaim).toBe('groups');
     expect(gl.provider.effective.tokenUrl).toBe('https://gitlab.empresa.com.br/oauth/token');
     const { me, userId } = await loginAs('sync', { sub: 's-1', preferred_username: 'criado.sync', grupos: ['suporte'] });
-    expect(me.roles.slice().sort()).toEqual(['livechat-agent', 'user']);
+    expect(me.roles.slice().sort()).toEqual(['operacao', 'user']);
     const subs = await pool.query(`SELECT 1 FROM subscriptions s JOIN rooms r ON r.id = s.room_id WHERE s.user_id = $1 AND r.name = 'canal-suporte'`, [userId]);
     expect(subs.rowCount).toBe(1);
   });
@@ -676,7 +676,7 @@ describe('OAuth: provedor e diretório', () => {
     }
     expect((await ms('ms-multi-canais', { tenant: 'common', mapChannels: true, channelMapping: { g: 'x' } })).status).toBe(400);
 
-    const created = await ms('ms', { tenant: TENANT, syncRoles: true, roleMapping: { 'Chat.Admin': 'admin', Suporte: 'livechat-agent' } });
+    const created = await ms('ms', { tenant: TENANT, syncRoles: true, roleMapping: { 'Chat.Admin': 'admin', Suporte: 'operacao' } });
     expect(created.success).toBe(true);
     expect(created.provider.effective.fieldMap.emailVerified).toBe('xms_edov');
     mock.idToken = true;
@@ -692,7 +692,7 @@ describe('OAuth: provedor e diretório', () => {
     expect((await flow('ms', msUser(TENANT, { sub: 'ms-z' }))).res.status).toBe(401);
     mock.idToken = true;
     const ok = await loginAs('ms', msUser(TENANT, { sub: 'ms-1', preferred_username: 'ana.ms', roles: ['Suporte'] }));
-    expect(ok.me.roles.slice().sort()).toEqual(['livechat-agent', 'user']);
+    expect(ok.me.roles.slice().sort()).toEqual(['operacao', 'user']);
   });
 
   it('Microsoft: e-mail do diretório vale para domínios permitidos; vínculo só com xms_edov', async () => {

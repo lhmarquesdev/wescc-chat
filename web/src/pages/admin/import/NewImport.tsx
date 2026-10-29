@@ -15,7 +15,7 @@ const SOURCE_LABEL: Record<ImportSource, string> = {
 };
 
 // Ícone de cada tipo nos cartões da escolha (tipos novos ficam com o ícone da importação).
-const TYPE_ICON: Record<string, IconName> = { slack: 'file-archive', csv: 'file-sheet', 'slack-users': 'admin-users', omnichannel_contact: 'nav-omnichannel' };
+const TYPE_ICON: Record<string, IconName> = { slack: 'file-archive', csv: 'file-sheet', 'slack-users': 'admin-users' };
 
 const URL_RE = /^https?:\/\/[^\s/?#]+\S*$/i;
 

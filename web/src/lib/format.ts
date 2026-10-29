@@ -4,7 +4,7 @@ import type { IconName } from '../components/icons';
 
 export function roomPath(r: { _id?: string; rid?: string; t: string }) {
   const id = r.rid ?? r._id;
-  const base = r.t === 'd' ? 'direct' : r.t === 'p' ? 'group' : r.t === 'l' ? 'live' : 'channel';
+  const base = r.t === 'd' ? 'direct' : r.t === 'p' ? 'group' : 'channel';
   return `/${base}/${id}`;
 }
 
@@ -17,7 +17,6 @@ export function roomIconName(r: RoomKind): IconName {
   if (r.notice) return 'room-notice';
   if (r.t === 'p') return 'room-private';
   if (r.t === 'd') return 'room-direct';
-  if (r.t === 'l') return 'room-livechat';
   return 'room-channel';
 }
 
@@ -178,26 +177,6 @@ export function systemText(m: Message & Record<string, any>, nameOf: (username: 
       return `${u} converteu o time em canal`;
     case 'rm':
       return 'Mensagem removida';
-    case 'livechat-started':
-      return 'Atendimento iniciado';
-    case 'livechat-close':
-      if (!m.u._id || m.closer === 'visitor' || m.closer === 'system') return `Atendimento encerrado${m.msg ? `: ${m.msg}` : ''}`;
-      return `${u} encerrou o atendimento${m.msg ? `: ${m.msg}` : ''}`;
-    case 'livechat_transfer_history': {
-      const d = m.transferData ?? {};
-      const by = d.transferredBy?.name || d.transferredBy?.username || u;
-      const note = d.comment ? ` — "${d.comment}"` : '';
-      if (d.scope === 'agent') return `${by} transferiu o atendimento para ${d.transferredTo?.name || d.transferredTo?.username}${note}`;
-      if (d.scope === 'department') return `${by} transferiu o atendimento para o departamento ${d.nextDepartment?.name}${note}`;
-      if (d.scope === 'queue') return `${by} devolveu o atendimento para a fila`;
-      return `Atendimento transferido${note}`;
-    }
-    case 'livechat_queue':
-      return m.msg;
-    case 'omnichannel_placed_chat_on_hold':
-      return `${u} colocou o atendimento em espera`;
-    case 'omnichannel_on_hold_chat_resumed':
-      return m.u._id ? `${u} retomou o atendimento` : 'O visitante retomou o atendimento';
     case 'call_ended':
       return `${m.call?.kind === 'video' ? 'Chamada de vídeo' : 'Chamada de voz'} · ${formatDuration(m.call?.duration ?? 0)}`;
     case 'call_missed': {
@@ -214,8 +193,6 @@ export function systemText(m: Message & Record<string, any>, nameOf: (username: 
       if (c.status === 'ongoing') return c.listenOnly ? `${u} iniciou uma transmissão` : `${u} iniciou uma chamada de ${c.kind === 'video' ? 'vídeo' : 'voz'}`;
       return callCardSummary(c);
     }
-    case 'livechat_navigation_history':
-      return `Visitante navegou para ${m.msg}`;
     default:
       return m.msg;
   }
@@ -268,18 +245,6 @@ export function systemIcon(m: Message & Record<string, any>): IconName | null {
     case 'user-converted-to-team':
     case 'user-converted-to-channel':
       return 'room-team';
-    case 'livechat-started':
-      return 'room-livechat';
-    case 'livechat-close':
-      return 'sys-closed';
-    case 'livechat_transfer_history':
-      return 'sys-transfer';
-    case 'livechat_queue':
-      return 'queue';
-    case 'omnichannel_placed_chat_on_hold':
-      return 'sys-hold';
-    case 'omnichannel_on_hold_chat_resumed':
-      return 'sys-resume';
     case 'call_ended':
       return m.call?.kind === 'video' ? 'call-video' : 'call-audio';
     case 'call_missed':
@@ -287,8 +252,6 @@ export function systemIcon(m: Message & Record<string, any>): IconName | null {
     // Chamadas em grupo: o mesmo ícone do cartão.
     case 'call_group':
       return (m.call as CallCard | undefined)?.listenOnly ? 'call-broadcast' : m.call?.kind === 'video' ? 'call-video' : 'call-audio';
-    case 'livechat_navigation_history':
-      return 'link';
     default:
       return null;
   }
@@ -304,9 +267,6 @@ export const ROLE_LABEL: Record<string, string> = {
   moderator: 'Moderador',
   leader: 'Líder',
   publisher: 'Publicador',
-  'livechat-agent': 'Agente de atendimento',
-  'livechat-manager': 'Gestor de atendimento',
-  'livechat-monitor': 'Monitor de atendimento',
   auditor: 'Auditor',
   'auditor-log': 'Auditor de logs',
   app: 'App',

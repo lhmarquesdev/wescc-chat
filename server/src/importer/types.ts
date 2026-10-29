@@ -20,11 +20,9 @@ export const ST = {
   preparingUsers: 'importer_preparing_users',
   preparingChannels: 'importer_preparing_channels',
   preparingMessages: 'importer_preparing_messages',
-  preparingContacts: 'importer_preparing_contacts',
   userSelection: 'importer_user_selection',
   importingStarted: 'importer_importing_started',
   importingUsers: 'importer_importing_users',
-  importingContacts: 'importer_importing_contacts',
   importingChannels: 'importer_importing_channels',
   importingMessages: 'importer_importing_messages',
   importingFiles: 'importer_importing_files',
@@ -37,11 +35,10 @@ export const ST = {
 export type ImportStatus = (typeof ST)[keyof typeof ST];
 
 export const WAITING_STATES: readonly ImportStatus[] = [ST.new, ST.uploading, ST.downloadingFile];
-export const PREPARING_STATES: readonly ImportStatus[] = [ST.fileLoaded, ST.preparingStarted, ST.preparingUsers, ST.preparingChannels, ST.preparingMessages, ST.preparingContacts];
+export const PREPARING_STATES: readonly ImportStatus[] = [ST.fileLoaded, ST.preparingStarted, ST.preparingUsers, ST.preparingChannels, ST.preparingMessages];
 export const IMPORTING_STATES: readonly ImportStatus[] = [
   ST.importingStarted,
   ST.importingUsers,
-  ST.importingContacts,
   ST.importingChannels,
   ST.importingMessages,
   ST.importingFiles,
@@ -51,7 +48,7 @@ export const FINAL_STATES: readonly ImportStatus[] = [ST.done, ST.failed, ST.can
 // Estados em que há trabalho rodando em segundo plano (não dá para começar outra importação).
 export const BUSY_STATES: readonly ImportStatus[] = [ST.uploading, ST.downloadingFile, ...PREPARING_STATES, ...IMPORTING_STATES];
 
-export type ImporterKey = 'csv' | 'slack' | 'slack-users' | 'omnichannel_contact' | 'api' | 'pending-files' | 'pending-avatars';
+export type ImporterKey = 'csv' | 'slack' | 'slack-users' | 'api' | 'pending-files' | 'pending-avatars';
 
 // ---------- Operação ----------
 
@@ -59,7 +56,6 @@ export interface ImportCounts {
   users: number;
   channels: number;
   messages: number;
-  contacts: number;
   total: number;
   completed: number;
   error: number;
@@ -194,16 +190,7 @@ export interface ImportMessage {
   pinned?: boolean;
 }
 
-export interface ImportContact {
-  importIds: string[];
-  name?: string;
-  emails: string[];
-  phones: string[];
-  manager?: string; // nome de usuário de quem cuida do contato
-  customFields?: Record<string, string>;
-}
-
-export type ImportDataType = 'user' | 'channel' | 'message' | 'contact';
+export type ImportDataType = 'user' | 'channel' | 'message';
 
 export interface StagedRecord<T = unknown> {
   id: number;
@@ -239,19 +226,10 @@ export interface SelectionChannel {
   do_import: boolean;
 }
 
-export interface SelectionContact {
-  id: string;
-  name: string;
-  emails: string[];
-  phones: string[];
-  do_import: boolean;
-}
-
 export interface ImportSelection {
   name: string;
   users: SelectionUser[];
   channels: SelectionChannel[];
-  contacts: SelectionContact[];
   message_count: number;
 }
 
@@ -263,7 +241,6 @@ export interface ShortSelectionPart {
 export interface ShortSelection {
   users?: ShortSelectionPart;
   channels?: ShortSelectionPart;
-  contacts?: ShortSelectionPart;
 }
 
 // ---------- Leitura do arquivo enviado ----------
@@ -299,8 +276,7 @@ export interface PrepareContext {
   user(rec: ImportUser): Promise<void>;
   channel(rec: ImportChannel): Promise<void>;
   message(rec: ImportMessage): Promise<void>;
-  contact(rec: ImportContact): Promise<void>;
-  setStep(step: ImportStatus): Promise<void>; // preparing_users / _channels / _messages / _contacts
+  setStep(step: ImportStatus): Promise<void>; // preparing_users / _channels / _messages
   setMessagesStatus(s: string | null): Promise<void>; // ex.: "general/2023-11-14"
   progress(rate: number): void; // 0–100
   warn(message: string): void; // aviso para o administrador (arquivo ignorado, linha inválida...)
@@ -338,7 +314,6 @@ export interface ConversionResult {
   users: { inserted: number; updated: number; failed: number; skipped: number };
   channels: { inserted: number; updated: number; failed: number; skipped: number };
   messages: { inserted: number; updated: number; failed: number; skipped: number };
-  contacts: { inserted: number; failed: number; skipped: number };
   roomIds: string[]; // salas que receberam mensagens ou membros
   newUserIds: string[];
 }

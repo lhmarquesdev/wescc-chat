@@ -1,11 +1,10 @@
-import { contactsImporter } from './importers/contacts';
 import { csvImporter } from './importers/csv';
 import { slackUsersImporter } from './importers/slack-users';
 import { slackImporter } from './importers/slack';
 import type { Importer } from './types';
 
 // Ordem da lista na tela "Nova importação".
-export const importers: Importer[] = [csvImporter, slackImporter, slackUsersImporter, contactsImporter];
+export const importers: Importer[] = [csvImporter, slackImporter, slackUsersImporter];
 
 export function getImporter(key: string): Importer | null {
   return importers.find((i) => i.key === key) ?? null;

@@ -1,5 +1,4 @@
 import { ImportError, ST, type ArchiveEntry, type ImportChannel, type ImportMessage, type ImportStatus, type ImportUser, type Importer, type PrepareContext } from '../types';
-import { parseContactsCsv } from './contacts';
 import {
   CsvFileError,
   type CsvRow,
@@ -31,9 +30,8 @@ import {
 //   channels.csv   canal,criador,public|private,membro1;membro2 (sem cabeçalho)
 //   <canal>/*.csv  autor,data,texto                         (sem cabeçalho; data em milissegundos desde 1970)
 //   directmessages/*.csv  de,para,data,texto                (sem cabeçalho)
-//   contacts.csv   contatos do omnichannel                  (com cabeçalho)
 
-const ROOT_FILES = ['users.csv', 'channels.csv', 'contacts.csv'] as const;
+const ROOT_FILES = ['users.csv', 'channels.csv'] as const;
 type RootFile = (typeof ROOT_FILES)[number];
 const DM_FOLDER = 'directmessages';
 
@@ -98,7 +96,7 @@ class CsvReader {
     this.done += all.length - files.length;
     const prefix = wrapperPrefix(files.map((e) => e.name), isMarker);
 
-    const tables: Record<RootFile, Item[]> = { 'users.csv': [], 'channels.csv': [], 'contacts.csv': [] };
+    const tables: Record<RootFile, Item[]> = { 'users.csv': [], 'channels.csv': [] };
     const messages: Item[] = [];
     for (const entry of files) {
       const rel = entry.name.slice(prefix.length);
@@ -116,14 +114,13 @@ class CsvReader {
       }
     }
     if (!Object.values(tables).some((t) => t.length) && !messages.length) {
-      ctx.warn('O .zip não tem users.csv, channels.csv, contacts.csv nem pastas com mensagens. Veja na ajuda como montar o arquivo.');
+      ctx.warn('O .zip não tem users.csv, channels.csv nem pastas com mensagens. Veja na ajuda como montar o arquivo.');
     }
 
     // Usuários e canais antes das mensagens, onde quer que estejam no .zip: as pastas são ligadas aos canais pelo nome.
     const phases: [RootFile, (it: Item) => Promise<unknown>, ImportStatus][] = [
       ['users.csv', (it) => this.readUsers(it), ST.preparingUsers],
       ['channels.csv', (it) => this.readChannels(it), ST.preparingChannels],
-      ['contacts.csv', async (it) => parseContactsCsv(await openTable(ctx.source, it.entry, it.rel), ctx, it.rel, this.partialProgress(it)), ST.preparingContacts],
     ];
     for (const [key, read, step] of phases) {
       if (!tables[key].length) continue;
@@ -416,7 +413,7 @@ export const csvImporter: Importer = {
   name: 'CSV',
   label: 'CSV (.zip)',
   description:
-    'Um .zip com users.csv (usuario,email,nome), channels.csv (canal,criador,public ou private,membros separados por ;), uma pasta por canal com as mensagens em .csv (autor,data em milissegundos,texto) e, se quiser, directmessages/ (de,para,data,texto) e contacts.csv. Os arquivos não levam cabeçalho, exceto contacts.csv.',
+    'Um .zip com users.csv (usuario,email,nome), channels.csv (canal,criador,public ou private,membros separados por ;), uma pasta por canal com as mensagens em .csv (autor,data em milissegundos,texto) e, se quiser, directmessages/ (de,para,data,texto). Os arquivos não levam cabeçalho.',
   accept: '.zip',
   sourceKind: 'zip-or-dir',
   visible: true,

@@ -367,15 +367,6 @@ button.side-item {
   cursor: pointer;
 }
 
-/* Disponibilidade do agente (só agentes). */
-.side-omni {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  padding: 0 var(--space-2) var(--space-2);
-  flex-shrink: 0;
-}
-
 /* Busca. */
 .side-search {
   display: flex;
@@ -783,10 +774,6 @@ button.side-item {
 [data-mode='list'] .side-search {
   padding: var(--space-1) var(--space-4) var(--space-2);
 }
-/* O cartão "Disponível na fila" fica na mesma margem de 16px da busca e da lista (na barra lateral são 8px). */
-[data-mode='list'] .side-omni {
-  padding: var(--space-1) var(--space-4) var(--space-2);
-}
 [data-mode='list'] .side-search-field {
   height: 40px;
   padding-left: var(--space-3);
@@ -1013,7 +1000,7 @@ button.side-item {
 .with-nav > .page-body {
   height: 100%;
 }
-/* Navegação de seções (Omnichannel; Administração e Conta no modo takeover, abaixo). */
+/* Navegação de seções (Administração e Conta no modo takeover, abaixo). */
 .page-nav {
   --nav-fg: var(--fg-2);
   --nav-fg-strong: var(--fg);

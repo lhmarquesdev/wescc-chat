@@ -27,7 +27,6 @@ export async function workspaceStatistics() {
       count(*) FILTER (WHERE t = 'c' AND prid IS NULL)::int AS channels,
       count(*) FILTER (WHERE t = 'p' AND prid IS NULL)::int AS private_groups,
       count(*) FILTER (WHERE t = 'd')::int AS direct,
-      count(*) FILTER (WHERE t = 'l')::int AS livechat,
       count(*) FILTER (WHERE prid IS NOT NULL)::int AS discussions
     FROM rooms`);
   const msgs = await one(`SELECT count(*)::int AS total,

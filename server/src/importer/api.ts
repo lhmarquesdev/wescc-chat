@@ -33,11 +33,11 @@ import type { ImportUser } from './types';
 
 const RUN = ['run-import'];
 const VIEW = ['view-import-operations', 'run-import'];
-const DATA_TYPES = ['user', 'channel', 'message', 'contact'];
+const DATA_TYPES = ['user', 'channel', 'message'];
 
 const selectionPart = z.object({ all: z.boolean().optional(), list: z.array(z.string()).optional() }).optional();
 const startBody = z.object({
-  input: z.object({ users: selectionPart, channels: selectionPart, contacts: selectionPart }),
+  input: z.object({ users: selectionPart, channels: selectionPart }),
   options: z.object({ sendPasswordEmails: z.boolean().optional(), skipExistingUsers: z.boolean().optional() }).optional(),
 });
 
@@ -188,7 +188,7 @@ export function importRoutes(app: FastifyInstance) {
   route(app, 'GET', 'import.errors', { permissions: RUN }, async (req) => {
     const query = q(req);
     const type = query.type || undefined;
-    if (type && !DATA_TYPES.includes(type)) throw badRequest('error-invalid-params', 'O tipo deve ser user, channel, message ou contact.');
+    if (type && !DATA_TYPES.includes(type)) throw badRequest('error-invalid-params', 'O tipo deve ser user, channel ou message.');
     return listErrors({ operationId: query.operationId || undefined, type, ...paging(query) });
   });
 

@@ -93,7 +93,7 @@ beforeAll(async () => {
         SAML_Email_Attribute: 'mail',
         SAML_Name_Attribute: 'displayName',
         SAML_Role_Attribute: 'groups',
-        SAML_Role_Mapping: JSON.stringify({ 'chat-admins': ['admin'], suporte: ['livechat-agent'] }),
+        SAML_Role_Mapping: JSON.stringify({ 'chat-admins': ['admin'], suporte: ['operacao'] }),
       },
     },
     A,
@@ -126,7 +126,7 @@ describe('SAML', () => {
     expect(login.status).toBe('success');
     expect(login.data.me.username).toBe('ana');
     expect(login.data.me.name).toBe('Ana Souza');
-    expect(login.data.me.roles.sort()).toEqual(['livechat-agent', 'user']);
+    expect(login.data.me.roles.sort()).toEqual(['operacao', 'user']);
     const me = await api('GET', 'me', undefined, { userId: login.data.userId, authToken: login.data.authToken, username: 'ana' });
     expect(JSON.stringify(me)).toContain('ana@empresa.com');
 
@@ -183,11 +183,11 @@ describe('SAML', () => {
   it('papéis dados à mão continuam; o SAML só troca os que ele gerencia', async () => {
     const roles = async () => (await pool.query(`SELECT roles FROM users WHERE username = 'ana'`)).rows[0].roles.sort();
     const id = (await pool.query(`SELECT id FROM users WHERE username = 'ana'`)).rows[0].id;
-    await api('POST', 'users.update', { userId: id, data: { roles: [...(await roles()), 'livechat-manager'] } }, A);
+    await api('POST', 'users.update', { userId: id, data: { roles: [...(await roles()), 'auditor-log'] } }, A);
     await postAcs(samlResponse({ nameID: 'ana@empresa.com', attrs: { uid: 'ana', mail: 'ana@empresa.com', groups: ['suporte'] }, acs }));
-    expect(await roles()).toEqual(['livechat-agent', 'livechat-manager', 'user']);
+    expect(await roles()).toEqual(['auditor-log', 'operacao', 'user']);
     await postAcs(samlResponse({ nameID: 'ana@empresa.com', attrs: { uid: 'ana', mail: 'ana@empresa.com', groups: ['outros'] }, acs }));
-    expect(await roles()).toEqual(['livechat-manager', 'user']);
+    expect(await roles()).toEqual(['auditor-log', 'user']);
   });
 
   it('desativado: rotas respondem 404 e credenciais não valem', async () => {

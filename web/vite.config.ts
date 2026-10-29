@@ -39,8 +39,6 @@ export default defineConfig({
       // Figurinhas: só /sticker/<arquivo>; /stickers… são páginas do app.
       '^/sticker/': target,
       '/websocket': { target: target.replace('http', 'ws'), ws: true },
-      // O widget do visitante abre o websocket dele em /livechat/websocket.
-      '/livechat': { target, ws: true },
       // Mídia das chamadas em grupo: o chat repassa ao LiveKit (sinalização por websocket e /sfu/rtc/v1/validate).
       '/sfu': { target, ws: true },
       '/hooks': target,

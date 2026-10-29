@@ -31,7 +31,6 @@ import {
   WAITING_STATES,
   type ArchiveSource,
   type ImportChannel,
-  type ImportContact,
   type ImportCounts,
   type Importer,
   type ImporterKey,
@@ -74,7 +73,6 @@ function countsOf(r: any): ImportCounts {
     users: r.count_users,
     channels: r.count_channels,
     messages: r.count_messages,
-    contacts: r.count_contacts,
     total: r.count_total,
     completed: r.count_completed,
     error: r.count_error,
@@ -605,7 +603,7 @@ export async function startPreparation(opId: string): Promise<void> {
   const live = { status: row.status as ImportStatus, messagesStatus: null as string | null };
   const liveCounts = (): ImportCounts => {
     const c = writer.counts();
-    return { users: c.user, channels: c.channel, messages: c.message, contacts: c.contact, total: c.user + c.channel + c.message + c.contact, completed: 0, error: 0, skipped: 0 };
+    return { users: c.user, channels: c.channel, messages: c.message, total: c.user + c.channel + c.message, completed: 0, error: 0, skipped: 0 };
   };
 
   // Contadores crescendo na tela; também é aqui que um cancelamento feito em outra instância é percebido.
@@ -613,9 +611,9 @@ export async function startPreparation(opId: string): Promise<void> {
   const tick = async () => {
     const c = liveCounts();
     const r = await one(
-      `UPDATE import_operations SET count_users = $2, count_channels = $3, count_messages = $4, count_contacts = $5, count_total = $6,
-         messages_status = $7, warnings = $8, updated_at = now() WHERE id = $1 RETURNING *`,
-      [opId, c.users, c.channels, c.messages, c.contacts, c.total, live.messagesStatus, JSON.stringify(warnings.list())],
+      `UPDATE import_operations SET count_users = $2, count_channels = $3, count_messages = $4, count_total = $5,
+         messages_status = $6, warnings = $7, updated_at = now() WHERE id = $1 RETURNING *`,
+      [opId, c.users, c.channels, c.messages, c.total, live.messagesStatus, JSON.stringify(warnings.list())],
     );
     // Cancelada, invalidada ou dada como falha por outra instância: para de ler.
     if (!r || !r.valid || !PREPARING_STATES.includes(r.status)) job.cancel = true;
@@ -654,7 +652,6 @@ export async function startPreparation(opId: string): Promise<void> {
       user: (rec: ImportUser) => writer.add('user', rec.importIds?.[0] ?? null, rec),
       channel: (rec: ImportChannel) => writer.add('channel', rec.importIds?.[0] ?? null, rec),
       message: (rec: ImportMessage) => writer.add('message', rec.importId ?? null, bounded(rec)),
-      contact: (rec: ImportContact) => writer.add('contact', rec.importIds?.[0] ?? null, rec),
       setStep: async (step) => {
         if (!PREPARING_STATES.includes(step) || step === live.status) return;
         live.status = step;
@@ -696,8 +693,8 @@ export async function startPreparation(opId: string): Promise<void> {
       await update(opId, { ...done, status: ST.failed, error: dbText(msg, 4000) }, PREPARING_STATES);
     } else {
       const c = await countStaged(opId);
-      const total = c.user + c.channel + c.message + c.contact;
-      const counts = { count_users: c.user, count_channels: c.channel, count_messages: c.message, count_contacts: c.contact, count_total: total };
+      const total = c.user + c.channel + c.message;
+      const counts = { count_users: c.user, count_channels: c.channel, count_messages: c.message, count_total: total };
       if (!total) {
         const first = warnings.first(5);
         const msg = `Nenhum dado válido foi encontrado no arquivo.${first.length ? ` Avisos: ${first.join(' | ')}` : ''}`;
@@ -718,7 +715,7 @@ export async function startPreparation(opId: string): Promise<void> {
 
 export async function buildSelection(opId: string): Promise<ImportSelection> {
   const op = await one('SELECT importer_key FROM import_operations WHERE id = $1', [opId]);
-  const out: ImportSelection = { name: importerName(op?.importer_key ?? ''), users: [], channels: [], contacts: [], message_count: 0 };
+  const out: ImportSelection = { name: importerName(op?.importer_key ?? ''), users: [], channels: [], message_count: 0 };
 
   const users: ImportUser[] = [];
   for await (const batch of iterateStaged<ImportUser>(opId, 'user', 2000)) for (const r of batch) users.push(r.data);
@@ -840,9 +837,6 @@ export async function buildSelection(opId: string): Promise<ImportSelection> {
     out.channels.push({ channel_id: DIRECT_MESSAGES_ID, name: 'Mensagens diretas', is_archived: false, is_private: true, is_direct: true, members: directs, exists: false, do_import: true });
   }
 
-  for await (const batch of iterateStaged<ImportContact>(opId, 'contact', 2000)) {
-    for (const r of batch) out.contacts.push({ id: r.data.importIds?.[0] ?? '', name: r.data.name ?? '', emails: r.data.emails ?? [], phones: r.data.phones ?? [], do_import: true });
-  }
   out.message_count = (await countStaged(opId)).message;
   return out;
 }
@@ -907,7 +901,7 @@ export function createProgressSink(opId: string): ProgressSink & { close(): Prom
 }
 
 const summarizeSelection = (s: ShortSelection) =>
-  Object.fromEntries((['users', 'channels', 'contacts'] as const).map((k) => [k, s[k]?.all ? 'all' : (s[k]?.list?.length ?? 0)]));
+  Object.fromEntries((['users', 'channels'] as const).map((k) => [k, s[k]?.all ? 'all' : (s[k]?.list?.length ?? 0)]));
 
 // Começa a importação da operação válida que está esperando a seleção.
 export async function startImport(actor: Actor, input: ShortSelection, options: ImportOptions = {}, onlyKey?: ImporterKey) {
@@ -941,7 +935,6 @@ async function runImport(opId: string, actor: Actor, selection: ShortSelection, 
       users: result.users,
       channels: result.channels,
       messages: result.messages,
-      contacts: result.contacts,
       rooms: result.roomIds.length,
       newUsers: result.newUserIds.length,
     });
@@ -1051,7 +1044,7 @@ export async function addApiUsers(users: ImportUser[]) {
     if (!users.length) return op;
     await stageRecords(op.id, users.map((u) => ({ type: 'user' as const, importId: u.importIds[0], data: u })), c);
     const n = await countStaged(op.id, c);
-    return update(op.id, { status: ST.userSelection, count_users: n.user, count_total: n.user + n.channel + n.message + n.contact }, [ST.new, ST.userSelection], c);
+    return update(op.id, { status: ST.userSelection, count_users: n.user, count_total: n.user + n.channel + n.message }, [ST.new, ST.userSelection], c);
   });
   await emit(progressOf(row));
   return row;
@@ -1102,7 +1095,6 @@ export function plainMentions(s: string): string {
 function recordLabel(type: string, importId: string | null, d: any): string {
   if (type === 'user') return d.username || d.name || d.emails?.[0] || importId || '';
   if (type === 'channel') return d.t === 'd' ? 'Mensagem direta' : d.name || importId || '';
-  if (type === 'contact') return d.name || d.emails?.[0] || d.phones?.[0] || importId || '';
   const text = plainMentions(String(d.msg ?? ''))
     .replace(/\s+/g, ' ')
     .trim();

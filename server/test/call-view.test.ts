@@ -279,8 +279,7 @@ describe('apresentação das chamadas na sala (call-view)', () => {
     expect(guessStart(channel, ctx())).toEqual({ show: true });
     expect(guessStart({ ...channel, t: 'p' }, ctx())).toEqual({ show: true });
     expect(guessStart({ t: 'd', uids: ['u-me', 'u-ana', 'u-bruno'] }, ctx({ canManage: false }))).toEqual({ show: true }); // DM em grupo não pede call-management
-    // Escondem (a recusa não muda sozinha): atendimento, DM consigo mesmo, grupo desligado, transmissão, sem permissão.
-    expect(guessStart({ t: 'l' }, ctx())).toEqual({ show: false });
+    // Escondem (a recusa não muda sozinha): DM consigo mesmo, grupo desligado, transmissão, sem permissão.
     expect(guessStart({ t: 'd', uids: ['u-me'] }, ctx())).toEqual({ show: false });
     expect(guessStart(channel, ctx({ groupEnabled: false }))).toEqual({ show: false });
     expect(guessStart({ t: 'd', uids: ['u-me', 'u-ana', 'u-bruno'] }, ctx({ groupEnabled: false }))).toEqual({ show: false });

@@ -116,7 +116,6 @@ export async function sendSticker(
   if (!!input.stickerId === !!input.fileId) throw badRequest('error-invalid-params', 'Informe a figurinha.');
   const room = input.roomId ? await getRoom(String(input.roomId)) : null;
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
-  if (room.t === 'l') throw new ApiError(403, 'error-sticker-not-allowed-here', 'Figurinhas não estão disponíveis em atendimentos.');
   // Antes de qualquer regra de figurinha: os erros de sala ficam idênticos aos do texto.
   await canPostInRoom(ctx, room);
   if (room.notice && !getSetting('Stickers_In_Notice_Rooms')) {

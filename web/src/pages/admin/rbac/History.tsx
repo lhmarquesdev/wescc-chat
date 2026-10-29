@@ -30,7 +30,7 @@ interface Row {
   createdAt: string;
 }
 
-const SOURCE: Record<string, string> = { system: 'Automático', ldap: 'LDAP / AD', oauth: 'OAuth', saml: 'SAML', omnichannel: 'Atendimento', migration: 'Migração' };
+const SOURCE: Record<string, string> = { system: 'Automático', ldap: 'LDAP / AD', oauth: 'OAuth', saml: 'SAML', migration: 'Migração' };
 const FIELD: Record<string, string> = { description: 'Descrição', scope: 'Escopo', mandatory2fa: 'Exigir 2FA', restrictDirect: 'Restrito em conversas diretas' };
 
 const show = (field: string, v: any) => {

@@ -29,7 +29,7 @@ interface Suggestion {
 // No canal de avisos a faixa do topo já explica quem publica: aqui basta uma linha curta.
 const disabledText = (reason?: string) => (!reason ? 'Você não pode enviar mensagens aqui.' : /canal de avisos/i.test(reason) ? 'Só os publicadores enviam aqui.' : reason);
 
-const SECTION: Record<string, string> = { '@': 'Pessoas', '#': 'Canais', ':': 'Emojis', '/': 'Comandos', '!': 'Respostas prontas' };
+const SECTION: Record<string, string> = { '@': 'Pessoas', '#': 'Canais', ':': 'Emojis', '/': 'Comandos' };
 
 export interface ComposerHandle {
   edit(m: Message): void;
@@ -69,7 +69,6 @@ function ComposerView({
   quoting,
   setQuoting,
   onEditLast,
-  canned,
   ackOption,
 }: {
   rid: string;
@@ -83,8 +82,6 @@ function ComposerView({
   quoting: Message | null;
   setQuoting: (m: Message | null) => void;
   onEditLast?: () => void;
-  // Atendimento: respostas prontas com "!atalho" e variáveis do contato/agente.
-  canned?: { contactName: string; contactEmail?: string; agentName: string };
   // Canal de avisos com "Ciente": quem publica escolhe se o aviso pede confirmação.
   ackOption?: boolean;
 }) {
@@ -236,7 +233,6 @@ function ComposerView({
   };
 
   const reqSeq = useRef(0);
-  const cannedRef = useRef<any[] | null>(null);
   const computeSuggestions = useCallback(
     async (value: string, caret: number) => {
       // Respostas antigas do servidor não podem reabrir a lista depois do envio.
@@ -247,31 +243,6 @@ function ComposerView({
         setSection(SECTION[trig] ?? '');
       };
       const before = value.slice(0, caret);
-      const cm = canned ? before.match(/(?:^|\s)!([\w-]*)$/) : null;
-      if (cm) {
-        cannedRef.current ??= (await api.get('canned-responses.get').catch(() => ({ responses: [] }))).responses;
-        const term = cm[1].toLowerCase();
-        const fill = (t: string) =>
-          t
-            .replace(/\{\{\s*contact\.name\s*\}\}/g, canned!.contactName)
-            .replace(/\{\{\s*contact\.email\s*\}\}/g, canned!.contactEmail ?? '')
-            .replace(/\{\{\s*agent\.name\s*\}\}/g, canned!.agentName);
-        put(
-          (cannedRef.current ?? [])
-            .filter((c: any) => c.shortcut.toLowerCase().startsWith(term) || (term.length > 1 && c.text.toLowerCase().includes(term)))
-            .slice(0, 10)
-            .map((c: any) => ({
-              key: c._id,
-              lead: <Icon name="canned" size={16} />,
-              title: `!${c.shortcut}`,
-              sub: c.text.slice(0, 80),
-              insert: fill(c.text),
-            })),
-          '!',
-        );
-        setSel(0);
-        return;
-      }
       const m = before.match(/(?:^|\s)([@#:])([^\s@#:]*)$/) ?? (before.match(/^\/([a-z0-9-]*)$/i) ? ([before, '/', before.slice(1)] as unknown as RegExpMatchArray) : null);
       if (!m) return put([]);
       const [, trig, term] = m;
@@ -327,7 +298,7 @@ function ComposerView({
       }
       setSel(0);
     },
-    [rid, canned, me.username, me._id],
+    [rid, me.username, me._id],
   );
 
   const applySuggestion = (s: Suggestion) => {

@@ -34,7 +34,7 @@ export function previewKeys(msg: string): string[] {
 export async function onMessageForPreview(data: { room: any; message: any }, edited: boolean): Promise<void> {
   if (!unfurlOn()) return;
   const { room, message: m } = data;
-  if (!room || !m?._id || room.t === 'l' || m.t) return;
+  if (!room || !m?._id || m.t) return;
   if (m.jira && OWN_KINDS.has(m.jira.kind)) return;
   if (m.jiraNoPreview) return;
   if (m.u?._id && (await botIds()).includes(m.u._id)) return;

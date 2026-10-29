@@ -32,7 +32,7 @@ export function inlineMimeType(type: string) {
   return /^(image\/(png|jpeg|gif|webp|bmp|avif)|(audio|video)\/[a-z0-9.+-]+|application\/pdf)$/.test(type);
 }
 
-// Regras de tipo comuns a usuários e visitantes do livechat.
+// Regras de tipo dos arquivos enviados.
 export function typeAllowed(type: string) {
   const match = (pattern: string) => (pattern.endsWith('/*') ? type.startsWith(pattern.slice(0, -1)) : type === pattern);
   if (mediaTypeList('FileUpload_MediaTypeBlackList').some(match)) return false;
@@ -123,12 +123,11 @@ export async function discardFile(f: StoredFile) {
   await fs.promises.rm(path.join(config.uploadDir, f.rel), { force: true }).catch(() => {});
 }
 
-export async function registerFile(f: StoredFile, rid: string, owner: { userId?: string | null; visitorId?: string | null }) {
-  await query('INSERT INTO files (id, room_id, user_id, visitor_id, name, type, size, storage_path) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [
+export async function registerFile(f: StoredFile, rid: string, owner: { userId?: string | null }) {
+  await query('INSERT INTO files (id, room_id, user_id, name, type, size, storage_path) VALUES ($1,$2,$3,$4,$5,$6,$7)', [
     f.id,
     rid,
     owner.userId ?? null,
-    owner.visitorId ?? null,
     f.name,
     f.type,
     f.size,
@@ -137,7 +136,7 @@ export async function registerFile(f: StoredFile, rid: string, owner: { userId?:
   return { _id: f.id, name: f.name, type: f.type, size: f.size };
 }
 
-// Formato do anexo que o cliente web e o widget exibem.
+// Formato do anexo que o cliente web exibe.
 export function fileAttachment(f: StoredFile, description?: string): Attachment {
   const url = fileUrl(f.id, f.name);
   const att: Attachment = { title: f.name, title_link: url, type: 'file', description: description || undefined, size: f.size, format: path.extname(f.name).slice(1).toUpperCase() };
@@ -176,27 +175,6 @@ export async function getFileForUser(ctx: Ctx | null, id: string) {
   return { ...f, absPath: path.join(config.uploadDir, f.storage_path) };
 }
 
-// Por quanto tempo o visitante ainda baixa os arquivos de uma conversa encerrada.
-const VISITOR_CLOSED_HOURS = 24;
-
-// Visitante do livechat: só arquivos de mensagens das próprias conversas (enviados por ele ou pelo agente),
-// abertas ou encerradas há pouco.
-export async function getFileForVisitor(token: string, id: string) {
-  const f = await one('SELECT * FROM files WHERE id = $1', [id]);
-  if (!f) throw notFound('error-file-not-found', 'Arquivo não encontrado.');
-  const own =
-    !!getSetting('Livechat_enabled') &&
-    token.length >= 8 &&
-    f.message_id &&
-    (await one(
-      `SELECT 1 FROM livechat_rooms lr JOIN livechat_visitors v ON v.id = lr.visitor_id
-        WHERE lr.room_id = $1 AND v.token = $2 AND (lr.status <> 'closed' OR lr.closed_at > now() - make_interval(hours => $3))`,
-      [f.room_id, token, VISITOR_CLOSED_HOURS],
-    ));
-  if (!own) throw forbidden();
-  return { ...f, absPath: path.join(config.uploadDir, f.storage_path) };
-}
-
 export async function listRoomFiles(ctx: Ctx, rid: string, opts: { offset?: number; count?: number; type?: string; name?: string }) {
   await loadRoomForUser(ctx, rid);
   const params: unknown[] = [rid];
@@ -204,14 +182,14 @@ export async function listRoomFiles(ctx: Ctx, rid: string, opts: { offset?: numb
   if (opts.type) w += ` AND f.type LIKE $${params.push(opts.type.replace('*', '%'))}`;
   if (opts.name) w += ` AND f.name ILIKE $${params.push(`%${opts.name}%`)}`;
   const rows = await many(
-    `SELECT f.*, u.username, v.username AS v_username, count(*) OVER() AS total FROM files f
-     LEFT JOIN users u ON u.id = f.user_id LEFT JOIN livechat_visitors v ON v.id = f.visitor_id
+    `SELECT f.*, u.username, count(*) OVER() AS total FROM files f
+     LEFT JOIN users u ON u.id = f.user_id
      WHERE ${w} ORDER BY f.created_at DESC LIMIT ${Math.min(opts.count ?? 25, 100)} OFFSET ${Number(opts.offset ?? 0)}`,
     params,
   );
   return {
     total: Number(rows[0]?.total ?? 0),
-    files: rows.map((r) => ({ _id: r.id, name: r.name, type: r.type, size: r.size, rid: r.room_id, messageId: r.message_id, user: { _id: r.user_id ?? r.visitor_id, username: r.username ?? r.v_username }, uploadedAt: r.created_at, url: fileUrl(r.id, r.name) })),
+    files: rows.map((r) => ({ _id: r.id, name: r.name, type: r.type, size: r.size, rid: r.room_id, messageId: r.message_id, user: { _id: r.user_id, username: r.username }, uploadedAt: r.created_at, url: fileUrl(r.id, r.name) })),
   };
 }
 

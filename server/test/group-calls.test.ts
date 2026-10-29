@@ -242,7 +242,7 @@ describe('chamadas em grupo', () => {
     expect((await pool.query(`SELECT count(*)::int AS n FROM calls WHERE room_id = $1`, [rid2])).rows[0].n).toBe(1);
   });
 
-  it('sala arquivada, silenciado, atendimento e sala somente leitura (v1a) recusam com os textos certos', async () => {
+  it('sala arquivada, silenciado e sala somente leitura (v1a) recusam com os textos certos', async () => {
     const [owner, m] = [await user(), await user()];
     const archived = await channel(owner, [m]);
     await api('POST', 'channels.archive', { roomId: archived }, owner);
@@ -258,10 +258,8 @@ describe('chamadas em grupo', () => {
       await pool.query(`UPDATE rooms SET ${flag} = true WHERE id = $1`, [rid]);
       expect(await start(owner, rid)).toMatchObject({ status: 403, error: 'Esta sala não aceita chamadas.' });
     }
-    const live = await channel(owner, [m]);
-    await pool.query(`UPDATE rooms SET t = 'l' WHERE id = $1`, [live]);
-    expect(await start(owner, live)).toMatchObject({ status: 400, errorType: 'error-call-room', error: 'Chamadas não estão disponíveis em conversas de atendimento.' });
-    expect(await start(owner, live, 'tela' as any)).toMatchObject({ status: 400, errorType: 'error-invalid-params', error: 'Tipo de chamada inválido.' });
+    const plain = await channel(owner, [m]);
+    expect(await start(owner, plain, 'tela' as any)).toMatchObject({ status: 400, errorType: 'error-invalid-params', error: 'Tipo de chamada inválido.' });
   });
 
   it('DM com três pessoas toca para todos; recusa e tempo esgotado ficam por pessoa; push para quem está offline', async () => {

@@ -26,7 +26,7 @@ import {
 import { ackMessage, assertCanSeeReceipts, listAcks, myAcks } from '../services/notices';
 import { getReadReceipts } from '../services/reads';
 import { getRoomByName, loadRoomForUser, resolveRoom } from '../services/rooms';
-import { assertCanUpload, getFileForUser, getFileForVisitor, inlineMimeType, listRoomFiles, readUpload, safeMimeType, saveUpload } from '../services/uploads';
+import { assertCanUpload, getFileForUser, inlineMimeType, listRoomFiles, readUpload, safeMimeType, saveUpload } from '../services/uploads';
 import { b, bool, paging, q, route, str } from './http';
 
 export function chatRoutes(app: FastifyInstance) {
@@ -219,17 +219,7 @@ export function chatRoutes(app: FastifyInstance) {
   route(app, 'POST', 'rooms.upload/:rid', {}, uploadHandler);
   route(app, 'POST', 'rooms.media/:rid', {}, uploadHandler);
 
-  // O widget do livechat baixa com o cabeçalho x-visitor-token (nunca na URL).
-  const fileForRequest = async (req: any) => {
-    const visitorToken = String(req.headers['x-visitor-token'] ?? '');
-    if (!visitorToken) return getFileForUser(req.ctx, req.params.id);
-    try {
-      return await getFileForVisitor(visitorToken, req.params.id);
-    } catch (e) {
-      if (!req.ctx) throw e;
-      return getFileForUser(req.ctx, req.params.id);
-    }
-  };
+  const fileForRequest = (req: any) => getFileForUser(req.ctx, req.params.id);
   app.get('/file-upload/:id/*', async (req: any, reply) => {
     const f = await fileForRequest(req);
     // Tipo revalidado também aqui (arquivos antigos podem ter um tipo como "image/png,text/html").

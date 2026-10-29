@@ -16,7 +16,6 @@ import { DirectoryPage, HomePage } from './pages/HomeDirectory';
 import { RoomPage } from './pages/RoomPage';
 import { AccountPage, applyTheme, TwoFactorCard } from './pages/AccountPage';
 import { AdminPage } from './pages/admin/AdminPage';
-import { OmnichannelPage } from './pages/omnichannel/OmnichannelPage';
 import { CallsPage } from './pages/CallsPage';
 import { CalendarPage } from './pages/CalendarPage';
 import { MeetPage } from './pages/MeetPage';
@@ -299,7 +298,7 @@ function Shell() {
           <Route path="/home" element={<HomePage />} />
           <Route path="/directory" element={<DirectoryPage />} />
           <Route path="/directory/:tab" element={<DirectoryPage />} />
-          {['channel', 'group', 'direct', 'live'].map((t) => (
+          {['channel', 'group', 'direct'].map((t) => (
             <Route key={t} path={`/${t}/:rid/*`} element={<RoomPage />} />
           ))}
           <Route path="/calls" element={<CallsPage />} />
@@ -311,8 +310,6 @@ function Shell() {
           <Route path="/admin/:section" element={<AdminPage />} />
           <Route path="/admin/:section/:view" element={<AdminPage />} />
           <Route path="/admin/:section/:view/:param" element={<AdminPage />} />
-          <Route path="/omnichannel" element={<Navigate to="/omnichannel/queue" replace />} />
-          <Route path="/omnichannel/:section" element={<OmnichannelPage />} />
           <Route path="*" element={<Navigate to="/home" replace />} />
         </Route>
       </Routes>

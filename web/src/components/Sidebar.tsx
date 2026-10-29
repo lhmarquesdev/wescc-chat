@@ -8,7 +8,6 @@ import { logout } from '../lib/session';
 import { usePermission, useSetting, useStore } from '../lib/store';
 import { applyTheme } from '../pages/AccountPage';
 import { ADMIN_MENU_PERMS } from '../pages/admin/sections';
-import { AgentStatusToggle } from '../pages/omnichannel/OmnichannelPage';
 import { BrandMark } from './BrandIcons';
 import { CreateModal, type CreateKind } from './CreateModal';
 import { Icon, type IconName } from './Icon';
@@ -49,13 +48,6 @@ const sortKey = (group: string) => `side.sort.${group}`;
 const readSort = (group: string): SortMode => ((local.get(sortKey(group)) ?? local.get('side.sort')) === 'az' ? 'az' : 'recent');
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
-
-export function useAgent() {
-  const me = useStore((s) => s.me)!;
-  const omni = useSetting<boolean>('Livechat_enabled');
-  const isAgent = me.roles.includes('livechat-agent') || me.roles.includes('livechat-manager') || me.roles.includes('admin');
-  return { omni: !!omni, isAgent, takesChats: !!omni && me.roles.includes('livechat-agent') };
-}
 
 // ---------- Item de sala ----------
 
@@ -331,11 +323,10 @@ function useAdminHome() {
   return canAdmin ? (!canStats && canImport ? '/admin/import' : '/admin') : null;
 }
 
-// Status, mensagem de status, conta, administração, atendimento, tema, instalar e sair. No celular vira folha.
+// Status, mensagem de status, conta, administração, tema, instalar e sair. No celular vira folha.
 export function UserMenu({ trigger, placement }: { trigger: ReactNode; placement?: Placement }) {
   const me = useStore((s) => s.me)!;
   const navigate = useNavigate();
-  const { omni, isAgent } = useAgent();
   const adminHome = useAdminHome();
   const install = useInstallPrompt();
   const [editStatus, setEditStatus] = useState(false);
@@ -375,12 +366,6 @@ export function UserMenu({ trigger, placement }: { trigger: ReactNode; placement
               <button onClick={() => (navigate(adminHome), close())}>
                 <Icon name="admin" />
                 Administração
-              </button>
-            )}
-            {omni && isAgent && (
-              <button onClick={() => (navigate('/omnichannel/queue'), close())}>
-                <Icon name="nav-omnichannel" />
-                Atendimento
               </button>
             )}
             <hr />
@@ -557,8 +542,6 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
   const siteName = useSetting<string>('Site_Name');
   const callsEnabled = useSetting<boolean>('Calls_Enabled');
   const calendarOn = useSetting<boolean>('Calendar_Enabled') !== false;
-  const { omni, isAgent, takesChats } = useAgent();
-  const queueCount = useStore((st) => Object.keys(st.queue).length);
   const phone = useIsPhone();
   const list = mode === 'list';
   const [filter, setFilter] = useState('');
@@ -603,7 +586,6 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
       { title: 'Canais', items: list.filter((s) => !s.f && !s.teamMain && !s.prid && (s.t === 'c' || s.t === 'p')), add: canChannel ? { label: 'Criar canal', onClick: () => setCreate('channel') } : undefined },
       { title: 'Discussões', items: list.filter((s) => !s.f && s.prid) },
       { title: 'Mensagens diretas', items: list.filter((s) => !s.f && s.t === 'd'), add: canDm ? { label: 'Nova mensagem direta', onClick: () => setCreate('dm') } : undefined },
-      { title: 'Atendimentos', items: list.filter((s) => !s.f && s.t === 'l') },
     ]
       .map((g) => ({ ...g, items: g.items.sort(sortOf(g.title) === 'az' ? byName : byRecent) }))
       .filter((g) => g.items.length);
@@ -681,14 +663,8 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
           <NavRow to="/home" icon="nav-home" label="Início" onNavigate={onNavigate} />
           {callsEnabled && <NavRow to="/calls" icon="nav-calls" label="Chamadas" extra={<CallsNavBadge />} onNavigate={onNavigate} />}
           {calendarOn && <NavRow to="/calendar" icon="nav-calendar" label="Agenda" onNavigate={onNavigate} />}
-          {omni && isAgent && <NavRow to="/omnichannel/queue" match="/omnichannel" icon="nav-omnichannel" label="Atendimento" badge={queueCount} badgeKind="group" onNavigate={onNavigate} />}
           <NavRow to="/directory" icon="nav-directory" label="Diretório" onNavigate={onNavigate} />
         </nav>
-      )}
-      {takesChats && (
-        <div className="side-omni">
-          <AgentStatusToggle />
-        </div>
       )}
       <div className="side-search">
         <div className="side-search-field">

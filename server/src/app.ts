@@ -78,8 +78,6 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   adminRoutes(app);
   registerRbac(app);
   registerWebsocket(app);
-  const { omnichannelRoutes } = await import('./omnichannel/api');
-  omnichannelRoutes(app);
   const { integrationsRoutes } = await import('./integrations/api');
   integrationsRoutes(app);
   const { samlRoutes } = await import('./saml/saml');
@@ -139,7 +137,7 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
 // Prefixos do servidor (API, arquivos, webhooks, login externo, servidor de chamadas): um endereço errado neles responde
 // 404 em JSON, nunca o index.html com 200. /twirp é a API do LiveKit, que só existe atrás do /sfu; um cliente que
 // normaliza /sfu/%2e%2e/twirp/... chega aqui com /twirp/... As rotas da SPA (/home, /channel/x, /admin/x...) seguem.
-const SERVER_PREFIXES = ['api', 'twirp', 'sfu', 'sfu-webhook', 'websocket', 'file-upload', 'avatar', 'sticker', 'emoji-custom', 'hooks', 'livechat', 'saml', 'oauth', 'integrations', 'health'];
+const SERVER_PREFIXES = ['api', 'twirp', 'sfu', 'sfu-webhook', 'websocket', 'file-upload', 'avatar', 'sticker', 'emoji-custom', 'hooks', 'saml', 'oauth', 'integrations', 'health'];
 const SERVER_PATH = new RegExp(`^/(?:${SERVER_PREFIXES.join('|')})(?:/|$)`, 'i');
 
 export function isSpaPath(url: string): boolean {

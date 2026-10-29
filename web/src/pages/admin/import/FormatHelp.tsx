@@ -5,16 +5,12 @@ const CSV_TREE = `exportacao.zip
 ├─ channels.csv      canal,criador,public|private,membro1;membro2
 ├─ geral/            uma pasta para cada canal de channels.csv
 │  └─ 2024-01.csv    autor,data,texto
-├─ directmessages/   mensagens diretas (opcional)
-│  └─ conversas.csv  de,para,data,texto
-└─ contacts.csv      contatos do omnichannel (opcional)`;
+└─ directmessages/   mensagens diretas (opcional)
+   └─ conversas.csv  de,para,data,texto`;
 
 const CSV_EXAMPLE = `users.csv        joao,joao@empresa.com,João Silva
 channels.csv     geral,joao,public,joao;maria
 geral/2024.csv   joao,1704106800000,"Bom dia, pessoal!"`;
-
-const CONTACTS_EXAMPLE = `name,emails,phones,manager,id,empresa
-Ana Souza,ana@cliente.com;ana.s@gmail.com,+55 11 99999-0000,maria,c-001,ACME`;
 
 export function FormatHelp({ importerKey, canUsePath }: { importerKey: string; canUsePath: boolean }) {
   return (
@@ -26,7 +22,7 @@ export function FormatHelp({ importerKey, canUsePath }: { importerKey: string; c
           <p className="small muted">Exemplos de linhas:</p>
           <pre className="code-block imp-tree">{CSV_EXAMPLE}</pre>
           <ul className="imp-help-list">
-            <li>Só contacts.csv tem linha de cabeçalho; os outros arquivos começam direto nos dados.</li>
+            <li>Os arquivos não têm linha de cabeçalho: começam direto nos dados.</li>
             <li>A data é em milissegundos desde 1970. Também vale em segundos ou no formato ISO (2024-01-01T14:00:00Z).</li>
             <li>Texto com vírgula, aspas ou quebra de linha vai entre aspas duplas.</li>
             <li>Autores e membros que não estão em users.csv precisam já ter conta aqui, com o mesmo nome de usuário.</li>
@@ -59,19 +55,6 @@ export function FormatHelp({ importerKey, canUsePath }: { importerKey: string; c
             <li>Colunas usadas: username, email, status, fullname e displayname.</li>
             <li>Status "Admin" vira administrador (só em conta nova, e se você pode dar esse papel), "Bot" vira bot e "Deactivated" cria a conta desativada.</li>
             <li>Linhas sem e-mail são ignoradas.</li>
-          </ul>
-        </>
-      )}
-      {importerKey === 'omnichannel_contact' && (
-        <>
-          <h3>Contatos do omnichannel</h3>
-          <pre className="code-block imp-tree">{CONTACTS_EXAMPLE}</pre>
-          <ul className="imp-help-list">
-            <li>A primeira linha é o cabeçalho.</li>
-            <li>Vários e-mails ou telefones vão separados por ponto e vírgula.</li>
-            <li>manager é o nome de usuário de quem cuida do contato; id é opcional.</li>
-            <li>As outras colunas viram campos personalizados do contato, se existirem em Atendimento › Campos.</li>
-            <li>Um contato com o mesmo e-mail de um já existente completa o cadastro dele, sem duplicar.</li>
           </ul>
         </>
       )}

@@ -9,7 +9,7 @@ import type { ImportErrorRow, ImportOperation } from './types';
 
 const PAGE = 20;
 
-const TYPE_LABEL: Record<string, string> = { user: 'Usuário', channel: 'Canal', message: 'Mensagem', contact: 'Contato' };
+const TYPE_LABEL: Record<string, string> = { user: 'Usuário', channel: 'Canal', message: 'Mensagem' };
 
 export function ImportHistory({ canRun }: { canRun: boolean }) {
   const navigate = useNavigate();
@@ -143,7 +143,7 @@ export function ImportHistory({ canRun }: { canRun: boolean }) {
       ) : !rows.length ? (
         // Sem botão aqui: o "Importar arquivo" do cabeçalho é o único (o E2E o procura pelo nome).
         <Empty icon="admin-import" title="Nenhuma importação ainda">
-          {canRun ? 'Use "Importar arquivo" para trazer dados do Slack, de planilhas CSV ou contatos do atendimento.' : 'As importações feitas aparecem aqui, com a situação e as contagens.'}
+          {canRun ? 'Use "Importar arquivo" para trazer dados do Slack ou de planilhas CSV.' : 'As importações feitas aparecem aqui, com a situação e as contagens.'}
         </Empty>
       ) : (
         <div className="imp-table-wrap">
@@ -158,7 +158,6 @@ export function ImportHistory({ canRun }: { canRun: boolean }) {
                 <th className="imp-opt imp-wide num">Usuários</th>
                 <th className="imp-opt imp-wide num">Canais</th>
                 <th className="imp-opt imp-wide num">Mensagens</th>
-                <th className="imp-opt imp-wide num">Contatos</th>
                 <th className="imp-opt imp-wide num">Total</th>
                 <th className="imp-opt num">Erros</th>
               </tr>
@@ -228,7 +227,6 @@ function HistoryRow({ op, isCurrent, onNavigate, onDetails }: { op: ImportOperat
       <td className="imp-opt imp-wide num">{num(c.users)}</td>
       <td className="imp-opt imp-wide num">{num(c.channels)}</td>
       <td className="imp-opt imp-wide num">{num(c.messages)}</td>
-      <td className="imp-opt imp-wide num">{num(c.contacts)}</td>
       <td className="imp-opt imp-wide num">{num(c.total)}</td>
       <td className="imp-opt num nowrap">
         <span className={c.error ? 'neg' : ''}>{num(c.error)}</span>
@@ -248,7 +246,6 @@ function itemsSummary(c: ImportOperation['count']) {
     c.users > 0 && plural(c.users, 'usuário', 'usuários'),
     c.channels > 0 && plural(c.channels, 'canal', 'canais'),
     c.messages > 0 && plural(c.messages, 'mensagem', 'mensagens'),
-    c.contacts > 0 && plural(c.contacts, 'contato', 'contatos'),
   ].filter(Boolean);
   if (parts.length) return parts.join(' · ');
   return c.total > 0 ? plural(c.total, 'item', 'itens') : <span className="muted">—</span>;
@@ -293,7 +290,6 @@ function OperationDetails({ op, canRun, onClose }: { op: ImportOperation; canRun
           c.users && plural(c.users, 'usuário', 'usuários'),
           c.channels && plural(c.channels, 'canal', 'canais'),
           c.messages && plural(c.messages, 'mensagem', 'mensagens'),
-          c.contacts && plural(c.contacts, 'contato', 'contatos'),
         ]
           .filter(Boolean)
           .join(' · ') || 'Nenhum dado lido.'}
@@ -314,7 +310,6 @@ function OperationDetails({ op, canRun, onClose }: { op: ImportOperation; canRun
               <option value="user">Usuários</option>
               <option value="channel">Canais</option>
               <option value="message">Mensagens</option>
-              <option value="contact">Contatos</option>
             </select>
           </div>
           {loading && !data ? (

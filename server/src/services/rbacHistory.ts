@@ -4,7 +4,7 @@ import { many, one, type Queryable } from '../db/pool';
 
 export type HistoryEntity = 'role' | 'user';
 export type HistoryAction = 'create' | 'update' | 'delete' | 'bulk' | 'rollback';
-export type HistorySource = 'manual' | 'system' | 'ldap' | 'oauth' | 'saml' | 'omnichannel' | 'migration';
+export type HistorySource = 'manual' | 'system' | 'ldap' | 'oauth' | 'saml' | 'migration';
 
 export interface FieldChange {
   field: string;

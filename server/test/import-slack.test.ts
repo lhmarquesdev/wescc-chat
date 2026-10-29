@@ -33,9 +33,6 @@ function fakeContext(source: ArchiveSource, cancelAfterMessages = Infinity) {
     user: async (u) => void r.users.push(u),
     channel: async (c) => void r.channels.push(c),
     message: async (m) => void r.messages.push(m),
-    contact: async () => {
-      throw new Error('o Slack não tem contatos');
-    },
     setStep: async (s) => void r.steps.push(s),
     setMessagesStatus: async (s) => void r.statuses.push(s),
     progress: (v) => void r.rates.push(v),

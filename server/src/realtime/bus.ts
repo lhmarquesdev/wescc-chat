@@ -24,8 +24,6 @@ type Internal =
 
 export interface Conn {
   id: string;
-  // Visitantes do livechat só recebem eventos das próprias salas, nunca os globais.
-  kind?: 'user' | 'visitor';
   userId: string;
   sessionId: string;
   rooms: Set<string>;
@@ -162,7 +160,7 @@ class Bus {
 
   private deliverLocal(target: Target, ev: ServerEvent) {
     if ('all' in target) {
-      for (const c of this.conns.values()) if (c.kind !== 'visitor') c.send(ev);
+      for (const c of this.conns.values()) c.send(ev);
     } else if ('conn' in target) {
       this.conns.get(target.conn)?.send(ev);
     } else if ('user' in target) {

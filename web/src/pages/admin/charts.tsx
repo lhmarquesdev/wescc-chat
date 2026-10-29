@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { Empty } from '../../components/ui';
 
-// Gráficos da administração (e da análise do Omnichannel): desenhados em pixels na largura medida, para que
+// Gráficos da administração: desenhados em pixels na largura medida, para que
 // barras e linhas não se deformem. Grade e eixos discretos, texto nos tokens de texto, dica no hover e no foco.
 
 const nf = new Intl.NumberFormat('pt-BR');

@@ -49,7 +49,6 @@ import {
   Code,
   Coffee,
   Compass,
-  ContactRound,
   Copy,
   CornerLeftUp,
   Crop,
@@ -84,7 +83,6 @@ import {
   HardDrive,
   Hash,
   Headphones,
-  Headset,
   Heart,
   HeartOff,
   Hourglass,
@@ -94,7 +92,6 @@ import {
   ImagePlus,
   ImageUp,
   Import,
-  Inbox,
   Info,
   Italic,
   KeyRound,
@@ -123,7 +120,6 @@ import {
   MessageSquarePlus,
   MessageSquareReply,
   MessageSquareText,
-  MessageSquareX,
   MessagesSquare,
   Mic,
   MicOff,
@@ -205,7 +201,6 @@ import {
   VolumeX,
   WifiOff,
   X,
-  Zap,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -275,7 +270,6 @@ export const ICONS = {
   'room-dm': MessageCircle,
   'room-discussion': MessageSquareText,
   'room-team': UsersRound,
-  'room-livechat': Headset,
   'room-notice': Megaphone,
   'sys-join': LogIn,
   'sys-leave': LogOut,
@@ -284,14 +278,11 @@ export const ICONS = {
   'sys-pinned': Pin,
   'sys-renamed': Pencil,
   'sys-transfer': ArrowLeftRight,
-  'sys-hold': CirclePause,
-  'sys-resume': CirclePlay,
   'sys-settings': Settings2,
   'sys-role': ShieldCheck,
   'sys-muted': VolumeX,
   'sys-archived': Archive,
   'sys-encrypted': LockKeyhole,
-  'sys-closed': CircleCheck,
   'call-audio': Phone,
   'call-video': Video,
   'call-missed': PhoneMissed,
@@ -313,7 +304,6 @@ export const ICONS = {
   'nav-home': House,
   'nav-directory': Compass,
   'nav-calls': Phone,
-  'nav-omnichannel': Headset,
   'nav-chats': MessageSquare,
   compose: SquarePen,
   'filter-unread': ListFilter,
@@ -381,7 +371,6 @@ export const ICONS = {
   'composer-muted': VolumeX, // compositor desativado: você está silenciado
 
   // ---------- Dono 4b: cabeçalho da sala, painéis, tópicos, cartão de usuário ----------
-  'panel-livechat': IdCard, // o mesmo painel do botão "Dados do atendimento" do cabeçalho
   'panel-info': Info,
   'panel-threads': MessagesSquare,
   'panel-discussions': MessageSquareText,
@@ -422,7 +411,7 @@ export const ICONS = {
   'last-seen': Clock, // cartão do usuário: último acesso
   'team-remove-room': CircleMinus, // canais do time: tirar o canal do time
 
-  // ---------- Dono 5: chamadas e atendimento ----------
+  // ---------- Dono 5: chamadas ----------
   'call-hangup': PhoneOff,
   'call-outgoing': PhoneOutgoing,
   'call-incoming': PhoneIncoming,
@@ -439,17 +428,8 @@ export const ICONS = {
   'call-minimize': ChevronDown, // recolhe a janela da chamada na pílula
   'on-hold': CirclePause,
   resume: CirclePlay,
-  transfer: ArrowLeftRight,
-  rating: Star,
-  queue: Inbox,
-  conversations: MessagesSquare,
-  contacts: ContactRound,
-  canned: Zap,
   reports: ChartColumn,
-  manage: Settings2,
   'wait-time': AlarmClock,
-  'livechat-details': IdCard, // abre o painel "Dados do atendimento" (o fone já é o ícone da sala)
-  'livechat-close': MessageSquareX, // Encerrar atendimento, quando o cabeçalho só tem lugar para o ícone
 
   // ---------- Dono 6: administração, importação, LDAP/AD e Minha conta ----------
   preferences: SlidersHorizontal,
@@ -603,7 +583,6 @@ export const ICONS = {
   'rbac-chat': MessagesSquare,
   'rbac-room': SlidersHorizontal,
   'rbac-admin': Settings,
-  'rbac-omni': Headset,
   'rbac-technical': Wrench,
   'rbac-areas': Layers,
   'rbac-id': IdCard,

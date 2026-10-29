@@ -1,6 +1,6 @@
 # Wescc Chat
 
-Chat interno completo: canais, mensagens diretas, threads, discussões, times, omnichannel (livechat), integrações, LDAP, SAML, auditoria, retenção e demais recursos, todos liberados, sem planos nem licenças.
+Chat interno completo: canais, mensagens diretas, threads, discussões, times, chamadas, agenda, integrações, LDAP, SAML, auditoria, retenção e demais recursos, todos liberados, sem planos nem licenças.
 
 - **Servidor:** Node.js 22 + TypeScript (Fastify, WebSocket), em `server/`
 - **Banco:** PostgreSQL 14+ (migrações SQL em `server/src/db/migrations`, aplicadas ao iniciar)
@@ -224,21 +224,6 @@ navegador, outro site. Faça a troca fora do horário das operações e avise as
    `docker-compose.override.yml` (o `docker-compose.yml` do repositório não muda). O endereço do banco vai para
    `C:\Wescc\secrets\database-url.txt` (o instalador pergunta).
 8. **Computador do servidor**: ninguém usa no dia a dia. Quem entra nele pode ler os arquivos e a memória do serviço.
-
-## Widget de atendimento
-
-Ative o Omnichannel em Administração › Configurações e cole no seu site:
-
-```html
-<script src="https://SEU-CHAT/livechat/widget.js" async></script>
-```
-
-O código pronto aparece em Administração › Omnichannel › Instalação.
-
-Visitantes podem enviar arquivos pelo 📎, arrastando para a conversa ou colando imagens. Isso segue as regras de
-Administração › Configurações › Upload de arquivos (tamanho máximo e tipos) e pode ser desligado em
-Omnichannel › File Upload (`Livechat_fileupload_enabled`). O widget baixa os arquivos com o cabeçalho `x-visitor-token`,
-e cada visitante só tem acesso aos arquivos das próprias conversas.
 
 ## Login com OAuth / OpenID Connect
 
@@ -707,7 +692,6 @@ Em Administração › Importação dá para trazer dados de outros sistemas, co
   A tela de nova importação mostra o formato completo.
 - **Usuários do Slack**: o .csv de "Exportar lista de membros" (admins, bots e contas desativadas são respeitados;
   linhas sem um e-mail válido ficam de fora, com aviso).
-- **Contatos do omnichannel**: um .csv com `name`, `emails`, `phones`, `manager` e `id`.
 - **API**: `import.new`, `import.addUsers` e `import.run`, para sistemas que mandam os dados direto. As senhas seguem
   a mesma política das contas e são guardadas só como hash; cada chamada de `import.addUsers` aceita até 500 usuários
   com senha.

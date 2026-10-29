@@ -50,7 +50,7 @@ export function StickerSuggestions({
   const { send, sending } = useStickerSend({ room, tmid, tshow, quotingId, onSent });
 
   // O primeiro emoji digitado carrega os catálogos que ainda não vieram; a linha aparece quando chegam. Onde não há
-  // figurinhas (desligadas, papel bloqueado, atendimento) ou com as sugestões desligadas, nada é pedido.
+  // figurinhas (desligadas, papel bloqueado) ou com as sugestões desligadas, nada é pedido.
   const here = useStickersHere(room);
   useEffect(() => {
     if (!emoji || hidden || !here || pref === false) return;

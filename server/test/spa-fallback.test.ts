@@ -82,10 +82,10 @@ describe('fallback da SPA', () => {
     for (const p of ['/assets/StickersSection-BAe2NGkA.js', '/assets/StickersSection-BAe2NGkA.js?v=1', '/assets/', '/assets', '/assets/sub/velho.css']) {
       expectNotFoundJson(await rawGet(p), p);
     }
-    // O widget do atendimento é do servidor, não da SPA.
+    // O widget de atendimento externo foi removido: /livechat é só mais uma rota do cliente.
     const widget = await rawGet('/livechat');
     expect(widget.status).toBe(200);
-    expect(widget.body).not.toBe(INDEX);
+    expect(widget.body).toBe(INDEX);
   });
 
   it('/twirp, /sfu e os demais caminhos do servidor dão 404 em JSON, com e sem normalização', async () => {
@@ -107,7 +107,6 @@ describe('fallback da SPA', () => {
       '/sticker/a/b/c',
       '/emoji-custom/a/b',
       '/hooks/abc',
-      '/livechat/nao-existe',
       '/saml/nao-existe',
       '/oauth/x',
       '/integrations/jira/x',
@@ -147,10 +146,10 @@ describe('fallback da SPA', () => {
   });
 
   it('isSpaPath: prefixos do servidor fora, rotas do cliente dentro', () => {
-    for (const p of ['/api/v1/me', '/API/v1/me', '/twirp/x', '/sfu', '/sfu/rtc', '/sfu/../twirp/x', '/a/../twirp/x', '/sticker/x', '/avatar/x', '/file-upload/x/y', '/hooks/a/b', '/livechat/x', '/emoji-custom/x', '/websocket', '/sfu-webhook', '/health', '/x/%2e%2e/api/v1/me']) {
+    for (const p of ['/api/v1/me', '/API/v1/me', '/twirp/x', '/sfu', '/sfu/rtc', '/sfu/../twirp/x', '/a/../twirp/x', '/sticker/x', '/avatar/x', '/file-upload/x/y', '/hooks/a/b', '/emoji-custom/x', '/websocket', '/sfu-webhook', '/health', '/x/%2e%2e/api/v1/me']) {
       expect(isSpaPath(p), p).toBe(false);
     }
-    for (const p of ['/', '/home', '/channel/x', '/group/x', '/direct/x', '/live/x', '/admin/stickers', '/admin/calls', '/account/stickers', '/omnichannel/queue', '/calls', '/login', '/invite/abc', '/apiario', '/livechatx', '/stickers']) {
+    for (const p of ['/', '/home', '/channel/x', '/group/x', '/direct/x', '/live/x', '/admin/stickers', '/admin/calls', '/account/stickers', '/omnichannel/queue', '/calls', '/login', '/invite/abc', '/apiario', '/livechat', '/livechat/x', '/stickers']) {
       expect(isSpaPath(p), p).toBe(true);
     }
   });

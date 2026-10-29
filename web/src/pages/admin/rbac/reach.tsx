@@ -3,7 +3,7 @@ import { areaLevel, RBAC_GROUPS, type RbacGroup } from '@shared/rbac';
 import { Icon, type IconName } from '../../../components/Icon';
 import { Tooltip } from '../../../components/ui';
 
-export const GROUP_ICON: Record<string, IconName> = { chat: 'rbac-chat', room: 'rbac-room', admin: 'rbac-admin', omnichannel: 'rbac-omni', technical: 'rbac-technical' };
+export const GROUP_ICON: Record<string, IconName> = { chat: 'rbac-chat', room: 'rbac-room', admin: 'rbac-admin', technical: 'rbac-technical' };
 
 // Alcance de um papel por grupo: quantas áreas têm algum acesso e quantas estão completas (último nível).
 export function groupReach(g: RbacGroup, perms: string[]) {

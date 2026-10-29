@@ -72,7 +72,7 @@ export function safeExternalText(s: string): string {
 export function messagePermalink(room: { id: string; t: string }, messageId: string): string | null {
   const site = String(getSetting('Site_Url') ?? '').trim().replace(/\/+$/, '');
   if (!site) return null;
-  const kind = room.t === 'd' ? 'direct' : room.t === 'p' ? 'group' : room.t === 'l' ? 'live' : 'channel';
+  const kind = room.t === 'd' ? 'direct' : room.t === 'p' ? 'group' : 'channel';
   return `${site}/${kind}/${encodeURIComponent(room.id)}?msg=${encodeURIComponent(messageId)}`;
 }
 

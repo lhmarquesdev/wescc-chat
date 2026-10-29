@@ -50,7 +50,7 @@ export type StartGuess = { show: false } | { show: true; reason?: string };
 // As que só o servidor conhece (servidor de chamadas, limite, regras de conversa direta em grupo) chegam com a resposta.
 export function guessStart(room: StartGuessRoom, c: StartGuessCtx): StartGuess {
   const scope = callScopeOf(room);
-  if (room.t === 'l' || !scope) return { show: false };
+  if (!scope) return { show: false };
   if (scope === 'group' && !c.groupEnabled) return { show: false };
   if (room.t === 'd') {
     if (!c.member) return { show: true, reason: CALL_NOT_MEMBER };

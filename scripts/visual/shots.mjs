@@ -317,15 +317,6 @@ const SCENES = [
     return 'skip';
   }],
   ['33-calls', async (p) => go(p, '/calls')],
-  ['34-omnichannel-queue', async (p) => go(p, '/omnichannel/queue')],
-  ['34b-omnichannel-current', async (p) => {
-    await go(p, '/omnichannel/current');
-    await settle(p, 700);
-  }],
-  ['34c-omnichannel-analytics', async (p) => {
-    await go(p, '/omnichannel/analytics');
-    await settle(p, 900);
-  }],
   ['35-account-profile', async (p) => go(p, '/account/profile')],
   ['36-account-preferences', async (p) => go(p, '/account/preferences')],
   ['37-account-security', async (p) => go(p, '/account/security')],
@@ -360,7 +351,6 @@ const SCENES = [
   }],
   ['48-admin-integrations', async (p) => go(p, '/admin/integrations')],
   ['49-admin-oauth', async (p) => go(p, '/admin/oauth')],
-  ['50-admin-omnichannel', async (p) => go(p, '/admin/omnichannel')],
   ['51-admin-import', async (p) => {
     await go(p, '/admin/import');
     await settle(p, 800);

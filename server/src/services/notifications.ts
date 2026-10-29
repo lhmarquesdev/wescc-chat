@@ -84,7 +84,7 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
     const offline = pushTargets.filter((id) => !online.has(id));
     if (offline.length) {
       const { sendPush } = await import('./push');
-      const base = isDM ? 'direct' : room.t === 'p' ? 'group' : room.t === 'l' ? 'live' : 'channel';
+      const base = isDM ? 'direct' : room.t === 'p' ? 'group' : 'channel';
       const path = `/${base}/${room.id}${row.tmid ? `/thread/${row.tmid}` : ''}`;
       void sendPush(offline, { title, body, url: path, tag: room.id }).catch(() => {});
     }

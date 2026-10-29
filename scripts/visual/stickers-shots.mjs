@@ -1,6 +1,6 @@
 // Capturas das figurinhas no chat em 4 variantes: desktop (1440x900) e celular (390x844), claro e escuro.
 // Prepara pela API dois pacotes da organização (um com figurinha animada), uma figurinha pessoal do admin, envios no
-// #geral, num tópico e numa DM, uma figurinha removida de todas as conversas e uma sala de atendimento (omnichannel).
+// #geral, num tópico e numa DM, uma figurinha removida de todas as conversas.
 // Grava os PNGs e stickers-shots-log.json (rolagem horizontal e elementos que saem da tela) na pasta de saída.
 //
 // Uso:
@@ -177,7 +177,7 @@ async function createSticker(who, fields, file, poster) {
 }
 
 // ---------- dados ----------
-fail('settings', await api.call('POST', 'settings', { settings: { Stickers_Enabled: true, Stickers_Personal_Enabled: true, Stickers_Animated_Enabled: true, Livechat_enabled: true, Livechat_accept_chats_with_no_agents: true } }));
+fail('settings', await api.call('POST', 'settings', { settings: { Stickers_Enabled: true, Stickers_Personal_Enabled: true, Stickers_Animated_Enabled: true } }));
 
 const ORG_PACKS = [
   {
@@ -282,21 +282,6 @@ if (firstRun) {
   fail('favorite', await api.call('POST', 'stickers.favorite', { stickerId: byName['Parabéns']._id, favorite: true }));
   // Favoritas do admin: a lista usa o mesmo MessageResult da busca.
   for (const m of [valeu, show, old]) fail('starMessage', await api.call('POST', 'chat.starMessage', { messageId: m._id }));
-}
-
-// Atendimento: o admin vira agente disponível e um visitante abre a conversa (a sala só aceita emoji).
-await api.call('POST', 'livechat/users/agent', { username: ADMIN_USER });
-await api.call('POST', 'livechat/agent.status', { status: 'available' });
-const VTOKEN = 'stkshots-visitante-0001';
-await fetch(`${BASE}/api/v1/livechat/visitor`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ visitor: { token: VTOKEN, name: 'Cliente Figurinhas' } }) });
-const lv = await fetch(`${BASE}/api/v1/livechat/message`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-visitor-token': VTOKEN }, body: JSON.stringify({ msg: 'Olá, preciso de ajuda com meu pedido.' }) }).then((r) => r.json());
-const LIVE = lv.message?.rid;
-if (!LIVE) console.log('aviso: sala de atendimento não criada', lv.error ?? '');
-else {
-  // Sem agente conectado a conversa fica na fila: o admin a pega pela API.
-  const queued = await api.call('GET', 'livechat/inquiries.queuedForUser');
-  const inq = queued.inquiries?.find((i) => i.rid === LIVE);
-  if (inq) fail('inquiries.take', await api.call('POST', 'livechat/inquiries.take', { inquiryId: inq._id }));
 }
 
 // ---------- navegador ----------
@@ -481,11 +466,6 @@ const SCENES = [
     await p.locator('.sticker-grid .sticker-cell').nth(1).dispatchEvent('contextmenu');
     await p.waitForSelector('.menu, .sheet', { timeout: 3000 });
     await p.waitForTimeout(400);
-  }],
-  ['k08-picker-livechat', async (p) => {
-    if (!LIVE) return 'skip';
-    await openRoom(p, `/live/${LIVE}`);
-    await openPicker(p);
   }],
   ['k09-picker-thread', async (p) => {
     if (!THREAD) return 'skip';

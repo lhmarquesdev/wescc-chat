@@ -210,10 +210,10 @@ describe('LDAP', () => {
 
 describe('auditoria', () => {
   it('não grava segredos de configurações', async () => {
-    await api('POST', 'settings', { settings: { Livechat_External_Queue_Token: 'token-super-secreto' } }, A);
+    await api('POST', 'settings', { settings: { SMTP_Password: 'token-super-secreto' } }, A);
     await sleep(50);
     const log = await api('GET', 'audit.settings', {}, A);
     expect(JSON.stringify(log)).not.toContain('token-super-secreto');
-    expect(JSON.stringify(log)).toContain('Livechat_External_Queue_Token');
+    expect(JSON.stringify(log)).toContain('SMTP_Password');
   });
 });

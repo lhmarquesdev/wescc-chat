@@ -333,7 +333,7 @@ export function roomRef(r: any): CallRoomRef {
 
 // Caminho da sala na web (para push e para o "#call").
 export function roomPath(r: any) {
-  const base = r.t === 'd' ? 'direct' : r.t === 'p' ? 'group' : r.t === 'l' ? 'live' : 'channel';
+  const base = r.t === 'd' ? 'direct' : r.t === 'p' ? 'group' : 'channel';
   return `/${base}/${r.id}`;
 }
 

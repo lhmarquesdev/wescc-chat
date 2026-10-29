@@ -41,7 +41,7 @@ function AuthShell({ children, title, subtitle }: { children: ReactNode; title?:
         </div>
         <div className="auth-brand-copy">
           <p className="auth-headline">Toda a operação em uma só conversa.</p>
-          <p className="auth-subline">Chat, chamadas e atendimento da sua equipe em um só lugar.</p>
+          <p className="auth-subline">Chat, chamadas e agenda da sua equipe em um só lugar.</p>
         </div>
         <div className="auth-brand-foot">
           {site}

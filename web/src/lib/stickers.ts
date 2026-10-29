@@ -107,7 +107,7 @@ export function useStickerCaps(): StickerCaps {
   return useMemo(() => capsFrom(settings, roles, perms), [settings, roles, perms]);
 }
 
-// Onde a aba Figurinhas e as sugestões aparecem: caps.enabled e stickersAllowedIn (sem atendimento; aviso só com a configuração).
+// Onde a aba Figurinhas e as sugestões aparecem: caps.enabled e stickersAllowedIn (aviso só com a configuração).
 export function stickersHere(room: Pick<Room, 't' | 'notice'> | null | undefined): boolean {
   const caps = stickerCaps();
   return caps.enabled && stickersAllowedIn(room, { noticeRooms: caps.noticeRooms });

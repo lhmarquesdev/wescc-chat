@@ -7,7 +7,7 @@ import type { EphemeralMessage, ExternalPresence, IntegrationAlert, MessageBridg
 import type { CalendarEvent } from './calendar';
 
 export type UserStatus = 'online' | 'away' | 'busy' | 'offline';
-export type RoomType = 'c' | 'p' | 'd' | 'l';
+export type RoomType = 'c' | 'p' | 'd';
 
 export interface UserRef {
   _id: string;
@@ -388,9 +388,6 @@ export type ServerEvent =
   | { type: 'permissions.changed' }
   | { type: 'settings.changed'; settings: { _id: string; value: unknown }[] }
   | { type: 'force_logout' }
-  | { type: 'livechat.inquiry'; action: 'queued' | 'taken' | 'removed'; inquiry: LivechatInquiry }
-  | { type: 'livechat.room'; room: LivechatRoomInfo }
-  | { type: 'livechat.agentStatus'; status: LivechatAgentStatus }
   | { type: 'call'; call: Call }
   | { type: 'call.signal'; callId: string; data: CallSignal }
   | { type: 'call.room'; rid: string; call: Call | null } // resumo para a sala; null = acabou
@@ -421,7 +418,7 @@ export interface ImportProgress {
   importerKey: string;
   status: string;
   valid: boolean;
-  count: { users: number; channels: number; messages: number; contacts: number; total: number; completed: number; error: number; skipped: number };
+  count: { users: number; channels: number; messages: number; total: number; completed: number; error: number; skipped: number };
   rate?: number;
   messagesstatus?: string | null;
   error?: string | null;
@@ -602,67 +599,6 @@ export interface RoomCallState {
 
 export type CallSignal = { sdp: { type: 'offer' | 'answer'; sdp: string } } | { candidate: Record<string, unknown> | null };
 
-// ---------- Omnichannel ----------
-
-export type LivechatAgentStatus = 'available' | 'not-available';
-export type LivechatRoomStatus = 'queued' | 'open' | 'onhold' | 'closed';
-
-export interface LivechatVisitor {
-  _id: string;
-  token: string;
-  username: string;
-  name: string;
-  email?: string | null;
-  phone?: string | null;
-  department?: string | null;
-  customFields?: Record<string, unknown>;
-  ip?: string | null;
-  userAgent?: string | null;
-  ts: string;
-  lastChat?: { _id: string; ts: string } | null;
-}
-
-export interface LivechatRoomInfo {
-  _id: string;
-  rid: string;
-  fname: string;
-  status: LivechatRoomStatus;
-  v: { _id: string; username: string; name: string; token?: string; email?: string | null; phone?: string | null };
-  servedBy?: { _id: string; username: string; name?: string } | null;
-  departmentId?: string | null;
-  departmentName?: string | null;
-  priority?: { _id: string; name: string; sortItem: number } | null;
-  sla?: { _id: string; name: string; dueTimeInMinutes: number } | null;
-  estimatedWaitingTimeQueue?: number;
-  tags: string[];
-  topic?: string;
-  livechatData?: Record<string, unknown>;
-  source?: { type: string; url?: string };
-  queuedAt?: string | null;
-  servedAt?: string | null;
-  firstResponseAt?: string | null;
-  closedAt?: string | null;
-  closer?: 'user' | 'visitor' | 'system' | null;
-  closedBy?: { _id: string; username: string } | null;
-  closeComment?: string | null;
-  onHoldAt?: string | null;
-  survey?: Record<string, unknown> | null;
-  messages: number;
-  ts: string;
-}
-
-export interface LivechatInquiry {
-  _id: string; // = rid
-  rid: string;
-  name: string;
-  v: { _id: string; username: string; name: string };
-  departmentId?: string | null;
-  priority?: { _id: string; name: string; sortItem: number } | null;
-  slaDue?: string | null;
-  queuedAt: string;
-  message?: string;
-}
-
 export type ClientEvent =
   | { type: 'auth'; token: string }
   | { type: 'ping' }
@@ -673,5 +609,3 @@ export type ClientEvent =
   | { type: 'status'; status: UserStatus }
   | { type: 'call.signal'; callId: string; data: CallSignal };
 
-// Eventos do widget do visitante (WebSocket /livechat/websocket)
-export type VisitorClientEvent = { type: 'ping' } | { type: 'typing'; rid: string; typing: boolean };

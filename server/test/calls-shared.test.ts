@@ -120,13 +120,12 @@ describe('regras das chamadas (shared)', () => {
     expect(callStartBlockMessage({ allowed: true, action: 'call' }, s, rules)).toBe('');
   });
 
-  it('callScopeOf, guardModeFor e isTransmissionRoom para DM a dois, DM em grupo, canal, grupo, discussão, time privado, aviso e atendimento', () => {
+  it('callScopeOf, guardModeFor e isTransmissionRoom para DM a dois, DM em grupo, canal, grupo, discussão, time privado e aviso', () => {
     expect(callScopeOf({ t: 'd', uids: ['a', 'b'] })).toBe('direct');
     expect(callScopeOf({ t: 'd', uids: ['a', 'b', 'c'] })).toBe('group');
     expect(callScopeOf({ t: 'd', uids: ['a'] })).toBeNull();
     expect(callScopeOf({ t: 'c' })).toBe('group');
     expect(callScopeOf({ t: 'p' })).toBe('group');
-    expect(callScopeOf({ t: 'l' })).toBeNull();
     expect(guardModeFor({ t: 'c' }, 'pairs')).toBe('pairs');
     expect(guardModeFor({ t: 'c' }, 'strict')).toBe('strict');
     expect(guardModeFor({ t: 'p' }, 'pairs')).toBe('strict');

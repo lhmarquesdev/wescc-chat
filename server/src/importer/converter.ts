@@ -19,7 +19,6 @@ import {
   type Actor,
   type ConversionResult,
   type ImportChannel,
-  type ImportContact,
   type ImportFile,
   type ImportMessage,
   type ImportOptions,
@@ -366,7 +365,6 @@ class Conversion {
     users: { inserted: 0, updated: 0, failed: 0, skipped: 0 },
     channels: { inserted: 0, updated: 0, failed: 0, skipped: 0 },
     messages: { inserted: 0, updated: 0, failed: 0, skipped: 0 },
-    contacts: { inserted: 0, failed: 0, skipped: 0 },
     roomIds: [],
     newUserIds: [],
   };
@@ -439,7 +437,6 @@ class Conversion {
 
     if (!this.stopped()) await this.convertUsers();
     this.usersDone = true;
-    if (!this.stopped()) await this.convertContacts();
     if (!this.stopped()) await this.convertChannels();
     if (!this.stopped()) await this.convertMessages();
     if (!this.stopped()) await this.sink.step(ST.finishing);
@@ -454,20 +451,20 @@ class Conversion {
 
   // ---------- Contagem ----------
 
-  private async fail(rec: StagedRecord<unknown>, kind: 'users' | 'channels' | 'messages' | 'contacts', msg: string) {
+  private async fail(rec: StagedRecord<unknown>, kind: 'users' | 'channels' | 'messages', msg: string) {
     await markRecordError(rec.id, msg);
     this.sink.inc({ error: 1 });
     this.result[kind].failed++;
   }
 
-  private async skipRecords(recs: StagedRecord<unknown>[], kind: 'users' | 'channels' | 'messages' | 'contacts') {
+  private async skipRecords(recs: StagedRecord<unknown>[], kind: 'users' | 'channels' | 'messages') {
     if (!recs.length) return;
     await markRecordsSkipped(recs.map((r) => r.id));
     this.sink.inc({ skipped: recs.length });
     this.result[kind].skipped += recs.length;
   }
 
-  private async pick<T>(batch: StagedRecord<T>[], keep: (r: StagedRecord<T>) => boolean, kind: 'users' | 'channels' | 'contacts', onSkip?: (r: StagedRecord<T>) => void) {
+  private async pick<T>(batch: StagedRecord<T>[], keep: (r: StagedRecord<T>) => boolean, kind: 'users' | 'channels', onSkip?: (r: StagedRecord<T>) => void) {
     const chosen: StagedRecord<T>[] = [];
     const skipped: StagedRecord<T>[] = [];
     for (const r of batch) (keep(r) ? chosen : skipped).push(r);
@@ -586,7 +583,7 @@ class Conversion {
       .replace(/[\u0001\u0002]/g, '');
   }
 
-  private async mapIds(c: Queryable, kind: 'user' | 'user-created' | 'user-email' | 'room' | 'room-created' | 'message' | 'contact', pairs: [string, string][]) {
+  private async mapIds(c: Queryable, kind: 'user' | 'user-created' | 'user-email' | 'room' | 'room-created' | 'message', pairs: [string, string][]) {
     // Um id repetido no mesmo INSERT ... ON CONFLICT DO UPDATE é recusado pelo PostgreSQL.
     const m = new Map(pairs.filter(([i]) => i));
     if (!m.size) return;
@@ -1104,104 +1101,6 @@ class Conversion {
         }
       } catch {
         // Só conveniência: quem recarregar já não vê a conversa juntada.
-      }
-    }
-  }
-
-  // ---------- Contatos ----------
-
-  private async convertContacts() {
-    await this.sink.step(ST.importingContacts);
-    const fields = new Set((await many(`SELECT id FROM livechat_custom_fields WHERE scope = 'visitor'`)).map((r) => r.id));
-    let seq = (await one('SELECT count(*)::int AS n FROM livechat_visitors'))!.n;
-    const sel = selector(this.sel.contacts);
-    for await (const batch of iterateStaged<ImportContact>(this.opId, 'contact', BATCH)) {
-      if (this.stopped()) return;
-      const chosen = await this.pick(batch, (r) => sel(r.importId ?? r.data.importIds?.[0]), 'contacts');
-      if (!chosen.length) continue;
-      const norm = chosen.map((r) => {
-        const d = r.data ?? ({} as ImportContact);
-        // "-", "n/a" e afins não são e-mail: nem acham o contato que já existe, nem vão para importedEmails.
-        const emails = uniq((Array.isArray(d.emails) ? d.emails : []).map((e) => str(e, EMAIL_CUT)).filter(validEmail));
-        const phones = uniq((Array.isArray(d.phones) ? d.phones : []).map((e) => str(e, 60)).filter(Boolean));
-        return {
-          ids: uniq((Array.isArray(d.importIds) ? d.importIds : []).filter((x) => x !== null && x !== undefined && x !== '').map(String)),
-          name: str(d.name, 120),
-          emails,
-          phones,
-          email: emails[0] ?? null,
-          manager: str(d.manager, 100).replace(/^@+/, ''),
-          custom: d.customFields && typeof d.customFields === 'object' ? d.customFields : {},
-        };
-      });
-      const byMap = new Map(
-        (
-          await many(`SELECT m.import_id, v.* FROM import_map m JOIN livechat_visitors v ON v.id = m.target_id WHERE m.kind = 'contact' AND m.import_id = ANY($1::text[])`, [
-            uniq(norm.flatMap((n) => n.ids)),
-          ])
-        ).map((r) => [r.import_id, r]),
-      );
-      const byEmail = new Map<string, any>();
-      for (const r of await many('SELECT * FROM livechat_visitors WHERE lower(email) = ANY($1::text[]) ORDER BY created_at', [
-        uniq(norm.map((n) => n.email?.toLowerCase()).filter(Boolean) as string[]),
-      ]))
-        if (!byEmail.has(String(r.email).toLowerCase())) byEmail.set(String(r.email).toLowerCase(), r);
-      const managers = new Map(
-        (await many('SELECT username FROM users WHERE lower(username) = ANY($1::text[])', [uniq(norm.map((n) => n.manager.toLowerCase()).filter(Boolean))])).map((r) => [
-          String(r.username).toLowerCase(),
-          r.username as string,
-        ]),
-      );
-      for (let i = 0; i < chosen.length; i++) {
-        if (this.stopped()) return;
-        const rec = chosen[i];
-        const n = norm[i];
-        try {
-          if (!n.name && !n.emails.length && !n.phones.length) throw new Error('Contato sem nome, e-mail e telefone.');
-          // Só campos personalizados de contato cadastrados aqui; os outros são descartados.
-          const custom: Record<string, string> = {};
-          for (const [k, v] of Object.entries(n.custom)) {
-            const s = str(typeof v === 'number' ? String(v) : v, 1000);
-            if (fields.has(k) && s) custom[k] = s;
-          }
-          const extraEmails = n.emails.filter((e) => e !== n.email);
-          if (extraEmails.length) custom.importedEmails = extraEmails.join('; ');
-          if (n.phones.length > 1) custom.importedPhones = n.phones.slice(1).join('; ');
-          const manager = n.manager ? managers.get(n.manager.toLowerCase()) : undefined;
-          if (manager) custom.contactManager = manager;
-          const found = n.ids.map((id) => byMap.get(id)).find(Boolean) ?? (n.email ? byEmail.get(n.email.toLowerCase()) : undefined);
-          let id: string;
-          if (found) {
-            id = found.id;
-            await query(
-              `UPDATE livechat_visitors SET name = CASE WHEN name = '' THEN $2 ELSE name END, email = coalesce(email, $3), phone = coalesce(phone, $4),
-                 custom_fields = $5::jsonb || custom_fields, updated_at = now() WHERE id = $1`,
-              [id, n.name, n.email, n.phones[0] ?? null, JSON.stringify(custom)],
-            );
-          } else {
-            seq++;
-            id = newId();
-            const row = await one(
-              `INSERT INTO livechat_visitors (id, token, username, name, email, phone, custom_fields) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-              [
-                id,
-                randomToken(),
-                `guest-${seq}-${randomToken(3).replace(/[^a-z0-9]/gi, '').slice(0, 4).toLowerCase()}`,
-                n.name || `Visitante ${seq}`,
-                n.email,
-                n.phones[0] ?? null,
-                JSON.stringify(custom),
-              ],
-            );
-            if (n.email) byEmail.set(n.email.toLowerCase(), row);
-            for (const x of n.ids) byMap.set(x, row);
-            this.result.contacts.inserted++;
-          }
-          await this.mapIds(pool, 'contact', n.ids.map((x): [string, string] => [x, id]));
-          this.sink.inc({ completed: 1 });
-        } catch (e) {
-          await this.fail(rec, 'contacts', errText(e));
-        }
       }
     }
   }

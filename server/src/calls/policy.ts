@@ -26,7 +26,6 @@ const notAllowed = (msg: string, hide = false) => no(new ApiError(403, 'error-ca
 
 export const ERR = {
   disabled: () => new ApiError(403, 'error-not-allowed', 'As chamadas estão desativadas.'),
-  room: () => new ApiError(400, 'error-call-room', 'Chamadas não estão disponíveis em conversas de atendimento.'),
   groupDisabled: () => new ApiError(400, 'error-call-group-disabled', 'Chamadas em grupo estão desativadas. Só é possível ligar em mensagens diretas entre duas pessoas.'),
   user: () => new ApiError(400, 'error-call-user', 'Este usuário não pode receber chamadas.'),
   sfu: () => new ApiError(503, 'error-call-sfu-unavailable', 'O servidor de chamadas não está respondendo. Tente de novo em instantes ou avise o administrador.'),
@@ -179,9 +178,8 @@ async function directCallVerdict(ctx: Ctx, otherIds: string[]): Promise<Verdict>
 
 const NO_CALLS = 'Esta sala não aceita chamadas.';
 
-// Passos 2 a 4 do início (§5.6): atendimento, escopo, chamadas em grupo e a política da sala.
+// Passos 2 a 4 do início (§5.6): escopo, chamadas em grupo e a política da sala.
 export async function startCheck(ctx: Ctx, room: any, db: Queryable = pool): Promise<Verdict & { scope?: CallScope }> {
-  if (room.t === 'l') return no(ERR.room(), true);
   const scope = callScopeOf(room);
   if (!scope) return no(ERR.user(), true);
   if (scope === 'group' && !groupEnabled()) return { ...no(ERR.groupDisabled(), true), scope };

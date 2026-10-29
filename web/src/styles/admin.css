@@ -1014,129 +1014,6 @@ h4 .head-count {
   gap: 16px;
 }
 
-/* ---------- Omnichannel (administração) ----------
-   As 13 seções saem do controle segmentado e viram uma subnavegação de 200px, como em Configurações. */
-.omni-admin {
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: var(--space-8);
-  align-items: start;
-}
-.seg-nav.omni-subnav {
-  position: sticky;
-  top: calc(var(--header-h) - var(--space-6) + var(--space-4));
-  display: flex;
-  flex-direction: column;
-  flex-wrap: nowrap;
-  gap: 1px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-}
-.omni-subnav button {
-  --omni-icon: var(--fg-muted);
-  justify-content: flex-start;
-  gap: var(--space-2);
-  min-height: 32px;
-  height: auto;
-  padding: var(--space-1-5) 10px;
-  border-radius: var(--radius-md);
-  color: var(--fg-2);
-  font-size: var(--fs-14);
-  line-height: var(--lh-14);
-  font-weight: var(--fw-regular);
-  text-align: left;
-  white-space: normal;
-}
-.omni-subnav button:hover {
-  background: var(--bg-hover);
-}
-.omni-subnav button.on {
-  --omni-icon: var(--accent-text);
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  font-weight: var(--fw-medium);
-  box-shadow: none;
-}
-.omni-subnav .icon {
-  flex-shrink: 0;
-  color: var(--omni-icon);
-}
-.omni-main {
-  min-width: 0;
-}
-.omni-main > * + .card {
-  margin-top: var(--space-4);
-}
-/* Título do cartão e botão Novo na mesma linha de centro. */
-.omni-main .card-head {
-  align-items: center;
-}
-.omni-card > .table,
-.omni-card > .table-wrap {
-  margin-top: var(--space-2);
-}
-.omni-card > p.muted {
-  margin: 0;
-}
-/* "Padrão" ao lado do nome do horário. */
-.omni-hours-name > .pill {
-  margin-left: var(--space-1-5);
-}
-/* Adicionar e buscar nas seções e no formulário do departamento: mesma linha, quebram no celular. */
-.row.omni-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  margin-bottom: var(--space-3);
-}
-.omni-toolbar > input {
-  flex: 1 1 200px;
-  min-width: 0;
-}
-.omni-toolbar > .omni-search {
-  flex: 1 1 200px;
-  width: auto;
-  margin-left: auto;
-}
-/* A busca não leva a margem de baixo da .search-field: na linha centralizada ela subia 6px em relação ao campo
-   de adicionar. */
-.omni-toolbar > .search-field {
-  margin-bottom: 0;
-}
-/* Formulários do Omnichannel: colunas com o espaçamento de .form, título das seções do formulário. */
-.grid-2.omni-form-cols {
-  align-items: start;
-  margin-bottom: 0;
-}
-.omni-form-title {
-  margin: var(--space-6) 0 var(--space-3);
-}
-.table .omni-order {
-  width: 1%;
-  color: var(--fg-muted);
-}
-.omni-order-actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: var(--space-1);
-}
-.omni-priorities input {
-  width: 100%;
-  max-width: 320px;
-}
-.omni-message {
-  min-width: 240px;
-  max-width: 480px;
-}
-.omni-week td {
-  padding-inline: 0 var(--space-3);
-}
-
 /* ---------- Detalhes das outras páginas ---------- */
 .head-select {
   width: auto;
@@ -2592,16 +2469,6 @@ h4 .head-count {
   .actions-col .row-actions {
     justify-content: flex-start;
   }
-  .grid-2.omni-form-cols {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .omni-toolbar > .omni-search {
-    flex-basis: 100%;
-  }
-  .stack td.omni-message {
-    min-width: 0;
-    max-width: none;
-  }
   /* URL de callback: longa demais para dividir a linha com o rótulo; desce para baixo dele, alinhada à esquerda. */
   .kv td.oauth-callback {
     flex-wrap: wrap;
@@ -2632,10 +2499,6 @@ h4 .head-count {
   .ldap-actionbar.sticky,
   .imp-actionbar {
     bottom: calc(var(--space-4) - var(--space-6));
-  }
-  .omni-admin {
-    grid-template-columns: 180px minmax(0, 1fr);
-    gap: var(--space-6);
   }
   .settings-layout {
     grid-template-columns: 180px minmax(0, 1fr);
@@ -2670,39 +2533,6 @@ h4 .head-count {
   }
   .ldap-actionbar.sticky {
     bottom: var(--space-2);
-  }
-  /* Celular: as seções do Omnichannel viram uma faixa que rola de lado. */
-  .omni-admin {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-4);
-  }
-  .seg-nav.omni-subnav {
-    position: static;
-    flex-direction: row;
-    gap: var(--space-1);
-    max-width: none;
-    margin: 0 calc(var(--space-4) * -1);
-    padding: 0 var(--space-4) var(--space-1);
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .omni-subnav button {
-    min-height: 36px;
-    white-space: nowrap;
-    border: 1px solid var(--border);
-  }
-  .omni-subnav button.on {
-    border-color: transparent;
-  }
-  /* Seções escondidas de um lado (useEdgeFade): a borda daquele lado esmaece, em vez de cortar o rótulo seco. */
-  .omni-subnav[data-fade='end'] {
-    mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
-  }
-  .omni-subnav[data-fade='start'] {
-    mask-image: linear-gradient(90deg, transparent, #000 32px);
-  }
-  .omni-subnav[data-fade='both'] {
-    mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent);
   }
   /* Celular: o grupo é escolhido num botão com cara de select, que abre a folha com os grupos (10.4). */
   .settings-main > .menu-wrap {
@@ -2759,16 +2589,12 @@ h4 .head-count {
   }
   .profile-who .btn,
   .settings-main > .btn,
-  .omni-card .btn,
   .btn.callout-action {
     min-height: var(--touch);
   }
   .matrix .check-cell {
     width: var(--touch);
     height: var(--touch);
-  }
-  .omni-subnav button {
-    min-height: var(--touch);
   }
   /* Segmentado dos filtros: sem o recuo interno, os botões ocupam os 44px e o raio acompanha a borda. */
   .admin-filters .seg-nav {
@@ -2784,14 +2610,4 @@ h4 .head-count {
     justify-content: center;
   }
   /* Nome que abre a edição (button.link): a área de toque cresce para 44px sem mudar a linha. */
-  .omni-card td > .link {
-    min-height: var(--touch);
-    display: inline-flex;
-    align-items: center;
-  }
-  .omni-order-actions .btn {
-    min-width: var(--touch);
-    min-height: var(--touch);
-    justify-content: center;
-  }
 }

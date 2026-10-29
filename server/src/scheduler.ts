@@ -1,5 +1,6 @@
 // Chaves de advisory lock (pg_try_advisory_lock): uma por tarefa, nunca repetida. Quem criar tarefa nova anota aqui.
-//   727001 migrações · 727101 limpeza (a cada minuto) · 727102 retenção · 727103 LDAP · 727104 omnichannel
+//   727001 migrações · 727101 limpeza (a cada minuto) · 727102 retenção · 727103 LDAP · 727104 (do atendimento
+//   externo, removido: não reusar)
 //   727105 importação · 727110 chamadas (varredura a cada 10 s; com hashtext(id), a trava de cada chamada; com 0, a
 //   trava curta das entradas, sempre depois da trava da chamada)
 //   727111 figurinhas (limpeza diária)
@@ -55,14 +56,6 @@ export function startScheduler(log: (m: string) => void) {
       }).catch((e) => log(`limpeza falhou: ${e.message}`));
     }),
   );
-
-  // Omnichannel: fila, chats abandonados, espera e tempo máximo na fila.
-  const omni = setInterval(() => {
-    void withLock(727104, async () => {
-      const { runOmnichannelTimers } = await import('./omnichannel/service');
-      await runOmnichannelTimers();
-    }).catch((e) => log(`omnichannel falhou: ${e.message}`));
-  }, 30_000);
 
   // Chamadas: toques vencidos, presença no servidor de chamadas, travas, chamadas abandonadas e histórico.
   const calls = setInterval(() => {
@@ -130,7 +123,6 @@ export function startScheduler(log: (m: string) => void) {
 
   return () => {
     clearInterval(heartbeat);
-    clearInterval(omni);
     clearInterval(calls);
     clearInterval(re);
     clearInterval(calendarSync);

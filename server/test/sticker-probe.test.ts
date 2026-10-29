@@ -663,7 +663,6 @@ describe('figurinhas: onde e o que dá para enviar', () => {
   it('stickersAllowedIn', () => {
     expect(stickersAllowedIn(null, { noticeRooms: true })).toBe(false);
     expect(stickersAllowedIn(undefined, { noticeRooms: true })).toBe(false);
-    expect(stickersAllowedIn({ t: 'l' }, { noticeRooms: true })).toBe(false);
     expect(stickersAllowedIn({ t: 'c', notice: true }, { noticeRooms: false })).toBe(false);
     expect(stickersAllowedIn({ t: 'p', notice: true }, { noticeRooms: true })).toBe(true);
     for (const t of ['c', 'p', 'd']) expect(stickersAllowedIn({ t }, { noticeRooms: false })).toBe(true);

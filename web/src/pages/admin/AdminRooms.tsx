@@ -10,7 +10,7 @@ import { PageHead, RoomCell, TableWrap, num } from './parts';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 
-const TYPE_LABEL: Record<string, string> = { c: 'Canal público', p: 'Grupo privado', d: 'Mensagem direta', l: 'Atendimento' };
+const TYPE_LABEL: Record<string, string> = { c: 'Canal público', p: 'Grupo privado', d: 'Mensagem direta' };
 
 export function AdminRooms() {
   const navigate = useNavigate();
@@ -85,8 +85,7 @@ export function AdminRooms() {
                     />
                   </td>
                   <td className="num" data-label="Membros">
-                    {/* Atendimento não tem membros (o visitante não é usuário): o zero pareceria sala vazia. */}
-                    {r.t === 'l' ? <span className="muted">—</span> : num(r.usersCount)}
+                    {num(r.usersCount)}
                   </td>
                   <td className="num col-md" data-label="Mensagens">
                     {num(r.msgs)}

@@ -6,7 +6,6 @@ export interface ImportCounts {
   users: number;
   channels: number;
   messages: number;
-  contacts: number;
   total: number;
   completed: number;
   error: number;
@@ -67,21 +66,12 @@ export interface SelectionChannel {
   do_import: boolean;
 }
 
-export interface SelectionContact {
-  id: string;
-  name: string;
-  emails: string[];
-  phones: string[];
-  do_import: boolean;
-}
-
 export interface ImportFileData {
   waiting?: boolean;
   operation: ImportOperation;
   name?: string;
   users?: SelectionUser[];
   channels?: SelectionChannel[];
-  contacts?: SelectionContact[];
   message_count?: number;
 }
 
@@ -92,7 +82,7 @@ export interface ShortSelectionPart {
 
 export interface ImportErrorRow {
   id: number;
-  type: 'user' | 'channel' | 'message' | 'contact';
+  type: 'user' | 'channel' | 'message';
   importId: string | null;
   label: string;
   messages: string[];

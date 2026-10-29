@@ -22,7 +22,6 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   // Integrações (Jira/Teams): quem configura o Jira ou o Teams também vê o item
   { id: 'integrations', icon: 'admin-integrations', label: 'Integrações', perm: ['manage-integrations', 'manage-own-integrations', 'manage-jira', 'manage-msteams'] },
   { id: 'oauth', icon: 'tokens', label: 'OAuth', perm: ['manage-oauth-apps'] },
-  { id: 'omnichannel', icon: 'nav-omnichannel', label: 'Atendimento', perm: ['view-livechat-manager'] },
   { id: 'emoji', icon: 'emoji', label: 'Emojis', perm: ['manage-emoji'] },
   // Figurinhas: curadoria (gestores) e removidas (moderação).
   { id: 'stickers', icon: 'sticker', label: 'Figurinhas', perm: ['manage-sticker-packs', 'view-moderation-console', 'manage-moderation-actions'] },

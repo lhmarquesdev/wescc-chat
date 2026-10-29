@@ -71,9 +71,7 @@ function RoomStart({ rid, sub }: { rid: string; sub?: Subscription }) {
       ? dm
         ? `Este é o começo da conversa com ${name}`
         : `Este é o começo da conversa com ${nameList(name.split(/,\s*/), 3)}`
-      : room.t === 'l'
-        ? 'Este é o começo do atendimento.'
-        : `Este é o começo de ${room.t === 'c' && !room.prid ? '#' : ''}${name}`;
+      : `Este é o começo de ${room.t === 'c' && !room.prid ? '#' : ''}${name}`;
   return (
     <div className="room-start">
       {dm ? (

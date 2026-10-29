@@ -16,7 +16,7 @@ export const STAGING_LIMITS = {
 // Chaves de objetos (nomes de reações, campos extras).
 const MAX_KEY = 500;
 
-const emptyCounts = (): Record<ImportDataType, number> => ({ user: 0, channel: 0, message: 0, contact: 0 });
+const emptyCounts = (): Record<ImportDataType, number> => ({ user: 0, channel: 0, message: 0 });
 const breathe = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 // O PostgreSQL recusa U+0000 em text e em jsonb, e o jsonb recusa metades soltas de pares UTF-16: um único caractere

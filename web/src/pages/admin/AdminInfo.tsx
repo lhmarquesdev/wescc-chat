@@ -54,7 +54,6 @@ export function AdminInfo() {
           <Stat icon="room-private" label="Grupos privados" value={num(data.rooms.private_groups)} />
           <Stat icon="room-direct" label="Conversas diretas" value={num(data.rooms.direct)} />
           <Stat icon="room-discussion" label="Discussões" value={num(data.rooms.discussions)} />
-          <Stat icon="room-livechat" label="Atendimentos" value={num(data.rooms.livechat)} />
           <Stat icon="panel-team" label="Times" value={num(data.teams)} />
           <Stat icon="nav-chats" label="Mensagens" value={num(data.messages.total)} />
           <Stat icon="panel-threads" label="Em tópicos" value={num(data.messages.thread_messages)} />

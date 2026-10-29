@@ -193,7 +193,6 @@ describe('figurinhas', () => {
   let avisos: string;
   let dmSupOp1: string;
   let dmOps: string;
-  let livechat: string;
   let org1: string;
   let bomDia: any;
 
@@ -227,8 +226,6 @@ describe('figurinhas', () => {
     dmOps = (await api('POST', 'im.create', { username: op2.username }, op1)).room._id;
     await api('POST', 'roles.addUserToRole', { roleId: 'operacao', username: op2.username }, A);
     await api('POST', 'roles.removeUserFromRole', { roleId: 'user', username: op2.username }, A);
-    livechat = newId();
-    await pool.query(`INSERT INTO rooms (id, t, name, fname) VALUES ($1, 'l', $2, 'Atendimento')`, [livechat, `atendimento-${livechat}`]);
   });
 
   it('admin cria pacote da organização em rascunho, adiciona figurinha e publica', async () => {
@@ -404,11 +401,6 @@ describe('figurinhas', () => {
     expect(m.status).toBe(403);
     expect(m.error).toBe((await sendText(sup, muted, 'oi')).error);
 
-    expect(await sendSt(sup, livechat, { stickerId: bomDia._id })).toMatchObject({
-      status: 403,
-      errorType: 'error-sticker-not-allowed-here',
-      error: 'Figurinhas não estão disponíveis em atendimentos.',
-    });
     expect((await sendSt(op1, diretoria, { stickerId: bomDia._id })).status).toBe(403);
     expect((await sendSt(op1, 'naoexiste1234567', { stickerId: bomDia._id })).status).toBe(404);
     expect((await sendSt(op1, geral, {})).errorType).toBe('error-invalid-params');
