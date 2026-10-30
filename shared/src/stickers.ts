@@ -313,13 +313,20 @@ export function stickerPreviewText(s: MessageSticker, opts: { withName?: boolean
   return `${s.emojis[0] ? `${s.emojis[0]} ` : ''}Figurinha${named}`;
 }
 
+// 0:07, 1:32, 12:05 (a duração das mensagens de voz).
+export function formatVoiceDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 // Prévia de uma mensagem sem texto (notificação, última mensagem, citação, fixar, integrações).
 export function messagePreviewText(
-  m: { msg?: string | null; sticker?: MessageSticker | null; files?: { name: string }[] | null },
+  m: { msg?: string | null; sticker?: MessageSticker | null; files?: { name: string; voice?: boolean; duration?: number }[] | null },
   opts: { withName?: boolean } = {},
 ): string {
   if (m.msg) return m.msg;
   if (m.sticker) return stickerPreviewText(m.sticker, opts);
+  if (m.files?.[0]?.voice) return `🎤 Mensagem de voz${m.files[0].duration ? ` (${formatVoiceDuration(m.files[0].duration)})` : ''}`;
   if (m.files?.length) return `📎 ${m.files[0].name}`; // igual aos outros produtores de prévia (dívida do DS, design §1.4)
   return '';
 }

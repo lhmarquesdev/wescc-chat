@@ -28,6 +28,7 @@ interface State {
   threads: Record<string, Message[]>;
   presence: Record<string, { status: UserStatus; statusText?: string }>;
   typing: Record<string, Record<string, number>>;
+  recording: Record<string, Record<string, boolean>>; // quem do typing está gravando áudio
   connected: boolean;
   emojiVersion: number;
   toasts: ToastItem[];
@@ -48,7 +49,7 @@ interface State {
   setThread(tmid: string, list: Message[]): void;
   markReads(rid: string, ids: string[]): void;
   setPresence(username: string, status: UserStatus, statusText?: string): void;
-  setTyping(rid: string, username: string, typing: boolean): void;
+  setTyping(rid: string, username: string, typing: boolean, recording?: boolean): void;
   setConnected(c: boolean): void;
   toast(text: string, kind?: ToastKind, opts?: { action?: ToastItem['action']; duration?: number; icon?: string }): void;
   dismissToast(id: number): void;
@@ -79,6 +80,7 @@ const initial = {
   threads: {},
   presence: {},
   typing: {},
+  recording: {},
   connected: false,
   emojiVersion: 0,
   toasts: [],
@@ -137,14 +139,17 @@ export const useStore = create<State>((set, get) => ({
     set({ messages: { ...get().messages, [rid]: { ...cur, list: cur.list.map((m) => (s.has(m._id) ? { ...m, unread: false } : m)) } } });
   },
   setPresence: (username, status, statusText) => set({ presence: { ...get().presence, [username]: { status, statusText } } }),
-  setTyping: (rid, username, typing) => {
+  setTyping: (rid, username, typing, recording = false) => {
     const room = { ...(get().typing[rid] ?? {}) };
+    const rec = { ...(get().recording[rid] ?? {}) };
     if (typing) room[username] = Date.now();
     else delete room[username];
-    set({ typing: { ...get().typing, [rid]: room } });
+    if (typing && recording) rec[username] = true;
+    else delete rec[username];
+    set({ typing: { ...get().typing, [rid]: room }, recording: { ...get().recording, [rid]: rec } });
   },
   // Sem conexão os eventos de "parou de digitar" não chegam: a faixa de digitação sairia presa.
-  setConnected: (connected) => set(connected ? { connected } : { connected, typing: {} }),
+  setConnected: (connected) => set(connected ? { connected } : { connected, typing: {}, recording: {} }),
   // O tempo corre no componente (pausa com o mouse em cima): erro 8 s, os outros 4 s.
   toast: (text, kind = 'info', opts) => {
     const id = ++toastSeq;
@@ -217,7 +222,7 @@ export function applyEvent(ev: ServerEvent) {
       if (st.me && ev.userId === st.me._id) st.setMe({ ...st.me, status: ev.status, statusText: ev.statusText });
       break;
     case 'typing':
-      if (ev.username !== st.me?.username) st.setTyping(ev.tmid ? `${ev.rid}:${ev.tmid}` : ev.rid, ev.username, ev.typing);
+      if (ev.username !== st.me?.username) st.setTyping(ev.tmid ? `${ev.rid}:${ev.tmid}` : ev.rid, ev.username, ev.typing, ev.activity === 'recording');
       break;
     case 'reads':
       st.markReads(ev.rid, ev.messageIds);

@@ -181,6 +181,10 @@ export interface Attachment {
   image_dimensions?: { width: number; height: number };
   image_type?: string;
   image_size?: number;
+  // mensagem de voz gravada no chat: duração em segundos e a onda (0 a 100 por barra)
+  voice?: boolean;
+  audio_duration?: number;
+  audio_waveform?: number[];
 }
 
 export interface MessageFile {
@@ -188,6 +192,8 @@ export interface MessageFile {
   name: string;
   type: string;
   size: number;
+  voice?: boolean; // mensagem de voz (a prévia vira "🎤 Mensagem de voz")
+  duration?: number; // segundos, só nas mensagens de voz
 }
 
 export interface Message {
@@ -378,7 +384,7 @@ export type ServerEvent =
   | { type: 'message'; action: 'inserted' | 'updated'; message: Message }
   | { type: 'message.deleted'; rid: string; _id: string; tmid?: string | null }
   | { type: 'messages.bulkDeleted'; rid: string; ids?: string[]; before?: string; filesOnly?: boolean }
-  | { type: 'typing'; rid: string; tmid?: string | null; username: string; typing: boolean }
+  | { type: 'typing'; rid: string; tmid?: string | null; username: string; typing: boolean; activity?: 'recording' }
   | { type: 'subscription'; action: 'inserted' | 'updated' | 'removed'; subscription: Subscription }
   | { type: 'room'; action: 'inserted' | 'updated' | 'removed'; room: Room }
   | { type: 'presence'; userId: string; username: string; status: UserStatus; statusText?: string }
@@ -603,7 +609,7 @@ export type ClientEvent =
   | { type: 'auth'; token: string }
   | { type: 'ping' }
   | { type: 'idle'; idle: boolean }
-  | { type: 'typing'; rid: string; tmid?: string | null; typing: boolean }
+  | { type: 'typing'; rid: string; tmid?: string | null; typing: boolean; activity?: 'recording' }
   | { type: 'watch'; rid: string }
   | { type: 'unwatch'; rid: string }
   | { type: 'status'; status: UserStatus }

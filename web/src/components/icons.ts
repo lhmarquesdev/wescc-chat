@@ -32,6 +32,7 @@ import {
   Check,
   CheckCheck,
   ChevronDown,
+  ChevronUp,
   ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
@@ -588,6 +589,11 @@ export const ICONS = {
   'rbac-areas': Layers,
   'rbac-id': IdCard,
   'rbac-power': Sparkles,
+  // ---------- Mensagens de voz ----------
+  'voice-play': Play,
+  'voice-pause': Pause,
+  'voice-lock': Lock,
+  'voice-up': ChevronUp,
 } as const;
 
 export type IconName = keyof typeof ICONS;

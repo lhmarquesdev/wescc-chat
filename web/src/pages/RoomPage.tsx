@@ -109,15 +109,17 @@ function useTypingName(rid: string) {
 
 function TypingIndicator({ id }: { id: string }) {
   const typing = useStore((s) => s.typing[id]);
+  const recording = useStore((s) => s.recording[id]);
   const nameOf = useTypingName(id.split(':')[0]);
   const [, force] = useState(0);
   useEffect(() => {
     const t = setInterval(() => force((x) => x + 1), 2000);
     return () => clearInterval(t);
   }, []);
-  const names = Object.entries(typing ?? {})
-    .filter(([, ts]) => Date.now() - ts < 6000)
-    .map(([u]) => nameOf(u));
+  const active = Object.entries(typing ?? {}).filter(([, ts]) => Date.now() - ts < 6000);
+  const names = active.map(([u]) => nameOf(u));
+  // Todos gravando áudio: "gravando áudio…"; se alguém digita, vale o "digitando…".
+  const verb = active.length && active.every(([u]) => recording?.[u]) ? 'gravando áudio' : 'digitando';
   // A linha fica sobre o fim da lista: não ocupa espaço quando ninguém digita.
   return (
     <div className="typing" aria-live="polite">
@@ -131,14 +133,14 @@ function TypingIndicator({ id }: { id: string }) {
           <span className="typing-text">
             {names.length === 1 ? (
               <>
-                <strong>{names[0]}</strong> está digitando…
+                <strong>{names[0]}</strong> está {verb}…
               </>
             ) : names.length === 2 ? (
               <>
-                <strong>{names[0]}</strong> e <strong>{names[1]}</strong> estão digitando…
+                <strong>{names[0]}</strong> e <strong>{names[1]}</strong> estão {verb}…
               </>
             ) : (
-              'Várias pessoas estão digitando…'
+              `Várias pessoas estão ${verb}…`
             )}
           </span>
         </div>

@@ -16,6 +16,7 @@ import { ExpressionPicker } from './stickers/ExpressionPicker';
 import { StickerHost } from './stickers/StickerMenuItems';
 import { StickerSuggestions } from './stickers/StickerSuggestions';
 import { Avatar, Modal } from './ui';
+import { useVoiceRecorder, VoiceBar } from './VoiceRecorder';
 
 interface Suggestion {
   key: string;
@@ -90,6 +91,7 @@ function ComposerView({
   const sendOnEnter = me.preferences?.sendOnEnter !== false;
   const maxSize = useSetting<number>('Message_MaxAllowedSize') ?? 5000;
   const uploadsOn = useSetting<boolean>('FileUpload_Enabled');
+  const uploadsInDirect = useSetting<boolean>('FileUpload_Enabled_Direct');
   const phone = useIsPhone();
   const coarse = useMedia('(pointer: coarse)');
   const [text, setText] = useState('');
@@ -231,6 +233,12 @@ function ComposerView({
     t.on = on;
     realtime.send({ type: 'typing', rid, tmid: tmid ?? null, typing: on });
   };
+  // "Gravando áudio…": repetido pelo gravador a cada 3 s (quem vê descarta depois de 6 s sem notícia).
+  const sendRecording = (on: boolean) => {
+    if (typingRef.current.timer) clearTimeout(typingRef.current.timer);
+    typingRef.current.on = false;
+    realtime.send({ type: 'typing', rid, tmid: tmid ?? null, typing: on, activity: 'recording' });
+  };
 
   const reqSeq = useRef(0);
   const computeSuggestions = useCallback(
@@ -344,14 +352,14 @@ function ComposerView({
     }
   };
 
-  const doUpload = async (files: File[], description: string) => {
+  const doUpload = async (files: File[], description: string, extra: Record<string, string> = {}, label?: string) => {
     for (const f of files) {
       const id = ++uploadSeq.current;
       const abort = new AbortController();
-      setUploads((u) => [...u, { id, name: f.name, progress: 0, abort }]);
+      setUploads((u) => [...u, { id, name: label ?? f.name, progress: 0, abort }]);
       try {
         const progress = (p: number) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, progress: p } : x)));
-        await uploadTo(`rooms.upload/${rid}`, f, { description, tmid: tmid ?? '' }, progress, abort.signal);
+        await uploadTo(`rooms.upload/${rid}`, f, { description, tmid: tmid ?? '', ...extra }, progress, abort.signal);
       } catch (e) {
         // Cancelado por quem enviou: a barra some e basta.
         if (!(e instanceof ApiError && e.errorType === 'aborted')) useStore.getState().toast(errorMessage(e), 'error');
@@ -360,6 +368,13 @@ function ComposerView({
       }
     }
   };
+
+  const voice = useVoiceRecorder({
+    onActivity: sendRecording,
+    onSend: (r) => void doUpload([r.file], '', { voice: '1', duration: r.duration.toFixed(1), waveform: r.waveform.join(',') }, 'mensagem de voz'),
+  });
+  // Caixa vazia: o botão Enviar vira o microfone (como no WhatsApp).
+  const micOn = !!uploadsOn && !(room?.t === 'd' && uploadsInDirect === false) && !editing && !text.trim() && !pending.length;
 
   const cancelEdit = () => {
     setEditing(null);
@@ -467,7 +482,7 @@ function ComposerView({
   );
 
   return (
-    <div className={`composer${editing ? ' is-editing' : ''}`} ref={box}>
+    <div className={`composer${editing ? ' is-editing' : ''}${voice.active ? ' is-recording' : ''}`} ref={box}>
       {editing && (
         <div className="composer-bar editing">
           <Icon name="editing" size={14} />
@@ -590,6 +605,7 @@ function ComposerView({
         </label>
       )}
       <div className="composer-tools">
+        {voice.active && <VoiceBar voice={voice} />}
         {uploadsOn && (
           <label
             className="tool-btn"
@@ -640,6 +656,17 @@ function ComposerView({
               Salvar
             </button>
           </span>
+        ) : micOn || voice.active ? (
+          // O mesmo botão grava (segurando) e, com a gravação travada, envia: ele não sai de baixo do dedo.
+          <button
+            type="button"
+            className={['btn primary send mic', voice.phase === 'holding' && 'holding', voice.phase === 'locked' && 'locked'].filter(Boolean).join(' ')}
+            title={voice.phase === 'locked' ? 'Enviar áudio' : 'Segure para gravar um áudio (ou clique para gravar sem segurar)'}
+            aria-label={voice.phase === 'locked' ? 'Enviar áudio' : 'Gravar mensagem de voz'}
+            {...voice.micProps}
+          >
+            <Icon name={voice.phase === 'locked' ? 'send' : 'mic'} size={18} />
+          </button>
         ) : (
           <button type="button" className="btn primary send" onClick={send} disabled={!text.trim() || over} title="Enviar">
             <Icon name="send" size={18} />

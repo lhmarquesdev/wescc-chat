@@ -610,6 +610,8 @@ describe('figurinhas: texto', () => {
     expect(messagePreviewText({ msg: 'oi', sticker: live('Rindo', ['😂']) })).toBe('oi');
     expect(messagePreviewText({ msg: '', sticker: live('Rindo', ['😂']) })).toBe('😂 Figurinha “Rindo”');
     expect(messagePreviewText({ sticker: live('Rindo', []) })).toBe('Figurinha “Rindo”');
+    expect(messagePreviewText({ files: [{ name: 'a.webm', voice: true, duration: 72.4 }] })).toBe('🎤 Mensagem de voz (1:12)');
+    expect(messagePreviewText({ files: [{ name: 'a.webm', voice: true }] })).toBe('🎤 Mensagem de voz');
     expect(messagePreviewText({ sticker: live('', ['😂']) })).toBe('😂 Figurinha');
     expect(messagePreviewText({ sticker: live('Figurinha', ['😂']) })).toBe('😂 Figurinha');
     expect(messagePreviewText({ sticker: live('Rindo', ['😂']) }, { withName: false })).toBe('😂 Figurinha');

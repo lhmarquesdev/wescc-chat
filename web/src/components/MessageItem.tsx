@@ -32,6 +32,7 @@ import { Portal, Sheet, useEscape, useFocusTrap, useMedia, useScrollLock } from 
 import { StickerCard } from './stickers/StickerCard';
 import { CreateStickerItem, StickerHost, StickerMenuItems, StickerRemoveItem, useCreateSticker } from './stickers/StickerMenuItems';
 import { StickerView } from './stickers/StickerView';
+import { VoicePlayer } from './VoicePlayer';
 import { Avatar, confirmDialog, Empty, Field, Menu, Modal, SkeletonList, useAsync } from './ui';
 // Integrações (Jira/Teams)
 import { jiraApi, jiraCreateAvailable, openIntegrationModal, useIntegrations } from '../lib/integrations';
@@ -275,7 +276,14 @@ function FileAttachment({ a, m, createSticker }: { a: Attachment; m?: Message; c
       </div>
     );
   if (a.video_url) return <video className="att-video" src={safeHref(a.video_url)} controls preload="metadata" />;
-  if (a.audio_url) return <audio className="att-audio" src={safeHref(a.audio_url)} controls preload="metadata" />;
+  const audio = safeHref(a.audio_url);
+  if (audio)
+    return (
+      <div className="att att-voice">
+        <VoicePlayer src={audio} duration={a.audio_duration} waveform={a.audio_waveform} title={a.title} voice={!!a.voice} />
+        {a.description && <div className="att-desc">{a.description}</div>}
+      </div>
+    );
   if (link) {
     const meta = [a.format?.toUpperCase(), formatBytes(a.size)].filter(Boolean).join(' · ');
     return (
@@ -895,7 +903,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
     // A figurinha e o nome são botões (abrem o cartão), mas o toque longo neles abre a folha de ações como no resto da
     // mensagem. No toque o nome também cobre o alto da primeira linha do corpo (alvo de 44px, room.css).
     const pressThrough = !!(e.target as HTMLElement).closest('.sticker-hit, .msg-name');
-    if (!pressThrough && (e.target as HTMLElement).closest(`button, input, textarea, .att-image-box, ${NATIVE_PRESS}`)) return;
+    if (!pressThrough && (e.target as HTMLElement).closest(`button, input, textarea, .att-image-box, .voice-wave, ${NATIVE_PRESS}`)) return;
     const timer = window.setTimeout(() => {
       if (press.current) press.current.fired = true;
       navigator.vibrate?.(10);

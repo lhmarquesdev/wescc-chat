@@ -85,7 +85,7 @@ async function writeFile(file: { file: Readable & { truncated?: boolean }; filen
   return { id, name: name && name !== '.' && name !== '..' ? name : 'arquivo', type, size, rel };
 }
 
-const UPLOAD_FIELDS = ['msg', 'description', 'tmid'];
+const UPLOAD_FIELDS = ['msg', 'description', 'tmid', 'voice', 'duration', 'waveform'];
 // Limites do multipart além do arquivo: sem eles cada campo de texto (até 1 MB, sem limite de quantidade) fica na memória.
 const FIELD_LIMITS = { files: 1, fields: 10, parts: 11, fieldSize: 64 * 1024 };
 
@@ -156,10 +156,28 @@ export async function assertCanUpload(ctx: Ctx, rid: string) {
   return room;
 }
 
-export async function saveUpload(ctx: Ctx, rid: string, file: StoredFile, fields: { msg?: string; description?: string; tmid?: string }) {
+// Mensagem de voz gravada no chat: voice=1, duration (segundos) e waveform ("12,40,87,…", até 64 barras de 0 a 100).
+// Só vale para áudio; valores fora do formato são descartados em vez de recusar o envio.
+export function voiceFields(type: string, fields: { voice?: string; duration?: string; waveform?: string }) {
+  if (fields.voice !== '1' || !type.startsWith('audio/')) return null;
+  const d = Number(fields.duration);
+  const duration = Number.isFinite(d) && d > 0 ? Math.min(Math.round(d * 10) / 10, 4 * 3600) : undefined;
+  const bars = String(fields.waveform ?? '')
+    .split(',')
+    .slice(0, 64)
+    .map((x) => Math.round(Number(x)));
+  const waveform = bars.length > 1 && bars.every((n) => Number.isFinite(n) && n >= 0 && n <= 100) ? bars : undefined;
+  return { duration, waveform };
+}
+
+export async function saveUpload(ctx: Ctx, rid: string, file: StoredFile, fields: { msg?: string; description?: string; tmid?: string; voice?: string; duration?: string; waveform?: string }) {
   try {
+    const voice = voiceFields(file.type, fields);
     const f = await registerFile(file, rid, { userId: ctx.userId });
-    return await sendMessage(ctx, { rid, msg: fields.msg ?? '', tmid: fields.tmid || null, files: [f], attachments: [fileAttachment(file, fields.description)] }, { skipCommands: true, internalAttachments: true });
+    const att = fileAttachment(file, fields.description);
+    if (voice) Object.assign(att, { voice: true, audio_duration: voice.duration, audio_waveform: voice.waveform });
+    const files = [voice ? { ...f, voice: true, duration: voice.duration } : f];
+    return await sendMessage(ctx, { rid, msg: fields.msg ?? '', tmid: fields.tmid || null, files, attachments: [att] }, { skipCommands: true, internalAttachments: true });
   } catch (e) {
     await discardFile(file);
     throw e;

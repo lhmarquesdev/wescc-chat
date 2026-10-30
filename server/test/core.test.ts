@@ -186,6 +186,33 @@ describe('salas e mensagens', () => {
     const files = await api('GET', 'groups.files', { roomId: g.group._id }, A);
     expect(files.files).toHaveLength(1);
   });
+
+  it('envia mensagem de voz com duração e onda', async () => {
+    const g = await api('POST', 'groups.create', { name: 'voz' }, A);
+    const fd = new FormData();
+    fd.append('voice', '1');
+    fd.append('duration', '12.34');
+    fd.append('waveform', '0,20,55,100,40');
+    fd.append('file', new Blob(['opus'], { type: 'audio/webm;codecs=opus' }), 'Mensagem de voz.webm');
+    const up = await api('POST', `rooms.upload/${g.group._id}`, fd, A);
+    const att = up.message.attachments[0];
+    expect(att.audio_url).toBeTruthy();
+    expect(att).toMatchObject({ voice: true, audio_duration: 12.3, audio_waveform: [0, 20, 55, 100, 40] });
+    expect(up.message.files[0]).toMatchObject({ voice: true, duration: 12.3, type: 'audio/webm' });
+    // Onda inválida é descartada; arquivo que não é áudio não vira mensagem de voz.
+    const bad = new FormData();
+    bad.append('voice', '1');
+    bad.append('waveform', '1,999');
+    bad.append('file', new Blob(['opus'], { type: 'audio/ogg' }), 'a.ogg');
+    const up2 = await api('POST', `rooms.upload/${g.group._id}`, bad, A);
+    expect(up2.message.attachments[0].voice).toBe(true);
+    expect(up2.message.attachments[0].audio_waveform).toBeUndefined();
+    const txt = new FormData();
+    txt.append('voice', '1');
+    txt.append('file', new Blob(['x'], { type: 'text/plain' }), 'n.txt');
+    const up3 = await api('POST', `rooms.upload/${g.group._id}`, txt, A);
+    expect(up3.message.attachments[0].voice).toBeUndefined();
+  });
 });
 
 describe('tempo real', () => {
