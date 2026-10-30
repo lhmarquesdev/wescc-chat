@@ -19,8 +19,10 @@ import { Avatar, Empty, Field, GroupAvatar, Menu, Segmented, SearchInput, Skelet
 import { InCallBadge } from './call/LiveIndicators';
 // Integrações (Jira/Teams): pílula "Teams" das mensagens copiadas do Teams, como na conversa.
 import { BridgeBadge } from './integrations/BridgeBadge';
+// Permissões do canal: quem fala e o que cada pessoa pode fazer nele.
+import { RoomAccessPanel } from './RoomAccessPanel';
 
-export type PanelId = 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune';
+export type PanelId = 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune' | 'access';
 
 const TITLES: Record<PanelId, string> = {
   info: 'Informações da sala',
@@ -36,6 +38,7 @@ const TITLES: Record<PanelId, string> = {
   notifications: 'Preferências de notificação',
   invite: 'Convidar por link',
   prune: 'Limpar histórico',
+  access: 'Permissões do canal',
 };
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
@@ -127,6 +130,7 @@ export function RoomPanel(p: Props) {
         {p.id === 'notifications' && <NotificationsPanel {...p} />}
         {p.id === 'invite' && <InvitePanel {...p} />}
         {p.id === 'prune' && <PrunePanel {...p} />}
+        {p.id === 'access' && <RoomAccessPanel room={p.room} onChanged={p.onChanged} />}
       </div>
     </aside>
   );
@@ -276,7 +280,7 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
                   </div>
                 ) : (
                   <>
-                    <Toggle checked={f.readOnly} onChange={(v) => setF({ ...f, readOnly: v })} label="Somente leitura" />
+                    <Toggle checked={f.readOnly} onChange={(v) => setF({ ...f, readOnly: v })} label="Somente leitura" description="Só quem você escolher em Permissões envia mensagens." />
                     {canSetReact && <Toggle checked={f.reactWhenReadOnly} onChange={(v) => setF({ ...f, reactWhenReadOnly: v })} label="Permitir reações em somente leitura" />}
                     {/* Sala que tinha a lista oculta (aviso desligado agora, ou "Transmissão" antiga): dá para desfazer aqui. */}
                     {room.broadcast && <Toggle checked={f.broadcast} onChange={(v) => setF({ ...f, broadcast: v })} label="Ocultar a lista de membros" />}

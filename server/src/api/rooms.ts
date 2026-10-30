@@ -1,3 +1,4 @@
+import { roomAccess, setMemberRoomRoles, setPosters } from '../services/roomAccess';
 import type { FastifyInstance } from 'fastify';
 import { many, one, query } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
@@ -159,6 +160,17 @@ export function roomsRoutes(app: FastifyInstance) {
       limit: Number(body.limit ?? 0),
     });
     return { count };
+  });
+  // Permissões do canal: quem pode enviar e o que cada pessoa pode fazer nele (painel Permissões da sala).
+  route(app, 'GET', 'rooms.access', {}, async (req, _rep, ctx) => roomAccess(ctx, str(q(req).roomId, 'roomId'), q(req).filter ?? ''));
+  route(app, 'POST', 'rooms.access.setRoles', {}, async (req, _rep, ctx) => {
+    const body = b(req);
+    const roles = await setMemberRoomRoles(ctx, str(body.roomId, 'roomId'), str(body.userId, 'userId'), strArray(body.roles));
+    return { roles };
+  });
+  route(app, 'POST', 'rooms.access.setPosters', {}, async (req, _rep, ctx) => {
+    const body = b(req);
+    return { changed: await setPosters(ctx, str(body.roomId, 'roomId'), strArray(body.add), strArray(body.remove)) };
   });
   route(app, 'POST', 'rooms.muteUser', {}, async (req, _rep, ctx) => {
     const body = b(req);

@@ -384,6 +384,7 @@ export const ICONS = {
   'panel-notifications': Bell,
   'panel-invite': Link,
   'panel-prune': BrushCleaning,
+  'panel-access': ShieldUser,
   favorite: Star,
   unfavorite: StarOff,
   encrypted: LockKeyhole,

@@ -1,13 +1,14 @@
 import type { RoomRetention, RoomType, Subscription, SubscriptionNotifyPrefs } from '@shared/index';
 import { many, one, query, type Queryable } from '../db/pool';
-import { badRequest, forbidden, notFound } from '../lib/errors';
+import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
+import { LOCK_TEXT } from '@shared/rbac';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
 import { assertCanBringIn, assertCanStartDirect } from './direct';
 import { mapRoom, mapSubscription } from './mappers';
 import { sendSystemMessage } from './messages';
-import { hasPermission, rolesHavePermission, getUserRoles } from './permissions';
+import { hasPermission, rolesHavePermission, getUserRoles, roleInfos } from './permissions';
 import { getSetting } from './settings';
 import { actorOf, getUserById, type Ctx } from './users';
 import { emit } from './hooks';
@@ -571,13 +572,33 @@ export async function deleteRoom(ctx: Ctx, rid: string) {
 const ROLE_PERMS: Record<string, string> = { owner: 'set-owner', moderator: 'set-moderator', leader: 'set-leader', publisher: 'set-publisher' };
 const ROLE_MSG: Record<string, string> = { owner: 'owner', moderator: 'moderator', leader: 'leader', publisher: 'publisher' };
 
+// Papel de sala que não é um dos quatro do sistema: um papel com escopo "De sala" criado em Papéis e permissões. Dar ou
+// tirar pede Definir moderadores na sala e a mesma trava de concessão dos papéis globais: o papel precisa caber no que
+// o ator tem nesta sala (papéis globais mais os da sala), salvo administrador ou delegação.
+export function roomRoleLock(actorRoles: string[], role: string): string | null {
+  const infos = roleInfos();
+  const info = infos.find((r) => r.id === role);
+  if (!info || info.scope !== 'Subscriptions') return 'invalid';
+  if (ROLE_PERMS[role]) return null;
+  const byId = new Map(infos.map((r) => [r.id, r]));
+  const mine = actorRoles.map((r) => byId.get(r)).filter((r): r is NonNullable<typeof r> => !!r);
+  if (mine.some((r) => r.root)) return null;
+  const held = new Set(mine.flatMap((r) => r.permissions));
+  if (info.permissions.every((k) => held.has(k))) return null;
+  if (mine.some((r) => r.delegable.includes(role))) return null;
+  return 'superior';
+}
+
 export async function setRoomRole(ctx: Ctx, rid: string, userId: string, role: string, add: boolean) {
-  const perm = ROLE_PERMS[role];
-  if (!perm) throw badRequest('error-invalid-role', 'Papel inválido.');
+  const builtin = ROLE_PERMS[role];
   const room = await getRoom(rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   if (room.t === 'd') throw badRequest('error-not-allowed', 'Mensagens diretas não têm papéis de sala.');
-  if (!(await hasPermission(ctx.userId, perm, rid))) throw forbidden();
+  const actorRoles = await getUserRoles(ctx.userId, rid);
+  const lock = roomRoleLock(actorRoles, role);
+  if (lock === 'invalid') throw badRequest('error-invalid-role', 'Papel inválido.');
+  if (!rolesHavePermission(actorRoles, builtin ?? 'set-moderator')) throw forbidden();
+  if (lock) throw new ApiError(403, 'RBAC_ROLE_SUPERIOR', LOCK_TEXT.superior);
   const sub = await getSubscriptionRow(rid, userId);
   if (!sub) throw badRequest('error-user-not-in-room', 'Usuário não está na sala.');
   if (add && sub.roles.includes(role)) throw badRequest('error-user-already-has-role', 'O usuário já tem esse papel.');
@@ -590,7 +611,7 @@ export async function setRoomRole(ctx: Ctx, rid: string, userId: string, role: s
   const row = await one('UPDATE subscriptions SET roles = $2, updated_at = now() WHERE id = $1 RETURNING *', [sub.id, roles]);
   const target = await one('SELECT username FROM users WHERE id = $1', [userId]);
   await sendSystemMessage(rid, add ? 'subscription-role-added' : 'subscription-role-removed', { id: ctx.userId, username: ctx.username }, target.username, {
-    role: ROLE_MSG[role],
+    role: ROLE_MSG[role] ?? role,
   });
   await notifySubscription(userId, rid, 'updated', row);
   if (room.team_main && room.team_id) {

@@ -29,7 +29,7 @@ import { meetingAvailable, openIntegrationModal, useIntegrations } from '../lib/
 import { useDirectMeetingOk } from '../lib/roomcall';
 
 // perm: só aparece para quem tem a permissão (global ou da sala), como o servidor exige.
-const PANELS: { id: PanelId; icon: IconName; label: string; when?: (r: Room) => boolean; perm?: string }[] = [
+const PANELS: { id: PanelId; icon: IconName; label: string; when?: (r: Room) => boolean; perm?: string | string[] }[] = [
   { id: 'info', icon: 'panel-info', label: 'Informações' },
   { id: 'threads', icon: 'panel-threads', label: 'Tópicos' },
   { id: 'discussions', icon: 'panel-discussions', label: 'Discussões', when: (r) => !r.prid },
@@ -43,6 +43,14 @@ const PANELS: { id: PanelId; icon: IconName; label: string; when?: (r: Room) => 
   { id: 'notifications', icon: 'panel-notifications', label: 'Notificações' },
   { id: 'invite', icon: 'panel-invite', label: 'Link de convite', when: (r) => r.t !== 'd', perm: 'create-invite-links' },
   { id: 'prune', icon: 'panel-prune', label: 'Limpar histórico', when: (r) => r.t !== 'd', perm: 'clean-channel-history' },
+  // Permissões do canal: quem fala e o que cada pessoa pode fazer nele (donos e moderadores).
+  {
+    id: 'access',
+    icon: 'panel-access',
+    label: 'Permissões',
+    when: (r) => r.t !== 'd',
+    perm: ['set-readonly', 'set-react-when-readonly', 'mute-user', 'set-owner', 'set-moderator', 'set-leader', 'set-publisher'],
+  },
 ];
 
 // Atalhos do cabeçalho, na ordem em que aparecem. Os que não cabem vão para o menu Mais.
@@ -437,7 +445,7 @@ export function RoomPage() {
     }
   };
   const dmUser = room.t === 'd' && sub && !sub.name.includes(',') ? sub.name : null;
-  const panels = PANELS.filter((p) => (!p.when || p.when(room)) && (!p.perm || canWithRoles(p.perm, roles)) && !(p.id === 'members' && membersHidden));
+  const panels = PANELS.filter((p) => (!p.when || p.when(room)) && (!p.perm || [p.perm].flat().some((x) => canWithRoles(x, roles))) && !(p.id === 'members' && membersHidden));
   // Chamadas em grupo: a conversa a dois mantém voz e vídeo no cabeçalho em qualquer largura. Nas outras salas, abaixo
   // de 440 px iniciar vai para o Mais; a pílula de uma chamada viva fica e toma o lugar de Membros (que vai para o Mais).
   const pairDm = room.t === 'd' && room.uids?.length === 2;

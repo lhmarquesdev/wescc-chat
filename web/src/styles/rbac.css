@@ -1644,3 +1644,293 @@
     display: none;
   }
 }
+
+/* ==========================================================================
+   Sala › Permissões do canal: quem fala e o que cada pessoa pode fazer nele.
+   ========================================================================== */
+.room-access-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  animation: rbac-fade var(--dur-3) var(--ease-out);
+}
+.access-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-surface);
+}
+.access-card.flush {
+  padding: var(--space-4) 0 var(--space-2);
+}
+.access-card.flush > .access-title,
+.access-card.flush > .access-search {
+  padding-inline: var(--space-4);
+}
+.access-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-semibold);
+}
+.access-title > i {
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.access-hint {
+  margin: 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.access-hint.pad {
+  padding: var(--space-2) var(--space-4) 0;
+}
+.access-modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.access-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-canvas);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-2) var(--ease-out), background-color var(--dur-2) var(--ease-out);
+}
+.access-mode > svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--fg-muted);
+}
+.access-mode > span:not(.access-radio) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.access-mode strong {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+}
+.access-mode span span {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.access-mode:hover:not([aria-disabled='true']) {
+  border-color: var(--border-hover);
+}
+.access-mode.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.access-mode.on > svg {
+  color: var(--accent-text);
+}
+.access-mode[aria-disabled='true'] {
+  cursor: default;
+}
+.access-mode[aria-disabled='true']:not(.on) {
+  opacity: 0.6;
+}
+.access-radio {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  transition: border-color var(--dur-2) var(--ease-out), border-width var(--dur-2) var(--ease-out);
+}
+.access-mode.on .access-radio {
+  border: 5px solid var(--accent);
+}
+.access-search .search-field {
+  margin: 0;
+}
+.access-search.top {
+  margin-bottom: var(--space-3);
+}
+.access-list,
+.access-people {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.access-list > li > .tooltip-anchor {
+  display: block;
+}
+.access-person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2-5, 10px);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+.access-person:hover {
+  background: var(--bg-hover);
+}
+.access-person:has(input:disabled) {
+  cursor: default;
+}
+.access-person > svg {
+  flex: none;
+  color: var(--fg-muted);
+}
+.access-person.changed {
+  background: var(--accent-soft);
+}
+.access-person.muted .access-who > span:first-child {
+  color: var(--fg-muted);
+}
+.access-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.access-who > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.access-who > span:first-child {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+}
+.access-who > span + span {
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+.access-save {
+  position: sticky;
+  bottom: calc(var(--space-4) * -1);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 calc(var(--space-4) * -1) calc(var(--space-4) * -1);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg-raised);
+  font-size: var(--fs-13);
+  color: var(--fg-2);
+}
+.access-save > span {
+  flex: 1;
+}
+.access-people > li {
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+}
+.access-people > li.open {
+  border-color: var(--border);
+  background: var(--bg-surface);
+}
+.access-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2-5, 10px);
+  width: 100%;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.access-row:hover {
+  background: var(--bg-hover);
+}
+.access-row > svg {
+  flex: none;
+  color: var(--fg-muted);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.access-row[aria-expanded='true'] > svg {
+  transform: rotate(180deg);
+}
+.access-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) var(--space-3);
+}
+.access-label {
+  margin-top: var(--space-1);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.access-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+}
+.access-roles > span {
+  display: inline-flex;
+}
+.access-roles .chip {
+  gap: var(--space-1);
+}
+.access-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.access-effective {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-13);
+}
+.access-effective li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.access-effective li > svg {
+  flex: none;
+  margin-top: 3px;
+}
+.access-effective li.yes > svg {
+  color: var(--ok);
+}
+.access-effective li.no {
+  color: var(--fg-muted);
+}
+.access-effective li > span {
+  display: flex;
+  flex-direction: column;
+}
+.access-effective li .muted {
+  font-size: var(--fs-12);
+}
+@media (prefers-reduced-motion: reduce) {
+  .room-access-panel {
+    animation: none;
+  }
+}
