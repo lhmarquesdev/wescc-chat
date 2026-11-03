@@ -109,7 +109,7 @@ describe('meus dados', () => {
     expect(res.headers.get('content-disposition')).toMatch(/meus-dados_user\d+[a-z0-9]*_\d{4}-\d{2}-\d{2}\.zip/);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const fileEntry = entries.find((e) => e.name.startsWith('arquivos/'))!;
-    expect(entries.map((e) => e.name)).toEqual(['perfil.json', 'agenda.json', 'reacoes.json', fileEntry.name, 'arquivos.json', 'mensagens.json', 'meus-dados.html']);
+    expect(entries.map((e) => e.name)).toEqual(['perfil.json', 'agenda.json', 'lembretes.json', 'agendadas.json', 'votos.json', 'reacoes.json', fileEntry.name, 'arquivos.json', 'mensagens.json', 'meus-dados.html']);
 
     const perfil = json('perfil.json');
     expect(perfil).toMatchObject({ format: 'wescc-user-data', version: 1 });
@@ -391,5 +391,31 @@ describe('meus dados', () => {
     expect(res.status).toBe(403);
     expect((await res.json()).errorType).toBe('error-password-change-required');
     expect((await ask(mia)).status).toBe(403);
+  });
+  it('lembretes, agendadas, os próprios votos e o comentário das encaminhadas', async () => {
+    const lia = await newUser(A, { name: 'Lia Prado' });
+    const rui = await newUser(A, { name: 'Rui Costa' });
+    const rid = (await api('POST', 'channels.create', { name: `mensagens-${Date.now()}`, members: [rui.username] }, lia)).channel._id;
+    const msg = (await api('POST', 'chat.sendMessage', { message: { rid, msg: 'lembra disso' } }, rui)).message;
+    const soon = new Date(Date.now() + 30 * 60_000).toISOString();
+    expect((await api('POST', 'reminders.set', { messageId: msg._id, remindAt: soon }, lia)).success).toBe(true);
+    expect((await api('POST', 'reminders.set', { messageId: msg._id, remindAt: soon }, rui)).success).toBe(true);
+    expect((await api('POST', 'chat.scheduleMessage', { message: { rid, msg: 'texto agendado' }, sendAt: soon }, lia)).success).toBe(true);
+    const poll = (await api('POST', 'polls.create', { rid, question: 'Café?', options: ['Sim', 'Não'], anonymous: true }, rui)).message;
+    await api('POST', 'polls.vote', { messageId: poll._id, optionIds: ['o1'] }, lia);
+    await api('POST', 'polls.vote', { messageId: poll._id, optionIds: ['o2'] }, rui);
+    const fwd = await api('POST', 'chat.forwardMessage', { messageId: msg._id, targets: [{ rid }], comment: 'olha isso' }, lia);
+    expect(fwd.results[0].ok).toBe(true);
+
+    const { json, byName } = await readyZip(lia);
+    expect(json('lembretes.json')).toEqual([expect.objectContaining({ mensagemId: msg._id, avisadoEm: null })]);
+    expect(json('agendadas.json')).toEqual([expect.objectContaining({ texto: 'texto agendado', situacao: 'Agendada' })]);
+    expect(json('votos.json')).toEqual([expect.objectContaining({ mensagemId: poll._id, pergunta: 'Café?', opcao: 'Sim' })]);
+    const mine = json('mensagens.json').find((m: any) => m.id === fwd.results[0].message._id);
+    expect(mine).toMatchObject({ texto: 'lembra disso', encaminhada: true, comentario: 'olha isso' });
+    const html = byName.get('meus-dados.html')!.toString('utf8');
+    expect(html).toContain('texto agendado');
+    expect(html).toContain('olha isso');
+    expect(html).not.toContain('>Não<');
   });
 });
