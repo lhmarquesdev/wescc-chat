@@ -388,7 +388,7 @@ function KeyCheck({ k, ctx, match }: { k: string; ctx: Ctx; match?: boolean }) {
       <input type="checkbox" checked={on} disabled={ctx.readOnly || !!lock} onChange={(e) => ctx.onKey(k, e.target.checked)} />
       <span className="rbac-key-text">
         <span className="rbac-key-label">
-          {def?.label ?? k}
+          <span className="rbac-key-name">{def?.label ?? k}</span>
           {lock && <Icon name="rbac-lock" size={12} />}
           <SensitiveTag k={k} />
           {inert && (

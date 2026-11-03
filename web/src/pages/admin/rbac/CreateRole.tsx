@@ -1,7 +1,7 @@
 // Novo papel: em branco, a partir de um modelo de operação ou copiando outro papel. Modelo e cópia levam só o que
 // quem cria tem (templatePlan); a delegação do modelo só vem quando quem cria é administrador. O resto se ajusta no
 // editor, que abre na aba Permissões.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { RBAC_TEMPLATES, rbacLabel, templatePlan, VISIBLE_KEYS, type RbacTemplate, type RoleInfo } from '@shared/rbac';
 import { api } from '../../../lib/api';
 import { nameList, plural, roleLabel } from '../../../lib/format';
@@ -49,6 +49,12 @@ export function CreateRole({ source, roles, grant, onClose, onCreated }: { sourc
     }
     return null;
   }, [tpl, copy, grant, infos]);
+
+  // Ao escolher um modelo, o cartão escolhido (com o plano dentro) fica à vista.
+  const cardsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (tplId) cardsRef.current?.querySelector<HTMLElement>('.rbac-template-card.on')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [tplId]);
 
   const pickTemplate = (t: RbacTemplate) => {
     setTplId(t.id);
@@ -123,7 +129,7 @@ export function CreateRole({ source, roles, grant, onClose, onCreated }: { sourc
           />
         </div>
         {start === 'template' && (
-          <div className="rbac-templates" role="radiogroup" aria-label="Modelos">
+          <div className="rbac-templates" role="radiogroup" aria-label="Modelos" ref={cardsRef}>
             {RBAC_TEMPLATES.map((t) => (
               <button key={t.id} type="button" role="radio" aria-checked={tplId === t.id} className={`rbac-template-card${tplId === t.id ? ' on' : ''}`} onClick={() => pickTemplate(t)}>
                 <span className="rbac-template-name">
@@ -141,6 +147,8 @@ export function CreateRole({ source, roles, grant, onClose, onCreated }: { sourc
                   )}
                   <span className="muted small">{plural(t.keys.length, 'permissão', 'permissões')}</span>
                 </span>
+                {/* O plano no próprio cartão: o que vai junto aparece no clique, sem rolar até o fim. */}
+                {tplId === t.id && plan && <PlanSummary plan={plan} canEdit={grant.canEditPermissions} />}
               </button>
             ))}
           </div>
@@ -164,7 +172,7 @@ export function CreateRole({ source, roles, grant, onClose, onCreated }: { sourc
           <input value={label} maxLength={NAME_MAX} placeholder="Supervisor de operação" onChange={(e) => setLabel(e.target.value)} />
         </Field>
         <Field label="Para que serve" hint={`Uma frase simples. Aparece embaixo do nome. ${purpose.length}/${PURPOSE_MAX}`}>
-          <textarea rows={2} value={purpose} maxLength={PURPOSE_MAX} onChange={(e) => setPurpose(e.target.value)} />
+          <textarea rows={Math.max(2, Math.min(5, Math.ceil(purpose.length / 56)))} value={purpose} maxLength={PURPOSE_MAX} onChange={(e) => setPurpose(e.target.value)} />
         </Field>
         <Field label="Escopo">
           <select value={scope} disabled={!!tpl} onChange={(e) => setScope(e.target.value as 'Users' | 'Subscriptions')}>
@@ -172,26 +180,37 @@ export function CreateRole({ source, roles, grant, onClose, onCreated }: { sourc
             <option value="Subscriptions">De sala: vale só nas salas onde a pessoa tem o papel</option>
           </select>
         </Field>
-        {plan && (
-          <div className="rbac-create-plan" role="status">
-            {!grant.canEditPermissions ? (
-              <p>O papel nasce sem permissões: você não altera permissões.</p>
-            ) : (
-              <>
-                <p>Leva {plural(plan.keys.length, 'permissão', 'permissões')}.</p>
-                {plan.stripped.length > 0 && (
-                  <p className="muted">
-                    {plan.stripped.length === 1 ? '1 fica de fora porque você não a tem' : `${plan.stripped.length} ficam de fora porque você não as tem`}: {plan.stripped.slice(0, 3).map(rbacLabel).join(', ')}
-                    {plan.stripped.length > 3 ? '…' : '.'}
-                  </p>
-                )}
-              </>
-            )}
-            {plan.delegable.length > 0 && <p>Já vem com a delegação: quem tiver o papel pode dar {nameList(plan.delegable.map(roleLabel), 3)}.</p>}
-            {plan.delegationSkipped.length > 0 && <p className="muted">A delegação de {nameList(plan.delegationSkipped.map(roleLabel), 3)} só um administrador define.</p>}
+        {plan && !tpl && (
+          <div className="rbac-create-plan">
+            <PlanSummary plan={plan} canEdit={grant.canEditPermissions} />
           </div>
         )}
       </div>
     </Modal>
+  );
+}
+
+type Plan = ReturnType<typeof templatePlan>;
+
+// O que o papel leva ao nascer: quantas permissões, as que ficam de fora (você não tem) e a delegação.
+function PlanSummary({ plan, canEdit }: { plan: Plan; canEdit: boolean }) {
+  return (
+    <span className="rbac-plan" role="status">
+      {!canEdit ? (
+        <span>O papel nasce sem permissões: você não altera permissões.</span>
+      ) : (
+        <>
+          <span>Leva {plural(plan.keys.length, 'permissão', 'permissões')}.</span>
+          {plan.stripped.length > 0 && (
+            <span className="muted">
+              {plan.stripped.length === 1 ? '1 fica de fora porque você não a tem' : `${plan.stripped.length} ficam de fora porque você não as tem`}: {plan.stripped.slice(0, 3).map(rbacLabel).join(', ')}
+              {plan.stripped.length > 3 ? '…' : '.'}
+            </span>
+          )}
+        </>
+      )}
+      {plan.delegable.length > 0 && <span>Já vem com a delegação: quem tiver o papel pode dar {nameList(plan.delegable.map(roleLabel), 3)}.</span>}
+      {plan.delegationSkipped.length > 0 && <span className="muted">A delegação de {nameList(plan.delegationSkipped.map(roleLabel), 3)} só um administrador define.</span>}
+    </span>
   );
 }

@@ -23,6 +23,7 @@ import { ReachBar } from './reach';
 import { ReviewDialog, type Draft } from './Review';
 import { RoomRoles } from './RoomRoles';
 import { SensitiveTag } from './SensitiveTag';
+import { useLeaveGuard } from './leaveGuard';
 import { EditorShell, LockHint, Notice, Section, type EditorTab } from './shell';
 import { lockText, people, rbacFail, rbacOk, userLockOf, type Grant, type RbacRole } from './data';
 
@@ -59,6 +60,7 @@ export const compareUrl = (a: string, b: string) => `/admin/permissions/matrix${
 
 export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleId: string; roles: RbacRole[] | null; grant: Grant | null; onSaved: () => void; onDeleted: () => void }) {
   const navigate = useNavigate();
+  const meId = useStore((s) => s.me?._id);
   const [params, setParams] = useSearchParams();
   const role = roles?.find((r) => r._id === roleId);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -66,7 +68,8 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
   const [group, setGroup] = useState('all');
   const [review, setReview] = useState(false);
   const [saving, setSaving] = useState(false);
-  // Outra pessoa salvou este papel enquanto ele estava com alterações aqui ('' = não deu para saber quem).
+  // Outra pessoa salvou este papel enquanto ele estava com alterações aqui ('' = não deu para saber quem; 'me' = a
+  // própria pessoa, em outra aba ou pela API).
   const [changedBy, setChangedBy] = useState<string | null>(null);
   const tabParam = params.get('tab') as Tab | null;
   const tab: Tab = tabParam && TABS.includes(tabParam) ? tabParam : 'summary';
@@ -97,10 +100,13 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
   // Com alterações: avisa quem salvou (também a mesma pessoa em outra aba), e ao salvar só as mudanças desta tela
   // entram. O que esta aba acabou de salvar não conta.
   const savingRef = useRef(false);
+  const meIdRef = useRef(meId);
+  meIdRef.current = meId;
   useEffect(() => {
     const off = realtime.on((ev) => {
       if (ev.type !== 'permissions.changed' || !ev.roles?.includes(roleId) || savingRef.current || !dirtyRef.current) return;
       if (!ev.by) return setChangedBy('');
+      if (ev.by === meIdRef.current) return setChangedBy('me');
       api
         .get('users.info', { userId: ev.by })
         .then((r) => setChangedBy(`@${r.user.username}`))
@@ -109,13 +115,8 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
     return () => void off();
   }, [roleId]);
 
-  // Sair da página com alterações: o navegador pergunta.
-  useEffect(() => {
-    if (!dirty) return;
-    const h = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener('beforeunload', h);
-    return () => window.removeEventListener('beforeunload', h);
-  }, [dirty]);
+  // Sair com alterações (recarregar, fechar ou qualquer link do chat): pergunta antes.
+  useLeaveGuard(dirty, () => confirmDialog({ title: 'Descartar as alterações?', body: 'O que você mudou neste papel ainda não foi salvo.', confirmLabel: 'Descartar', danger: true }));
 
   if (!roles || !grant) return <SkeletonTable rows={10} cols={2} />;
   if (!role)
@@ -148,10 +149,18 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
     setSaving(true);
     savingRef.current = true;
     try {
-      const body: Record<string, unknown> = { roleId: role._id, description: draft.description, purpose: draft.purpose, mandatory2fa: draft.mandatory2fa, restrictDirect: draft.scope === 'Users' && draft.restrictDirect };
-      if (!role.protected) body.scope = draft.scope;
-      if (grant.canEditPermissions) Object.assign(body, { permissions: [...draft.permissions], basePermissions: [...initial.permissions] });
-      if (grant.root && draft.scope === 'Users' && !role.root) body.delegable = draft.delegable;
+      // Só o que esta tela mudou (contra o que ela abriu): o que outra pessoa salvou no meio-tempo em outro campo
+      // (Exigir 2FA, Restrito, delegação) fica. As permissões vão como diferença (basePermissions).
+      const body: Record<string, unknown> = { roleId: role._id };
+      if (draft.description !== initial.description) body.description = draft.description;
+      if (draft.purpose !== initial.purpose) body.purpose = draft.purpose;
+      if (draft.mandatory2fa !== initial.mandatory2fa) body.mandatory2fa = draft.mandatory2fa;
+      if (!role.protected && draft.scope !== initial.scope) body.scope = draft.scope;
+      // Papel de sala nunca é restrito: mudar o escopo para sala desliga a restrição junto.
+      const restrict = (d: Draft) => d.scope === 'Users' && d.restrictDirect;
+      if (restrict(draft) !== restrict(initial)) body.restrictDirect = restrict(draft);
+      if (grant.canEditPermissions && !sameSet(draft.permissions, initial.permissions)) Object.assign(body, { permissions: [...draft.permissions], basePermissions: [...initial.permissions] });
+      if (grant.root && draft.scope === 'Users' && !role.root && draft.delegable.join() !== initial.delegable.join()) body.delegable = draft.delegable;
       const r = await api.post('rbac.roles.update', body);
       rbacOk(`Papel ${roleLabel(role._id)} salvo.`);
       // O que ficou no servidor (pode ter mudanças de outra pessoa) vira a base.
@@ -205,13 +214,24 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
   const notices = (
     <>
       {changedBy !== null && dirty && (
-        <Notice kind="warn">{changedBy ? `${changedBy} alterou este papel agora.` : 'Outra pessoa alterou este papel agora.'} Ao salvar, só as suas mudanças são aplicadas.</Notice>
+        <Notice kind="warn">
+          {changedBy === 'me'
+            ? 'Você alterou este papel em outra aba. Ao salvar, só as mudanças desta tela são aplicadas.'
+            : `${changedBy ? `${changedBy} alterou` : 'Outra pessoa alterou'} este papel agora. Ao salvar, só as suas mudanças são aplicadas.`}
+        </Notice>
       )}
       {tab === 'summary' && role.root && (
         <Notice>O Administrador passa por todas as travas de concessão: dá e tira qualquer permissão, edita qualquer papel e define delegações. A gestão de papéis fica sempre ligada nele.</Notice>
       )}
       {tab !== 'perms' && lock && <Notice kind="lock">Somente leitura. {lockText(lock)}</Notice>}
-      {tab !== 'perms' && !lock && !grant.canEditRoles && !grant.canEditPermissions && <Notice kind="lock">Você pode ver os papéis, mas não alterá-los.</Notice>}
+      {tab !== 'perms' && !lock && !grant.canEditRoles && !grant.canEditPermissions && (
+        // Na aba Pessoas, quem dá o papel (delegação) age mesmo sem editar papéis: o aviso diz o que vale.
+        tab === 'people' && role.scope === 'Users' && grant.canAssignRoles ? (
+          <Notice>Você não altera as permissões deste papel, mas pode dar e tirar o papel.</Notice>
+        ) : (
+          <Notice kind="lock">Você pode ver os papéis, mas não alterá-los.</Notice>
+        )
+      )}
     </>
   );
 
@@ -538,7 +558,7 @@ function RolePeople({ role, grant, onChanged }: { role: RbacRole; grant: Grant; 
         )}
       </Section>
       {picking && <GiveRole role={role} grant={grant} onClose={() => setPicking(false)} onPicked={(ids) => (setPicking(false), setBulk({ mode: 'add', userIds: ids }))} />}
-      {bulk && <BulkRolesDialog role={role._id} mode={bulk.mode} userIds={bulk.userIds} onClose={() => setBulk(null)} onDone={done} />}
+      {bulk && <BulkRolesDialog role={role._id} info={role} mode={bulk.mode} userIds={bulk.userIds} onClose={() => setBulk(null)} onDone={done} />}
     </>
   );
 }

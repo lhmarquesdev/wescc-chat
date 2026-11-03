@@ -451,3 +451,132 @@ describe('migração 033: para que serve', () => {
     }
   });
 });
+
+// Achados da revisão: o Usuário que entra quando a lista fica vazia passa pela hierarquia como qualquer papel, e
+// users.update só grava papéis pelo caminho com as travas (nunca direto na linha).
+describe('supervisor que só dá Operação', () => {
+  let sup: Auth;
+  let contas: Auth;
+  beforeAll(async () => {
+    await roleWith('sup-op-v2', ['view-user-administration', 'create-user', 'edit-other-user-info', 'edit-other-user-active-status', 'logout-other-user', 'assign-roles']);
+    expect((await api('POST', 'rbac.roles.update', { roleId: 'sup-op-v2', delegable: ['operacao'] }, A)).success).toBe(true);
+    sup = await newUser(A, { roles: ['sup-op-v2'] });
+    await roleWith('contas-v2', ['view-user-administration', 'edit-other-user-active-status', 'logout-other-user']);
+    contas = await newUser(A, { roles: ['user', 'contas-v2'] });
+  });
+
+  it('não transforma ninguém em Usuário tirando o último papel', async () => {
+    const g = await api('GET', 'rbac.grantContext', {}, sup);
+    expect(g.roleLocks).toMatchObject({ operacao: null, user: 'superior' });
+    const op = await newUser(A, { roles: ['operacao'] });
+    const histBefore = Number((await pool.query('SELECT count(*) AS n FROM rbac_history WHERE entity_id = $1', [op.userId])).rows[0].n);
+
+    const preview = await api('POST', 'rbac.users.bulkRoles', { userIds: [op.userId], remove: ['operacao'], dryRun: true }, sup);
+    expect(preview.ok).toEqual([]);
+    expect(preview.blocked).toEqual([{ _id: op.userId, username: op.username, reason: 'not-assignable', roles: ['user'] }]);
+    expect(await api('POST', 'rbac.users.bulkRoles', { userIds: [op.userId], remove: ['operacao'], skipBlocked: true }, sup)).toMatchObject({ status: 200, users: 0, skipped: 1 });
+    expect((await api('POST', 'rbac.users.bulkRoles', { userIds: [op.userId], remove: ['operacao'] }, sup)).errorType).toBe('RBAC_ROLE_NOT_ASSIGNABLE');
+    expect((await api('POST', 'roles.removeUserFromRole', { roleId: 'operacao', userId: op.userId }, sup)).errorType).toBe('RBAC_ROLE_NOT_ASSIGNABLE');
+    expect((await api('POST', 'rbac.users.setRoles', { userId: op.userId, roles: [] }, sup)).errorType).toBe('RBAC_ROLE_NOT_ASSIGNABLE');
+    expect((await api('POST', 'users.update', { userId: op.userId, data: { roles: [] } }, sup)).errorType).toBe('RBAC_ROLE_NOT_ASSIGNABLE');
+    expect(await rolesOf(op.userId)).toEqual(['operacao']);
+    expect((await api('POST', 'groups.create', { name: uniq('grupo-op') }, op)).status).toBe(403);
+    expect(Number((await pool.query('SELECT count(*) AS n FROM rbac_history WHERE entity_id = $1', [op.userId])).rows[0].n)).toBe(histBefore);
+
+    // Dar e tirar Operação continua: o papel delegado entra e sai de quem tem outro papel que ele gerencia.
+    const op2 = await newUser(A, { roles: ['operacao'] });
+    expect((await api('POST', 'rbac.users.setRoles', { userId: op2.userId, roles: ['operacao'] }, sup)).status).toBe(200);
+
+    // Criar conta sem papel é dar Usuário: recusado para quem não o dá; com Operação, passa.
+    const semPapel = await api('POST', 'users.create', { username: uniq('sem-papel'), name: 'Sem papel', password: 'senha-forte-1' }, sup);
+    expect(semPapel).toMatchObject({ status: 403, errorType: 'RBAC_ROLE_NOT_ASSIGNABLE' });
+    const comOp = await api('POST', 'users.create', { username: uniq('com-op'), name: 'Com Operação', password: 'senha-forte-1', roles: ['operacao'] }, sup);
+    expect(comOp.status).toBe(200);
+    expect(comOp.user.roles).toEqual(['operacao']);
+  });
+
+  it('o administrador tira o último papel: a prévia avisa que a pessoa fica com Usuário', async () => {
+    const op = await newUser(A, { roles: ['operacao'] });
+    const preview = await api('POST', 'rbac.users.bulkRoles', { userIds: [op.userId], remove: ['operacao'], dryRun: true }, A);
+    expect(preview.ok).toEqual([{ _id: op.userId, username: op.username, fallbackUser: true }]);
+    expect(await api('POST', 'rbac.users.bulkRoles', { userIds: [op.userId], remove: ['operacao'] }, A)).toMatchObject({ status: 200, users: 1 });
+    expect(await rolesOf(op.userId)).toEqual(['user']);
+    // Quem já tinha Usuário não "cai" nele: sem aviso.
+    const both = await newUser(A, { roles: ['user', 'operacao'] });
+    expect((await api('POST', 'rbac.users.bulkRoles', { userIds: [both.userId], remove: ['operacao'], dryRun: true }, A)).ok).toEqual([{ _id: both.userId, username: both.username }]);
+  });
+
+  it('users.update recusa roles que não são lista (vazio, false, null, 0) sem gravar nada', async () => {
+    const op = await newUser(A, { roles: ['operacao'] });
+    const hist = async (id: string) => Number((await pool.query('SELECT count(*) AS n FROM rbac_history WHERE entity_id = $1', [id])).rows[0].n);
+    const before = await hist(op.userId);
+    for (const roles of ['', false, null, 0, {}, [1]]) {
+      const r = await api('POST', 'users.update', { userId: op.userId, data: { roles } }, sup);
+      expect(r, JSON.stringify(roles)).toMatchObject({ status: 400, errorType: 'error-invalid-params' });
+    }
+    expect(await rolesOf(op.userId)).toEqual(['operacao']);
+    expect(await hist(op.userId)).toBe(before);
+    // Os próprios papéis e o último administrador continuam travados por esse caminho.
+    expect((await api('POST', 'users.update', { userId: sup.userId, data: { roles: '' } }, sup)).status).toBe(400);
+    expect(await rolesOf(sup.userId)).toEqual(['sup-op-v2']);
+    expect((await api('POST', 'users.update', { userId: sup.userId, data: { roles: ['operacao'] } }, sup)).errorType).toBe('RBAC_SELF_ESCALATION');
+    expect((await api('POST', 'users.update', { userId: A.userId, data: { roles: '' } }, A)).status).toBe(400);
+    expect(await rolesOf(A.userId)).toContain('admin');
+    // Lista válida (também como texto com vírgula) grava pelo caminho com histórico e evento.
+    const ws = connectWs(A);
+    await ws.ready;
+    try {
+      const evt = ws.waitFor((e: any) => e.type === 'user' && e.user?._id === op.userId && e.user.roles?.includes('admin'));
+      const ok = await api('POST', 'users.update', { userId: op.userId, data: { roles: 'operacao,admin' } }, A);
+      expect(ok.status).toBe(200);
+      expect(await rolesOf(op.userId)).toEqual(['operacao', 'admin']);
+      expect(await hist(op.userId)).toBe(before + 1);
+      await evt;
+    } finally {
+      ws.close();
+    }
+    expect((await api('POST', 'rbac.users.setRoles', { userId: op.userId, roles: ['operacao'] }, A)).status).toBe(200);
+  });
+
+  it('ativar, desativar e encerrar sessões em lote numa chamada só, sem a própria conta e sem cadeado', async () => {
+    const ops = [await newUser(A, { roles: ['operacao'] }), await newUser(A, { roles: ['operacao'] })];
+    const plainUser = await newUser(A, { roles: ['user'] });
+    const ids = [...ops.map((o) => o.userId), plainUser.userId, A.userId, sup.userId];
+    const off = await api('POST', 'users.bulkSetActiveStatus', { userIds: ids, activeStatus: false }, sup);
+    expect(off).toMatchObject({ status: 200, users: 2, skipped: { self: 1, locked: 2, unchanged: 0 } });
+    for (const o of ops) expect((await pool.query('SELECT active FROM users WHERE id = $1', [o.userId])).rows[0].active).toBe(false);
+    expect((await pool.query('SELECT active FROM users WHERE id = $1', [plainUser.userId])).rows[0].active).toBe(true);
+    // Desativar encerra as sessões, como no individual.
+    expect((await api('GET', 'me', undefined, ops[0])).status).toBe(401);
+    expect(await api('POST', 'users.bulkSetActiveStatus', { userIds: ops.map((o) => o.userId), activeStatus: false }, sup)).toMatchObject({ users: 0, skipped: { unchanged: 2 } });
+    expect(await api('POST', 'users.bulkSetActiveStatus', { userIds: ops.map((o) => o.userId), activeStatus: true }, sup)).toMatchObject({ users: 2 });
+
+    const a = await newUser(A, { roles: ['user'] });
+    const out = await api('POST', 'users.bulkLogout', { userIds: [a.userId, contas.userId, A.userId] }, contas);
+    expect(out).toMatchObject({ status: 200, users: 1, skipped: { self: 1, locked: 1 } });
+    expect(out.sessions).toBeGreaterThanOrEqual(1);
+    expect((await api('GET', 'me', undefined, a)).status).toBe(401);
+    expect((await api('GET', 'me', undefined, contas))._id).toBe(contas.userId);
+
+    expect((await api('POST', 'users.bulkLogout', { userIds: [a.userId] }, plainUser)).status).toBe(403);
+    expect((await api('POST', 'users.bulkSetActiveStatus', { userIds: [], activeStatus: false }, sup)).status).toBe(400);
+    const many = Array.from({ length: 501 }, (_, i) => `x${i}`);
+    expect(await api('POST', 'users.bulkSetActiveStatus', { userIds: many, activeStatus: false }, sup)).toMatchObject({ status: 400, error: 'Até 500 pessoas por vez.' });
+    expect((await api('POST', 'users.bulkLogout', { userIds: ['nao-existe'] }, contas)).status).toBe(404);
+  });
+
+  it('Quem pode…? conta pessoas distintas nos papéis de sala; users.info mostra o e-mail a quem vê a lista', async () => {
+    const dona = await newUser(A, { roles: ['user'] });
+    for (let i = 0; i < 3; i++) expect((await api('POST', 'channels.create', { name: uniq('dona-tres') }, dona)).status).toBe(200);
+    const r = await api('GET', 'rbac.whoCan', { permission: 'delete-message' }, A);
+    const owner = r.roomRoles.find((x: any) => x._id === 'owner');
+    const db = (await pool.query(`SELECT count(DISTINCT user_id)::int AS users, count(*)::int AS assignments, count(DISTINCT room_id)::int AS rooms FROM subscriptions WHERE 'owner' = ANY(roles)`)).rows[0];
+    expect(owner).toEqual({ _id: 'owner', ...db });
+    expect(owner.users).toBeLessThan(owner.assignments);
+
+    const info = await api('GET', 'users.info', { userId: dona.userId }, contas);
+    expect(info.user).toMatchObject({ email: expect.stringContaining('@test.local'), emailVerified: expect.any(Boolean) });
+    const plainUser = await newUser(A, { roles: ['user'] });
+    expect((await api('GET', 'users.info', { userId: dona.userId }, plainUser)).user.email).toBeUndefined();
+  });
+});

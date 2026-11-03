@@ -1,7 +1,7 @@
 // Administração › Papéis e permissões: três visões na mesma faixa (Papéis, Matriz, Quem pode…?), o editor de papel
 // (RoleEditor) com abas no rodapé, o histórico com reversão e o resumo das conversas diretas restritas. Toda tela daqui
 // recarrega quando alguém muda papéis (permissions.changed).
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { DirectRestrictionReport } from '@shared/direct';
 import { ROLE_PURPOSE } from '@shared/rbac';
@@ -60,7 +60,7 @@ export function AdminPermissions() {
     );
   if (view === 'direct') return <DirectPage />;
   if (view === 'matrix') return <MatrixPage roles={roles.data} grant={grant.data} error={roles.error} onSaved={reload} />;
-  if (view === 'who') return <WhoCanPage roles={roles.data} />;
+  if (view === 'who') return <WhoCanPage roles={roles.data} grant={grant.data} />;
   return <RoleList roles={roles.data} grant={grant.data} loading={roles.loading || grant.loading} error={roles.error} onChanged={reload} />;
 }
 
@@ -206,7 +206,7 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
                     Papel
                   </span>
                 </th>
-                <th>
+                <th className="col-id">
                   <span className="th-icon">
                     <Icon name="rbac-id" size={14} />
                     Identificador
@@ -224,7 +224,7 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
                     Pessoas
                   </span>
                 </th>
-                <th>Tipo</th>
+                <th className="col-type">Tipo</th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>
@@ -270,7 +270,7 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
                         </div>
                       </div>
                     </td>
-                    <td data-label="Identificador">
+                    <td className="col-id" data-label="Identificador">
                       <code className="mono small rbac-id" title={r._id}>{r._id}</code>
                     </td>
                     <td data-label="Acesso">
@@ -292,7 +292,7 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
                         <span className="muted">—</span>
                       )}
                     </td>
-                    <td data-label="Tipo">
+                    <td className="col-type" data-label="Tipo">
                       <span className={`rbac-type${r.root ? ' root' : r.protected ? '' : ' custom'}`}>{r.root ? 'Administrador' : r.protected ? 'Sistema' : 'Personalizado'}</span>
                     </td>
                     <td className="actions-col" onClick={(e) => e.stopPropagation()}>
@@ -368,19 +368,33 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
 // Para que serve, embaixo do nome: o do papel, o texto do sistema ou o escopo.
 const purposeOf = (r: RbacRole) => r.purpose || ROLE_PURPOSE[r._id] || (r.scope === 'Users' ? 'Global' : 'De sala');
 
-// "Comparar com…" no menu da linha: abre a lista de papéis no próprio menu.
+// "Comparar com…" no menu da linha: abre a lista de papéis no próprio menu. O foco acompanha (vai para o primeiro
+// papel ao abrir e volta ao "Comparar com…" ao fechar): o botão que tinha o foco sai da tela na troca.
 function CompareItems({ role, roles, onPick }: { role: RbacRole; roles: RbacRole[]; onPick: (id: string) => void }) {
   const [open, setOpen] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const moved = useRef(false);
+  useEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    if (open) listRef.current?.querySelectorAll<HTMLElement>('button')[1]?.focus();
+    else toggleRef.current?.focus();
+  }, [open]);
+  const flip = (v: boolean) => {
+    moved.current = true;
+    setOpen(v);
+  };
   if (!open)
     return (
-      <button onClick={() => setOpen(true)} aria-expanded={false}>
+      <button ref={toggleRef} onClick={() => flip(true)} aria-expanded={false}>
         <Icon name="rbac-compare" />
         Comparar com…
       </button>
     );
   return (
-    <div className="rbac-menu-scroll" role="group" aria-label={`Comparar ${roleLabel(role._id)} com`}>
-      <button onClick={() => setOpen(false)} aria-expanded>
+    <div ref={listRef} className="rbac-menu-scroll" role="group" aria-label={`Comparar ${roleLabel(role._id)} com`}>
+      <button onClick={() => flip(false)} aria-expanded>
         <Icon name="back" />
         Comparar com…
       </button>

@@ -11,6 +11,7 @@ import { Avatar, Empty, Field, Modal, SkeletonTable, Toggle, Tooltip, confirmDia
 import { DeviceCell, lastSeen } from '../parts';
 import { EffectiveAccess } from './Effective';
 import { RbacHistory } from './History';
+import { useLeaveGuard } from './leaveGuard';
 import { EditorShell, Notice, Section, type EditorTab } from './shell';
 import { lockText, loadGrant, rbacFail, rbacOk } from './data';
 
@@ -86,12 +87,8 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
   }, [f, initial]);
   const dirty = changed.length > 0;
 
-  useEffect(() => {
-    if (!dirty) return;
-    const h = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener('beforeunload', h);
-    return () => window.removeEventListener('beforeunload', h);
-  }, [dirty]);
+  // Sair com alterações (recarregar, fechar ou qualquer link do chat): pergunta antes.
+  useLeaveGuard(dirty, () => confirmDialog({ title: 'Descartar as alterações?', body: 'O que você mudou nesta pessoa ainda não foi salvo.', confirmLabel: 'Descartar', danger: true }));
 
   if (missing)
     return (
@@ -152,6 +149,9 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
 
   const isAdmin = initial.roles.includes('admin');
   const dataEditable = !readOnly && can.info;
+  // users.info sem os dados completos (e-mail, verificado, último acesso): mostra travado com o motivo, nunca como
+  // campo vazio que dá para sobrescrever sem ver.
+  const hidden = user.emailVerified === undefined;
   const status = (
     <>
       {isAdmin && (
@@ -204,8 +204,8 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
                     <input value={f.username} disabled={!dataEditable} onChange={(e) => set({ username: e.target.value })} />
                   </Field>
                 </div>
-                <Field label="E-mail">
-                  <input type="email" value={f.email} disabled={!dataEditable} onChange={(e) => set({ email: e.target.value })} />
+                <Field label="E-mail" hint={hidden ? 'Ver o e-mail pede a permissão Ver dados completos de outras pessoas.' : undefined}>
+                  <input type="email" value={hidden ? '' : f.email} placeholder={hidden ? 'Oculto' : undefined} disabled={!dataEditable || hidden} onChange={(e) => set({ email: e.target.value })} />
                 </Field>
                 <Field label="Bio">
                   <textarea rows={3} value={f.bio} disabled={!dataEditable} maxLength={500} onChange={(e) => set({ bio: e.target.value })} />
@@ -222,7 +222,7 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
                 <dt>Criada em</dt>
                 <dd>{user.createdAt ? formatDateTime(user.createdAt) : '—'}</dd>
                 <dt>Último acesso</dt>
-                <dd>{user.lastLogin ? lastSeen(user.lastLogin) : '—'}</dd>
+                <dd>{hidden ? <span className="muted">Oculto</span> : user.lastLogin ? lastSeen(user.lastLogin) : '—'}</dd>
               </dl>
               {!self && !readOnly && can.remove && (
                 <div className="rbac-about-actions">
@@ -271,15 +271,33 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
             <EffectiveAccess key={version} userId={id} draftRoles={changed.includes('roles') ? f.roles : undefined} />
           </div>
         )}
-        {tab === 'security' && <Security id={id} user={user} f={f} set={set} readOnly={readOnly} self={self} can={can} />}
+        {tab === 'security' && <Security id={id} user={user} f={f} set={set} readOnly={readOnly} self={self} can={can} hidden={hidden} />}
         {tab === 'history' && <RbacHistory entity={id} embedded onChanged={() => setVersion((v) => v + 1)} />}
       </EditorShell>
-      {review && <UserReview initial={initial} f={f} changed={changed} saving={saving} onClose={() => setReview(false)} onConfirm={() => void save()} />}
+      {review && <UserReview initial={initial} f={f} roles={roles.data} changed={changed} saving={saving} onClose={() => setReview(false)} onConfirm={() => void save()} />}
     </>
   );
 }
 
-function Security({ id, user, f, set, readOnly, self, can }: { id: string; user: any; f: Form; set: (p: Partial<Form>) => void; readOnly: boolean; self: boolean; can: Record<string, boolean> }) {
+function Security({
+  id,
+  user,
+  f,
+  set,
+  readOnly,
+  self,
+  can,
+  hidden,
+}: {
+  id: string;
+  user: any;
+  f: Form;
+  set: (p: Partial<Form>) => void;
+  readOnly: boolean;
+  self: boolean;
+  can: Record<string, boolean>;
+  hidden: boolean;
+}) {
   // Sem permissão de ver dispositivos, nem chama a API.
   const sessions = useAsync(() => (can.sessions ? api.get('sessions.list.all', { userId: id, count: 50 }).then((r) => r.sessions as any[]) : Promise.resolve([] as any[])), [id, can.sessions]);
   const [twoFactor, setTwoFactor] = useState(!!user.twoFactorEnabled);
@@ -309,7 +327,11 @@ function Security({ id, user, f, set, readOnly, self, can }: { id: string; user:
                 label="Ativo"
                 description={self ? 'Você não pode desativar a própria conta.' : f.active ? 'A pessoa consegue entrar no chat.' : 'Desligado, a pessoa não consegue entrar.'}
               />
-              <Toggle checked={f.verified} disabled={readOnly || !can.info} onChange={(v) => set({ verified: v })} label="E-mail verificado" />
+              {hidden ? (
+                <p className="field-hint">E-mail verificado: oculto. Ver pede a permissão Ver dados completos de outras pessoas.</p>
+              ) : (
+                <Toggle checked={f.verified} disabled={readOnly || !can.info} onChange={(v) => set({ verified: v })} label="E-mail verificado" />
+              )}
               <Toggle checked={f.requirePasswordChange} disabled={readOnly || !can.info} onChange={(v) => set({ requirePasswordChange: v })} label="Exigir troca de senha no próximo login" />
             </div>
           </div>
@@ -365,9 +387,41 @@ function Security({ id, user, f, set, readOnly, self, can }: { id: string; user:
   );
 }
 
-function UserReview({ initial, f, changed, saving, onClose, onConfirm }: { initial: Form; f: Form; changed: string[]; saving: boolean; onClose: () => void; onConfirm: () => void }) {
-  const added = f.roles.filter((r) => !initial.roles.includes(r));
-  const removed = initial.roles.filter((r) => !f.roles.includes(r));
+function UserReview({
+  initial,
+  f,
+  roles,
+  changed,
+  saving,
+  onClose,
+  onConfirm,
+}: {
+  initial: Form;
+  f: Form;
+  roles: any[];
+  changed: string[];
+  saving: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  // Sem papel nenhum, o servidor grava Usuário: a revisão mostra o que fica de fato.
+  const next = f.roles.length ? f.roles : ['user'];
+  const added = next.filter((r) => !initial.roles.includes(r));
+  const removed = initial.roles.filter((r) => !next.includes(r));
+  // Restrições que os papéis trazem (Restrito, 2FA obrigatório): entram ou saem com a troca.
+  const flagged = (list: string[], k: 'restrictDirect' | 'mandatory2fa') => roles.filter((r) => r[k] && list.includes(r._id)).map((r) => r._id as string);
+  const notes: string[] = [];
+  if (changed.includes('roles')) {
+    const rdNow = flagged(initial.roles, 'restrictDirect');
+    const rdNext = flagged(next, 'restrictDirect');
+    const tfaNow = flagged(initial.roles, 'mandatory2fa');
+    const tfaNext = flagged(next, 'mandatory2fa');
+    if (!f.roles.length) notes.push('Sem papel nenhum, a pessoa fica com Usuário.');
+    if (!rdNow.length && rdNext.length) notes.push(`Passa a ser restrita em conversas diretas (via ${rdNext.map(roleLabel).join(', ')}).`);
+    if (rdNow.length && !rdNext.length) notes.push('Deixa de ser restrita em conversas diretas.');
+    if (!tfaNow.length && tfaNext.length) notes.push(`Passa a exigir 2FA (via ${tfaNext.map(roleLabel).join(', ')}): configura antes de voltar a usar o chat.`);
+    if (tfaNow.length && !tfaNext.length) notes.push('Deixa de exigir 2FA.');
+  }
   const show = (k: string, v: unknown) => (typeof v === 'boolean' ? (v ? 'Sim' : 'Não') : v === '' ? '—' : String(v));
   return (
     <Modal
@@ -394,6 +448,12 @@ function UserReview({ initial, f, changed, saving, onClose, onConfirm }: { initi
             {removed.length > 0 && <span className="rbac-review-keys del">− {removed.map(roleLabel).join(', ')}</span>}
           </li>
         )}
+        {notes.map((n) => (
+          <li key={n} className="mixed">
+            <Icon name="warning" size={12} />
+            <span>{n}</span>
+          </li>
+        ))}
         {changed
           .filter((k) => k !== 'roles')
           .map((k) => (

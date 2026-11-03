@@ -13,7 +13,7 @@ import { UserCell } from '../parts';
 import { matrixQuery } from './matrix';
 import { SensitiveTag } from './SensitiveTag';
 import { ListStrip, RbacViews, Section } from './shell';
-import { people, rbacOk, type RbacRole } from './data';
+import { people, rbacOk, type Grant, type RbacRole } from './data';
 
 // Atalhos para as perguntas mais comuns.
 const SHORTCUTS: { key: string; label: string }[] = [
@@ -35,7 +35,8 @@ interface WhoCan {
   legacy: boolean;
   checkedIn: 'room' | 'global';
   roles: { _id: string; users: number; activeUsers: number; root: boolean }[];
-  roomRoles: { _id: string; assignments: number; rooms: number }[];
+  // users: pessoas distintas; assignments: atribuições (a mesma pessoa Dona em três salas conta três).
+  roomRoles: { _id: string; users: number; assignments: number; rooms: number }[];
   inert: string[];
   people: null | {
     items: { _id: string; username: string; name: string; active: boolean; type: string; via: string[]; restricted: boolean }[];
@@ -48,7 +49,7 @@ interface WhoCan {
 const areaOf = (k: string) => RBAC_AREAS.find((a) => a.id === KEY_AREA[k]);
 const groupOf = (k: string) => RBAC_GROUPS.find((g) => g.id === AREA_GROUP[KEY_AREA[k]]);
 
-export function WhoCanPage({ roles }: { roles: RbacRole[] | null }) {
+export function WhoCanPage({ roles, grant }: { roles: RbacRole[] | null; grant: Grant | null }) {
   const [params, setParams] = useSearchParams();
   const key = params.get('key') ?? '';
   const pick = (k: string) => setParams(k ? { key: k } : {});
@@ -71,7 +72,7 @@ export function WhoCanPage({ roles }: { roles: RbacRole[] | null }) {
             </div>
           </div>
         ) : (
-          <WhoCanResult key={key} permission={key} roles={roles} />
+          <WhoCanResult key={key} permission={key} roles={roles} grant={grant} />
         )}
       </div>
     </div>
@@ -99,12 +100,18 @@ function KeySearch({ onPick }: { onPick: (k: string) => void }) {
     } else if (e.key === 'Enter' && items[active]) {
       e.preventDefault();
       choose(items[active]);
-    } else if (e.key === 'Escape') setOpen(false);
+    } else if (e.key === 'Escape') {
+      // Primeiro Esc fecha a lista e guarda o texto; o segundo limpa (o campo de busca limparia de cara).
+      e.preventDefault();
+      if (shown || empty) setOpen(false);
+      else setTerm('');
+    }
   };
   useEffect(() => {
     (listRef.current?.querySelector('[aria-selected="true"]') as HTMLElement | null)?.scrollIntoView({ block: 'nearest' });
   }, [active]);
   const shown = open && items.length > 0;
+  const empty = open && !!term.trim() && !items.length;
   return (
     <div className="rbac-who-search">
       <label className="rbac-search">
@@ -112,7 +119,7 @@ function KeySearch({ onPick }: { onPick: (k: string) => void }) {
         <input
           type="search"
           role="combobox"
-          aria-expanded={shown}
+          aria-expanded={shown || empty}
           aria-controls="rbac-who-options"
           aria-autocomplete="list"
           aria-label="Busque uma ação"
@@ -129,6 +136,11 @@ function KeySearch({ onPick }: { onPick: (k: string) => void }) {
           </button>
         )}
       </label>
+      {empty && (
+        <div className="rbac-who-options rbac-who-empty" id="rbac-who-options" role="status">
+          Nenhuma permissão para “{term.trim()}”.
+        </div>
+      )}
       {shown && (
         <div className="rbac-who-options" id="rbac-who-options" role="listbox" aria-label="Permissões" ref={listRef}>
           {RBAC_GROUPS.map((g) => {
@@ -167,7 +179,7 @@ function KeySearch({ onPick }: { onPick: (k: string) => void }) {
   );
 }
 
-function WhoCanResult({ permission, roles }: { permission: string; roles: RbacRole[] | null }) {
+function WhoCanResult({ permission, roles, grant }: { permission: string; roles: RbacRole[] | null; grant: Grant | null }) {
   const navigate = useNavigate();
   const canSeeUsers = usePermission(['view-user-administration']);
   const [q, setQ] = useState('');
@@ -217,6 +229,8 @@ function WhoCanResult({ permission, roles }: { permission: string; roles: RbacRo
     return r?.purpose || ROLE_PURPOSE[id] || '';
   };
   const holders = [...data.roles.map((r) => r._id), ...data.roomRoles.map((r) => r._id)];
+  // Mesmo critério da lista de papéis: quem não edita (ou tem o papel acima do que dá) só vê.
+  const canEdit = (id: string) => !!grant && (grant.canEditRoles || grant.canEditPermissions) && !grant.roleLocks[id];
   const matrixUrl = `/admin/permissions/matrix${matrixQuery({ roles: holders.slice(0, 12), group: 'all', q: permission, diff: false, sens: false })}`;
   const copy = () => {
     void navigator.clipboard?.writeText(window.location.href).then(
@@ -285,7 +299,7 @@ function WhoCanResult({ permission, roles }: { permission: string; roles: RbacRo
                     <span className="small muted">{people(r.users)}</span>
                   )}
                   <button type="button" className="btn small ghost" onClick={() => navigate(`/admin/permissions/role/${encodeURIComponent(r._id)}?tab=perms`)}>
-                    Editar papel
+                    {canEdit(r._id) ? 'Editar papel' : 'Ver papel'}
                   </button>
                 </li>
               ))}
@@ -306,7 +320,7 @@ function WhoCanResult({ permission, roles }: { permission: string; roles: RbacRo
                     <span className="rbac-who-role-text">
                       <strong>{roleLabel(r._id)}</strong>
                       <span className="muted small">
-                        {plural(r.assignments, 'pessoa', 'pessoas')} em {plural(r.rooms, 'sala', 'salas')}
+                        {plural(r.users, 'pessoa', 'pessoas')} em {plural(r.rooms, 'sala', 'salas')}
                       </span>
                     </span>
                     <button type="button" className="btn small ghost" onClick={() => navigate(`/admin/permissions/role/${encodeURIComponent(r._id)}?tab=people`)}>

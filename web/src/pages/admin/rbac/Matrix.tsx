@@ -12,11 +12,10 @@ import { useIsPhone } from '../../../components/overlay';
 import { Empty, Menu, SkeletonTable, Toggle, Tooltip, confirmDialog, useEdgeFade } from '../../../components/ui';
 import { areaKeys } from './Permissions';
 import { cellLock, cellState, defaultColumns, differs, MATRIX_MAX, matrixChanges, matrixQuery, parseMatrixQuery, type CellState, type MatrixQuery } from './matrix';
+import { useLeaveGuard } from './leaveGuard';
 import { MatrixReviewDialog } from './Review';
 import { Chips, ListStrip, Notice, RbacViews } from './shell';
 import { people, rbacFail, rbacOk, type Grant, type RbacRole } from './data';
-
-const INERT = 'Papel de sala: esta permissão não é checada nas salas, então não tem efeito.';
 
 const roleIcon = (r: RbacRole): IconName => (r.root ? 'rbac-root' : r.scope === 'Subscriptions' ? 'rbac-room' : 'admin-permissions');
 
@@ -66,12 +65,8 @@ export function MatrixPage({ roles, grant, error, onSaved }: { roles: RbacRole[]
     return () => void off();
   }, []);
 
-  useEffect(() => {
-    if (!dirty) return;
-    const h = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener('beforeunload', h);
-    return () => window.removeEventListener('beforeunload', h);
-  }, [dirty]);
+  // Com alterações, sair por qualquer link (a navegação da administração também) pergunta antes.
+  useLeaveGuard(dirty, () => confirmDialog({ title: 'Descartar as alterações?', body: 'O que você mudou na matriz ainda não foi salvo.', confirmLabel: 'Descartar', danger: true }));
 
   const sorted = useMemo(() => sortRoles(roles ?? []), [roles]);
   const byId = useMemo(() => new Map(sorted.map((r) => [r._id, r])), [sorted]);
@@ -434,7 +429,8 @@ function AreaRows({
 }
 
 function cellTitle(state: CellState, on: boolean, lock: string | null, role: string, key: string) {
-  if (state === 'inert') return INERT;
+  // Com o papel e a permissão na frente, como as outras células: o leitor de tela diz onde está.
+  if (state === 'inert') return `${roleLabel(role)} · ${rbacLabel(key)}: sem efeito (papel de sala; esta permissão não é checada nas salas).`;
   const base = `${roleLabel(role)} ${on ? 'tem' : 'não tem'}: ${rbacLabel(key)}`;
   return lock ? `${base}. ${lock}` : base;
 }

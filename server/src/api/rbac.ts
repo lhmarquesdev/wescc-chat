@@ -167,8 +167,9 @@ export function registerRbac(app: FastifyInstance) {
       (await many<{ role: string; n: number; active: number }>(`SELECT r AS role, count(*)::int AS n, count(*) FILTER (WHERE active)::int AS active FROM users, unnest(roles) r WHERE r = ANY($1) GROUP BY r`, [who.global])).map((r) => [r.role, r]),
     );
     const roomCounts = who.room.length
-      ? await many<{ role: string; assignments: number; rooms: number }>(
-          `SELECT r AS role, count(*)::int AS assignments, count(DISTINCT room_id)::int AS rooms FROM subscriptions, unnest(roles) r WHERE r = ANY($1) GROUP BY r`,
+      ? await many<{ role: string; assignments: number; users: number; rooms: number }>(
+          `SELECT r AS role, count(*)::int AS assignments, count(DISTINCT user_id)::int AS users, count(DISTINCT room_id)::int AS rooms
+           FROM subscriptions, unnest(roles) r WHERE r = ANY($1) GROUP BY r`,
           [who.room],
         )
       : [];
@@ -207,7 +208,8 @@ export function registerRbac(app: FastifyInstance) {
       roles: who.global.map((id) => ({ _id: id, users: counts.get(id)?.n ?? 0, activeUsers: counts.get(id)?.active ?? 0, root: !!infos.find((r) => r.id === id)?.root })),
       roomRoles: who.room.map((id) => {
         const c = roomCounts.find((r) => r.role === id);
-        return { _id: id, assignments: c?.assignments ?? 0, rooms: c?.rooms ?? 0 };
+        // users: pessoas distintas (a mesma pessoa Dona em três salas conta uma vez); assignments: atribuições.
+        return { _id: id, users: c?.users ?? 0, assignments: c?.assignments ?? 0, rooms: c?.rooms ?? 0 };
       }),
       inert: who.inert,
       people,

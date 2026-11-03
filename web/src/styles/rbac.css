@@ -258,11 +258,18 @@
   min-width: 0;
 }
 .rbac-key-label {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: var(--space-1);
+  flex-wrap: wrap;
+  gap: 2px var(--space-1);
   font-size: var(--fs-13);
   line-height: var(--lh-13);
+}
+/* O nome ocupa a linha e quebra como texto; as marcas (Sensível, Sem efeito em papel de sala) vão para a linha de
+   baixo quando não cabem, em vez de espremer o nome numa coluna de uma palavra. */
+.rbac-key-name {
+  flex: 0 1 auto;
+  min-width: min(100%, 12ch);
 }
 .rbac-key-desc {
   font-size: var(--fs-12);
@@ -896,16 +903,23 @@
 /* Barra flutuante das ações em lote. */
 .rbac-bulk {
   --ring-offset: var(--bg-raised);
+  /* Centrada na coluna do conteúdo (fora da navegação da administração), sem passar por cima dela: com muitas
+     ações, quebra em duas linhas dentro da coluna. 22px = pílula numa linha só, cantos arredondados em duas. */
+  --rbac-nav-w: var(--side-w);
   position: fixed;
-  left: 50%;
+  left: calc(50% + var(--rbac-nav-w) / 2);
   bottom: var(--space-6);
   z-index: var(--z-toolbar);
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-2);
+  width: max-content;
+  max-width: calc(100vw - var(--rbac-nav-w) - 2 * var(--space-6));
   padding: var(--space-1-5) var(--space-1-5) var(--space-1-5) var(--space-4);
   border: 1px solid var(--border);
-  border-radius: var(--radius-full);
+  border-radius: 22px;
   background: var(--bg-raised);
   box-shadow: var(--shadow-3);
   transform: translateX(-50%);
@@ -1103,8 +1117,11 @@
   padding: var(--space-6) var(--space-8) var(--space-10);
   overflow-x: clip;
 }
-.rbac-notice {
+/* .info também é o painel de informações da sala (coluna, gap 20px): o aviso fixa a linha. */
+.rbac-notice,
+.rbac-notice.info {
   display: flex;
+  flex-direction: row;
   align-items: flex-start;
   gap: var(--space-2);
   padding: var(--space-2-5, 10px) var(--space-4);
@@ -1515,6 +1532,12 @@
   .rbac-editor-bar {
     padding-inline: var(--space-6);
   }
+  /* Tablet estreito: as ações da faixa quebram de linha em vez de empurrar a página para o lado. */
+  .rbac-strip-actions {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
   .rbac-list-body,
   .rbac-editor-body {
     padding-inline: var(--space-6);
@@ -1631,6 +1654,8 @@
   .rbac-bulk {
     left: var(--space-3);
     right: var(--space-3);
+    width: auto;
+    max-width: none;
     flex-wrap: wrap;
     justify-content: center;
     border-radius: var(--radius-xl);
@@ -1708,9 +1733,52 @@
 .rbac-roles .rbac-reach-num {
   min-width: 0;
 }
-@media (max-width: 1279px) {
-  .rbac-roles .rbac-reach-num {
-    display: none;
+/* A lista de papéis cabe na coluna do conteúdo (o que sobra ao lado da navegação da administração): pela largura
+   do próprio corpo da lista (container), não da janela, saem primeiro os números do alcance, depois o identificador
+   (aparece no editor) e o tipo, e o alcance vira uma coluna só. No celular a lista é de cartões e mostra tudo. */
+.rbac-list-body {
+  container: rbac-list / inline-size;
+}
+@media (min-width: 761px) {
+  @container rbac-list (max-width: 1160px) {
+    .rbac-roles .rbac-reach-num {
+      display: none;
+    }
+    .rbac-roles .rbac-purpose {
+      max-width: 220px;
+    }
+  }
+  @container rbac-list (max-width: 1040px) {
+    .rbac-roles .col-id {
+      display: none;
+    }
+  }
+  @container rbac-list (max-width: 880px) {
+    .rbac-roles .col-type {
+      display: none;
+    }
+    .rbac-roles .rbac-purpose {
+      max-width: 180px;
+    }
+  }
+  @container rbac-list (max-width: 720px) {
+    .rbac-roles .rbac-reach {
+      grid-template-columns: max-content;
+    }
+    .rbac-roles .rbac-purpose {
+      max-width: 140px;
+    }
+  }
+  @container rbac-list (max-width: 620px) {
+    .rbac-roles .rbac-purpose {
+      display: none;
+    }
+    .rbac-roles .cell-name {
+      white-space: normal;
+    }
+    .rbac-roles .rbac-access-cell {
+      flex-wrap: wrap;
+    }
   }
 }
 
@@ -1738,12 +1806,19 @@ svg.rbac-tag-sensitive {
   font-weight: var(--fw-regular);
 }
 
-/* Lista de papéis dentro de um menu (Comparar com…, Papéis na matriz). */
+/* Lista de papéis dentro de um menu (Comparar com…, Papéis na matriz). Cresce até caber a lista de sempre; quando
+   rola, uma sombra na borda de cima ou de baixo mostra que há mais (fundo "local" cobre a sombra nas pontas). */
 .rbac-menu-scroll {
+  --menu-shade: color-mix(in srgb, var(--fg) 18%, transparent);
   display: flex;
   flex-direction: column;
-  max-height: min(360px, 60vh);
+  max-height: min(520px, 70vh);
   overflow-y: auto;
+  background:
+    linear-gradient(var(--bg-raised) 30%, transparent) top / 100% 24px no-repeat local,
+    linear-gradient(transparent, var(--bg-raised) 70%) bottom / 100% 24px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, var(--menu-shade), transparent) top / 100% 10px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, var(--menu-shade), transparent) bottom / 100% 10px no-repeat scroll;
 }
 .rbac-menu-scroll .pill {
   margin-left: auto;
@@ -1757,14 +1832,16 @@ svg.rbac-tag-sensitive {
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
-  backdrop-filter: blur(10px);
+  background: var(--bg-surface);
 }
 @media (min-width: 761px) {
+  /* Presa 8px abaixo do cabeçalho do editor (72px). A sombra sólida na cor do fundo cobre essa faixa e os cantos
+     arredondados: nada do que rola aparece entre o cabeçalho e os filtros. */
   .rbac-perm-tools {
     position: sticky;
     top: 80px;
     z-index: 2;
+    box-shadow: 0 calc(-1 * var(--space-1)) 0 var(--space-1) var(--bg-canvas);
   }
 }
 .rbac-perm-filters {
@@ -1902,6 +1979,41 @@ svg.rbac-tag-sensitive {
   color: var(--fg-2);
   font-size: var(--fs-13);
 }
+.rbac-bulk-preview > li.warn > svg {
+  color: var(--warn);
+}
+/* O que o papel traz (Exige 2FA, Restrito), embaixo das contagens. */
+.rbac-bulk-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 0;
+  padding: var(--space-3) var(--space-4);
+  list-style: none;
+  border-radius: 10px;
+  background: var(--warn-soft);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.rbac-bulk-notes > li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.rbac-bulk-notes > li > svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--warn);
+}
+.rbac-understood.rbac-bulk-self {
+  align-items: flex-start;
+  margin-top: var(--space-3);
+  font-size: var(--fs-13);
+}
+.rbac-understood.rbac-bulk-self input {
+  flex: none;
+  margin-top: 2px;
+}
 
 /* ---------- Papéis de sala ---------- */
 .rbac-roomroles > .table {
@@ -2014,6 +2126,24 @@ svg.rbac-tag-sensitive {
 }
 .rbac-create-plan p {
   margin: 0;
+}
+.rbac-plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+/* No cartão do modelo escolhido: o plano embaixo da descrição, separado por um fio. */
+.rbac-template-card .rbac-plan {
+  width: 100%;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-medium);
+}
+.rbac-template-card .rbac-plan .muted {
+  font-weight: var(--fw-regular);
 }
 
 /* ---------- Matriz ---------- */
@@ -2428,22 +2558,43 @@ svg.rbac-tag-sensitive {
 .rbac-bulk-all {
   white-space: nowrap;
 }
+/* "Selecionar os N resultados": um link de verdade, na cor de destaque. */
+.rbac-bulk .link-btn.rbac-bulk-all {
+  padding: 0 var(--space-2);
+  color: var(--accent-text);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.rbac-bulk .link-btn.rbac-bulk-all:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+@media (min-width: 761px) and (max-width: 1199px) {
+  .rbac-bulk {
+    --rbac-nav-w: 240px;
+  }
+}
 
 /* ---------- Quem pode…? ---------- */
 .rbac-who-search {
   position: relative;
   flex: 1 1 320px;
+  min-width: 0;
   max-width: 480px;
 }
 .rbac-who-search .rbac-search {
   max-width: none;
 }
+/* Do tamanho da busca (nunca passa da borda da janela); as descrições quebram em até duas linhas. */
 .rbac-who-options {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
+  right: 0;
   z-index: var(--z-popover);
-  width: min(560px, calc(100vw - 32px));
+  min-width: min(400px, calc(100vw - 32px));
   max-height: min(420px, 60vh);
   overflow-y: auto;
   padding: var(--space-1);
@@ -2484,10 +2635,16 @@ svg.rbac-tag-sensitive {
   font-weight: var(--fw-medium);
 }
 .rbac-who-option-desc {
+  display: -webkit-box;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.rbac-who-empty {
+  padding: var(--space-3) var(--space-4);
+  color: var(--fg-muted);
+  font-size: var(--fs-14);
 }
 .rbac-who-start {
   display: flex;
@@ -2619,11 +2776,22 @@ svg.rbac-tag-sensitive {
   }
   .rbac-who-search {
     flex: 1 1 100%;
+    width: 100%;
     max-width: none;
+  }
+  /* Ação da seção (Dar este papel a…, Encerrar todas) embaixo do título, na largura toda: o título e a dica usam
+     o cartão inteiro em vez de uma coluna estreita ao lado do botão. */
+  .rbac-section-header {
+    flex-wrap: wrap;
+  }
+  .rbac-section-header > .btn {
+    flex: 1 1 100%;
+    justify-content: center;
   }
   .rbac-who-options {
     position: static;
     width: 100%;
+    min-width: 0;
     margin-top: var(--space-1-5);
     box-shadow: none;
   }

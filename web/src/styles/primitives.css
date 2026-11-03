@@ -1051,6 +1051,20 @@ input[type='checkbox']:checked:where(:disabled) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.cell-name.has-tags {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+.cell-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cell-name.has-tags > :not(.cell-name-text) {
+  flex: none;
+  margin-left: 0;
+}
 .cell-sub {
   font-size: var(--fs-12);
   line-height: var(--lh-12);

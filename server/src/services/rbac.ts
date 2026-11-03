@@ -60,10 +60,15 @@ export async function assertCanManageUser(ctx: Ctx, targetId: string, opts: { al
   if (lock) throw lockError(lock, 'RBAC_TARGET_SUPERIOR', { userId: targetId });
 }
 
+// Os papéis que a pessoa fica de fato: sem nenhum, writeUserRoles grava Usuário (e users.create também).
+export const effectiveRoles = (roles: string[]) => (roles.length ? [...new Set(roles)] : ['user']);
+
 // Confere a troca de papéis globais de uma pessoa: ninguém mexe nos próprios papéis, a pessoa precisa ser
-// gerenciável e cada papel que entra ou sai também.
-export async function assertRoleChange(ctx: Ctx, targetId: string, before: string[], after: string[], g?: GrantContext) {
+// gerenciável e cada papel que entra ou sai também. Conta o Usuário que entra quando a lista fica vazia: quem só dá
+// Operação não transforma uma pessoa de Operação em Usuário tirando o último papel dela.
+export async function assertRoleChange(ctx: Ctx, targetId: string, before: string[], requested: string[], g?: GrantContext) {
   g ??= await grantContext(ctx.userId);
+  const after = effectiveRoles(requested);
   const infos = roleInfos();
   const known = new Set(infos.map((r) => r.id));
   const bad = after.filter((r) => !known.has(r));
@@ -93,8 +98,7 @@ export async function writeUserRoles(
   const run = async (c: pg.PoolClient) => {
     const u = (await c.query('SELECT id, username, roles FROM users WHERE id = $1 FOR UPDATE', [userId])).rows[0];
     if (!u) throw notFound('error-invalid-user', 'Usuário não encontrado.');
-    const roles = [...new Set(next)];
-    const final = roles.length ? roles : ['user'];
+    const final = effectiveRoles(next);
     const root = roleInfos().find((r) => r.root)?.id;
     if (root && u.roles.includes(root) && !final.includes(root)) {
       const n = (await c.query(`SELECT count(*)::int AS n FROM users WHERE $1 = ANY(roles) AND active AND id <> $2`, [root, userId])).rows[0].n;
@@ -142,13 +146,16 @@ export async function bulkUserRoles(ctx: Ctx, userIds: string[], add: string[], 
   const users = await many<{ id: string; username: string; roles: string[]; active: boolean }>('SELECT id, username, roles, active FROM users WHERE id = ANY($1) ORDER BY username', [userIds]);
   if (users.length !== new Set(userIds).size) throw badRequest('error-invalid-user', 'Usuário não encontrado.');
   const root = infos.find((r) => r.root)?.id;
-  const ok: (BulkPerson & { next: string[]; roles: string[] })[] = [];
+  const ok: (BulkPerson & { next: string[]; roles: string[]; fallbackUser?: boolean })[] = [];
   const unchanged: BulkPerson[] = [];
   const blocked: (BulkPerson & { reason: BulkBlockReason; roles?: string[]; idle?: boolean })[] = [];
   // Quantos administradores ativos sobram se tirar o papel raiz de todos os escolhidos.
   let activeRoots = root ? Number((await one<{ n: number }>(`SELECT count(*)::int AS n FROM users WHERE $1 = ANY(roles) AND active`, [root]))?.n ?? 0) : 0;
   for (const u of users) {
-    const next = [...new Set([...u.roles.filter((r) => !remove.includes(r)), ...add])];
+    // Sem papel nenhum a pessoa fica com Usuário: ele entra na conta como qualquer papel dado (e a prévia avisa).
+    const requested = [...u.roles.filter((r) => !remove.includes(r)), ...add];
+    const next = effectiveRoles(requested);
+    const fallbackUser = !requested.length && !u.roles.includes('user');
     const person = { _id: u.id, username: u.username };
     const changed = [...next.filter((r) => !u.roles.includes(r)), ...u.roles.filter((r) => !next.includes(r))];
     // Pessoa com cadeado fica de fora mesmo quando nada mudaria nela (a prévia mostra o motivo); só a que mudaria
@@ -177,15 +184,16 @@ export async function bulkUserRoles(ctx: Ctx, userIds: string[], add: string[], 
       }
       activeRoots--;
     }
-    ok.push({ ...person, next, roles: u.roles });
+    ok.push({ ...person, next, roles: u.roles, ...(fallbackUser ? { fallbackUser } : {}) });
   }
-  if (opts.dryRun) return { ok: ok.map(({ _id, username }) => ({ _id, username })), blocked: blocked.map(({ idle: _, ...b }) => b), unchanged };
+  if (opts.dryRun)
+    return { ok: ok.map(({ _id, username, fallbackUser }) => ({ _id, username, ...(fallbackUser ? { fallbackUser } : {}) })), blocked: blocked.map(({ idle: _, ...b }) => b), unchanged };
   const stuck = blocked.filter((b) => !b.idle);
   if (stuck.length && !opts.skipBlocked) {
     // O mesmo erro de antes (tudo ou nada), na ordem: pessoa travada, papel travado, último administrador.
     const first = stuck[0];
     const u = users.find((x) => x.id === first._id)!;
-    const next = [...new Set([...u.roles.filter((r) => !remove.includes(r)), ...add])];
+    const next = effectiveRoles([...u.roles.filter((r) => !remove.includes(r)), ...add]);
     if (first.reason === 'last-admin') throw badRequest('error-action-not-allowed', 'Não é possível remover o último administrador.');
     await assertRoleChange(ctx, u.id, u.roles, next, g);
     throw lockError('superior', 'RBAC_TARGET_SUPERIOR', { userId: u.id });

@@ -141,8 +141,8 @@ function UserList() {
     }
   };
 
-  // Ações de conta em lote: uma chamada por pessoa, e um aviso só no fim. Desativar e encerrar sessões nunca valem
-  // para quem está usando a tela, e quem tem cadeado fica de fora.
+  // Ações de conta em lote: uma chamada só para todas (até 500, sem esbarrar no limite de chamadas por minuto) e um
+  // aviso no fim. O servidor deixa de fora a própria conta e quem tem cadeado; a tela só antecipa as contagens.
   const selectedUsers = [...selected].map((id) => known.get(id)).filter(Boolean) as any[];
   const unlocked = selectedUsers.filter((u) => {
     const l = lockOf(u);
@@ -151,21 +151,22 @@ function UserList() {
   const lockedOut = selectedUsers.length - unlocked.length;
   const others = unlocked.filter((u) => u._id !== me._id);
   const selfSelected = selectedUsers.some((u) => u._id === me._id);
-  const bulk = async (what: string, fn: (u: any) => Promise<unknown>, skipSelf = false) => {
-    const targets = skipSelf ? others : unlocked;
-    let done = 0;
-    for (const u of targets) {
-      try {
-        await fn(u);
-        done++;
-      } catch (e) {
-        fail(e);
-      }
+  const bulk = async (what: string, path: 'users.bulkSetActiveStatus' | 'users.bulkLogout', extra: Record<string, unknown> = {}, mentionSelf = true) => {
+    try {
+      const r = await api.post(path, { userIds: [...selected], ...extra });
+      const sk = r.skipped ?? {};
+      const notes = [
+        mentionSelf && sk.self ? 'você não foi incluído' : '',
+        sk.locked ? `${sk.locked} com cadeado ${sk.locked === 1 ? 'ficou' : 'ficaram'} de fora` : '',
+        sk.unchanged ? `${sk.unchanged} já ${sk.unchanged === 1 ? 'estava' : 'estavam'} assim` : '',
+      ].filter(Boolean);
+      const tail = notes.length ? ` (${notes.join('; ')})` : '';
+      if (r.users) ok(`${what}: ${plural(r.users, 'pessoa', 'pessoas')}${tail}.`);
+      else ok(`Nada a fazer${tail || ': você não pode aplicar isso à sua própria conta'}.`);
+      setSelected(new Set());
+    } catch (e) {
+      fail(e);
     }
-    const notes = `${skipSelf && selfSelected ? ' (você não foi incluído)' : ''}${lockedOut ? ` (${lockedOut} com cadeado ${lockedOut === 1 ? 'ficou' : 'ficaram'} de fora)` : ''}`;
-    if (done) ok(`${what}: ${plural(done, 'pessoa', 'pessoas')}${notes}.`);
-    else ok(`Nada a fazer${notes || ': você não pode aplicar isso à sua própria conta'}.`);
-    setSelected(new Set());
     reload();
   };
   const selfNote = `${selfSelected ? ' Sua própria conta fica de fora.' : ''}${lockedOut ? ` ${plural(lockedOut, 'pessoa com cadeado fica', 'pessoas com cadeado ficam')} de fora.` : ''}`;
@@ -179,7 +180,7 @@ function UserList() {
       });
       if (!yes) return;
     }
-    await bulk(active ? 'Ativadas' : 'Desativadas', (u) => api.post('users.setActiveStatus', { userId: u._id, activeStatus: active }), !active);
+    await bulk(active ? 'Ativadas' : 'Desativadas', 'users.bulkSetActiveStatus', { activeStatus: active }, !active);
   };
   const logoutSelected = async () => {
     const yes = await confirmDialog({
@@ -188,7 +189,7 @@ function UserList() {
       confirmLabel: 'Encerrar sessões',
       danger: true,
     });
-    if (yes) await bulk('Sessões encerradas', (u) => api.post('users.logout', { userId: u._id }), true);
+    if (yes) await bulk('Sessões encerradas', 'users.bulkLogout');
   };
 
   // Ações de uma linha (menu "Mais ações"): desativar e deslogar pedem confirmação, como em lote.
@@ -409,7 +410,7 @@ function UserList() {
           </span>
           {allOnPage && total > selected.size && (
             total <= SELECT_MAX ? (
-              <button type="button" className="btn small ghost rbac-bulk-all" disabled={selectingAll} aria-busy={selectingAll || undefined} onClick={() => void selectAll()}>
+              <button type="button" className="link-btn rbac-bulk-all" disabled={selectingAll} aria-busy={selectingAll || undefined} onClick={() => void selectAll()}>
                 Selecionar os {total} resultados
               </button>
             ) : (
@@ -472,6 +473,7 @@ function UserList() {
       {bulkRole && (
         <BulkRolesDialog
           role={bulkRole.role}
+          info={globalRoles.find((r) => r._id === bulkRole.role)}
           mode={bulkRole.mode}
           userIds={[...selected]}
           onClose={() => setBulkRole(null)}

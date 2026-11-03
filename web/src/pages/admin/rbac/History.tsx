@@ -251,7 +251,8 @@ function EventRow({ r, nested, onRevert }: { r: Row; nested?: boolean; onRevert:
         )}
         <span>
           {nested ? (
-            <strong>@{r.entityLabel}</strong>
+            // No lote, o papel pelo nome (Operação); o @ fica só para pessoas.
+            <strong>{r.entityType === 'role' ? roleLabel(r.entityLabel || r.entityId) : `@${r.entityLabel}`}</strong>
           ) : (
             <>
               <strong>{h.who}</strong> {h.text}

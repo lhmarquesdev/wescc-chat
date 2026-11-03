@@ -30,6 +30,19 @@ interface Effective {
 
 const keysOf = (areas: EffectiveArea[]) => areas.flatMap((a) => a.keys.map((k) => k.key));
 
+// Restrições que entram ou saem ao salvar (Restrita em conversas diretas, 2FA obrigatório), com o papel que as traz.
+function restrictionChanges(now: Restrictions, after: Restrictions) {
+  const out: { key: string; icon: 'direct-blocked' | 'security'; text: string }[] = [];
+  const via = (ids: string[]) => ` (via ${nameList(ids.map(roleLabel), 2)})`;
+  if (!now.restrictDirect.length && after.restrictDirect.length)
+    out.push({ key: 'rd', icon: 'direct-blocked', text: `Passa a ser restrita em conversas diretas${via(after.restrictDirect)}: só conversa e liga para quem não é restrito.` });
+  if (now.restrictDirect.length && !after.restrictDirect.length) out.push({ key: 'rd', icon: 'direct-blocked', text: 'Deixa de ser restrita em conversas diretas.' });
+  if (!now.mandatory2fa.length && after.mandatory2fa.length)
+    out.push({ key: '2fa', icon: 'security', text: `Passa a exigir 2FA${via(after.mandatory2fa)}: configura antes de voltar a usar o chat.` });
+  if (now.mandatory2fa.length && !after.mandatory2fa.length) out.push({ key: '2fa', icon: 'security', text: 'Deixa de exigir 2FA.' });
+  return out;
+}
+
 export function EffectiveAccess({ userId, draftRoles }: { userId: string; draftRoles?: string[] }) {
   const can = usePermission(['view-user-administration', 'view-permissions', 'access-permissions', 'manage-roles']);
   const [mode, setMode] = useState<Mode>('after');
@@ -49,6 +62,7 @@ export function EffectiveAccess({ userId, draftRoles }: { userId: string; draftR
   const term = q.trim();
   const keyShown = (k: string) => keyMatches(k, term) && (filter === 'all' || isSensitive(k));
   const sensitiveNew = sim && data ? sensitiveAdded(keysOf(data.areas), keysOf(sim.areas)) : [];
+  const restrictionDiff = sim && data ? restrictionChanges(data.restrictions, sim.restrictions) : [];
 
   return (
     <>
@@ -91,8 +105,16 @@ export function EffectiveAccess({ userId, draftRoles }: { userId: string; draftR
                       </span>
                     </div>
                   ))}
-                  {sim.diff.areas.length ? (
+                  {sim.diff.areas.length || restrictionDiff.length ? (
                     <ul className="rbac-eff-diff">
+                      {restrictionDiff.map((r) => (
+                        <li key={r.key} className="rbac-review-row rbac-eff-restriction mixed">
+                          <Icon name={r.icon} size={14} />
+                          <span className="rbac-review-change">
+                            <span>{r.text}</span>
+                          </span>
+                        </li>
+                      ))}
                       {sim.diff.areas.map((a) => (
                         <AreaDiff key={a.area} change={a} />
                       ))}
