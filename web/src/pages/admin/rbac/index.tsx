@@ -1,21 +1,26 @@
-// Administração › Papéis e permissões: lista em faixa única (busca, contador, Todos/Sistema/Personalizados, Novo
-// papel) com a tabela de papéis; o editor (RoleEditor) com abas no rodapé; o histórico com reversão e o resumo das
-// conversas diretas restritas, cada um na sua página.
-import { useMemo, useState } from 'react';
+// Administração › Papéis e permissões: três visões na mesma faixa (Papéis, Matriz, Quem pode…?), o editor de papel
+// (RoleEditor) com abas no rodapé, o histórico com reversão e o resumo das conversas diretas restritas. Toda tela daqui
+// recarrega quando alguém muda papéis (permissions.changed).
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { DirectRestrictionReport } from '@shared/direct';
-import { RBAC_KEYS, VISIBLE_KEYS } from '@shared/rbac';
+import { ROLE_PURPOSE } from '@shared/rbac';
 import { api } from '../../../lib/api';
 import { plural, roleLabel } from '../../../lib/format';
+import { realtime } from '../../../lib/realtime';
 import { usePermission } from '../../../lib/store';
 import { Icon } from '../../../components/Icon';
-import { Empty, Field, Modal, SkeletonTable, Tooltip, confirmDialog, useAsync } from '../../../components/ui';
+import { Empty, SkeletonTable, Tooltip, confirmDialog, useAsync } from '../../../components/ui';
 import { RowMenu } from '../parts';
+import { CreateRole } from './CreateRole';
 import { DirectReportCard } from './DirectReport';
 import { RbacHistory } from './History';
-import { RoleEditor } from './RoleEditor';
+import { MatrixPage } from './Matrix';
+import { compareUrl, RoleEditor } from './RoleEditor';
 import { ReachBar } from './reach';
-import { Chips, ListStrip, LockHint } from './shell';
+import { SensitiveCount } from './SensitiveTag';
+import { Chips, ListStrip, LockHint, RbacViews } from './shell';
+import { WhoCanPage } from './WhoCan';
 import { lockText, loadGrant, loadRoles, people, rbacFail, rbacOk, type Grant, type RbacRole } from './data';
 
 type Kind = 'all' | 'system' | 'custom';
@@ -26,6 +31,16 @@ export function AdminPermissions() {
   const roles = useAsync(loadRoles, []);
   const grant = useAsync(loadGrant, []);
   const reload = () => (roles.reload(), grant.reload());
+  const { reload: reloadRoles } = roles;
+  const { reload: reloadGrant } = grant;
+  // Alguém mudou papéis (inclusive em outra aba): lista, matriz, Quem pode…? e editor acompanham.
+  useEffect(() => {
+    const off = realtime.on((ev) => {
+      if (ev.type === 'permissions.changed') (reloadRoles(), reloadGrant());
+    });
+    return () => void off();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (view === 'role' && param)
     return <RoleEditor key={param} roleId={param} roles={roles.data} grant={grant.data} onSaved={reload} onDeleted={() => (reload(), navigate('/admin/permissions'))} />;
@@ -44,6 +59,8 @@ export function AdminPermissions() {
       </div>
     );
   if (view === 'direct') return <DirectPage />;
+  if (view === 'matrix') return <MatrixPage roles={roles.data} grant={grant.data} error={roles.error} onSaved={reload} />;
+  if (view === 'who') return <WhoCanPage roles={roles.data} />;
   return <RoleList roles={roles.data} grant={grant.data} loading={roles.loading || grant.loading} error={roles.error} onChanged={reload} />;
 }
 
@@ -80,7 +97,7 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
   const list = all.filter((r) => {
     if (kind === 'system' && !r.protected) return false;
     if (kind === 'custom' && r.protected) return false;
-    return !term || [r._id, roleLabel(r._id), r.description ?? ''].some((t) => t.toLowerCase().includes(term));
+    return !term || [r._id, roleLabel(r._id), r.description ?? '', purposeOf(r)].some((t) => t.toLowerCase().includes(term));
   });
   const canWrite = !!grant?.canEditRoles;
   const deletable = (r: RbacRole) => canWrite && !grant?.deleteLocks[r._id];
@@ -131,7 +148,7 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
   const counts = { all: all.length, system: all.filter((r) => r.protected).length, custom: all.filter((r) => !r.protected).length };
   return (
     <div className="rbac-shell list">
-      <ListStrip eyebrow="Papéis e permissões" title="Papéis" search={q} onSearch={setQ} placeholder="Buscar papéis..." count={list.length}>
+      <ListStrip eyebrow="Papéis e permissões" title="Papéis" views={<RbacViews value="roles" />} search={q} onSearch={setQ} placeholder="Buscar papéis..." count={list.length}>
         <Chips<Kind>
           label="Tipo"
           value={kind}
@@ -244,16 +261,24 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
                                 Restrito
                               </span>
                             )}
+                            {r.scope === 'Subscriptions' && <span className="pill tag">De sala</span>}
                             {lock && <LockHint text={lockText(lock)} />}
                           </span>
-                          <span className="cell-sub">{r.scope === 'Users' ? 'Global' : 'De sala'}</span>
+                          <span className="cell-sub rbac-purpose" title={purposeOf(r)}>
+                            {purposeOf(r)}
+                          </span>
                         </div>
                       </div>
                     </td>
                     <td data-label="Identificador">
                       <code className="mono small rbac-id">{r._id}</code>
                     </td>
-                    <td data-label="Acesso">{r.root ? <span className="rbac-total">Acesso total à gestão</span> : <ReachBar perms={r.permissions} compact />}</td>
+                    <td data-label="Acesso">
+                      <span className="rbac-access-cell">
+                        {r.root ? <span className="rbac-total">Acesso total à gestão</span> : <ReachBar perms={r.permissions} />}
+                        <SensitiveCount keys={r.permissions} />
+                      </span>
+                    </td>
                     <td className="num" data-label="Pessoas">
                       {r.users ? (
                         canSeeUsers && r.scope === 'Users' ? (
@@ -284,6 +309,11 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
                                 Duplicar
                               </button>
                             )}
+                            <CompareItems role={r} roles={all} onPick={(other) => (close(), navigate(compareUrl(r._id, other)))} />
+                            <button onClick={() => (close(), navigate(`/admin/permissions/role/${encodeURIComponent(r._id)}?tab=people`))}>
+                              <Icon name="admin-users" />
+                              Quem tem
+                            </button>
                             {canWrite && (
                               <button className="danger" disabled={!!delLock} title={delLock ? lockText(delLock) : undefined} onClick={() => (close(), void removeMany([r._id]))}>
                                 <Icon name="delete" />
@@ -319,6 +349,7 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
       {(creating || copyFrom) && grant && (
         <CreateRole
           source={copyFrom ? all.find((r) => r._id === copyFrom) : undefined}
+          roles={all}
           grant={grant}
           onClose={() => {
             setCreating(false);
@@ -326,7 +357,7 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
           }}
           onCreated={(id) => {
             onChanged();
-            navigate(`/admin/permissions/role/${encodeURIComponent(id)}`);
+            navigate(`/admin/permissions/role/${encodeURIComponent(id)}?tab=perms`);
           }}
         />
       )}
@@ -334,74 +365,33 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
   );
 }
 
-// Criação por modal curto: identificador, nome e escopo. Duplicar leva as permissões da origem (quem não é
-// administrador só leva as que tem). O resto se completa no editor.
-function CreateRole({ source, grant, onClose, onCreated }: { source?: RbacRole; grant: Grant; onClose: () => void; onCreated: (id: string) => void }) {
-  const [name, setName] = useState(source ? `${source._id}-copia` : '');
-  const [label, setLabel] = useState(source ? `Cópia de ${roleLabel(source._id)}` : '');
-  const [scope, setScope] = useState<'Users' | 'Subscriptions'>(source?.scope ?? 'Users');
-  const [busy, setBusy] = useState(false);
-  const held = new Set(grant.held);
-  const perms = (source?.permissions ?? []).filter((k) => grant.root || held.has(k));
-  const stripped = (source?.permissions ?? []).filter((k) => !perms.includes(k) && VISIBLE_KEYS.includes(k));
-  const valid = /^[a-zA-Z0-9 _.-]+$/.test(name.trim());
-  const create = async () => {
-    setBusy(true);
-    try {
-      const body: Record<string, unknown> = { name: name.trim(), description: label.trim(), scope };
-      if (source) Object.assign(body, { permissions: grant.canEditPermissions ? perms : [], mandatory2fa: source.mandatory2fa, restrictDirect: scope === 'Users' && source.restrictDirect });
-      await api.post('rbac.roles.create', body);
-      rbacOk(`Papel ${label.trim() || name.trim()} criado.`);
-      onCreated(name.trim());
-    } catch (e) {
-      rbacFail(e);
-    } finally {
-      setBusy(false);
-    }
-  };
+// Para que serve, embaixo do nome: o do papel, o texto do sistema ou o escopo.
+const purposeOf = (r: RbacRole) => r.purpose || ROLE_PURPOSE[r._id] || (r.scope === 'Users' ? 'Global' : 'De sala');
+
+// "Comparar com…" no menu da linha: abre a lista de papéis no próprio menu.
+function CompareItems({ role, roles, onPick }: { role: RbacRole; roles: RbacRole[]; onPick: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  if (!open)
+    return (
+      <button onClick={() => setOpen(true)} aria-expanded={false}>
+        <Icon name="rbac-compare" />
+        Comparar com…
+      </button>
+    );
   return (
-    <Modal
-      size="sm"
-      title={source ? `Duplicar ${roleLabel(source._id)}` : 'Novo papel'}
-      description="Depois de criar, você escolhe as permissões no editor."
-      onClose={onClose}
-      footer={
-        <>
-          <button className="btn" onClick={onClose}>
-            Cancelar
+    <div className="rbac-menu-scroll" role="group" aria-label={`Comparar ${roleLabel(role._id)} com`}>
+      <button onClick={() => setOpen(false)} aria-expanded>
+        <Icon name="back" />
+        Comparar com…
+      </button>
+      {roles
+        .filter((r) => r._id !== role._id)
+        .map((r) => (
+          <button key={r._id} onClick={() => onPick(r._id)}>
+            <Icon name={r.root ? 'rbac-root' : r.scope === 'Subscriptions' ? 'rbac-room' : 'admin-permissions'} />
+            {roleLabel(r._id)}
           </button>
-          <button className="btn primary" disabled={busy || !valid} aria-busy={busy || undefined} onClick={() => void create()}>
-            Criar e abrir
-          </button>
-        </>
-      }
-    >
-      <div className="form">
-        <Field label="Identificador" hint="Sem acentos, ex.: supervisor. Não muda depois.">
-          <input value={name} autoFocus maxLength={60} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label="Nome exibido">
-          <input value={label} maxLength={60} placeholder="Supervisor de operação" onChange={(e) => setLabel(e.target.value)} />
-        </Field>
-        <Field label="Escopo">
-          <select value={scope} onChange={(e) => setScope(e.target.value as 'Users' | 'Subscriptions')}>
-            <option value="Users">Global: vale em todo o chat</option>
-            <option value="Subscriptions">De sala: vale só nas salas onde a pessoa tem o papel</option>
-          </select>
-        </Field>
-        {source && (
-          <p className="field-hint">
-            Leva {plural(perms.length, 'permissão', 'permissões')} de {roleLabel(source._id)}
-            {stripped.length > 0
-              ? `; ${plural(stripped.length, 'fica', 'ficam')} de fora porque você não ${stripped.length === 1 ? 'a' : 'as'} tem: ${stripped
-                  .slice(0, 3)
-                  .map((k) => RBAC_KEYS[k]?.label ?? k)
-                  .join(', ')}${stripped.length > 3 ? '...' : ''}`
-              : ''}
-            .
-          </p>
-        )}
-      </div>
-    </Modal>
+        ))}
+    </div>
   );
 }

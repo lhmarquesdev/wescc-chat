@@ -7,6 +7,8 @@ import { nameList, roleLabel, setRoleDescriptions } from '../../../lib/format';
 import { useStore } from '../../../lib/store';
 
 export interface RbacRole extends Role {
+  // Para que serve: a frase embaixo do nome (pode vir vazia; a tela cai no texto do sistema).
+  purpose?: string;
   permissions: string[];
   users: number;
   activeUsers: number;
@@ -51,3 +53,6 @@ export const rbacFail = (e: unknown) => useStore.getState().toast(rbacError(e), 
 export const rbacOk = (t: string) => useStore.getState().toast(t);
 
 export const people = (n: number) => `${n} ${n === 1 ? 'pessoa' : 'pessoas'}`;
+
+
+export { userLockOf } from './userLock';

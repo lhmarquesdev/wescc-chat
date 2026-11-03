@@ -1,27 +1,35 @@
-// Editor de papel: cabeçalho fixo (voltar, nome editável, alterações pendentes, Reverter, Salvar) e abas no rodapé:
-// Identificação, um grupo de permissões por aba (Conversas, Salas, Administração, Atendimento), Mapa de poder, Pessoas
-// e Histórico. Salvar abre o "Revisar alterações"; nada é gravado antes de confirmar.
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { areaLevel, KEY_AREA, levelText, RBAC_GROUPS, RBAC_KEYS, rbacLabel, VISIBLE_KEYS, withAreaLevel, type RbacArea, type RbacGroup } from '@shared/rbac';
+// Editor de papel: cabeçalho fixo (voltar, nome editável, Comparar com…, alterações pendentes, Reverter, Salvar) e
+// quatro abas no rodapé: Resumo (identificação, o que o papel libera, delegação), Permissões, Pessoas e Histórico.
+// Salvar abre o "Revisar alterações" e grava só o que esta tela mudou (deltas): o que outra pessoa salvou no meio-tempo
+// em outras permissões continua.
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { areaLevel, isSensitive, KEY_AREA, levelText, RBAC_GROUPS, rbacLabel, ROLE_PURPOSE, VISIBLE_KEYS } from '@shared/rbac';
 import { api } from '../../../lib/api';
-import { plural, roleLabel } from '../../../lib/format';
-import { usePermission } from '../../../lib/store';
+import { plural, ROLE_LABEL, roleLabel } from '../../../lib/format';
+import { realtime } from '../../../lib/realtime';
+import { usePermission, useStore } from '../../../lib/store';
 import { Icon } from '../../../components/Icon';
-import { Empty, Field, Menu, SkeletonTable, Toggle, Tooltip, confirmDialog, useAsync } from '../../../components/ui';
+import { UserPicker, type PickedUser } from '../../../components/Pickers';
+import { Empty, Field, Menu, Modal, SkeletonTable, Toggle, Tooltip, confirmDialog, useAsync } from '../../../components/ui';
+import { useIsPhone } from '../../../components/overlay';
 import { UserCell } from '../parts';
+import { BulkRolesDialog } from './BulkRoles';
 import { RbacHistory } from './History';
 import { groupIcon } from './groupIcons';
-import { ReachBar, groupReach } from './reach';
+import { matrixQuery } from './matrix';
+import { areaKeys, PermissionsTab } from './Permissions';
+import { ReachBar } from './reach';
 import { ReviewDialog, type Draft } from './Review';
-import { Chips, EditorShell, Notice, Section, type EditorTab } from './shell';
-import { lockText, people, rbacFail, rbacOk, type Grant, type RbacRole } from './data';
+import { RoomRoles } from './RoomRoles';
+import { SensitiveTag } from './SensitiveTag';
+import { EditorShell, LockHint, Notice, Section, type EditorTab } from './shell';
+import { lockText, people, rbacFail, rbacOk, userLockOf, type Grant, type RbacRole } from './data';
 
-// O papel Administrador nunca perde a gestão de papéis (o servidor recusa).
-const ROOT_KEEP = ['view-permissions', 'access-permissions', 'manage-roles'];
-const KNOWN = Object.keys(RBAC_KEYS);
-
-type Tab = 'identity' | 'chat' | 'room' | 'admin' | 'power' | 'people' | 'history';
+type Tab = 'summary' | 'perms' | 'people' | 'history';
+const TABS: Tab[] = ['summary', 'perms', 'people', 'history'];
+const NAME_MAX = 32;
+const PURPOSE_MAX = 200;
 
 const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((x) => b.has(x));
 
@@ -29,6 +37,7 @@ function draftOf(role: RbacRole): Draft {
   return {
     name: role._id,
     description: role.description ?? '',
+    purpose: role.purpose ?? '',
     scope: role.scope,
     mandatory2fa: role.mandatory2fa,
     restrictDirect: role.restrictDirect,
@@ -37,39 +46,67 @@ function draftOf(role: RbacRole): Draft {
   };
 }
 
+const differs = (a: Draft, b: Draft) =>
+  a.description !== b.description ||
+  a.purpose !== b.purpose ||
+  a.scope !== b.scope ||
+  a.mandatory2fa !== b.mandatory2fa ||
+  a.restrictDirect !== b.restrictDirect ||
+  !sameSet(a.permissions, b.permissions) ||
+  a.delegable.join() !== b.delegable.join();
+
+export const compareUrl = (a: string, b: string) => `/admin/permissions/matrix${matrixQuery({ roles: [a, b], group: 'all', q: '', diff: true, sens: false })}`;
+
 export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleId: string; roles: RbacRole[] | null; grant: Grant | null; onSaved: () => void; onDeleted: () => void }) {
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const meId = useStore((s) => s.me?._id);
   const role = roles?.find((r) => r._id === roleId);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [initial, setInitial] = useState<Draft | null>(null);
-  const [tab, setTab] = useState<Tab>('identity');
+  const [group, setGroup] = useState('all');
   const [review, setReview] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showTechnical, setShowTechnical] = useState(false);
+  // Outra pessoa salvou este papel enquanto ele estava com alterações aqui ('' = não deu para saber quem).
+  const [changedBy, setChangedBy] = useState<string | null>(null);
+  const tabParam = params.get('tab') as Tab | null;
+  const tab: Tab = tabParam && TABS.includes(tabParam) ? tabParam : 'summary';
+  const setTab = (t: Tab) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (t === 'summary') n.delete('tab');
+        else n.set('tab', t);
+        return n;
+      },
+      { replace: true },
+    );
 
+  const dirty = useMemo(() => !!draft && !!initial && differs(draft, initial), [draft, initial]);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+
+  // A lista recarrega a cada permissions.changed (index.tsx). Sem alterações aqui, o editor acompanha em silêncio.
   useEffect(() => {
-    if (draft || !role) return;
+    if (!role || (draft && dirtyRef.current)) return;
     const d = draftOf(role);
     setDraft(d);
     setInitial(d);
-  }, [role, draft]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
 
-  const lock = role && grant ? grant.roleLocks[role._id] : null;
-  const canEditPerms = !!grant?.canEditPermissions && !lock;
-  const canEditRole = !!grant?.canEditRoles && !lock;
-  const canWrite = canEditPerms || canEditRole;
-  const held = useMemo(() => new Set(grant?.held ?? []), [grant]);
-  const dirty = useMemo(() => {
-    if (!draft || !initial) return false;
-    return (
-      draft.description !== initial.description ||
-      draft.scope !== initial.scope ||
-      draft.mandatory2fa !== initial.mandatory2fa ||
-      draft.restrictDirect !== initial.restrictDirect ||
-      !sameSet(draft.permissions, initial.permissions) ||
-      draft.delegable.join() !== initial.delegable.join()
-    );
-  }, [draft, initial]);
+  // Com alterações: avisa quem salvou, e ao salvar só as mudanças desta tela entram.
+  useEffect(() => {
+    const off = realtime.on((ev) => {
+      if (ev.type !== 'permissions.changed' || !ev.roles?.includes(roleId) || ev.by === meId || !dirtyRef.current) return;
+      if (!ev.by) return setChangedBy('');
+      api
+        .get('users.info', { userId: ev.by })
+        .then((r) => setChangedBy(`@${r.user.username}`))
+        .catch(() => setChangedBy(''));
+    });
+    return () => void off();
+  }, [roleId, meId]);
 
   // Sair da página com alterações: o navegador pergunta.
   useEffect(() => {
@@ -90,53 +127,37 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
     );
   if (!draft || !initial) return <SkeletonTable rows={10} cols={2} />;
 
-  // Trava de uma chave: o ator não tem (só dá e tira o que tem) ou é a gestão de papéis do Administrador.
-  const keyLock = (k: string): string | null => {
-    if (!canEditPerms) return lock ? lockText(lock) : 'Você pode ver, mas não alterar permissões.';
-    if (role.root && ROOT_KEEP.includes(k)) return 'O Administrador sempre gerencia papéis.';
-    if (!grant.root && !held.has(k)) return 'Você não tem esta permissão, então não pode dá-la nem tirá-la.';
-    return null;
-  };
-  const setPerms = (next: Set<string>) => setDraft({ ...draft, permissions: next });
-  const toggleKey = (k: string, on: boolean) => {
-    const next = new Set(draft.permissions);
-    if (on) next.add(k);
-    else next.delete(k);
-    setPerms(next);
-  };
-  const levelBlocked = (area: RbacArea, index: number) => {
-    const next = withAreaLevel(area, draft.permissions, index);
-    const locked = area.levels.flatMap((l) => l.keys).filter((k) => next.has(k) !== draft.permissions.has(k) && keyLock(k));
-    return locked.length ? keyLock(locked[0]) : null;
-  };
-  const setGroup = (g: RbacGroup, mode: 'none' | 'view' | 'max') => {
-    let next = new Set(draft.permissions);
-    for (const a of g.areas) {
-      if (mode === 'view') {
-        if (a.levels.length && !levelBlocked(a, 0)) next = withAreaLevel(a, next, 0);
-        continue;
-      }
-      for (const k of areaKeys(a).filter((k) => !keyLock(k))) {
-        if (mode === 'max') next.add(k);
-        else next.delete(k);
-      }
-    }
-    setPerms(next);
-  };
+  const lock = grant.roleLocks[role._id];
+  const canEditPerms = grant.canEditPermissions && !lock;
+  const canEditRole = grant.canEditRoles && !lock;
+  const canWrite = canEditPerms || canEditRole;
 
   const askLeave = async () => !dirty || confirmDialog({ title: 'Descartar as alterações?', body: 'O que você mudou neste papel ainda não foi salvo.', confirmLabel: 'Descartar', danger: true });
+  const compare = async (other: string) => {
+    if (await askLeave()) navigate(compareUrl(role._id, other));
+  };
+  const revert = () => {
+    const d = draftOf(role);
+    setDraft(d);
+    setInitial(d);
+    setChangedBy(null);
+  };
 
   const save = async () => {
     setSaving(true);
     try {
-      const body: Record<string, unknown> = { roleId: role._id, description: draft.description, mandatory2fa: draft.mandatory2fa, restrictDirect: draft.scope === 'Users' && draft.restrictDirect };
+      const body: Record<string, unknown> = { roleId: role._id, description: draft.description, purpose: draft.purpose, mandatory2fa: draft.mandatory2fa, restrictDirect: draft.scope === 'Users' && draft.restrictDirect };
       if (!role.protected) body.scope = draft.scope;
-      if (grant.canEditPermissions) Object.assign(body, { permissions: [...draft.permissions], knownPermissions: KNOWN });
+      if (grant.canEditPermissions) Object.assign(body, { permissions: [...draft.permissions], basePermissions: [...initial.permissions] });
       if (grant.root && draft.scope === 'Users' && !role.root) body.delegable = draft.delegable;
-      await api.post('rbac.roles.update', body);
+      const r = await api.post('rbac.roles.update', body);
       rbacOk(`Papel ${roleLabel(role._id)} salvo.`);
+      // O que ficou no servidor (pode ter mudanças de outra pessoa) vira a base.
+      const next = draftOf({ ...role, ...r.role });
       setReview(false);
-      setInitial(draft);
+      setInitial(next);
+      setDraft(next);
+      setChangedBy(null);
       onSaved();
     } catch (e) {
       rbacFail(e);
@@ -159,22 +180,12 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
         .catch(rbacFail);
   };
 
-  const groupOf = (id: string) => RBAC_GROUPS.find((g) => g.id === id)!;
-  const reachText = (id: string) => {
-    const r = groupReach(groupOf(id), [...draft.permissions]);
-    return `${r.any}/${r.total}`;
-  };
   const tabs: EditorTab<Tab>[] = [
-    { id: 'identity', label: 'Identificação', icon: 'rbac-id' },
-    { id: 'chat', label: 'Conversas', icon: 'rbac-chat' },
-    { id: 'room', label: 'Salas', icon: 'rbac-room' },
-    { id: 'admin', label: 'Administração', icon: 'rbac-admin' },
-    { id: 'power', label: 'Mapa de poder', icon: 'rbac-power' },
+    { id: 'summary', label: 'Resumo', icon: 'rbac-id' },
+    { id: 'perms', label: 'Permissões', icon: 'rbac-areas' },
     { id: 'people', label: 'Pessoas', icon: 'admin-users' },
     { id: 'history', label: 'Histórico', icon: 'rbac-history' },
   ];
-  // Papel de sala: a aba de salas vem logo depois da identificação.
-  if (draft.scope === 'Subscriptions') tabs.splice(1, 2, tabs[2], tabs[1]);
 
   const status = role.root ? (
     <span className="rbac-status root">
@@ -189,14 +200,43 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
 
   const notices = (
     <>
-      {role.root && <Notice>O Administrador passa por todas as travas de concessão: dá e tira qualquer permissão, edita qualquer papel e define delegações. A gestão de papéis fica sempre ligada nele.</Notice>}
-      {lock && <Notice kind="lock">Somente leitura. {lockText(lock)}</Notice>}
-      {!lock && canEditPerms && !grant.root && <Notice>Você só dá ou tira permissões que você mesmo tem. As outras aparecem com cadeado.</Notice>}
-      {!grant.canEditRoles && !grant.canEditPermissions && <Notice kind="lock">Você pode ver os papéis, mas não alterá-los.</Notice>}
+      {changedBy !== null && dirty && (
+        <Notice kind="warn">{changedBy ? `${changedBy} alterou este papel agora.` : 'Outra pessoa alterou este papel agora.'} Ao salvar, só as suas mudanças são aplicadas.</Notice>
+      )}
+      {tab === 'summary' && role.root && (
+        <Notice>O Administrador passa por todas as travas de concessão: dá e tira qualquer permissão, edita qualquer papel e define delegações. A gestão de papéis fica sempre ligada nele.</Notice>
+      )}
+      {tab !== 'perms' && lock && <Notice kind="lock">Somente leitura. {lockText(lock)}</Notice>}
+      {tab !== 'perms' && !lock && !grant.canEditRoles && !grant.canEditPermissions && <Notice kind="lock">Você pode ver os papéis, mas não alterá-los.</Notice>}
     </>
   );
 
-  const groupProps: GroupProps = { draft, initial, keyLock, levelBlocked, onLevel: (a, i) => setPerms(withAreaLevel(a, draft.permissions, i)), onKey: toggleKey, editable: canEditPerms };
+  const others = [...roles].filter((r) => r._id !== role._id).sort((a, b) => Number(b.scope === 'Users') - Number(a.scope === 'Users') || roleLabel(a._id).localeCompare(roleLabel(b._id), 'pt-BR'));
+  const compareMenu = (small?: boolean) => (
+    <Menu
+      label="Comparar com…"
+      sheetTitle="Comparar com…"
+      trigger={
+        <button type="button" className={`btn small${small ? '' : ' rbac-compare-btn'}`}>
+          <Icon name="rbac-compare" size={14} />
+          <span>Comparar com…</span>
+        </button>
+      }
+    >
+      {(close) => (
+        <div className="rbac-menu-scroll">
+          {others.map((r) => (
+            <button key={r._id} onClick={() => (close(), void compare(r._id))}>
+              <Icon name={r.root ? 'rbac-root' : r.scope === 'Subscriptions' ? 'rbac-room' : 'admin-permissions'} />
+              {roleLabel(r._id)}
+            </button>
+          ))}
+        </div>
+      )}
+    </Menu>
+  );
+
+  const nameEditable = canEditRole && !role.root && !ROLE_LABEL[role._id];
 
   return (
     <>
@@ -207,14 +247,14 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
         iconClass={role.root ? 'root' : undefined}
         eyebrow="Editor de papel"
         title={
-          canEditRole && !role.root ? (
+          nameEditable ? (
             <input
               className="rbac-title-input"
               aria-label="Nome exibido do papel"
               value={draft.description}
               placeholder={roleLabel(role._id)}
-              maxLength={500}
-              size={Math.max(8, Math.min(32, (draft.description || roleLabel(role._id)).length + 1))}
+              maxLength={NAME_MAX}
+              size={Math.max(8, Math.min(NAME_MAX, (draft.description || roleLabel(role._id)).length + 1))}
               onChange={(e) => setDraft({ ...draft, description: e.target.value })}
             />
           ) : (
@@ -225,27 +265,38 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
         dirty={dirty}
         canWrite={canWrite}
         saving={saving}
-        onRevert={() => setDraft(initial)}
+        onRevert={revert}
         onSave={() => setReview(true)}
+        extraActions={compareMenu()}
         notices={notices}
         tabs={tabs}
         active={tab}
         onTab={setTab}
         label="Seções do papel"
       >
-        {tab === 'identity' && (
+        {tab === 'summary' && (
           <div className="rbac-stack">
             <div className="rbac-grid-75">
-              <Section icon="rbac-id" title="Identificação" hint="Nome, escopo e regras de segurança.">
+              <Section icon="rbac-id" title="Identificação" hint="Nome, para que serve, escopo e regras de segurança.">
                 <div className="form">
                   <div className="two-col">
-                    <Field label="Nome técnico" hint="Não muda depois de criado.">
+                    <Field label="Identificador" hint="Não muda depois de criado.">
                       <input value={role._id} disabled />
                     </Field>
-                    <Field label="Nome exibido e descrição" hint="Até 32 caracteres viram o nome do papel nas telas.">
-                      <input value={draft.description} disabled={!canEditRole} maxLength={500} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+                    <Field label="Nome exibido" hint={nameEditable ? `Até ${NAME_MAX} caracteres. ${draft.description.length}/${NAME_MAX}` : 'Nome do sistema.'}>
+                      <input value={nameEditable ? draft.description : roleLabel(role._id)} disabled={!nameEditable} maxLength={NAME_MAX} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
                     </Field>
                   </div>
+                  <Field label="Para que serve" hint={`Uma frase simples. Aparece embaixo do nome. ${draft.purpose.length}/${PURPOSE_MAX}`}>
+                    <textarea
+                      rows={2}
+                      value={draft.purpose}
+                      placeholder={ROLE_PURPOSE[role._id] ?? 'Ex.: Cuida da equipe do turno da noite.'}
+                      disabled={!canEditRole}
+                      maxLength={PURPOSE_MAX}
+                      onChange={(e) => setDraft({ ...draft, purpose: e.target.value })}
+                    />
+                  </Field>
                   <Field label="Escopo">
                     <select value={draft.scope} disabled={role.protected || !canEditRole} onChange={(e) => setDraft({ ...draft, scope: e.target.value as Draft['scope'] })}>
                       <option value="Users">Global: vale em todo o chat</option>
@@ -293,6 +344,7 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
                       Duplicar
                     </button>
                   )}
+                  {compareMenu(true)}
                   {grant.canEditRoles && !role.protected && (
                     <Tooltip label={delLock ? lockText(delLock) : 'Excluir o papel'}>
                       <button className="btn small ghost danger" aria-disabled={!!delLock} onClick={() => !delLock && void remove()}>
@@ -304,26 +356,7 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
                 </div>
               </Section>
             </div>
-            <Section icon="rbac-areas" title="Resumo de acesso" hint="Quantas áreas de cada grupo este papel libera. Toque num grupo para abrir a aba dele.">
-              <div className="rbac-summary-groups">
-                {RBAC_GROUPS.filter((g) => g.id !== 'technical').map((g) => {
-                  const r = groupReach(g, [...draft.permissions]);
-                  return (
-                    <button key={g.id} type="button" className="rbac-summary-card" onClick={() => setTab(g.id as Tab)}>
-                      <span className="rbac-summary-head">
-                        <Icon name={groupIcon(g.id)} size={16} />
-                        {g.label}
-                      </span>
-                      <strong>
-                        {r.any}
-                        <span>/{r.total}</span>
-                      </strong>
-                      <span className="muted small">{r.any ? `${r.full} ${r.full === 1 ? 'completa' : 'completas'}` : 'sem acesso'}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </Section>
+            <PowerMap perms={draft.permissions} onGroup={(g) => (setGroup(g), setTab('perms'))} />
             {draft.scope === 'Users' && !role.root && (
               <Section
                 icon="rbac-delegation"
@@ -353,22 +386,20 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
             )}
           </div>
         )}
-        {(tab === 'chat' || tab === 'room' || tab === 'admin') && (
-          <div className="rbac-stack">
-            <GroupPanel group={groupOf(tab)} count={reachText(tab)} onGroup={(m) => setGroup(groupOf(tab), m)} {...groupProps} />
-            {tab === 'chat' && (showTechnical || [...draft.permissions].some((k) => KEY_AREA[k] === 'bots')) && (
-              <GroupPanel group={groupOf('technical')} count={reachText('technical')} onGroup={(m) => setGroup(groupOf('technical'), m)} {...groupProps} />
-            )}
-            {tab === 'chat' && (
-              <label className="rbac-tech-toggle">
-                <input type="checkbox" checked={showTechnical} onChange={(e) => setShowTechnical(e.target.checked)} />
-                Mostrar as permissões técnicas (bots e integrações)
-              </label>
-            )}
-          </div>
+        {tab === 'perms' && (
+          <PermissionsTab
+            role={role}
+            draft={draft}
+            initial={initial}
+            grant={grant}
+            editable={canEditPerms}
+            lockNotice={lock ? `Somente leitura. ${lockText(lock)}` : 'Você vê as permissões, mas não as altera: falta Alterar as permissões dos papéis.'}
+            group={group}
+            onGroup={setGroup}
+            onChange={(next) => setDraft({ ...draft, permissions: next })}
+          />
         )}
-        {tab === 'power' && <PowerMap perms={draft.permissions} />}
-        {tab === 'people' && <RolePeople role={role} />}
+        {tab === 'people' && (role.scope === 'Users' ? <RolePeople role={role} grant={grant} onChanged={onSaved} /> : <RoomRolePeople role={role} />)}
         {tab === 'history' && <RbacHistory entity={role._id} embedded onChanged={onSaved} />}
       </EditorShell>
       {review && <ReviewDialog role={role} isNew={false} initial={initial} draft={draft} grant={grant} saving={saving} onClose={() => setReview(false)} onConfirm={() => void save()} />}
@@ -376,302 +407,79 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
   );
 }
 
-// ---------- Aba de um grupo ----------
+// ---------- O que este papel libera ----------
 
-type AreaFilter = 'all' | 'on' | 'off';
-
-interface GroupProps {
-  draft: Draft;
-  initial: Draft;
-  keyLock: (k: string) => string | null;
-  levelBlocked: (a: RbacArea, i: number) => string | null;
-  onLevel: (a: RbacArea, i: number) => void;
-  onKey: (k: string, on: boolean) => void;
-  editable: boolean;
-}
-
-const areaKeys = (a: RbacArea) => [...a.levels.flatMap((l) => l.keys), ...a.extras];
-
-function GroupPanel({ group, count, onGroup, ...p }: GroupProps & { group: RbacGroup; count: string; onGroup: (m: 'none' | 'view' | 'max') => void }) {
-  const [q, setQ] = useState('');
-  const [filter, setFilter] = useState<AreaFilter>('all');
-  const term = q.trim().toLowerCase();
-  const list = group.areas.filter((a) => {
-    const on = areaKeys(a).some((k) => p.draft.permissions.has(k));
-    if (filter === 'on' && !on) return false;
-    if (filter === 'off' && on) return false;
-    if (!term) return true;
-    return [a.label, a.description, ...areaKeys(a).map(rbacLabel)].some((t) => t.toLowerCase().includes(term));
-  });
-  const hasView = group.areas.some((a) => a.levels.length);
-  return (
-    <Section
-      icon={groupIcon(group.id)}
-      title={group.label}
-      hint={group.description}
-      count={count}
-      flush
-      action={
-        p.editable && (
-          <Menu
-            label={`Todas as áreas de ${group.label}`}
-            trigger={
-              <button type="button" className="btn small ghost">
-                Todas as áreas
-                <Icon name="chevron-down" />
-              </button>
-            }
-          >
-            {(close) => (
-              <>
-                {hasView && (
-                  <button onClick={() => (close(), onGroup('view'))}>
-                    <Icon name="show" />
-                    Primeiro nível em todas
-                  </button>
-                )}
-                <button onClick={() => (close(), onGroup('max'))}>
-                  <Icon name="rbac-up" />
-                  Liberar tudo o que posso
-                </button>
-                <button onClick={() => (close(), onGroup('none'))}>
-                  <Icon name="rbac-down" />
-                  Sem acesso em todas
-                </button>
-              </>
-            )}
-          </Menu>
-        )
-      }
-    >
-      <div className="rbac-area-tools">
-        <label className="rbac-search small">
-          <Icon name="search" />
-          <input type="search" value={q} placeholder="Buscar nesta aba" aria-label="Buscar nesta aba" onChange={(e) => setQ(e.target.value)} />
-        </label>
-        <Chips<AreaFilter>
-          label="Mostrar"
-          value={filter}
-          onChange={setFilter}
-          items={[
-            { id: 'all', label: 'Todas' },
-            { id: 'on', label: 'Com acesso' },
-            { id: 'off', label: 'Sem acesso' },
-          ]}
-        />
-      </div>
-      <div className="rbac-areas">
-        {list.map((a) => (
-          <AreaRow key={a.id} area={a} {...p} />
-        ))}
-        {!list.length && <p className="muted small rbac-empty-areas">Nenhuma área com esse filtro.</p>}
-      </div>
-    </Section>
-  );
-}
-
-function AreaRow({ area, draft, initial, keyLock, levelBlocked, onLevel, onKey, editable }: GroupProps & { area: RbacArea }) {
-  const level = areaLevel(area, draft.permissions);
-  const [open, setOpen] = useState(level.kind === 'custom');
-  useEffect(() => {
-    if (level.kind === 'custom') setOpen(true);
-  }, [level.kind]);
-  const changed = areaKeys(area).some((k) => draft.permissions.has(k) !== initial.permissions.has(k));
-  const n = area.levels.flatMap((l) => l.keys).length;
-  return (
-    <div className={`rbac-area${changed ? ' changed' : ''}`}>
-      <div className="rbac-area-main">
-        <div className="rbac-area-text">
-          <span className="rbac-area-name">
-            {area.label}
-            {changed && <span className="rbac-changed-dot" title="Alterado" />}
-            {level.kind === 'custom' && <span className="pill warn tag">Personalizado</span>}
-          </span>
-          <span className="rbac-area-desc">{area.description}</span>
-        </div>
-        {area.levels.length > 0 && (
-          <LevelPicker
-            area={area}
-            current={level.kind === 'none' ? -1 : level.kind === 'level' ? level.index : null}
-            readOnly={!editable}
-            blocked={(i) => levelBlocked(area, i)}
-            onPick={(i) => onLevel(area, i)}
-          />
-        )}
-      </div>
-      {area.extras.length > 0 && (
-        <div className="rbac-keys">
-          {area.extras.map((k) => (
-            <KeyCheck key={k} k={k} draft={draft} initial={initial} keyLock={keyLock} onKey={onKey} />
-          ))}
-        </div>
-      )}
-      {n > 0 && (
-        <div className="rbac-detail">
-          <button type="button" className="rbac-detail-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
-            <Icon name="chevron-down" size={14} />
-            {n === 1 ? `${open ? 'Esconder' : 'Ver'} a permissão do nível` : `${open ? 'Esconder' : 'Ver'} as ${n} permissões dos níveis`}
-          </button>
-          {open && (
-            <div className="rbac-keys levels">
-              {area.levels.map((l) => (
-                <div key={l.label} className="rbac-level-keys">
-                  <span className="rbac-level-name">{l.label}</span>
-                  {l.keys.map((k) => (
-                    <KeyCheck key={k} k={k} draft={draft} initial={initial} keyLock={keyLock} onKey={onKey} />
-                  ))}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Seletor de nível: um radiogroup com uma parada de Tab; setas, Home e End mudam o nível pulando os travados. O travado
-// continua focável (aria-disabled), com cadeado e o motivo na dica. Sempre três colunas para as linhas alinharem.
-function LevelPicker({ area, current, readOnly, blocked, onPick }: { area: RbacArea; current: number | null; readOnly: boolean; blocked: (i: number) => string | null; onPick: (i: number) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const options = [{ label: 'Sem acesso', index: -1 }, ...area.levels.map((l, i) => ({ label: l.label, index: i }))];
-  const focusIndex = current ?? -1;
-  const lockOf = (i: number) => (readOnly ? null : blocked(i));
-  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (readOnly) return;
-    const pos = options.findIndex((o) => o.index === focusIndex);
-    const order =
-      e.key === 'ArrowRight' || e.key === 'ArrowDown'
-        ? options.slice(pos + 1)
-        : e.key === 'ArrowLeft' || e.key === 'ArrowUp'
-          ? options.slice(0, Math.max(pos, 0)).reverse()
-          : e.key === 'Home'
-            ? options
-            : e.key === 'End'
-              ? [...options].reverse()
-              : null;
-    if (!order) return;
-    e.preventDefault();
-    const next = order.find((o) => !lockOf(o.index));
-    if (!next) return;
-    onPick(next.index);
-    requestAnimationFrame(() => (ref.current?.querySelector(`[data-index="${next.index}"]`) as HTMLElement | null)?.focus());
-  };
-  return (
-    <div ref={ref} className={`rbac-level${readOnly ? ' readonly' : ''}`} role="radiogroup" aria-label={`Nível em ${area.label}`} aria-readonly={readOnly || undefined} onKeyDown={onKey}>
-      {options.map((o) => {
-        const lock = lockOf(o.index);
-        const on = current === o.index;
-        const btn = (
-          <button
-            type="button"
-            role="radio"
-            data-index={o.index}
-            aria-checked={on}
-            aria-disabled={readOnly || (!!lock && !on)}
-            tabIndex={o.index === focusIndex ? 0 : -1}
-            className={on ? 'on' : ''}
-            data-level={o.index < 0 ? 'none' : o.index === area.levels.length - 1 ? 'top' : 'mid'}
-            onClick={() => !on && !lock && !readOnly && onPick(o.index)}
-          >
-            {lock && !on && <Icon name="rbac-lock" size={12} />}
-            {o.label}
-          </button>
-        );
-        return lock && !on ? (
-          <Tooltip key={o.index} label={lock}>
-            {btn}
-          </Tooltip>
-        ) : (
-          <span key={o.index} className="rbac-level-slot">
-            {btn}
-          </span>
-        );
-      })}
-      {options.length < 3 && <span className="rbac-level-slot rbac-level-gap" aria-hidden="true" />}
-    </div>
-  );
-}
-
-function KeyCheck({ k, draft, initial, keyLock, onKey }: { k: string; draft: Draft; initial: Draft; keyLock: (k: string) => string | null; onKey: (k: string, on: boolean) => void }) {
-  const on = draft.permissions.has(k);
-  const lock = keyLock(k);
-  const changed = on !== initial.permissions.has(k);
-  const def = RBAC_KEYS[k];
-  return (
-    <label className={`rbac-key${lock ? ' locked' : ''}${changed ? ' changed' : ''}`} title={lock ?? undefined}>
-      <input type="checkbox" checked={on} disabled={!!lock} onChange={(e) => onKey(k, e.target.checked)} />
-      <span className="rbac-key-text">
-        <span className="rbac-key-label">
-          {def?.label ?? k}
-          {lock && <Icon name="rbac-lock" size={12} />}
-        </span>
-        {def?.description && <span className="rbac-key-desc">{def.description}</span>}
-      </span>
-    </label>
-  );
-}
-
-// ---------- Mapa de poder ----------
-
-function PowerMap({ perms }: { perms: Set<string> }) {
+function PowerMap({ perms, onGroup }: { perms: Set<string>; onGroup: (g: string) => void }) {
   const legacy = [...perms].filter((k) => !VISIBLE_KEYS.includes(k));
-  const technical = RBAC_GROUPS.find((g) => g.id === 'technical')!.areas.flatMap((a) => a.extras).filter((k) => perms.has(k));
+  const technical = [...perms].filter((k) => KEY_AREA[k] === 'bots');
+  const sensitive = [...perms].filter(isSensitive);
   return (
-    <div className="rbac-stack">
-      <Section icon="rbac-power" title="O que este papel libera" hint="Área por área, o nível e as capacidades ligadas. Áreas sem acesso ficam de fora.">
-        <ReachBar perms={[...perms]} />
-        <div className="rbac-power">
-          {RBAC_GROUPS.filter((g) => g.id !== 'technical').map((g) => {
-            const list = g.areas.filter((a) => areaKeys(a).some((k) => perms.has(k)));
-            return (
-              <div key={g.id} className="rbac-power-group">
-                <span className="rbac-group-label">
-                  <Icon name={groupIcon(g.id)} size={14} />
-                  {g.label}
-                </span>
-                {list.length ? (
-                  <ul>
-                    {list.map((a) => {
-                      const lv = areaLevel(a, perms);
-                      const extras = a.extras.filter((k) => perms.has(k));
-                      return (
-                        <li key={a.id}>
-                          <span className="rbac-power-area">{a.label}</span>
-                          {a.levels.length > 0 && (
-                            <span className={`pill tag${lv.kind === 'custom' ? ' warn' : lv.kind === 'level' && lv.index === a.levels.length - 1 ? ' accent' : ''}`}>{levelText(a, lv)}</span>
-                          )}
-                          {extras.length > 0 && <span className="muted small">{extras.map(rbacLabel).join(' · ')}</span>}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="muted small">Sem acesso.</p>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </Section>
-      <Section icon="rbac-technical" title="Capacidades avançadas" hint="Permissões de bots e integrações, e as antigas sem efeito que ficam guardadas.">
-        <p className="small">{technical.length ? technical.map(rbacLabel).join(' · ') : 'Nenhuma capacidade técnica.'}</p>
-        {legacy.length > 0 && (
-          <p className="muted small">
-            Também guarda {plural(legacy.length, 'permissão antiga', 'permissões antigas')} sem efeito no chat (herança do Rocket.Chat). Elas não aparecem nas abas e continuam como estão ao salvar.
-          </p>
-        )}
-      </Section>
-    </div>
+    <Section icon="rbac-power" title="O que este papel libera" hint="Área por área, o nível e as capacidades ligadas. Toque num grupo para abrir as permissões dele.">
+      <ReachBar perms={[...perms]} />
+      <div className="rbac-power">
+        {RBAC_GROUPS.filter((g) => g.id !== 'technical').map((g) => {
+          const list = g.areas.filter((a) => areaKeys(a).some((k) => perms.has(k)));
+          return (
+            <div key={g.id} className="rbac-power-group">
+              <button type="button" className="rbac-group-label link-btn" onClick={() => onGroup(g.id)}>
+                <Icon name={groupIcon(g.id)} size={14} />
+                {g.label}
+                <Icon name="next" size={12} />
+              </button>
+              {list.length ? (
+                <ul>
+                  {list.map((a) => {
+                    const lv = areaLevel(a, perms);
+                    const extras = a.extras.filter((k) => perms.has(k) && !isSensitive(k));
+                    const sens = areaKeys(a).filter((k) => perms.has(k) && isSensitive(k));
+                    return (
+                      <li key={a.id}>
+                        <span className="rbac-power-area">{a.label}</span>
+                        {a.levels.length > 0 && (
+                          <span className={`pill tag${lv.kind === 'custom' ? ' warn' : lv.kind === 'level' && lv.index === a.levels.length - 1 ? ' accent' : ''}`}>{levelText(a, lv)}</span>
+                        )}
+                        {extras.length > 0 && <span className="muted small">{extras.map(rbacLabel).join(' · ')}</span>}
+                        {sens.map((k) => (
+                          <SensitiveTag key={k} k={k} label />
+                        ))}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="muted small">Sem acesso.</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {sensitive.length > 0 && (
+        <p className="rbac-power-sensitive">
+          <Icon name="rbac-sensitive" size={14} />
+          {plural(sensitive.length, 'permissão sensível', 'permissões sensíveis')}
+        </p>
+      )}
+      {technical.length > 0 && <p className="muted small">Técnicas: {technical.map(rbacLabel).join(' · ')}</p>}
+      {legacy.length > 0 && (
+        <p className="muted small">
+          Também guarda {plural(legacy.length, 'permissão antiga', 'permissões antigas')} sem efeito no chat (herança do Rocket.Chat). Elas não aparecem nas abas e continuam como estão ao salvar.
+        </p>
+      )}
+    </Section>
   );
 }
 
 // ---------- Pessoas com o papel ----------
 
-function RolePeople({ role }: { role: RbacRole }) {
+function RolePeople({ role, grant, onChanged }: { role: RbacRole; grant: Grant; onChanged: () => void }) {
   const can = usePermission(['view-user-administration']);
+  const meId = useStore((s) => s.me?._id) ?? '';
   const navigate = useNavigate();
-  const { data, loading, error } = useAsync(() => (can ? api.get('roles.getUsersInRole', { role: role._id, count: 200 }) : Promise.resolve(null)), [role._id, can]);
+  const { data, loading, error, reload } = useAsync(() => (can ? api.get('roles.getUsersInRole', { role: role._id, count: 200 }) : Promise.resolve(null)), [role._id, can]);
+  const [picking, setPicking] = useState(false);
+  const [bulk, setBulk] = useState<{ mode: 'add' | 'remove'; userIds: string[] } | null>(null);
+  const canAssign = grant.canAssignRoles && !grant.roleLocks[role._id];
+  const done = () => (setBulk(null), reload(), onChanged());
   if (!can)
     return (
       <Section icon="admin-users" title="Pessoas">
@@ -679,31 +487,100 @@ function RolePeople({ role }: { role: RbacRole }) {
       </Section>
     );
   return (
-    <Section
-      icon="admin-users"
-      title="Pessoas com este papel"
-      count={data?.total ?? role.users}
-      hint={role.scope === 'Users' ? 'Para dar ou tirar o papel, abra a pessoa.' : 'Papel de sala: a lista mostra quem tem o papel em alguma sala.'}
-      flush
+    <>
+      <Section
+        icon="admin-users"
+        title="Pessoas com este papel"
+        count={data?.total ?? role.users}
+        hint={canAssign ? 'Dê o papel a mais pessoas ou tire de quem não precisa: antes de aplicar você vê quem muda.' : 'Para dar ou tirar o papel, peça a quem tem a permissão Dar e tirar papéis de pessoas.'}
+        action={
+          canAssign && (
+            <button type="button" className="btn small primary" onClick={() => setPicking(true)}>
+              <Icon name="add" />
+              Dar este papel a…
+            </button>
+          )
+        }
+        flush
+      >
+        {loading && !data ? (
+          <SkeletonTable rows={4} cols={2} />
+        ) : error ? (
+          <p className="muted small rbac-empty-areas">{error}</p>
+        ) : !data?.users.length ? (
+          <Empty icon="admin-users" title="Ninguém tem este papel" />
+        ) : (
+          <ul className="rbac-people">
+            {data.users.map((u: any) => {
+              const userLock = userLockOf(grant, meId, u);
+              return (
+                <li key={u._id} className="rbac-people-item">
+                  <button type="button" className="rbac-people-row" onClick={() => navigate(`/admin/users/edit/${u._id}`)}>
+                    <UserCell username={u.username} name={u.name} sub={u.active ? undefined : 'Desativado'} />
+                    <Icon name="next" />
+                  </button>
+                  {canAssign &&
+                    (userLock ? (
+                      <LockHint text={lockText(userLock)} />
+                    ) : (
+                      <button type="button" className="btn small ghost" onClick={() => setBulk({ mode: 'remove', userIds: [u._id] })}>
+                        Tirar
+                      </button>
+                    ))}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Section>
+      {picking && <GiveRole role={role} grant={grant} onClose={() => setPicking(false)} onPicked={(ids) => (setPicking(false), setBulk({ mode: 'add', userIds: ids }))} />}
+      {bulk && <BulkRolesDialog role={role._id} mode={bulk.mode} userIds={bulk.userIds} onClose={() => setBulk(null)} onDone={done} />}
+    </>
+  );
+}
+
+// Escolher a quem dar o papel; pessoas travadas aparecem desativadas com o motivo.
+function GiveRole({ role, grant, onClose, onPicked }: { role: RbacRole; grant: Grant; onClose: () => void; onPicked: (ids: string[]) => void }) {
+  const phone = useIsPhone();
+  const meId = useStore((s) => s.me?._id) ?? '';
+  const [picked, setPicked] = useState<PickedUser[]>([]);
+  return (
+    <Modal
+      size="sm"
+      variant={phone ? 'sheet' : undefined}
+      title={`Dar o papel ${roleLabel(role._id)} a…`}
+      description="Escolha as pessoas. Antes de aplicar, você vê quem recebe e quem fica de fora."
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancelar
+          </button>
+          <button className="btn primary" disabled={!picked.length} onClick={() => onPicked(picked.map((u) => u._id))}>
+            Revisar
+          </button>
+        </>
+      }
     >
-      {loading && !data ? (
-        <SkeletonTable rows={4} cols={2} />
-      ) : error ? (
-        <p className="muted small rbac-empty-areas">{error}</p>
-      ) : !data?.users.length ? (
-        <Empty icon="admin-users" title="Ninguém tem este papel" />
-      ) : (
-        <ul className="rbac-people">
-          {data.users.map((u: any) => (
-            <li key={u._id}>
-              <button type="button" className="rbac-people-row" onClick={() => navigate(`/admin/users/edit/${u._id}`)}>
-                <UserCell username={u.username} name={u.name} sub={u.active ? undefined : 'Desativado'} />
-                <Icon name="next" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <UserPicker
+        value={picked}
+        onChange={setPicked}
+        placeholder="Buscar pessoas"
+        itemDisabled={(u) => {
+          if (u.roles?.includes(role._id)) return 'Já tem este papel.';
+          const l = userLockOf(grant, meId, { _id: u._id, roles: u.roles });
+          return l ? lockText(l) : undefined;
+        }}
+      />
+    </Modal>
+  );
+}
+
+function RoomRolePeople({ role }: { role: RbacRole }) {
+  const can = usePermission(['view-user-administration', 'view-permissions', 'access-permissions', 'manage-roles']);
+  return (
+    <Section icon="rbac-room" title="Pessoas com este papel" count={role.users} hint="Papel de sala: vale só nas salas listadas. Para dar ou tirar, use o menu de membros da sala." flush>
+      {can ? <RoomRoles role={role._id} /> : <p className="muted small rbac-empty-areas">Ver quem tem o papel pede acesso à lista de usuários.</p>}
     </Section>
   );
 }

@@ -31,7 +31,10 @@ interface Row {
 }
 
 const SOURCE: Record<string, string> = { system: 'Automático', ldap: 'LDAP / AD', oauth: 'OAuth', saml: 'SAML', migration: 'Migração' };
-const FIELD: Record<string, string> = { description: 'Descrição', scope: 'Escopo', mandatory2fa: 'Exigir 2FA', restrictDirect: 'Restrito em conversas diretas' };
+const FIELD: Record<string, string> = { description: 'Descrição', purpose: 'Para que serve', scope: 'Escopo', mandatory2fa: 'Exigir 2FA', restrictDirect: 'Restrito em conversas diretas' };
+
+// Lote da matriz: só papéis, só alterações.
+const rolesOnly = (rows: Row[]) => rows.every((r) => r.entityType === 'role' && r.action === 'update');
 
 const show = (field: string, v: any) => {
   if (v === null || v === undefined || v === '') return '—';
@@ -196,10 +199,15 @@ export function RbacHistory({ onChanged, entity: fixed, embedded }: { onChanged:
               <li key={b.batch} className="rbac-event batch">
                 <div className="rbac-event-head">
                   <span className="rbac-event-icon">
-                    <Icon name="admin-users" size={14} />
+                    <Icon name={rolesOnly(b.rows) ? 'rbac-matrix' : 'admin-users'} size={14} />
                   </span>
                   <span>
-                    <strong>{headline(b.rows[0]).who}</strong> {b.rows[0].action === 'bulk' ? `alterou em lote os papéis de ${b.rows.length} pessoas` : `fez ${b.rows.length} alterações de uma vez`}
+                    <strong>{headline(b.rows[0]).who}</strong>{' '}
+                    {b.rows[0].action === 'bulk'
+                      ? `alterou em lote os papéis de ${b.rows.length} pessoas`
+                      : rolesOnly(b.rows)
+                        ? `alterou ${b.rows.length} papéis de uma vez`
+                        : `fez ${b.rows.length} alterações de uma vez`}
                   </span>
                   <time className="muted small">{formatDateTime(b.rows[0].createdAt)}</time>
                 </div>

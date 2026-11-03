@@ -1633,15 +1633,961 @@
   }
 }
 @media (max-width: 640px) {
-  .rbac-tabbar button > span {
-    display: none;
+  /* Quatro abas com rótulo cabem em 390px: ícone em cima, nome embaixo. */
+  .rbac-tabbar button {
+    flex-direction: column;
+    gap: 2px;
+    height: 54px;
+    padding: 0 var(--space-1);
+    font-size: var(--fs-11);
+    line-height: var(--lh-11);
   }
   .rbac-tabbar button > svg {
     width: 18px;
     height: 18px;
   }
-  .rbac-revert-btn > span {
+  .rbac-revert-btn > span,
+  .rbac-compare-btn > span {
     display: none;
+  }
+}
+
+/* ==========================================================================
+   Papéis e permissões v2: visões (Papéis, Matriz, Quem pode…?), marcas de sensível, aba Permissões com filtros,
+   modelos de papel, prévia de papéis em lote, papéis de sala, matriz e Comparar, Quem pode…?
+   ========================================================================== */
+
+/* ---------- Visões na faixa ---------- */
+.rbac-views {
+  flex: none;
+  display: flex;
+  min-width: 0;
+}
+.rbac-views .seg-nav {
+  flex-wrap: nowrap;
+}
+.rbac-views .seg-nav button {
+  white-space: nowrap;
+}
+
+/* ---------- Lista de papéis ---------- */
+.rbac-roles .rbac-purpose {
+  display: block;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rbac-access-cell {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+@media (max-width: 1279px) {
+  .rbac-roles .rbac-reach-num {
+    display: none;
+  }
+}
+
+/* ---------- Sensível ---------- */
+.rbac-tag-sensitive {
+  flex: none;
+}
+.rbac-tag-sensitive.compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 var(--space-1-5);
+  border-radius: var(--radius-full);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+svg.rbac-tag-sensitive {
+  color: var(--warn);
+}
+.rbac-tag-inert {
+  font-weight: var(--fw-regular);
+}
+
+/* Lista de papéis dentro de um menu (Comparar com…, Papéis na matriz). */
+.rbac-menu-scroll {
+  display: flex;
+  flex-direction: column;
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+}
+.rbac-menu-scroll .pill {
+  margin-left: auto;
+}
+
+/* ---------- Aba Permissões ---------- */
+.rbac-perm-tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  backdrop-filter: blur(10px);
+}
+@media (min-width: 761px) {
+  .rbac-perm-tools {
+    position: sticky;
+    top: 80px;
+    z-index: 2;
+  }
+}
+.rbac-perm-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+.rbac-perm-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-5);
+}
+.rbac-level-wrap {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 372px;
+  max-width: 100%;
+}
+.rbac-level-includes {
+  margin: 0;
+  padding: 0 var(--space-1);
+}
+.rbac-key.readonly {
+  cursor: default;
+}
+.rbac-key.readonly:hover {
+  background: none;
+}
+.rbac-key.match {
+  background: var(--accent-soft);
+}
+.rbac-key-label .pill {
+  margin-left: var(--space-1);
+}
+
+/* ---------- O que este papel libera ---------- */
+.rbac-power-group > .rbac-group-label.link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+.rbac-power li .rbac-tag-sensitive {
+  margin-left: var(--space-1);
+}
+.rbac-power-sensitive {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  margin: var(--space-4) 0 0;
+  color: var(--warn);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+}
+
+/* ---------- Pessoas do papel ---------- */
+.rbac-people-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-right: var(--space-4);
+}
+.rbac-people-item > .rbac-people-row {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- Revisão ---------- */
+.rbac-understood {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: 10px;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+}
+.rbac-review-role {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.rbac-review-role-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--fs-15);
+}
+.rbac-review-role-name .muted {
+  margin-left: auto;
+  font-weight: var(--fw-regular);
+}
+
+/* ---------- Papéis em lote ---------- */
+.rbac-bulk-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rbac-bulk-preview > li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--fs-14);
+}
+.rbac-bulk-preview > li > svg {
+  flex: none;
+  margin-top: 3px;
+}
+.rbac-bulk-preview > li.up {
+  font-weight: var(--fw-semibold);
+}
+.rbac-bulk-preview > li.up > svg {
+  color: var(--accent-text);
+}
+.rbac-bulk-preview > li.blocked > svg {
+  color: var(--fg-muted);
+}
+.rbac-bulk-preview ul {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+  color: var(--fg-2);
+  font-size: var(--fs-13);
+}
+
+/* ---------- Papéis de sala ---------- */
+.rbac-roomroles > .table {
+  border-radius: 0;
+  border-inline: 0;
+  border-bottom: 0;
+}
+.rbac-room-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  font-weight: var(--fw-medium);
+}
+.rbac-room-name svg {
+  color: var(--fg-muted);
+}
+.rbac-roomroles-roles {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.rbac-roomroles-lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-14);
+}
+.rbac-roomroles-lines li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.rbac-roomroles-lines svg {
+  color: var(--fg-muted);
+}
+.rbac-roomroles-empty {
+  margin: 0;
+}
+.rbac-roomroles .pager {
+  padding: var(--space-3) var(--space-4);
+}
+
+/* ---------- Novo papel: modelos ---------- */
+.rbac-templates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.rbac-template-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-2) var(--ease-out), background-color var(--dur-2) var(--ease-out);
+}
+.rbac-template-card:hover {
+  border-color: var(--border-hover);
+}
+.rbac-template-card.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.rbac-template-card:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.rbac-template-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+.rbac-template-name svg {
+  color: var(--accent-text);
+}
+.rbac-template-desc {
+  color: var(--fg-2);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.rbac-template-tags {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  margin-top: var(--space-1);
+}
+.rbac-create-plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 10px;
+  background: var(--bg-subtle);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.rbac-create-plan p {
+  margin: 0;
+}
+
+/* ---------- Matriz ---------- */
+.rbac-shell.matrix {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.rbac-shell.matrix > .rbac-strip {
+  position: static;
+}
+.rbac-shell.matrix > .rbac-notice {
+  margin: var(--space-3) var(--space-8) 0;
+}
+.rbac-matrix-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-8);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-canvas);
+}
+.rbac-matrix-toggles {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-left: auto;
+}
+.rbac-matrix-toggles .toggle-row,
+.rbac-matrix-toggles label {
+  white-space: nowrap;
+}
+.rbac-matrix-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.rbac-matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 100%;
+  font-size: var(--fs-13);
+}
+.rbac-matrix th,
+.rbac-matrix td {
+  padding: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-canvas);
+  font-weight: var(--fw-regular);
+  text-align: left;
+}
+.rbac-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  vertical-align: bottom;
+}
+.rbac-matrix .rbac-matrix-key {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 320px;
+  min-width: 260px;
+  max-width: 320px;
+  padding: var(--space-1-5) var(--space-3) var(--space-1-5) var(--space-8);
+  border-right: 1px solid var(--border);
+}
+.rbac-matrix thead .rbac-matrix-key {
+  z-index: 4;
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.rbac-matrix-role {
+  min-width: 112px;
+  max-width: 150px;
+  text-align: center !important;
+}
+.rbac-matrix-role-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+.rbac-matrix-role-btn:hover {
+  background: var(--bg-hover);
+  color: var(--accent-text);
+}
+.rbac-matrix-role-btn svg {
+  flex: none;
+  color: var(--fg-muted);
+}
+.rbac-matrix-role-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rbac-matrix-role-sub {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  margin-top: 2px;
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-regular);
+  white-space: nowrap;
+}
+.rbac-matrix-group {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}
+.rbac-matrix-group-row th {
+  padding: var(--space-3) var(--space-3) var(--space-1-5) var(--space-8);
+  background: var(--bg-canvas);
+  color: var(--accent-text);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.rbac-matrix-area th,
+.rbac-matrix-area td {
+  background: var(--bg-subtle);
+}
+.rbac-matrix-area th {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  padding: var(--space-1-5) var(--space-3) var(--space-1-5) var(--space-8);
+  border-right: 1px solid var(--border);
+  font-weight: var(--fw-semibold);
+}
+.rbac-matrix-level {
+  padding: var(--space-1) var(--space-2) !important;
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+  text-align: center !important;
+  white-space: nowrap;
+}
+.rbac-matrix-key-label {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+}
+.rbac-matrix-info {
+  display: inline-flex;
+  color: var(--fg-muted);
+  cursor: help;
+}
+.rbac-matrix-cell {
+  text-align: center !important;
+  vertical-align: middle;
+}
+.rbac-matrix-row:hover th,
+.rbac-matrix-row:hover td {
+  background: var(--bg-hover);
+}
+.rbac-cell {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin: 2px 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--accent);
+  cursor: pointer;
+  transition: background-color var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out);
+}
+.rbac-cell:hover {
+  border-color: var(--border-hover);
+}
+.rbac-cell:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.rbac-cell[data-state='on'] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.rbac-cell[data-state='inert'] {
+  border-style: dashed;
+  background: transparent;
+  cursor: default;
+}
+.rbac-cell-dash {
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--fg-muted);
+}
+.rbac-cell[data-state='locked'] {
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+  cursor: not-allowed;
+}
+.rbac-cell[data-state='locked'][data-on] .rbac-cell-lock {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+}
+.rbac-cell.changed {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.rbac-cell.changed::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Barra de salvar: embaixo da matriz (desktop) ou presa no fim da tela, acima da barra de abas (celular). */
+.rbac-savebar {
+  --ring-offset: var(--bg-raised);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-8);
+  border-top: 1px solid var(--border);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+}
+.rbac-savebar-count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  margin-right: auto;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+.rbac-savebar-count i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.rbac-shell.rbac-compare > .rbac-savebar {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+}
+
+/* ---------- Comparar (celular) ---------- */
+.rbac-shell.rbac-compare > .rbac-matrix-tools {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: var(--space-2) var(--space-4);
+  scrollbar-width: none;
+}
+.rbac-shell.rbac-compare > .rbac-matrix-tools .rbac-chips {
+  flex-wrap: nowrap;
+}
+.rbac-shell.rbac-compare > .rbac-matrix-tools .rbac-chips button {
+  white-space: nowrap;
+}
+.rbac-shell.rbac-compare > .rbac-matrix-tools .rbac-matrix-toggles {
+  margin-left: 0;
+}
+.rbac-shell.rbac-compare > .rbac-notice {
+  margin: var(--space-3) var(--space-4) 0;
+}
+.rbac-compare-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.rbac-compare-picks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.rbac-compare-pick select {
+  width: 100%;
+}
+.rbac-compare-group h2 {
+  margin: 0 0 var(--space-2);
+  color: var(--accent-text);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.rbac-compare-area {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.rbac-compare-area h3 {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+.rbac-compare-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+}
+.rbac-compare-card summary {
+  cursor: pointer;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+}
+.rbac-compare-card details p {
+  margin: var(--space-1) 0 0;
+}
+.rbac-compare-cells {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.rbac-compare-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-left: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+}
+.rbac-compare-role {
+  overflow: hidden;
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rbac-compare-cell .rbac-cell {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+}
+
+/* ---------- Quem pode…? ---------- */
+.rbac-who-search {
+  position: relative;
+  flex: 1 1 320px;
+  max-width: 480px;
+}
+.rbac-who-search .rbac-search {
+  max-width: none;
+}
+.rbac-who-options {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: var(--z-popover);
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-3);
+}
+.rbac-who-options-group {
+  display: block;
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  color: var(--accent-text);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.rbac-who-options button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rbac-who-options button.active {
+  background: var(--bg-hover);
+}
+.rbac-who-option-label {
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+}
+.rbac-who-option-desc {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rbac-who-start {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 820px;
+}
+.rbac-who-start > p {
+  margin: 0;
+}
+.rbac-who-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.rbac-who-shortcuts .chip {
+  height: auto;
+  min-height: 32px;
+  padding-block: var(--space-1);
+  white-space: normal;
+  text-align: left;
+}
+.rbac-who {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.rbac-who-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.rbac-who-main > .callout {
+  margin: 0;
+}
+.rbac-who-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-surface);
+}
+.rbac-who-card h2 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--fs-18);
+  line-height: var(--lh-18);
+}
+.rbac-who-card p {
+  margin: 0;
+  color: var(--fg-2);
+}
+.rbac-who-card-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-1);
+}
+.rbac-who-card-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+.rbac-who-roles {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rbac-who-roles li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+}
+.rbac-who-roles li:first-child {
+  border-top: 0;
+}
+.rbac-who-role-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.rbac-who-role-text .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rbac-who-inert {
+  margin: 0;
+}
+.rbac-who .rbac-area-tools {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1100px) {
+  .rbac-who {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 900px) {
+  .rbac-matrix-tools,
+  .rbac-savebar {
+    padding-inline: var(--space-6);
+  }
+  .rbac-matrix .rbac-matrix-key,
+  .rbac-matrix-area th,
+  .rbac-matrix-group-row th {
+    padding-left: var(--space-6);
+  }
+}
+@media (max-width: 760px) {
+  .rbac-views {
+    flex: 1 1 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .rbac-who-search {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .rbac-who-options {
+    position: static;
+    width: 100%;
+    margin-top: var(--space-1-5);
+    box-shadow: none;
+  }
+  .rbac-who-card {
+    padding: var(--space-4);
+  }
+  .rbac-who-card-actions {
+    margin-left: 0;
+  }
+  .rbac-who-roles li {
+    flex-wrap: wrap;
+    padding-inline: var(--space-4);
+  }
+  .rbac-perm-tools {
+    padding: var(--space-3);
+  }
+  .rbac-perm-tools .rbac-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .rbac-perm-tools .rbac-chips button {
+    flex: none;
+    white-space: nowrap;
+  }
+  .rbac-perm-filters .rbac-search {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .rbac-level-wrap {
+    width: 100%;
+  }
+  .rbac-people-item {
+    padding-right: var(--space-3);
+  }
+  .rbac-perm-tools .rbac-chips button,
+  .rbac-matrix-tools .rbac-chips button {
+    min-height: 44px;
   }
 }
 

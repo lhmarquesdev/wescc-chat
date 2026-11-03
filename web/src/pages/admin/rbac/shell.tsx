@@ -3,27 +3,57 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon, type IconName } from '../../../components/Icon';
-import { Tooltip } from '../../../components/ui';
+import { Segmented, Tooltip } from '../../../components/ui';
 
 const nf = new Intl.NumberFormat('pt-BR');
 
 // ---------- Lista ----------
 
+// As três visões de Papéis e permissões. A matriz com alterações pergunta antes de sair (guard).
+export type RbacView = 'roles' | 'matrix' | 'who';
+const VIEW_PATH: Record<RbacView, string> = { roles: '/admin/permissions', matrix: '/admin/permissions/matrix', who: '/admin/permissions/who' };
+
+export function RbacViews({ value, guard }: { value: RbacView; guard?: () => Promise<boolean> | boolean }) {
+  const navigate = useNavigate();
+  const go = async (v: RbacView) => {
+    if (v === value || (guard && !(await guard()))) return;
+    navigate(VIEW_PATH[v]);
+  };
+  return (
+    <div className="rbac-views">
+      <Segmented<RbacView>
+        label="Visão"
+        value={value}
+        onChange={(v) => void go(v)}
+        items={[
+          { id: 'roles', label: 'Papéis', icon: 'admin-permissions' },
+          { id: 'matrix', label: 'Matriz', icon: 'rbac-matrix' },
+          { id: 'who', label: 'Quem pode…?', icon: 'rbac-who' },
+        ]}
+      />
+    </div>
+  );
+}
+
 export function ListStrip({
   eyebrow,
   title,
+  views,
   search,
   onSearch,
   placeholder,
   count,
+  countUnit = ['registro', 'registros'],
   children,
 }: {
   eyebrow: string;
   title: string;
+  views?: ReactNode;
   search?: string;
   onSearch?: (v: string) => void;
   placeholder?: string;
   count?: number;
+  countUnit?: [string, string];
   children?: ReactNode;
 }) {
   return (
@@ -32,6 +62,7 @@ export function ListStrip({
         <span className="rbac-eyebrow">{eyebrow}</span>
         <h1>{title}</h1>
       </div>
+      {views}
       {onSearch && (
         <label className="rbac-search">
           <Icon name="search" />
@@ -46,7 +77,7 @@ export function ListStrip({
       {count !== undefined && (
         <span className="rbac-count">
           <i aria-hidden="true" />
-          {nf.format(count)} {count === 1 ? 'registro' : 'registros'}
+          {nf.format(count)} {count === 1 ? countUnit[0] : countUnit[1]}
         </span>
       )}
       <div className="rbac-strip-actions">{children}</div>
@@ -54,13 +85,13 @@ export function ListStrip({
   );
 }
 
-export function Chips<T extends string>({ value, onChange, items, label }: { value: T; onChange: (v: T) => void; items: { id: T; label: string; count?: number }[]; label: string }) {
+export function Chips<T extends string>({ value, onChange, items, label }: { value: T; onChange: (v: T) => void; items: { id: T; label: string; count?: number | string }[]; label: string }) {
   return (
     <div className="rbac-chips" role="radiogroup" aria-label={label}>
       {items.map((i) => (
         <button key={i.id} type="button" role="radio" aria-checked={value === i.id} className={value === i.id ? 'on' : ''} onClick={() => onChange(i.id)}>
           {i.label}
-          {i.count !== undefined && <span className="rbac-chip-count">{nf.format(i.count)}</span>}
+          {i.count !== undefined && <span className="rbac-chip-count">{typeof i.count === 'number' ? nf.format(i.count) : i.count}</span>}
         </button>
       ))}
     </div>
@@ -90,6 +121,7 @@ export function EditorShell<T extends string>({
   onRevert,
   onSave,
   saveLabel = 'Salvar',
+  extraActions,
   notices,
   tabs,
   active,
@@ -110,6 +142,8 @@ export function EditorShell<T extends string>({
   onRevert?: () => void;
   onSave?: () => void;
   saveLabel?: string;
+  // Botões antes de Reverter e Salvar (Comparar com…).
+  extraActions?: ReactNode;
   notices?: ReactNode;
   tabs: EditorTab<T>[];
   active: T;
@@ -154,6 +188,7 @@ export function EditorShell<T extends string>({
           </div>
         </div>
         <div className="rbac-editor-actions">
+          {extraActions}
           {dirty && (
             <span className="rbac-dirty" role="status">
               <i aria-hidden="true" />
