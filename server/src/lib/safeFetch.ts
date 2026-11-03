@@ -113,7 +113,7 @@ function proxyInfo(): ProxyInfo | null {
   try {
     raw = readSecret('INTEGRATIONS_PROXY');
   } catch (e) {
-    // O texto chega a quem gerencia o Jira ou o Teams (teste da conexão, alertas): o caminho e o erro do sistema
+    // O texto chega a quem gerencia o Jira (teste da conexão, alertas): o caminho e o erro do sistema
     // vão só para o log do servidor, uma vez por problema.
     const detail = (e as Error).message;
     if (detail !== proxyFileLogged) {
@@ -208,7 +208,7 @@ function networkError(e: any): SafeFetchError {
   if (e instanceof SafeFetchError) return e;
   const code = String(e?.code ?? '');
   if (code === 'EINTERNAL') return fail('error-url-internal');
-  if (code === 'ETESTVENDOR') return fail('error-network', 'Em teste, o chat não chama o Jira nem a Microsoft de verdade: aponte as URLs base para um servidor falso.');
+  if (code === 'ETESTVENDOR') return fail('error-network', 'Em teste, o chat não chama o Jira de verdade: aponte as URLs base para um servidor falso.');
   if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'EAI_NONAME') return fail('error-network', 'Servidor não encontrado.');
   if (code === 'ECONNREFUSED') return fail('error-network', 'O servidor recusou a conexão.');
   if (/CERT|SSL|TLS|UNABLE_TO_VERIFY|SELF_SIGNED|ERR_TLS/.test(code)) return fail('error-tls');

@@ -17,8 +17,6 @@ import { StickerView } from './stickers/StickerView';
 import { Avatar, Empty, Field, GroupAvatar, Menu, Segmented, SearchInput, SkeletonList, Toggle, UserAvatar, confirmDialog, useAsync } from './ui';
 // Chamadas em grupo: "Em chamada" ao lado da presença.
 import { InCallBadge } from './call/LiveIndicators';
-// Integrações (Jira/Teams): pílula "Teams" das mensagens copiadas do Teams, como na conversa.
-import { BridgeBadge } from './integrations/BridgeBadge';
 // Permissões do canal: quem fala e o que cada pessoa pode fazer nele.
 import { RoomAccessPanel } from './RoomAccessPanel';
 
@@ -143,14 +141,14 @@ function resultBody(m: Message) {
   return renderMarkdown(m.msg, { me: useStore.getState().me?.username, mentions: m.mentions });
 }
 
-// Autor e hora de um resultado como no cabeçalho da mensagem: o alias (webhooks, cópias do Teams) no lugar do robô, a
-// imagem própria da mensagem e a pílula "Teams" ou "Bot".
+// Autor e hora de um resultado como no cabeçalho da mensagem: o alias (webhooks) no lugar do robô, a imagem própria
+// da mensagem e a pílula "Bot".
 function ResultHead({ m }: { m: Message }) {
   return (
     <div className="result-head">
       {m.avatar ? <img className="avatar" src={m.avatar} width={20} height={20} style={{ width: 20, height: 20 }} alt="" /> : <Avatar username={m.u.username} size={20} />}
       <strong title={`@${m.u.username}`}>{authorName(m)}</strong>
-      {m.bridge ? <BridgeBadge /> : m.alias && <span className="pill msg-bot">Bot</span>}
+      {m.alias && <span className="pill msg-bot">Bot</span>}
       <time className="muted" dateTime={m.ts} title={formatDateTime(m.ts)}>
         {formatWhen(m.ts)}
       </time>

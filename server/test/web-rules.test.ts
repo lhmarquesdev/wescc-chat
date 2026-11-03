@@ -7,10 +7,10 @@ import { authorName, continuesGroup, editableKind, lastOwnEditable } from '../..
 import { ADMIN_MENU_PERMS, ADMIN_SECTIONS, SETTINGS_GROUP, settingsPath } from '../../web/src/pages/admin/sections';
 
 // Regras puras do chat web que mais de uma tela usa (seta para cima, agrupamento, nome do autor, menu da
-// Administração): os casos que já divergiram entre as telas depois de juntar figurinhas, chamadas e Jira/Teams.
+// Administração): os casos que já divergiram entre as telas depois de juntar figurinhas, chamadas e Jira.
 
 const ME = { _id: 'u-ana', username: 'ana.souza', name: 'Ana Souza' };
-const BOT = { _id: 'u-teams', username: 'msteams.bot', name: 'Microsoft Teams' };
+const BOT = { _id: 'u-hook', username: 'webhook.bot', name: 'Webhook' };
 let n = 0;
 // Hora local (o agrupamento compara o dia do calendário de quem lê).
 const at = (h: number, min: number, day = 15) => new Date(2026, 9, day, h, min).toISOString();
@@ -48,23 +48,23 @@ describe('seta para cima no compositor (lastOwnEditable)', () => {
 
   it('pula mensagens de sistema e de outras pessoas, e respeita Message_AllowEditing', () => {
     const text = msg();
-    const list = [text, msg({ t: 'rm' }), msg({ t: 'uj' }), msg({ u: BOT, alias: 'Bruno Lima (Teams)' })];
+    const list = [text, msg({ t: 'rm' }), msg({ t: 'uj' }), msg({ u: BOT, alias: 'Bruno Lima (Webhook)' })];
     expect(lastOwnEditable(list, ME._id, true)?._id).toBe(text._id);
     expect(lastOwnEditable(list, ME._id, false)).toBeUndefined();
   });
 });
 
 describe('agrupamento de mensagens seguidas (continuesGroup)', () => {
-  const ana = (h: number, min: number, extra: Partial<Message> = {}) => msg({ u: BOT, alias: 'Ana Souza (Teams)', ts: at(h, min), ...extra });
-  const bruno = (h: number, min: number) => msg({ u: BOT, alias: 'Bruno Lima (Teams)', ts: at(h, min) });
+  const ana = (h: number, min: number, extra: Partial<Message> = {}) => msg({ u: BOT, alias: 'Ana Souza (Webhook)', ts: at(h, min), ...extra });
+  const bruno = (h: number, min: number) => msg({ u: BOT, alias: 'Bruno Lima (Webhook)', ts: at(h, min) });
 
-  it('respostas do Teams de pessoas diferentes (mesmo robô, alias diferente) não se agrupam', () => {
+  it('mensagens de webhook com apelidos diferentes (mesmo robô, alias diferente) não se agrupam', () => {
     const replies = [ana(10, 0), bruno(10, 1), ana(10, 2)];
     expect(continuesGroup(replies[0], replies[1], 300_000)).toBe(false);
     expect(continuesGroup(replies[1], replies[2], 300_000)).toBe(false);
   });
 
-  it('a mesma pessoa do Teams dentro do intervalo se agrupa; fora dele, não', () => {
+  it('o mesmo apelido dentro do intervalo se agrupa; fora dele, não', () => {
     expect(continuesGroup(ana(10, 0), ana(10, 4), 300_000)).toBe(true);
     expect(continuesGroup(ana(10, 0), ana(10, 6), 300_000)).toBe(false);
   });
@@ -85,8 +85,8 @@ describe('agrupamento de mensagens seguidas (continuesGroup)', () => {
 });
 
 describe('nome do autor nos painéis (authorName)', () => {
-  it('a cópia do Teams mostra a pessoa do alias, não o robô', () => {
-    expect(authorName(msg({ u: BOT, alias: 'Ana Souza (Teams)' }))).toBe('Ana Souza (Teams)');
+  it('a mensagem com apelido mostra o alias, não o robô', () => {
+    expect(authorName(msg({ u: BOT, alias: 'Ana Souza (Webhook)' }))).toBe('Ana Souza (Webhook)');
     expect(authorName(msg())).toBe('Ana Souza');
     expect(authorName(msg({ u: { _id: 'u2', username: 'bruno.lima' } }))).toBe('bruno.lima');
   });
@@ -95,16 +95,16 @@ describe('nome do autor nos painéis (authorName)', () => {
 describe('item "Administração" do menu do usuário', () => {
   const known = new Set(DEFAULT_PERMISSIONS.map(([id]) => id));
 
-  it('quem abre qualquer seção vê o item (chamadas, Jira, Teams e figurinhas inclusive)', () => {
+  it('quem abre qualquer seção vê o item (chamadas, Jira e figurinhas inclusive)', () => {
     for (const s of ADMIN_SECTIONS) for (const p of s.perm) expect(ADMIN_MENU_PERMS, `${s.id}: ${p}`).toContain(p);
-    for (const p of ['manage-calls', 'manage-jira', 'manage-msteams', 'manage-integrations', 'manage-own-integrations', 'manage-sticker-packs']) expect(ADMIN_MENU_PERMS).toContain(p);
+    for (const p of ['manage-calls', 'manage-jira', 'manage-integrations', 'manage-own-integrations', 'manage-sticker-packs']) expect(ADMIN_MENU_PERMS).toContain(p);
   });
 
-  it('um papel só com manage-calls ou só com manage-jira + manage-msteams cai na seção certa', () => {
+  it('um papel só com manage-calls ou só com manage-jira cai na seção certa', () => {
     const first = (perms: string[]) => ADMIN_SECTIONS.find((s) => s.perm.some((p) => perms.includes(p)))?.id;
     expect(ADMIN_MENU_PERMS.some((p) => p === 'manage-calls')).toBe(true);
     expect(first(['manage-calls'])).toBe('calls');
-    expect(first(['manage-jira', 'manage-msteams'])).toBe('integrations');
+    expect(first(['manage-jira'])).toBe('integrations');
   });
 
   it('cada permissão das seções existe no servidor (um id errado esconderia a seção de todo mundo)', () => {

@@ -1,5 +1,5 @@
 import type { Attachment, MessageFile, UserRef } from '@shared/index';
-import type { MessageBridge, MessageJira, MessageMeeting } from '@shared/integrations';
+import type { MessageJira, MessageMeeting } from '@shared/integrations';
 import { messagePreviewText, stickerPreviewText, type MessageSticker } from '@shared/stickers';
 import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
@@ -96,10 +96,9 @@ export interface SendInput {
   avatar?: string;
   customFields?: Record<string, unknown>;
   ackRequired?: boolean; // aviso que pede "Ciente"
-  // Integrações (Jira/Teams): só valem com opts.integration (código do servidor); chat.sendMessage nunca os repassa.
+  // Integrações (Jira) e reuniões da agenda: só valem com opts.integration (código do servidor); chat.sendMessage nunca os repassa.
   jira?: MessageJira;
   meeting?: MessageMeeting;
-  bridge?: MessageBridge;
   mentionsAllowed?: string[]; // usernames que podem virar menção numa mensagem de integração (só o responsável da issue)
   sticker?: MessageSticker; // figurinha (só chat.sendSticker preenche, com opts.sticker)
 }
@@ -111,7 +110,7 @@ export async function canPostInRoom(ctx: Ctx, room: any, opts: WriteOpts = {}) {
 }
 
 // ignoreReadOnly: só o aviso de transparência dos robôs das integrações (texto fixo do servidor), que precisa sair
-// também num canal de avisos ou numa sala somente leitura em que o robô só lê (Sala → Teams).
+// também num canal de avisos ou numa sala somente leitura em que o robô só lê.
 interface WriteOpts {
   ignoreReadOnly?: boolean;
 }
@@ -151,7 +150,7 @@ function quotedMessageId(link: string) {
   return /[?&]msg=([A-Za-z0-9]{10,24})/.exec(link)?.[1] ?? /\/msg\/([A-Za-z0-9]{10,24})/.exec(link)?.[1] ?? null;
 }
 
-// Mensagem com apelido (ponte do Teams, webhooks): author_name continua o usuário que publicou (avatar e perfil), e o
+// Mensagem com apelido (webhooks): author_name continua o usuário que publicou (avatar e perfil), e o
 // nome que o stream mostra vai em author_alias, para a citação e a fixação não atribuírem o texto ao robô.
 const aliasOf = (m: any): { author_alias?: string } => (m.alias ? { author_alias: truncate(String(m.alias), 200) } : {});
 
@@ -248,7 +247,7 @@ export async function sendMessage(
 
   msg = filterBadWords(msg);
   let { mentions, channels } = await parseMentions(msg, room);
-  // Integrações (Jira/Teams): texto de fora não menciona ninguém; só o responsável escolhido pelo servidor. Nunca @all, @here, times ou #sala.
+  // Integrações (Jira): texto de fora não menciona ninguém; só o responsável escolhido pelo servidor. Nunca @all, @here, times ou #sala.
   if (opts.integration) {
     const allowed = new Set((input.mentionsAllowed ?? []).map((u) => u.toLowerCase()));
     mentions = mentions.filter((m: any) => m._id !== 'all' && m._id !== 'here' && m.type !== 'team' && allowed.has(String(m.username).toLowerCase()));
@@ -268,11 +267,10 @@ export async function sendMessage(
   const extra: Record<string, unknown> = {};
   if (input.tshow && tmid) extra.tshow = true;
   if (input.customFields) extra.customFields = input.customFields;
-  // Integrações (Jira/Teams)
+  // Integrações (Jira)
   if (opts.integration) {
     if (input.jira) extra.jira = input.jira;
     if (input.meeting) extra.meeting = input.meeting;
-    if (input.bridge) extra.bridge = input.bridge;
   }
   if (sticker) extra.sticker = sticker;
   const row = await one(
@@ -450,7 +448,7 @@ export async function removeMessageRow(m: any) {
     // Raiz de thread com respostas: mantém o lugar como "mensagem removida", sem o pedido de "Ciente" nem as confirmações.
     const row = await one(
       `UPDATE messages SET msg = '', t = 'rm', attachments = '[]', files = '[]', reactions = '{}', ack_required = false, ack_count = 0,
-         -- Integrações (Jira/Teams): mensagem removida não guarda cartão
+         -- Integrações (Jira): mensagem removida não guarda cartão
          extra = extra - 'sticker' - 'jira' - 'meeting' - 'bridge', sticker_file_id = NULL, updated_at = now()
        WHERE id = $1 RETURNING *`,
       [m.id],
@@ -479,36 +477,14 @@ export async function removeMessageRow(m: any) {
   }
 }
 
-// Integrações (Jira/Teams): grava ou remove uma chave de extra sem marcar a mensagem como editada (prévias, cartões).
-export async function setMessageExtra(msgId: string, key: 'jira' | 'meeting' | 'bridge' | 'jiraNoPreview', value: unknown) {
+// Integrações (Jira) e reuniões: grava ou remove uma chave de extra sem marcar a mensagem como editada (prévias, cartões).
+export async function setMessageExtra(msgId: string, key: 'jira' | 'meeting' | 'jiraNoPreview', value: unknown) {
   const row =
     value === null || value === undefined
       ? await one(`UPDATE messages SET extra = extra - $2, updated_at = now() WHERE id = $1 RETURNING *`, [msgId, key])
       : await one(`UPDATE messages SET extra = jsonb_set(extra, ARRAY[$2::text], $3::jsonb), updated_at = now() WHERE id = $1 RETURNING *`, [msgId, key, JSON.stringify(value)]);
   if (row) bus.publish({ room: row.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
   return row;
-}
-
-// Integrações (Jira/Teams): edição espelhada de outro sistema (Teams). Sem as regras de tempo de edição, sem menções.
-export async function replaceMessageText(msgId: string, text: string, editor: { id: string; username: string }, extra: Record<string, unknown> = {}) {
-  const m = await getMessageRow(msgId);
-  if (!m || m.t) return null;
-  const msg = filterBadWords(text.trim()).slice(0, getSetting<number>('Message_MaxAllowedSize'));
-  if (getSetting('Message_KeepHistory')) {
-    await query('INSERT INTO message_history (message_id, room_id, msg, edited_by) VALUES ($1,$2,$3,$4)', [m.id, m.room_id, m.msg, editor.id]);
-  }
-  const row = await one(
-    `UPDATE messages SET msg = $2, mentions = '[]', channels = '[]', extra = extra || $4::jsonb, edited_at = now(), edited_by = $3, updated_at = now() WHERE id = $1 RETURNING *`,
-    [m.id, msg, JSON.stringify({ _id: editor.id, username: editor.username }), JSON.stringify(extra)],
-  );
-  const room = await getRoom(m.room_id);
-  if (room?.last_message?._id === m.id) {
-    await query(`UPDATE rooms SET last_message = jsonb_set(last_message, '{msg}', to_jsonb($2::text)) WHERE id = $1`, [room.id, truncate(msg, 200)]);
-  }
-  const message = withExtra(row);
-  bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message });
-  emit('message.updated', { room, message });
-  return message;
 }
 
 // ---------- Reações, fixar, favoritar ----------

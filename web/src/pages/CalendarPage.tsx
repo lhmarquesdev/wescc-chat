@@ -1,8 +1,7 @@
-// Agenda: mês, semana e lista, com os eventos do chat, os convites e o que vem do Google Agenda e do Outlook.
+// Agenda: mês, semana e lista, com os eventos do chat e os convites.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { CalendarEvent } from '@shared/calendar';
-import { PROVIDER_LABEL } from '@shared/calendar';
 import {
   addDays,
   calendarApi,
@@ -25,7 +24,6 @@ import {
 import { usePermission, useStore } from '../lib/store';
 import { EventDetails } from '../components/calendar/EventDetails';
 import { EventEditor, type EditorStart } from '../components/calendar/EventEditor';
-import { SyncPanel, useCalendarAccounts } from '../components/calendar/SyncPanel';
 import { Icon } from '../components/Icon';
 import { useIsPhone } from '../components/overlay';
 import { Empty, Segmented, Skeleton } from '../components/ui';
@@ -45,22 +43,10 @@ function readView(phone: boolean): View {
   return phone ? 'list' : 'week';
 }
 
-const MOTIVO: Record<string, string> = {
-  negado: 'o acesso não foi autorizado',
-  token: 'o fornecedor não liberou o acesso',
-  rede: 'o fornecedor não respondeu',
-  config: 'a configuração do administrador está incompleta',
-  estado: 'o link de conexão venceu; tente de novo',
-};
-
 function eventClass(e: CalendarEvent) {
-  return ['cal-ev', e.source !== 'chat' && `src-${e.source}`, e.meeting && 'meeting', e.myResponse === 'pending' && 'pending', e.myResponse === 'declined' && 'declined', e.myResponse === 'tentative' && 'tentative']
+  return ['cal-ev', e.meeting && 'meeting', e.myResponse === 'pending' && 'pending', e.myResponse === 'declined' && 'declined', e.myResponse === 'tentative' && 'tentative']
     .filter(Boolean)
     .join(' ');
-}
-
-function sourceTitle(e: CalendarEvent) {
-  return e.source === 'chat' ? '' : ` · ${PROVIDER_LABEL[e.source]}`;
 }
 
 export function CalendarPage() {
@@ -73,7 +59,6 @@ export function CalendarPage() {
   const [cursor, setCursor] = useState(() => startOfDay(new Date()));
   const [editor, setEditor] = useState<EditorStart | null>(null);
   const [open, setOpen] = useState<CalendarEvent | null>(null);
-  const { providers, setProviders } = useCalendarAccounts();
 
   const setView = (v: View) => {
     setViewState(v);
@@ -97,19 +82,15 @@ export function CalendarPage() {
   }, [view, cursor]);
   const { events, error, reload } = useCalendarEvents(span.from, span.to);
 
-  // ?evento=<id> (push, convite) abre o evento; ?integracao=… volta do Google/Microsoft.
+  // ?evento=<id> (push, convite) abre o evento.
   const handled = useRef<string | null>(null);
   useEffect(() => {
     if (handled.current === location.key) return;
     handled.current = location.key;
     const q = new URLSearchParams(location.search);
     const id = q.get('evento');
-    const r = q.get('integracao');
-    const p = q.get('agenda');
     if (id) void calendarApi.get(id).then(setOpen).catch(() => toast('Esse evento não existe mais ou não é seu.', 'warning'));
-    if (r === 'agenda-ok') toast(`${p === 'microsoft' ? 'Outlook' : 'Google Agenda'} conectado. A primeira sincronização já começou.`, 'success');
-    else if (r === 'erro') toast(`Não foi possível conectar (${MOTIVO[q.get('motivo') ?? ''] ?? 'erro inesperado'}).`, 'error');
-    if (id || r) navigate({ pathname: location.pathname, search: '' }, { replace: true });
+    if (id) navigate({ pathname: location.pathname, search: '' }, { replace: true });
   }, [location.key, location.search, location.pathname, navigate, toast]);
 
   const move = (dir: -1 | 1) => {
@@ -202,8 +183,8 @@ export function CalendarPage() {
           </div>
           {body}
         </div>
-        <aside className="cal-side">
-          {pendingInvites.length > 0 && (
+        {pendingInvites.length > 0 && (
+          <aside className="cal-side">
             <section className="cal-side-card" aria-labelledby="cal-inv-title">
               <h2 id="cal-inv-title">
                 <Icon name="cal-reminder" size={16} />
@@ -223,9 +204,8 @@ export function CalendarPage() {
                 ))}
               </ul>
             </section>
-          )}
-          <SyncPanel providers={providers} onProviders={setProviders} />
-        </aside>
+          </aside>
+        )}
       </div>
       {phone && canMeet && (
         <button type="button" className="cal-fab" aria-label="Nova reunião" title="Nova reunião" onClick={() => openNew({ meeting: true })}>
@@ -287,7 +267,7 @@ function MonthView({ month, events, onOpen, onDay: openDay, onNew }: { month: Da
               ) : (
                 <>
                   {list.slice(0, 3).map((e) => (
-                    <button key={e._id} type="button" className={`${eventClass(e)} chip`} title={`${e.title} · ${whenLabel(e)}${sourceTitle(e)}`} onClick={() => onOpen(e)}>
+                    <button key={e._id} type="button" className={`${eventClass(e)} chip`} title={`${e.title} · ${whenLabel(e)}`} onClick={() => onOpen(e)}>
                       {!e.allDay && <span className="tabular">{fmtTime(e.startsAt)}</span>}
                       {e.meeting && <Icon name="cal-meeting" size={12} />}
                       <span className="ellipsis">{e.title}</span>
@@ -360,7 +340,7 @@ function WeekView({ start, events, onOpen, onNew }: { start: Date; events: Calen
             {allDay
               .filter((e) => onDay(e, d))
               .map((e) => (
-                <button key={e._id} type="button" className={`${eventClass(e)} chip`} title={`${e.title} · ${whenLabel(e)}${sourceTitle(e)}`} onClick={() => onOpen(e)}>
+                <button key={e._id} type="button" className={`${eventClass(e)} chip`} title={`${e.title} · ${whenLabel(e)}`} onClick={() => onOpen(e)}>
                   <span className="ellipsis">{e.title}</span>
                 </button>
               ))}
@@ -389,7 +369,7 @@ function WeekView({ start, events, onOpen, onNew }: { start: Date; events: Calen
                     left: `calc(${(p.col / p.cols) * 100}% + 2px)`,
                     width: `calc(${100 / p.cols}% - 4px)`,
                   }}
-                  title={`${p.e.title} · ${whenLabel(p.e)}${sourceTitle(p.e)}`}
+                  title={`${p.e.title} · ${whenLabel(p.e)}`}
                   onClick={() => onOpen(p.e)}
                 >
                   <strong className="ellipsis">
@@ -441,7 +421,7 @@ function ListView({ from, events, onOpen, onNew }: { from: Date; events: Calenda
             </button>
           }
         >
-          Crie um evento, marque uma reunião ou conecte o Google Agenda e o Outlook ao lado.
+          Crie um evento ou marque uma reunião.
         </Empty>
       </div>
     );
@@ -463,7 +443,6 @@ function ListView({ from, events, onOpen, onNew }: { from: Date; events: Calenda
                     </strong>
                     <small className="muted ellipsis">
                       {[
-                        e.source !== 'chat' ? PROVIDER_LABEL[e.source] : null,
                         e.location || null,
                         e.myResponse === 'pending' ? `Convite de ${e.owner.name || e.owner.username}` : null,
                         e.myResponse === 'tentative' ? 'Talvez' : null,

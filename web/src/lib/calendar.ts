@@ -1,7 +1,7 @@
 // Agenda no navegador: datas (semana começando na segunda, no fuso da pessoa), chamadas à API e a lista de eventos de
 // um período, que se atualiza sozinha quando a agenda muda no servidor.
 import { useEffect, useState } from 'react';
-import type { CalendarEvent, CalendarEventInput, CalendarProviderInfo, MeetingInfo, SyncDirection } from '@shared/calendar';
+import type { CalendarEvent, CalendarEventInput, MeetingInfo } from '@shared/calendar';
 import { api } from './api';
 import { realtime } from './realtime';
 
@@ -105,15 +105,9 @@ export const calendarApi = {
   meeting: (code: string) => api.get<MeetingInfo>('calendar.meeting', { code }),
   join: (code: string) => api.post<{ rid: string; event: CalendarEvent }>('calendar.meeting.join', { code }),
   byRoom: (roomId: string) => api.get<{ event: CalendarEvent | null }>('calendar.meeting.byRoom', { roomId }).then((r) => r.event),
-  accounts: () => api.get<{ providers: CalendarProviderInfo[] }>('calendar.accounts').then((r) => r.providers),
-  connect: (provider: string, direction: SyncDirection) =>
-    api.post<{ url: string }>('calendar.accounts.connect', { provider, direction, returnTo: `${location.pathname}${location.search}` }),
-  direction: (provider: string, direction: SyncDirection) => api.post('calendar.accounts.direction', { provider, direction }),
-  disconnect: (provider: string) => api.post('calendar.accounts.disconnect', { provider }),
-  syncNow: (provider: string) => api.post<{ result: { error?: string }; providers: CalendarProviderInfo[] }>('calendar.accounts.sync', { provider }),
 };
 
-// Eventos de [from, to). Volta a buscar quando a agenda muda (evento, convite, resposta, sincronização), com 300 ms de
+// Eventos de [from, to). Volta a buscar quando a agenda muda (evento, convite, resposta), com 300 ms de
 // folga para juntar vários avisos seguidos. A lista anterior fica na tela enquanto a nova chega.
 export function useCalendarEvents(from: Date, to: Date) {
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);

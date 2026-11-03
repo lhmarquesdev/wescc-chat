@@ -1,11 +1,11 @@
-// Integrações (Jira/Teams): atividade de um provedor (§7.5): publicações, avisos e falhas, com nova tentativa.
+// Integração com o Jira: atividade de um provedor (§7.5): publicações, avisos e falhas, com nova tentativa.
 import { useState } from 'react';
 import type { IntegrationActivity, Provider } from '@shared/integrations';
 import { formatDateTime, formatRelative } from '../../../lib/format';
 import { Icon } from '../../../components/Icon';
 import { Empty, Pager, Segmented, SkeletonTable, useAsync } from '../../../components/ui';
 import { TableWrap } from '../parts';
-import { coreAdmin, jiraAdmin, teamsAdmin } from './admin-api';
+import { coreAdmin, jiraAdmin } from './admin-api';
 import { LoadError, done, fail, useIntegrationEvents } from './parts';
 import './integrations-admin.css';
 
@@ -18,11 +18,8 @@ const TONE: Record<IntegrationActivity['tone'], { cls: string; text: string }> =
   info: { cls: 'pill', text: 'Info' },
 };
 
-async function rulesOf(provider: Provider): Promise<{ _id: string; name: string }[]> {
-  if (provider === 'jira') return (await jiraAdmin.rules()).rules.map((r) => ({ _id: r._id, name: r.name }));
-  // Com o Teams desligado as listas respondem erro: o filtro fica só com "Todas as regras".
-  const [out, inn] = await Promise.all([teamsAdmin.outList().catch(() => ({ rules: [] })), teamsAdmin.inList().catch(() => ({ rules: [] }))]);
-  return [...out.rules, ...inn.rules].map((r) => ({ _id: r._id, name: r.name }));
+async function rulesOf(): Promise<{ _id: string; name: string }[]> {
+  return (await jiraAdmin.rules()).rules.map((r) => ({ _id: r._id, name: r.name }));
 }
 
 export function Activity({ provider }: { provider: Provider }) {
@@ -30,7 +27,7 @@ export function Activity({ provider }: { provider: Provider }) {
   const [rule, setRule] = useState('');
   const [offset, setOffset] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
-  const rules = useAsync(() => rulesOf(provider), [provider]);
+  const rules = useAsync(() => rulesOf(), [provider]);
   const list = useAsync(
     () => coreAdmin.activity({ provider, integrationId: rule || null, tone: errorsOnly === 'err' ? 'err' : null, offset, count: PER_PAGE }),
     [provider, rule, errorsOnly, offset],

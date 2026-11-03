@@ -7,7 +7,7 @@ import { sendMail } from './mailer';
 import { getSetting } from './settings';
 import type { Ctx } from './users';
 
-// Avisos do Jira (eventos e resumos), cartões de reunião do Teams e mensagens espelhadas do Teams trazem markdown que o
+// Avisos do Jira (eventos e resumos) e cartões de reunião trazem markdown que o
 // próprio servidor montou: na notificação, no push e no e-mail vão sem ** e com o rótulo do link no lugar de [rótulo](url).
 // Texto de fora já chega com "](" quebrado por U+200B (safeExternalText), então só os links do servidor casam.
 export function plainIntegrationText(s: string): string {
@@ -38,7 +38,7 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
     : new Set<string>();
   const followers = new Set<string>(row.tmid && parent ? parent.replies ?? [] : []);
   const isDM = room.t === 'd';
-  // Quem a pessoa vê como autor: o apelido da mensagem (ponte do Teams "Ana Souza (Teams)", webhooks) ou o usuário.
+  // Quem a pessoa vê como autor: o apelido da mensagem (webhooks) ou o usuário.
   // O sender do evento continua a conta que publicou.
   const senderName: string = row.alias ? truncate(String(row.alias), 100) : ctx.username;
   const roomName = isDM ? senderName : room.fname || room.name || '';

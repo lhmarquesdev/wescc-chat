@@ -1,8 +1,8 @@
-// Integrações com Jira e Microsoft Teams no chat: estado de integrations.me, chamadas à API e os modais pedidos
+// Integração com o Jira no chat: estado de integrations.me, chamadas à API e os modais pedidos
 // pelas respostas efêmeras, pelo menu da mensagem e pelo cabeçalho da sala.
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { useEffect } from 'react';
-import type { EphemeralModal, IntegrationsMe, JiraAssignable, JiraCreateInput, JiraCreateMeta, JiraIssueSnapshot, JiraProjectRef, JiraSearchResult, JiraStatusCategory, JiraTypeKind, ExternalPresence, LinkedAccount, MessageMeeting } from '@shared/integrations';
+import type { EphemeralModal, IntegrationsMe, JiraAssignable, JiraCreateInput, JiraCreateMeta, JiraIssueSnapshot, JiraProjectRef, JiraSearchResult, JiraStatusCategory, JiraTypeKind, LinkedAccount } from '@shared/integrations';
 import { EPHEMERAL_API_ENDPOINTS } from '@shared/integrations';
 import type { IconName } from '../components/icons';
 import { confirmDialog } from '../components/ui';
@@ -12,11 +12,10 @@ import { api, ApiError, getCredentials } from './api';
 
 interface IntegrationsState {
   me: IntegrationsMe | null;
-  presence: Record<string, ExternalPresence>;
 }
 
 // Estado de GET integrations.me (zustand próprio; store.ts não muda). Zerado no logout e recarregado no login.
-export const useIntegrations: UseBoundStore<StoreApi<IntegrationsState>> = create<IntegrationsState>(() => ({ me: null, presence: {} }));
+export const useIntegrations: UseBoundStore<StoreApi<IntegrationsState>> = create<IntegrationsState>(() => ({ me: null }));
 
 const CACHE_MS = 60_000;
 let loadedAt = 0;
@@ -51,12 +50,12 @@ export async function loadIntegrationsMe(force?: boolean): Promise<IntegrationsM
   return p;
 }
 
-// Logout: apaga me e presence.
+// Logout: apaga me.
 export function resetIntegrations(): void {
   generation++;
   loadedAt = 0;
   inflight = null;
-  useIntegrations.setState({ me: null, presence: {} });
+  useIntegrations.setState({ me: null });
   useModal.setState({ req: null });
 }
 
@@ -69,16 +68,7 @@ export function useIntegrationsMe(): IntegrationsMe | null {
   return me;
 }
 
-export function setExternalPresence(userId: string, p: ExternalPresence | null): void {
-  const presence = { ...useIntegrations.getState().presence };
-  if (p) presence[userId] = p;
-  else delete presence[userId];
-  useIntegrations.setState({ presence });
-}
-
 // ---------- API ----------
-
-const tzOffset = () => -new Date().getTimezoneOffset();
 
 export const jiraApi = {
   search: (q: string, mode: 'text' | 'jql' = 'text', nextPageToken?: string | null) => api.get<JiraSearchResult>('jira.search', { q, mode, nextPageToken: nextPageToken || undefined }),
@@ -113,20 +103,11 @@ export async function shareIssueWithConfirm(key: string, roomId: string, tmid?: 
   }
 }
 
-export const teamsApi = {
-  // tmid (opcional, além do contrato do §8.1): /teams dentro de um tópico anuncia a reunião no próprio tópico.
-  create: (p: { roomId: string; subject?: string; minutes?: number; tmid?: string | null }) => api.post<{ meeting: MessageMeeting; messageId: string }>('msteams.meeting.create', { ...p, tzOffset: tzOffset() }),
-  link: (p: { roomId: string; url: string; subject?: string; tmid?: string | null }) => api.post<{ meeting: MessageMeeting; messageId: string }>('msteams.meeting.link', p),
-  scheduleLink: (p: { roomId: string; subject: string; startsAt: string; minutes: number; includeMembers: boolean }) => api.post<{ url: string; skipped: string[] }>('msteams.meeting.scheduleLink', { ...p, tzOffset: tzOffset() }),
-  presence: (userIds: string[]) => api.get<{ presence: Record<string, ExternalPresence> }>('msteams.presence', { userIds }),
-};
-
 export const linkedApi = {
   list: () => api.get<{ accounts: LinkedAccount[] }>('integrations.linked.list'),
-  remove: async (provider: 'jira' | 'microsoft'): Promise<void> => {
+  remove: async (provider: 'jira'): Promise<void> => {
     await api.post('integrations.linked.remove', { provider });
   },
-  update: (p: { provider: 'microsoft'; busySync: boolean }) => api.post<{ account: LinkedAccount }>('integrations.linked.update', p),
 };
 
 // ---------- Modais ----------
@@ -183,11 +164,6 @@ export function canRunApiAction(endpoint: string): boolean {
 // Jira ligado, use-jira e create-jira-issue (com ou sem conta vinculada).
 export function jiraCreateAvailable(me: IntegrationsMe | null): boolean {
   return !!me && me.jira.enabled && me.jira.canUse && me.jira.canCreate;
-}
-
-// Teams ligado, modo ≠ off, start-msteams-meeting.
-export function meetingAvailable(me: IntegrationsMe | null): boolean {
-  return !!me && me.msteams.enabled && me.msteams.meetings !== 'off' && me.msteams.canMeet;
 }
 
 export function isIntegrationBot(me: IntegrationsMe | null, userId: string): boolean {

@@ -63,8 +63,8 @@ function judge(action: DirectAction, ctx: Ctx, parties: DirectParty[], rules: Di
 }
 
 export async function assertCanStartDirect(ctx: Ctx, otherIds: string[]): Promise<void> {
-  // Integrações (Jira/Teams): o robô de uma integração não recebe nem abre conversas diretas novas (F11, D20).
-  if (await one(`SELECT 1 FROM integration_state WHERE id IN ('bot.jira', 'bot.msteams') AND data->>'id' = ANY($1::text[]) LIMIT 1`, [[ctx.userId, ...otherIds]])) {
+  // Integração com o Jira: o robô da integração não recebe nem abre conversas diretas novas (F11, D20).
+  if (await one(`SELECT 1 FROM integration_state WHERE id = 'bot.jira' AND data->>'id' = ANY($1::text[]) LIMIT 1`, [[ctx.userId, ...otherIds]])) {
     throw new ApiError(400, 'error-integration-bot-direct', 'O robô de uma integração não recebe mensagens diretas.');
   }
   if (!restrictedRoleIds().length) return;

@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): conectar a conta do Jira da própria pessoa (§7.9). Também aberto pelo chat (modal
+// Integrações (Jira): conectar a conta do Jira da própria pessoa (§7.9). Também aberto pelo chat (modal
 // jira-link das respostas efêmeras), por isso as props são fixas.
 import { useId, useState, type FormEvent } from 'react';
 import type { LinkedAccount } from '@shared/integrations';

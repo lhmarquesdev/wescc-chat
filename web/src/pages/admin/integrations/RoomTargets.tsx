@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): salas de destino ou de origem de uma regra (§7.8). A busca só traz canais e grupos
+// Integração com o Jira: salas de destino ou de origem de uma regra (§7.8). A busca só traz canais e grupos
 // privados que a pessoa acessa; cada sala escolhida mostra se o robô pode usá-la (integrations.targets.check).
 import { useEffect, useId, useState, type KeyboardEvent } from 'react';
 import type { IntegrationRoomRef, TargetCheck } from '@shared/integrations';
@@ -9,7 +9,6 @@ import { coreAdmin } from './admin-api';
 import { SuggestList } from './parts';
 import './integrations-admin.css';
 
-const BOT_NAME = { jira: 'Jira', msteams: 'Microsoft Teams' } as const;
 
 export const roomIcon = (r: Pick<IntegrationRoomRef, 't' | 'notice'>): IconName => (r.notice ? 'announcement' : r.t === 'p' ? 'room-private' : 'room-channel');
 export const roomName = (r: Pick<IntegrationRoomRef, 'name' | 'fname'>) => r.fname || r.name;
@@ -22,7 +21,7 @@ function Status({ check, grantPublisher }: { check: TargetCheck | undefined; gra
 }
 
 export function RoomTargets(p: {
-  provider: 'jira' | 'msteams';
+  provider: 'jira';
   mode: 'post' | 'read';
   value: string[];
   onChange: (ids: string[]) => void;
@@ -207,11 +206,7 @@ export function RoomTargets(p: {
         <label className="check">
           <input type="checkbox" checked={grantPublisher} onChange={(e) => onGrantPublisher(e.target.checked)} />
           <span>
-            {provider === 'jira'
-              ? 'Permitir que o Jira publique nos canais de avisos escolhidos'
-              : single
-                ? 'Permitir que o Microsoft Teams publique neste canal de avisos'
-                : `Permitir que o ${BOT_NAME[provider]} publique nos canais de avisos escolhidos`}
+            {single ? 'Permitir que o Jira publique neste canal de avisos' : 'Permitir que o Jira publique nos canais de avisos escolhidos'}
           </span>
         </label>
       )}

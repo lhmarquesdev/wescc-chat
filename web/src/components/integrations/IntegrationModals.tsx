@@ -8,7 +8,6 @@ import { loadIntegrationsMe, useIntegrationModal, useIntegrationsMe, type Integr
 const JiraIssueModal = lazy(() => import('./JiraIssueModal'));
 const JiraCommentModal = lazy(() => import('./JiraCommentModal'));
 const JiraAssignModal = lazy(() => import('./JiraAssignModal'));
-const MeetingModal = lazy(() => import('./MeetingModal'));
 const JiraTokenModal = lazy(() => import('../../pages/account/JiraTokenModal').then((m) => ({ default: m.JiraTokenModal })));
 
 export function IntegrationModals({ rid }: { rid: string }) {
@@ -49,8 +48,6 @@ function Requested({ req, onClose }: { req: IntegrationModalRequest; onClose: ()
       return <JiraCommentModal req={req} onClose={onClose} />;
     case 'jira-assign':
       return <JiraAssignModal req={req} onClose={onClose} />;
-    case 'msteams-meeting':
-      return <MeetingModal req={req} onClose={onClose} />;
     default:
       return null;
   }

@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): Administração → Integrações → Jira (§7.3). As abas devolvem fragmentos: a barra de
+// Integrações (Jira): Administração → Integrações → Jira (§7.3). As abas devolvem fragmentos: a barra de
 // salvar precisa ser filha direta do .page-body.
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';

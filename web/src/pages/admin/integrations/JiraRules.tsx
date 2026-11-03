@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): Jira → Avisos nos canais (§7.3). Como o chat fica sabendo das mudanças (consulta ou
+// Integrações (Jira): Jira → Avisos nos canais (§7.3). Como o chat fica sabendo das mudanças (consulta ou
 // webhook, com barra de salvar própria) e as regras que publicam nas salas.
 import { useEffect, useState } from 'react';
 import { JIRA_EVENT_LABEL, type JiraRule } from '@shared/integrations';

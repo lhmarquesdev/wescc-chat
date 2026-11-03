@@ -19,8 +19,8 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   { id: 'devices', icon: 'devices', label: 'Dispositivos', perm: ['view-device-management'] },
   { id: 'audit', icon: 'admin-audit', label: 'Auditoria', perm: ['can-audit', 'can-audit-log'] },
   { id: 'moderation', icon: 'report', label: 'Moderação', perm: ['view-moderation-console'] },
-  // Integrações (Jira/Teams): quem configura o Jira ou o Teams também vê o item
-  { id: 'integrations', icon: 'admin-integrations', label: 'Integrações', perm: ['manage-integrations', 'manage-own-integrations', 'manage-jira', 'manage-msteams'] },
+  // Integrações: quem configura o Jira também vê o item
+  { id: 'integrations', icon: 'admin-integrations', label: 'Integrações', perm: ['manage-integrations', 'manage-own-integrations', 'manage-jira'] },
   { id: 'oauth', icon: 'tokens', label: 'OAuth', perm: ['manage-oauth-apps'] },
   { id: 'emoji', icon: 'emoji', label: 'Emojis', perm: ['manage-emoji'] },
   // Figurinhas: curadoria (gestores) e removidas (moderação).
@@ -33,7 +33,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   { id: 'settings', icon: 'admin', label: 'Configurações', perm: ['view-privileged-setting'] },
 ];
 
-// O item "Administração" do menu do usuário: quem abre alguma seção (quem só administra chamadas, só o Jira/Teams ou
+// O item "Administração" do menu do usuário: quem abre alguma seção (quem só administra chamadas, só o Jira ou
 // só figurinhas também), mais view-administration, que já abria o menu. A AdminPage leva à primeira seção que a pessoa vê.
 export const ADMIN_MENU_PERMS: string[] = [...new Set(['view-administration', ...ADMIN_SECTIONS.flatMap((s) => s.perm)])];
 

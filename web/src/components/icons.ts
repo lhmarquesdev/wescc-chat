@@ -25,7 +25,6 @@ import {
   BrushCleaning,
   CalendarCheck,
   CalendarDays,
-  CalendarSync,
   CalendarX,
   ChartColumn,
   ChartLine,
@@ -189,7 +188,6 @@ import {
   TrianglesCenterlineDashedHorizontal,
   Type,
   Undo2,
-  Unplug,
   UserMinus,
   UserPlus,
   UserRoundCog,
@@ -205,12 +203,11 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-// Integrações (Jira/Teams)
+// Integrações (Jira)
 import {
   Activity,
   Bookmark,
   Bug,
-  CalendarClock,
   CalendarPlus,
   Circle,
   CircleDashed,
@@ -220,8 +217,6 @@ import {
   ListChecks,
   MessageSquareQuote,
   MonitorPlay,
-  Presentation,
-  Repeat2,
   SquareCheck,
   SquareDashed,
   Ticket,
@@ -527,10 +522,9 @@ export const ICONS = {
   'sticker-redo': Redo2,
   'sticker-import': Import,
   'sticker-export': Download,
-  // Integrações (Jira/Teams)
+  // Integração com o Jira
   // integrações (intchat); 'show' (Eye) já existe no registro e é usado como par do 'hide'.
   'int-jira': Ticket,
-  'int-teams': Presentation,
   'int-webhook': Webhook,
   'int-linked': Link2,
   'int-activity': Activity,
@@ -548,26 +542,21 @@ export const ICONS = {
   'jira-type-other': SquareDashed,
   'jira-status-new': Circle,
   'jira-status-progress': CircleDashed,
-  'meeting-teams': CalendarClock,
   'meeting-schedule': CalendarPlus,
   'meeting-link': ClipboardPaste,
   'meeting-join': MonitorPlay,
-  'bridge-teams': Repeat2,
 
   // ---------- Agenda ----------
   'nav-calendar': CalendarDays,
   'cal-new': CalendarPlus,
   'cal-meeting': Video,
   'cal-today': CalendarCheck,
-  'cal-sync': CalendarSync,
   'cal-canceled': CalendarX,
   'cal-location': MapPin,
   'cal-people': Users,
   'cal-time': Clock,
   'cal-reminder': Bell,
   'cal-link': Link2,
-  'cal-open': ExternalLink,
-  'cal-disconnect': Unplug,
   'cal-prev': ChevronLeft,
   'cal-next': ChevronRight,
   'cal-direction': ArrowLeftRight,

@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): peças comuns das telas de administração (cabeçalho, linhas de configuração, barra de
+// Integrações (Jira): peças comuns das telas de administração (cabeçalho, linhas de configuração, barra de
 // salvar, caixa de copiar, campo de chips e o estado do conector).
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -90,7 +90,7 @@ export function RuleStatus({ rule, idle, stale }: { rule: RuleMeta; idle: string
   );
 }
 
-// ---------- Cabeçalho das páginas do Jira e do Teams ----------
+// ---------- Cabeçalho das páginas do Jira ----------
 
 // Enquanto carrega, o selo e o "Ativado" já ocupam o lugar deles: nada pula quando a configuração chega. Na linha
 // do texto, o esqueleto fica em linha: a linha mantém a altura do texto que vai chegar.

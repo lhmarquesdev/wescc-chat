@@ -5,18 +5,12 @@ const pick = (env: string, def: string) => (dev() && process.env[env]) || def;
 export const endpoints = {
   atlassianApi: () => pick('JIRA_API_GATEWAY', 'https://api.atlassian.com'),
   atlassianAuth: () => pick('ATLASSIAN_AUTH_URL', 'https://auth.atlassian.com'),
-  msLogin: () => pick('MS_LOGIN_URL', 'https://login.microsoftonline.com'),
-  msGraph: () => pick('MS_GRAPH_URL', 'https://graph.microsoft.com'),
-  // Agenda (Google)
-  googleAuth: () => pick('GOOGLE_AUTH_URL', 'https://accounts.google.com'),
-  googleToken: () => pick('GOOGLE_TOKEN_URL', 'https://oauth2.googleapis.com'),
-  googleApi: () => pick('GOOGLE_API_URL', 'https://www.googleapis.com'),
 };
 
 // Únicos hosts de fornecedores que safeFetch alcança (além de INTEGRATIONS_ALLOWED_HOSTS).
 export const VENDOR_HOSTS = {
-  exact: ['api.atlassian.com', 'auth.atlassian.com', 'login.microsoftonline.com', 'graph.microsoft.com', 'oauth2.googleapis.com', 'www.googleapis.com'],
-  suffixes: ['.atlassian.net', '.jira.com', '.environment.api.powerplatform.com'],
+  exact: ['api.atlassian.com', 'auth.atlassian.com'],
+  suffixes: ['.atlassian.net', '.jira.com'],
 };
 
 // Um rótulo inteiro antes do sufixo ("explorer.atlassian.net"), nunca o próprio sufixo nem um nome com ponto no fim.
@@ -26,6 +20,3 @@ export function isVendorHost(host: string): boolean {
   if (VENDOR_HOSTS.exact.includes(h)) return true;
   return VENDOR_HOSTS.suffixes.some((s) => h.endsWith(s) && h.length > s.length && !h.slice(0, -s.length).endsWith('.') && !h.startsWith('.'));
 }
-
-// Público do token do Power Automate: tem de ser exatamente este texto, com a barra final.
-export const FLOW_AUDIENCE = 'https://service.flow.microsoft.com/';

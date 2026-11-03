@@ -34,9 +34,8 @@ import { CreateStickerItem, StickerHost, StickerMenuItems, StickerRemoveItem, us
 import { StickerView } from './stickers/StickerView';
 import { VoicePlayer } from './VoicePlayer';
 import { Avatar, confirmDialog, Empty, Field, Menu, Modal, SkeletonList, useAsync } from './ui';
-// Integrações (Jira/Teams)
+// Integrações (Jira)
 import { jiraApi, jiraCreateAvailable, openIntegrationModal, useIntegrations } from '../lib/integrations';
-import { BridgeBadge, BridgeUsername } from './integrations/BridgeBadge';
 import { JiraCard } from './integrations/JiraCard';
 import { MeetingCard } from './integrations/MeetingCard';
 
@@ -373,7 +372,7 @@ function RichAttachment({ a, m }: { a: Attachment; m?: Message }) {
 }
 
 // Citação: o servidor manda o @usuário do autor; aparece o nome, e a data no formato curto ("Ontem 10:24").
-// Mensagem com apelido (ponte do Teams): o nome é o apelido ("Ana Souza (Teams)"), com o avatar da conta que publicou.
+// Mensagem com apelido (webhooks): o nome é o apelido, com o avatar da conta que publicou.
 function QuoteAttachment({ a }: { a: Attachment }) {
   const nameOf = useNames();
   return (
@@ -774,7 +773,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   const receiptsOn = useSetting<boolean>('Message_Read_Receipt_Enabled');
   const showEdited = useSetting<boolean>('Message_ShowEditedStatus');
   const closePicker = useCallback(() => setPicker(null), []);
-  // Integrações (Jira/Teams): integrations.me (carregado no login) para o grupo "Integrações" do Mais
+  // Integrações (Jira): integrations.me (carregado no login) para o grupo "Integrações" do Mais
   const integrations = useIntegrations((s) => s.me);
   const own = m.u._id === me._id;
   const perms = me.permissions;
@@ -835,7 +834,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
       opt(m.sticker, { key: 'sticker', el: (close, sheetRole) => <StickerMenuItems message={m} close={close} sheetRole={sheetRole} /> }),
       opt(createSticker, { key: 'create-sticker', el: (close, sheetRole) => <CreateStickerItem message={m} close={close} sheetRole={sheetRole} inThread={inThread} /> }),
     ],
-    // Integrações (Jira/Teams): grupo "Integrações" entre o 2 e o Denunciar (some quando não tem itens)
+    // Integrações (Jira): grupo "Integrações" entre o 2 e o Denunciar (some quando não tem itens)
     [
       opt(jiraCreateAvailable(integrations) && !m.t, {
         key: 'jira-create',
@@ -843,7 +842,6 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
         label: 'Criar issue no Jira',
         run: () => openIntegrationModal({ modal: 'jira-create', rid: m.rid, tmid: m.tmid ?? null, messageId: m._id }),
       }),
-      opt(m.bridge?.webUrl, { key: 'teams-open', icon: 'open-external', label: 'Ver no Teams', run: () => void window.open(m.bridge?.webUrl ?? '', '_blank', 'noopener,noreferrer') }),
       opt(m.jira?.kind === 'preview' && (own || canModerate), { key: 'jira-preview', icon: 'close', label: 'Remover prévia', run: () => void jiraApi.removePreview(m._id).catch(fail) }),
     ],
     [opt(!own, { key: 'report', icon: 'report', label: 'Denunciar', run: () => setReport(true) })],
@@ -941,21 +939,12 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
     );
   const name = authorName(m);
   const mentioned = m.mentions?.some((x) => x._id === me._id || x._id === 'all' || x._id === 'here');
-  // Integrações (Jira/Teams): edição feita no Teams. O espelho grava editedAt/editedBy com o robô (o autor da cópia) e a
-  // hora da cópia; a marca mostra a hora do Teams. Uma edição posterior no chat, por outra pessoa, volta à marca de sempre.
-  const bridgeEdited =
-    m.bridge?.editedAt && showEdited && m.t !== 'rm' && (!m.editedAt || m.editedBy?._id === m.u._id) ? (
-      <span className="edited" title={`Editada no Teams em ${formatDateTime(m.bridge.editedAt)}`}>
-        editada
-      </span>
-    ) : null;
   const edited =
-    bridgeEdited ??
-    (m.editedAt && showEdited && m.t !== 'rm' ? (
+    m.editedAt && showEdited && m.t !== 'rm' ? (
       <span className="edited" title={`Editada por ${m.editedBy?.username} em ${formatDateTime(m.editedAt)}`}>
         editada
       </span>
-    ) : null);
+    ) : null;
   const receipt =
     receiptsOn && own && !m.t ? (
       <span className={`receipt ${m.unread ? '' : 'read'}`} title={m.unread ? 'Enviada' : 'Lida por todos'} role="img" aria-label={m.unread ? 'Enviada' : 'Lida por todos'}>
@@ -973,12 +962,11 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
         (text || !lifted) && (
           <div className={`msg-body ${isEmojiOnly(text) ? 'big-emoji' : ''}`}>
             {body}
-            {/* Integrações (Jira/Teams): ou a edição feita no Teams */}
             {grouped && edited}
           </div>
         )
       )}
-      {/* Integrações (Jira/Teams): o anexo de reserva do Jira e da reunião some quando o cartão existe */}
+      {/* Integrações (Jira): o anexo de reserva do Jira e da reunião some quando o cartão existe */}
       {m.attachments?.map((a, i) =>
         (sticker && a.type === 'sticker') || (a.type === 'jira' && m.jira) || (a.type === 'meeting' && m.meeting) ? null : (
           <AttachmentView key={i} a={a} m={m} createSticker={createSticker ?? undefined} />
@@ -1048,10 +1036,8 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
               {m.emoji ? `${resolveEmoji(m.emoji)?.unicode ?? ''} ` : ''}
               {name}
             </button>
-            {/* Integrações (Jira/Teams): na mensagem copiada do Teams o @ do robô fica de fora no celular */}
-            {name !== m.u.username && (m.bridge ? <BridgeUsername username={m.u.username} /> : <span className="msg-username">@{m.u.username}</span>)}
-            {/* Integrações (Jira/Teams): mensagem copiada do Teams leva "Teams" no lugar de "Bot" */}
-            {m.bridge ? <BridgeBadge /> : bot && <span className="pill msg-bot">Bot</span>}
+            {name !== m.u.username && <span className="msg-username">@{m.u.username}</span>}
+            {bot && <span className="pill msg-bot">Bot</span>}
             <time className="msg-time" dateTime={m.ts} title={formatDateTime(m.ts)}>
               {formatTime(m.ts)}
             </time>
@@ -1089,7 +1075,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
         ) : (
           content
         )}
-        {/* Integrações (Jira/Teams): cartões depois do corpo e antes das reações; mensagem removida não mostra cartão */}
+        {/* Integrações (Jira): cartões depois do corpo e antes das reações; mensagem removida não mostra cartão */}
         {!m.t && m.jira && <JiraCard jira={m.jira} message={m} />}
         {!m.t && m.meeting && <MeetingCard meeting={m.meeting} />}
         {call && <CallCard message={m} />}

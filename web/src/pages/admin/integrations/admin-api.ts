@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): chamadas da administração (§3.11, §4.11, §5.8). As do chat ficam em lib/integrations.ts.
+// Integração com o Jira: chamadas da administração (§3.11, §4.11, §5.8). As do chat ficam em lib/integrations.ts.
 import type {
   ConnectorStatus,
   IntegrationActivity,
@@ -13,20 +13,11 @@ import type {
   MessageJira,
   Provider,
   TargetCheck,
-  TeamsChannelRef,
-  TeamsConfig,
-  TeamsConfigInput,
-  TeamsInRule,
-  TeamsInRuleInput,
-  TeamsOutRule,
-  TeamsOutRuleInput,
-  TeamsTeamRef,
 } from '@shared/integrations';
 import { api } from '../../../lib/api';
 
 export interface IntegrationsOverview {
   jira: { enabled: boolean; status: ConnectorStatus; rules: number };
-  msteams: { enabled: boolean; status: ConnectorStatus; outRules: number; inRules: number };
   webhooks: { incoming: number; outgoing: number };
   secretsKey: { source: 'env' | 'file' | 'none'; file?: string; created?: boolean; problem?: string };
   paused: boolean;
@@ -71,30 +62,6 @@ export const jiraAdmin = {
   preview: (projects: string[], events: JiraEventKind[]) => api.post<{ msg: string; jira: MessageJira }>('jira.rules.preview', { projects, events }),
   // Precisa do Jira ligado e de use-jira; a lista é a que a conta da pessoa (ou a da integração) vê.
   projects: (query?: string) => api.get<{ projects: JiraProjectRef[]; identity: 'user' | 'integration' }>('jira.projects', { query: query || undefined }),
-};
-
-export const teamsAdmin = {
-  config: () => api.get<{ config: TeamsConfig }>('msteams.config'),
-  save: (input: TeamsConfigInput) => api.post<{ config: TeamsConfig }>('msteams.config.save', body(input)),
-  test: () => api.post<{ config: TeamsConfig }>('msteams.config.test'),
-  serviceStart: (returnTo: string) => api.post<{ url: string }>('msteams.service.start', { returnTo }),
-  serviceUnlink: async (): Promise<void> => {
-    await api.post('msteams.service.unlink');
-  },
-  teams: () => api.get<{ teams: TeamsTeamRef[] }>('msteams.teams'),
-  channels: (teamId: string) => api.get<{ channels: TeamsChannelRef[] }>('msteams.channels', { teamId }),
-  outList: () => api.get<{ rules: TeamsOutRule[] }>('msteams.out.list'),
-  outSave: (input: TeamsOutRuleInput & { _id?: string }) => api.post<{ rule: TeamsOutRule }>('msteams.out.save', body(input)),
-  outRemove: async (id: string): Promise<void> => {
-    await api.post('msteams.out.remove', { _id: id });
-  },
-  outTest: (id: string) => api.post<{ ok: boolean; text: string }>('msteams.out.test', { _id: id }),
-  inList: () => api.get<{ rules: TeamsInRule[] }>('msteams.in.list'),
-  inSave: (input: TeamsInRuleInput & { _id?: string }) => api.post<{ rule: TeamsInRule }>('msteams.in.save', body(input)),
-  inRemove: async (id: string): Promise<void> => {
-    await api.post('msteams.in.remove', { _id: id });
-  },
-  meetingTest: () => api.post<{ ok: boolean; text: string }>('msteams.meeting.test', { tzOffset: -new Date().getTimezoneOffset() }),
 };
 
 // Papéis que têm uma permissão (para "Quem pode usar"): só para quem pode ler as permissões.

@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): Jira → Recursos no chat (§7.3): prévias, projetos visíveis, criação de issues e quem usa.
+// Integrações (Jira): Jira → Recursos no chat (§7.3): prévias, projetos visíveis, criação de issues e quem usa.
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { JiraProjectRef } from '@shared/integrations';

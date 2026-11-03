@@ -1,4 +1,4 @@
-/* Integrações (Jira/Teams) no chat: cartão de issue, cartão de reunião, respostas efêmeras e pílulas.
+/* Integrações (Jira) no chat: cartão de issue, cartão de reunião, respostas efêmeras e pílulas.
    Só tokens; importado pelos próprios componentes, depois dos arquivos do design system. Nunca muda .pill, .btn,
    .callout, .card ou .msg em si. */
 
@@ -141,8 +141,8 @@
   opacity: 1;
 }
 
-/* ---------- Cartão de reunião do Teams (como o cartão de chamada) ---------- */
-/* 360 px como o cartão de chamada, crescendo até 480 px para "Reunião do Microsoft Teams · hh:mm–hh:mm" caber numa linha. */
+/* ---------- Cartão de reunião (como o cartão de chamada) ---------- */
+/* 360 px como o cartão de chamada, crescendo até 480 px para "Reunião do chat · hh:mm–hh:mm" caber numa linha. */
 .att-meeting {
   display: flex;
   align-items: center;
@@ -275,13 +275,6 @@ div.ephemeral:hover {
   margin-top: var(--space-1);
 }
 
-/* ---------- Pílula da mensagem copiada do Teams ---------- */
-.bridge-pill {
-  align-self: center;
-  height: 18px;
-  font-size: var(--fs-11);
-}
-
 /* ---------- Modais ---------- */
 /* Tipo da issue: a lista nativa com o ícone do tipo escolhido à esquerda. */
 [data-int='type'] {
@@ -309,11 +302,6 @@ div.ephemeral:hover {
   align-items: center;
   justify-content: center;
   text-align: center;
-}
-/* "No Teams: …" no cartão do usuário: ponto de 6px com a forma da presença do chat. */
-[data-int='presence'] > .status-dot {
-  --dot: 6px;
-  margin-right: 6px;
 }
 
 /* ---------- Celular e telas de toque: ações sempre visíveis, cartões na largura toda ---------- */

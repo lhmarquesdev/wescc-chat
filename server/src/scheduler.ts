@@ -4,9 +4,9 @@
 //   727105 importação · 727110 chamadas (varredura a cada 10 s; com hashtext(id), a trava de cada chamada; com 0, a
 //   trava curta das entradas, sempre depois da trava da chamada)
 //   727111 figurinhas (limpeza diária)
-//   727120–727124 integrações Jira/Teams
+//   727120–727124 integrações (Jira; as do Teams, removido, não reusar)
 //   727125 integrações: reserva da fila de tarefas (pg_advisory_xact_lock, só na transação curta da reserva)
-//   727130 agenda (rodada de sincronização) · 727131 com hashtext(id): a trava de cada conta de agenda · 727132 lembretes
+//   727130 e 727131 (da sincronização da agenda com Google/Outlook, removida: não reusar) · 727132 lembretes da agenda
 import cron from 'node-cron';
 import { pool, query } from './db/pool';
 import { recoverInterrupted } from './importer/operations';
@@ -14,7 +14,7 @@ import { bus } from './realtime/bus';
 import { cleanupStaleConnections } from './realtime/ws';
 import { runRetention } from './services/retention';
 import { getSetting } from './services/settings';
-import { startIntegrationsRuntime } from './integrations/runtime'; // Integrações (Jira/Teams)
+import { startIntegrationsRuntime } from './integrations/runtime'; // Integração com o Jira
 
 // Tarefas periódicas. Cada tarefa usa um advisory lock para rodar em uma só instância.
 export async function withLock(key: number, fn: () => Promise<unknown>) {
@@ -75,16 +75,10 @@ export function startScheduler(log: (m: string) => void) {
   tasks.push(cron.schedule('30 3 * * *', runStickersGc));
   const stickersBoot = setTimeout(runStickersGc, 60_000); // termina o que um desligamento deixou na lixeira
 
-  // Integrações (Jira/Teams)
+  // Integração com o Jira
   tasks.push(startIntegrationsRuntime(log));
 
-  // Agenda: sincronização com o Google/Outlook (cada conta no seu intervalo) e lembretes antes do início.
-  const calendarSync = setInterval(() => {
-    void withLock(727130, async () => {
-      const { syncDue } = await import('./calendar/sync');
-      await syncDue(log);
-    }).catch((e) => log(`agenda falhou: ${e.message}`));
-  }, 60_000);
+  // Agenda: lembretes antes do início.
   const calendarReminders = setInterval(() => {
     void withLock(727132, async () => {
       const { sendDueReminders } = await import('./calendar/reminders');
@@ -125,7 +119,6 @@ export function startScheduler(log: (m: string) => void) {
     clearInterval(heartbeat);
     clearInterval(calls);
     clearInterval(re);
-    clearInterval(calendarSync);
     clearInterval(calendarReminders);
     clearTimeout(stickersBoot);
     for (const t of tasks) t.stop();

@@ -9,7 +9,7 @@ import { Icon } from './Icon';
 import { MessageItem } from './MessageItem';
 import { PanelHead, refocusRoom, usePanelEscape } from './RoomPanels';
 import { SkeletonMessages } from './ui';
-// Integrações (Jira/Teams)
+// Integrações (Jira)
 import { placeEphemeral, useRoomEphemeral } from '../lib/ephemeral';
 import { EphemeralRow } from './integrations/EphemeralRow';
 
@@ -43,7 +43,7 @@ export function ThreadPanel({
   const ref = useRef<HTMLDivElement>(null);
   const following = root?.replies?.includes(me._id);
   const esc = usePanelEscape(onClose);
-  // Integrações (Jira/Teams): respostas que só a pessoa vê dentro deste tópico, entre as respostas pela hora
+  // Integrações (Jira): respostas que só a pessoa vê dentro deste tópico, entre as respostas pela hora
   const ephemeral = useRoomEphemeral(rid, tmid);
   const ephSlots = useMemo(() => placeEphemeral(ephemeral, replies ?? []), [ephemeral, replies]);
   // Respostas seguidas da mesma pessoa se agrupam como na conversa (continuesGroup, com o mesmo intervalo).
@@ -68,7 +68,7 @@ export function ThreadPanel({
 
   useLayoutEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-    // Integrações (Jira/Teams): também quando chega uma resposta efêmera
+    // Integrações (Jira): também quando chega uma resposta efêmera
   }, [replies?.length, ephemeral.length]);
 
   const actions = { onEdit: setEditing, onQuote: setQuoting, onUserClick };
@@ -118,7 +118,7 @@ export function ThreadPanel({
           <span>{plural(count, 'resposta', 'respostas')}</span>
         </div>
         {!replies && root && count > 0 && <SkeletonMessages n={3} />}
-        {/* Integrações (Jira/Teams): efêmeras antes da primeira resposta mais nova (que começa outro grupo) ou no fim, todas
+        {/* Integrações (Jira): efêmeras antes da primeira resposta mais nova (que começa outro grupo) ou no fim, todas
             irmãs com chave das respostas (a efêmera não é montada de novo quando sobe) */}
         {(replies ?? [])
           .flatMap((m, i) => [

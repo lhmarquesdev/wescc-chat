@@ -1,24 +1,14 @@
-import crypto from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { many, one, query } from '../src/db/pool';
-import { ACCOUNT_TEXT } from '../src/calendar/accounts';
 import { CAL_TEXT } from '../src/calendar/events';
 import { sendDueReminders } from '../src/calendar/reminders';
-import { setSyncKicker } from '../src/calendar/dirty';
-import { kickAccount, syncAccount } from '../src/calendar/sync';
-import { reloadSecretsKey, setSecret } from '../src/lib/secrets';
-import { startFakeCalendars, type FakeCalendars } from './fake-calendars';
 import { admin, api, connectWs, newUser, sleep, startServer, stopServer, urlOf, type Auth } from './helpers';
 
-// Agenda: eventos, convites e respostas, reuniões com sala e link, lembretes e a sincronização com o Google Agenda e o
-// Outlook nos três sentidos, contra os fornecedores falsos (fake-calendars.ts). Nada sai para a internet.
-
-process.env.SECRETS_KEY = crypto.randomBytes(32).toString('base64');
+// Agenda: eventos, convites e respostas, reuniões com sala e link e lembretes. Tudo fica no chat (sem agendas externas).
 
 const SITE = 'https://chat.explorer.example';
 const H = 3_600_000;
 const DAY = 24 * H;
-let F: FakeCalendars;
 let A: Auth;
 let ana: Auth;
 let bruno: Auth;
@@ -33,14 +23,6 @@ async function setSettings(settings: Record<string, unknown>) {
 }
 
 beforeAll(async () => {
-  F = await startFakeCalendars();
-  process.env.INTEGRATIONS_ALLOWED_HOSTS = F.host;
-  process.env.GOOGLE_AUTH_URL = F.url;
-  process.env.GOOGLE_TOKEN_URL = F.url;
-  process.env.GOOGLE_API_URL = F.url;
-  process.env.MS_LOGIN_URL = F.url;
-  process.env.MS_GRAPH_URL = F.url;
-  reloadSecretsKey();
   await startServer();
   A = await admin();
   await setSettings({ API_Enable_Rate_Limiter: false, Site_Url: SITE });
@@ -51,7 +33,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await stopServer();
-  await F.close();
 });
 
 describe('eventos', () => {
@@ -229,191 +210,15 @@ describe('lembretes', () => {
   });
 });
 
-// Conecta pelo fluxo completo: calendar.accounts.connect → fornecedor (falso) → /integrations/calendar/:p/callback.
-async function connect(auth: Auth, provider: 'google' | 'microsoft', direction: 'import' | 'export' | 'both') {
-  const res = await fetch(urlOf('/api/v1/calendar.accounts.connect'), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-user-id': auth.userId, 'x-auth-token': auth.authToken },
-    body: JSON.stringify({ provider, direction, returnTo: '/calendar' }),
-  });
-  const j: any = await res.json();
-  if (!j.success) throw new Error(JSON.stringify(j));
-  const cookie = String(res.headers.get('set-cookie') ?? '').split(';')[0];
-  const u = new URL(j.url);
-  const code = F.authorize(provider, u.searchParams.get('code_challenge')!);
-  const cb = await fetch(urlOf(`/integrations/calendar/${provider}/callback?state=${encodeURIComponent(u.searchParams.get('state')!)}&code=${code}`), {
-    headers: { cookie },
-    redirect: 'manual',
-  });
-  return { authorizeUrl: u, location: cb.headers.get('location') ?? '' };
-}
-
-async function accountId(auth: Auth, provider: string) {
-  return (await one(`SELECT id FROM calendar_accounts WHERE user_id = $1 AND provider = $2`, [auth.userId, provider])).id as string;
-}
-
-describe('sincronização', () => {
-  let dani: Auth;
-  beforeAll(async () => {
-    // As rodadas aqui são chamadas pelo teste; a rodada automática logo depois de uma mudança tem teste próprio no fim.
-    setSyncKicker(null);
-    dani = await newUser(A, { name: 'Dani Alves' });
-    await setSettings({ MSTeams_Tenant_Id: '11111111-2222-3333-4444-555555555555', MSTeams_Client_Id: '66666666-7777-8888-9999-000000000000' });
-    await setSecret('msteams.clientSecret', 'segredo-teste-ms', A.userId);
-  });
-
-  it('sem configuração do administrador a conexão não abre', async () => {
-    const p = await api('GET', 'calendar.accounts', {}, dani);
-    expect(p.providers.map((x: any) => [x.provider, x.available, x.account])).toEqual([
-      ['google', false, null],
-      ['microsoft', false, null],
-    ]);
-    expect((await api('POST', 'calendar.accounts.connect', { provider: 'google' }, dani)).error).toBe(ACCOUNT_TEXT.googleOff);
-    expect((await api('POST', 'calendar.admin.save', { googleEnabled: true }, A)).error).toBe(ACCOUNT_TEXT.clientId);
-    expect((await api('GET', 'calendar.admin.config', {}, dani)).status).toBe(403);
-  });
-
-  it('administração liga o Google e o Outlook', async () => {
-    const r = await api('POST', 'calendar.admin.save', { googleEnabled: true, googleClientId: 'cliente-teste.apps.googleusercontent.com', googleClientSecret: 'segredo-google', microsoftEnabled: true }, A);
-    expect(r.success, JSON.stringify(r)).toBe(true);
-    expect(r.config.google).toMatchObject({ enabled: true, secretSet: true, redirectUri: `${SITE}/integrations/calendar/google/callback` });
-    expect(r.config.microsoft).toMatchObject({ enabled: true, secretSet: true, redirectUri: `${SITE}/integrations/calendar/microsoft/callback` });
-    expect(JSON.stringify(r)).not.toContain('segredo-google');
-  });
-
-  it('Google nos dois sentidos: traz, leva e não duplica', async () => {
-    F.google.events.push({ id: 'gext1', title: 'Dentista', description: '', location: 'Centro', start: at(2 * DAY), end: at(2 * DAY + H), allDay: false });
-    F.google.events.push({ id: 'gext2', title: 'Viagem', description: '', location: '', start: new Date(Date.now() + 6 * DAY).toISOString().slice(0, 10), end: new Date(Date.now() + 8 * DAY).toISOString().slice(0, 10), allDay: true });
-    const mine = await api('POST', 'calendar.create', { title: 'Reunião com cliente', startsAt: at(3 * DAY), endsAt: at(3 * DAY + H), isMeeting: true, description: 'Pauta' }, dani);
-
-    const { authorizeUrl, location } = await connect(dani, 'google', 'both');
-    expect(authorizeUrl.searchParams.get('scope')).toContain('calendar.events');
-    expect(authorizeUrl.searchParams.get('access_type')).toBe('offline');
-    expect(location).toBe('/calendar?integracao=agenda-ok&agenda=google');
-    const id = await accountId(dani, 'google');
-    const r = await syncAccount(id);
-    expect(r.error).toBeUndefined();
-    expect(r.imported).toBe(2);
-    expect(r.pushed).toBeGreaterThanOrEqual(1);
-
-    const list = (await api('GET', 'calendar.events', range, dani)).events;
-    const dent = list.find((e: any) => e.title === 'Dentista');
-    expect(dent).toMatchObject({ source: 'google', canEdit: false, location: 'Centro' });
-    expect(list.find((e: any) => e.title === 'Viagem').allDay).toBe(true);
-    expect((await api('POST', 'calendar.update', { eventId: dent._id, title: 'X' }, dani)).error).toBe(CAL_TEXT.readOnly);
-    // A cópia lá leva o link da reunião e a marca do chat.
-    const copy = F.google.events.find((e) => e.wesccEventId === mine.event._id)!;
-    expect(copy.title).toBe('Reunião com cliente');
-    expect(copy.description).toContain(mine.event.meeting.url);
-    expect(copy.location).toBe(mine.event.meeting.url);
-
-    // Outra rodada: nada volta como evento trazido, nada é gravado de novo.
-    const r2 = await syncAccount(id);
-    expect([r2.imported, r2.removed, r2.pushed, r2.deleted]).toEqual([0, 0, 0, 0]);
-    expect((await api('GET', 'calendar.events', range, dani)).events.filter((e: any) => e.title === 'Reunião com cliente')).toHaveLength(1);
-
-    // Mudou lá, apagou lá, mudou aqui, cancelou aqui.
-    F.google.events.find((e) => e.id === 'gext1')!.title = 'Dentista (remarcado)';
-    F.google.events.splice(F.google.events.findIndex((e) => e.id === 'gext2'), 1);
-    await api('POST', 'calendar.update', { eventId: mine.event._id, title: 'Reunião com o cliente' }, dani);
-    const r3 = await syncAccount(id);
-    expect([r3.imported, r3.removed, r3.pushed]).toEqual([1, 1, 1]);
-    expect(F.google.events.find((e) => e.wesccEventId === mine.event._id)!.title).toBe('Reunião com o cliente');
-    await api('POST', 'calendar.cancel', { eventId: mine.event._id }, dani);
-    const r4 = await syncAccount(id);
-    expect(r4.deleted).toBe(1);
-    expect(F.google.events.some((e) => e.wesccEventId === mine.event._id)).toBe(false);
-  });
-
-  it('convite aceito vai para a agenda do convidado; recusar tira de lá', async () => {
-    const id = await accountId(dani, 'google');
-    const c = await api('POST', 'calendar.create', { title: 'Alinhamento', startsAt: at(4 * DAY), endsAt: at(4 * DAY + H), attendeeIds: [dani.userId] }, ana);
-    await syncAccount(id);
-    expect(F.google.events.some((e) => e.wesccEventId === c.event._id)).toBe(true);
-    await api('POST', 'calendar.respond', { eventId: c.event._id, response: 'declined' }, dani);
-    await syncAccount(id);
-    expect(F.google.events.some((e) => e.wesccEventId === c.event._id)).toBe(false);
-  });
-
-  it('só trazer: o chat não grava nada lá; só levar: os trazidos saem do chat', async () => {
-    const id = await accountId(dani, 'google');
-    expect((await api('POST', 'calendar.accounts.direction', { provider: 'google', direction: 'import' }, dani)).account.direction).toBe('import');
-    const before = F.google.events.length;
-    await api('POST', 'calendar.create', { title: 'Só no chat', startsAt: at(DAY), endsAt: at(DAY + H) }, dani);
-    await syncAccount(id);
-    expect(F.google.events.length).toBe(before);
-    expect((await api('POST', 'calendar.accounts.direction', { provider: 'google', direction: 'export' }, dani)).success).toBe(true);
-    expect((await api('GET', 'calendar.events', range, dani)).events.some((e: any) => e.source === 'google')).toBe(false);
-    const r = await syncAccount(id);
-    expect(r.imported).toBe(0);
-    expect(F.google.events.some((e) => e.title === 'Só no chat')).toBe(true);
-    expect((await api('POST', 'calendar.accounts.direction', { provider: 'google', direction: 'lado' }, dani)).error).toBe(ACCOUNT_TEXT.direction);
-  });
-
-  it('token vencido é renovado; renovação recusada marca a conta para conectar de novo', async () => {
-    const id = await accountId(dani, 'google');
-    await query(`UPDATE calendar_accounts SET token_expires_at = now() - interval '1 minute' WHERE id = $1`, [id]);
-    const old = F.google.access;
-    expect((await syncAccount(id)).error).toBeUndefined();
-    expect(F.google.access).not.toBe(old);
-    F.google.refreshDenied = true;
-    await query(`UPDATE calendar_accounts SET token_expires_at = now() - interval '1 minute' WHERE id = $1`, [id]);
-    const r = await syncAccount(id);
-    expect(r.error).toBe(ACCOUNT_TEXT.expired);
-    const p = await api('GET', 'calendar.accounts', {}, dani);
-    expect(p.providers.find((x: any) => x.provider === 'google').account).toMatchObject({ status: 'expired', statusText: ACCOUNT_TEXT.expired });
-    F.google.refreshDenied = false;
-    // Conectar de novo volta ao normal, sem duplicar a conta.
-    await connect(dani, 'google', 'both');
-    expect((await many(`SELECT id, status FROM calendar_accounts WHERE user_id = $1 AND provider = 'google'`, [dani.userId])).map((x) => x.status)).toEqual(['ok']);
-  });
-
-  it('Outlook: traz e leva pelo Microsoft Graph', async () => {
-    F.microsoft.events.push({ id: 'AAMkext1', title: 'Treinamento', description: 'Sala B', location: 'Auditório', start: at(2 * DAY), end: at(2 * DAY + 2 * H), allDay: false });
-    const { authorizeUrl } = await connect(dani, 'microsoft', 'both');
-    expect(authorizeUrl.pathname).toBe('/11111111-2222-3333-4444-555555555555/oauth2/v2.0/authorize');
-    expect(authorizeUrl.searchParams.get('scope')).toContain('Calendars.ReadWrite');
-    const id = await accountId(dani, 'microsoft');
-    const r = await syncAccount(id);
-    expect(r.error).toBeUndefined();
-    expect(r.imported).toBe(1);
-    const t = (await api('GET', 'calendar.events', range, dani)).events.find((e: any) => e.title === 'Treinamento');
-    expect(t).toMatchObject({ source: 'microsoft', location: 'Auditório', startsAt: at(2 * DAY), endsAt: at(2 * DAY + 2 * H) });
-    expect(F.microsoft.events.some((e) => e.title === 'Só no chat')).toBe(true);
-    const r2 = await syncAccount(id);
-    expect([r2.imported, r2.pushed]).toEqual([0, 0]);
-    expect((await api('GET', 'calendar.events', range, dani)).events.filter((e: any) => e.title === 'Só no chat')).toHaveLength(1);
-  });
-
-  it('desconectar apaga lá as cópias futuras e a conta', async () => {
-    const copies = () => F.microsoft.events.filter((e) => e.title === 'Só no chat').length;
-    expect(copies()).toBe(1);
-    expect((await api('POST', 'calendar.accounts.disconnect', { provider: 'microsoft' }, dani)).success).toBe(true);
-    expect(copies()).toBe(0);
-    expect(await one(`SELECT 1 FROM calendar_accounts WHERE user_id = $1 AND provider = 'microsoft'`, [dani.userId])).toBeNull();
-    expect((await api('GET', 'calendar.events', range, dani)).events.some((e: any) => e.source === 'microsoft')).toBe(false);
-  });
-
-  it('uma mudança no chat chega lá sem esperar a rodada periódica', async () => {
-    setSyncKicker((ids) => ids.forEach(kickAccount));
-    try {
-      const c = await api('POST', 'calendar.create', { title: 'Na hora', startsAt: at(DAY), endsAt: at(DAY + H) }, dani);
-      for (let i = 0; i < 50 && !F.google.events.some((e) => e.wesccEventId === c.event._id); i++) await sleep(100);
-      expect(F.google.events.some((e) => e.wesccEventId === c.event._id)).toBe(true);
-    } finally {
-      setSyncKicker(null);
-    }
-  });
-
-  it('o retorno do OAuth recusa state de outro navegador', async () => {
-    const res = await fetch(urlOf('/api/v1/calendar.accounts.connect'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-user-id': dani.userId, 'x-auth-token': dani.authToken },
-      body: JSON.stringify({ provider: 'google' }),
-    });
-    const j: any = await res.json();
-    const state = new URL(j.url).searchParams.get('state')!;
-    const cb = await fetch(urlOf(`/integrations/calendar/google/callback?state=${encodeURIComponent(state)}&code=x`), { redirect: 'manual' });
-    expect(cb.headers.get('location')).toContain('integracao=erro');
+describe('sem agendas externas', () => {
+  it('não há mais conexão com o Google Agenda nem com o Outlook', async () => {
+    const r = await api('GET', 'calendar.accounts', undefined, ana);
+    expect(r.success).not.toBe(true);
+    const cb = await fetch(urlOf('/integrations/calendar/google/callback?state=x&code=x'), { redirect: 'manual' });
+    expect(cb.status).toBe(404);
+    expect(await one(`SELECT to_regclass('calendar_accounts') AS t`)).toEqual({ t: null });
+    const cols = (await many(`SELECT column_name FROM information_schema.columns WHERE table_name = 'calendar_events'`)).map((c) => c.column_name);
+    expect(cols).not.toContain('source');
+    expect(cols).not.toContain('account_id');
   });
 });

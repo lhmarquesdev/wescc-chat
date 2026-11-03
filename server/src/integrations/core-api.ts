@@ -13,14 +13,14 @@ import { alertsFor } from './alerts';
 import { botIds, checkTargets, registerBotDmReply, roomRef } from './bots';
 import { sessionTag } from './ephemeral';
 import { getJob, retryDead, retryJob } from './jobs';
-import { getLinked, listLinked, mapLinked, removeLinked, setLinkedMeta } from './linked';
+import { getLinked, listLinked, mapLinked, removeLinked } from './linked';
 import { publishChanged } from './state';
 
-// Integrações (Jira/Teams): rotas comuns (integrations.*): o que a pessoa pode usar, visão geral, alertas,
+// Integração com o Jira: rotas comuns (integrations.*): o que a pessoa pode usar, visão geral, alertas,
 // atividade, novas tentativas, salas de destino, contas conectadas e a troca da chave de segredos.
 
-const MANAGE: Record<Provider, string> = { jira: 'manage-jira', msteams: 'manage-msteams' };
-const RULE_PROVIDER: Record<string, Provider> = { 'jira-events': 'jira', 'msteams-outgoing': 'msteams', 'msteams-incoming': 'msteams' };
+const MANAGE: Record<Provider, string> = { jira: 'manage-jira' };
+const RULE_PROVIDER: Record<string, Provider> = { 'jira-events': 'jira' };
 
 // ---------- Estado do conector (cada módulo registra o seu) ----------
 
@@ -43,8 +43,8 @@ async function connectorStatus(provider: Provider): Promise<ConnectorStatus> {
 // ---------- Ajudantes ----------
 
 const asProvider = (v: unknown): Provider => {
-  if (v === 'jira' || v === 'msteams') return v;
-  throw badRequest('error-invalid-params', 'O parâmetro "provider" deve ser jira ou msteams.');
+  if (v === 'jira') return v;
+  throw badRequest('error-invalid-params', 'O parâmetro "provider" deve ser jira.');
 };
 
 async function requireManage(ctx: Ctx, provider: Provider) {
@@ -66,26 +66,14 @@ export function jiraReady(): boolean {
   return getSetting('Jira_Enabled') === true && !!originOf(getSetting('Jira_Site_Url')) && !integrationsPaused();
 }
 
-export function msteamsReady(): boolean {
-  const filled = (k: string) => !!String(getSetting(k) ?? '').trim();
-  return getSetting('MSTeams_Enabled') === true && filled('MSTeams_Tenant_Id') && filled('MSTeams_Client_Id') && !integrationsPaused();
-}
-
 export async function integrationsMe(ctx: Ctx): Promise<IntegrationsMe> {
-  const [canUse, canCreate, canManageJira, canMeet, canManageTeams] = await Promise.all([
+  const [canUse, canCreate, canManageJira] = await Promise.all([
     hasPermission(ctx.userId, 'use-jira'),
     hasPermission(ctx.userId, 'create-jira-issue'),
     hasPermission(ctx.userId, 'manage-jira'),
-    hasPermission(ctx.userId, 'start-msteams-meeting'),
-    hasPermission(ctx.userId, 'manage-msteams'),
   ]);
-  const [jiraAccount, msAccount, user] = await Promise.all([
-    getLinked(ctx.userId, 'jira'),
-    getLinked(ctx.userId, 'microsoft'),
-    one('SELECT email_verified FROM users WHERE id = $1', [ctx.userId]),
-  ]);
+  const jiraAccount = await getLinked(ctx.userId, 'jira');
   const userAuth = String(getSetting('Jira_User_Auth') ?? 'token');
-  const meetings = String(getSetting('MSTeams_Meetings_Mode') ?? 'links');
   return {
     sessionTag: sessionTag(ctx.sessionId ?? ''),
     bots: await botIds(),
@@ -99,16 +87,6 @@ export async function integrationsMe(ctx: Ctx): Promise<IntegrationsMe> {
       defaultProject: String(getSetting('Jira_Default_Project') ?? ''),
       site: originOf(getSetting('Jira_Site_Url')),
       account: jiraAccount ? mapLinked(jiraAccount) : null,
-    },
-    msteams: {
-      enabled: msteamsReady(),
-      meetings: meetings === 'off' || meetings === 'graph' ? meetings : 'links',
-      canMeet,
-      canManage: canManageTeams,
-      defaultMinutes: Number(getSetting('MSTeams_Meeting_Minutes') ?? 30) || 30,
-      presence: getSetting('MSTeams_Presence_Enabled') === true,
-      emailTrusted: user?.email_verified === true,
-      account: msAccount ? mapLinked(msAccount) : null,
     },
   };
 }
@@ -139,14 +117,13 @@ export function integrationsCoreRoutes(app: FastifyInstance) {
 
   route(app, 'GET', 'integrations.me', {}, async (_req, _r, ctx) => integrationsMe(ctx));
 
-  route(app, 'GET', 'integrations.overview', { permissions: ['manage-jira', 'manage-msteams', 'manage-integrations'] }, async (_req, _r, ctx) => {
+  route(app, 'GET', 'integrations.overview', { permissions: ['manage-jira', 'manage-integrations'] }, async (_req, _r, ctx) => {
     const counts = await many(`SELECT type, count(*)::int AS n FROM integrations GROUP BY type`);
     const n = (t: string) => Number(counts.find((c) => c.type === t)?.n ?? 0);
     const info = keyInfo();
     const admin = await isAdmin(ctx.userId);
     return {
       jira: { enabled: getSetting('Jira_Enabled') === true, status: await connectorStatus('jira'), rules: n('jira-events') },
-      msteams: { enabled: getSetting('MSTeams_Enabled') === true, status: await connectorStatus('msteams'), outRules: n('msteams-outgoing'), inRules: n('msteams-incoming') },
       webhooks: { incoming: n('webhook-incoming'), outgoing: n('webhook-outgoing') },
       // O caminho do arquivo e o erro do sistema só para o papel admin.
       secretsKey: {
@@ -161,8 +138,8 @@ export function integrationsCoreRoutes(app: FastifyInstance) {
   });
 
   route(app, 'GET', 'integrations.alerts', {}, async (_req, _r, ctx) => {
-    const [jira, msteams, admin] = await Promise.all([hasPermission(ctx.userId, 'manage-jira'), hasPermission(ctx.userId, 'manage-msteams'), isAdmin(ctx.userId)]);
-    return { alerts: await alertsFor(ctx.userId, { jira, msteams, admin }) };
+    const [jira, admin] = await Promise.all([hasPermission(ctx.userId, 'manage-jira'), isAdmin(ctx.userId)]);
+    return { alerts: await alertsFor(ctx.userId, { jira, admin }) };
   });
 
   route(app, 'GET', 'integrations.activity', {}, async (req, _r, ctx) => {
@@ -223,7 +200,7 @@ export function integrationsCoreRoutes(app: FastifyInstance) {
   });
 
   // Só salas que a pessoa pode acessar: nunca discussões, salas arquivadas ou canais de um time privado de fora.
-  route(app, 'GET', 'integrations.rooms.search', { permissions: ['manage-jira', 'manage-msteams'] }, async (req, _r, ctx) => {
+  route(app, 'GET', 'integrations.rooms.search', { permissions: ['manage-jira'] }, async (req, _r, ctx) => {
     const query = q(req);
     const text = String(query.text ?? '').trim().slice(0, 100);
     const count = Math.max(1, Math.min(20, Number(query.count ?? 10) || 10));
@@ -251,19 +228,9 @@ export function integrationsCoreRoutes(app: FastifyInstance) {
 
   route(app, 'POST', 'integrations.linked.remove', {}, async (req, _r, ctx) => {
     const provider = b(req).provider;
-    if (provider !== 'jira' && provider !== 'microsoft') throw badRequest('error-invalid-params', 'O parâmetro "provider" deve ser jira ou microsoft.');
+    if (provider !== 'jira') throw badRequest('error-invalid-params', 'O parâmetro "provider" deve ser jira.');
     await removeLinked(ctx.userId, provider);
     return {};
-  });
-
-  route(app, 'POST', 'integrations.linked.update', {}, async (req, _r, ctx) => {
-    const body = b(req);
-    if (body.provider !== 'microsoft') throw badRequest('error-invalid-params', 'Só a conta Microsoft 365 tem opções.');
-    const busySync = bool(body.busySync);
-    if (busySync === undefined) throw badRequest('error-invalid-params', 'O parâmetro "busySync" é obrigatório.');
-    const row = await setLinkedMeta(ctx.userId, 'microsoft', { busySync });
-    if (!row) throw notFound('error-not-found', 'Nenhuma conta Microsoft 365 encontrada para você.');
-    return { account: mapLinked(row) };
   });
 
   // discardUnreadable: a chave antiga se perdeu e o administrador confirmou que os segredos que não abrem serão

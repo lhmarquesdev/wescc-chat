@@ -1,8 +1,8 @@
-// Integrações com Jira e Microsoft Teams: contratos entre servidor e web e funções puras usadas pelos dois.
+// Integração com o Jira: contratos entre servidor e web e funções puras usadas pelos dois.
 
 // ---------- Comuns ----------
 
-export type Provider = 'jira' | 'msteams';
+export type Provider = 'jira';
 export type Tone = 'ok' | 'warn' | 'err' | 'info' | 'off';
 
 // Segredo visto pela API: nunca o valor.
@@ -258,125 +258,11 @@ export interface JiraSearchResult {
   identity: 'user' | 'integration';
 }
 
-// ---------- Microsoft Teams ----------
-
-export interface TeamsConfig {
-  enabled: boolean;
-  tenantId: string;
-  clientId: string;
-  clientSecret: SecretState;
-  status: ConnectorStatus;
-  granted: { application: string[]; delegated: string[] }; // permissões vistas nos tokens do último teste
-  serviceAccount: { linked: boolean; upn?: string | null; displayName?: string | null; status: ConnectorStatus };
-  serviceRedirectUri: string; // {Site_Url}/integrations/msteams/callback, ou http://localhost:<porta>/... quando Site_Url não é https
-  serviceRedirectNote?: string | null; // pt-BR, quando é preciso entrar pelo próprio servidor
-  inboundMode: 'off' | 'notifications' | 'polling'; // como as mensagens do Teams chegam (D13)
-  notificationsUrl: string | null; // {Site_Url}/hooks/msteams/<token>; null quando o endereço não serve
-  notificationsProblem?: string | null; // pt-BR: por que as notificações não servem neste endereço
-  pollMinutes: number; // só no modo polling
-  pollingAcceptedAt?: string | null; // quando e por quem o risco foi aceito (auditoria)
-  pollingAcceptedBy?: string | null;
-  pollingUnavailable?: string | null; // pt-BR: este locatário não oferece a leitura por delta dos canais
-  appObjectId?: string | null; // ID de objeto do aplicativo no Entra (o gatilho do fluxo libera este ID)
-  emailChangeAllowed: boolean; // Accounts_AllowEmailChange ligado: Criar agora e presença ficam inseguros (D30)
-  meetingsMode: 'off' | 'links' | 'graph';
-  meetingLobby: 'organization' | 'everyone' | 'organizer';
-  meetingMinutes: number;
-  presenceEnabled: boolean;
-  presenceMinutes: number; // só no modo polling (com notificações, a presença chega por assinatura)
-}
-
-export interface TeamsConfigInput {
-  enabled?: boolean;
-  tenantId?: string;
-  clientId?: string;
-  clientSecret?: string | null;
-  clientSecretExpiresAt?: string | null; // AAAA-MM-DD
-  inboundMode?: 'off' | 'notifications' | 'polling';
-  acceptPolling?: boolean; // obrigatório (true) para passar a 'polling'
-  pollMinutes?: number;
-  meetingsMode?: 'off' | 'links' | 'graph';
-  meetingLobby?: 'organization' | 'everyone' | 'organizer';
-  meetingMinutes?: number;
-  presenceEnabled?: boolean;
-  presenceMinutes?: number;
-}
-
-export type TeamsOutFilter = 'all' | 'root' | 'ack' | 'keywords';
-
-export interface TeamsOutRule extends RuleMeta {
-  _id: string;
-  name: string;
-  roomIds: string[]; // 1 a 10, só c/p
-  rooms: IntegrationRoomRef[];
-  filter: TeamsOutFilter; // padrão 'root'. todas | só mensagens principais | só avisos com "Ciente" | com palavras-chave
-  keywords: string[]; // filter 'keywords': até 20, sem diferenciar maiúsculas e acentos
-  includeBots: boolean; // também as mensagens de robôs (Jira, webhooks); padrão false
-  includeFiles: boolean; // nomes dos arquivos (nunca o arquivo)
-  includeLink: boolean; // botão "Abrir no {Site_Name}" quando Site_Url existe
-  destinationLabel: string; // "Operação › Avisos", mostrado no chat
-  destinationPrivate: boolean; // canal privado do Teams: o fluxo precisa publicar como usuário (Post as user)
-  flowOwner: string; // e-mail do dono do fluxo no Power Automate: as regras do mesmo dono dividem o limite
-  budget: 5 | 10 | 20; // posts a cada 5 minutos para este dono (vale o menor entre as regras dele)
-  auth: 'none' | 'entra'; // 'entra': token do aplicativo Entra no cabeçalho Authorization
-  url: SecretState; // URL do fluxo (segredo)
-  urlHost?: string | null; // só o host, para mostrar
-}
-export type TeamsOutRuleInput = Pick<TeamsOutRule, 'name' | 'enabled' | 'roomIds' | 'filter' | 'keywords' | 'includeBots' | 'includeFiles' | 'includeLink' | 'destinationLabel' | 'destinationPrivate' | 'flowOwner' | 'budget' | 'auth'> & {
-  url?: string; // obrigatório ao criar; ausente = manter
-};
-
-export interface TeamsTeamRef {
-  id: string;
-  name: string;
-}
-
-export interface TeamsChannelRef {
-  id: string;
-  name: string;
-  membership: 'standard' | 'private' | 'shared';
-}
-
-export interface TeamsInRule extends RuleMeta {
-  _id: string;
-  name: string;
-  team: TeamsTeamRef;
-  channel: TeamsChannelRef;
-  roomId: string; // só c/p
-  room: IntegrationRoomRef | null;
-  replies: boolean;
-  edits: boolean;
-  deletes: boolean;
-  grantPublisher: boolean;
-  lastEventAt?: string | null; // última mensagem do Teams processada
-  subscriptionExpiresAt?: string | null; // modo notificações
-}
-export interface TeamsInRuleInput {
-  name: string;
-  enabled: boolean;
-  teamId: string;
-  channelId: string;
-  roomId: string;
-  replies: boolean;
-  edits: boolean;
-  deletes: boolean;
-  grantPublisher: boolean;
-  acknowledgePrivate?: boolean; // canal privado/compartilhado do Teams indo para qualquer sala do chat (c ou p)
-}
-
-export interface MessageBridge {
-  provider: 'msteams';
-  externalId: string;
-  author: string; // nome no Teams (safeExternalText)
-  webUrl?: string | null; // link da mensagem no Teams
-  editedAt?: string | null;
-}
-
-// provider wescc: reunião da agenda do chat (meetingId = id do evento, joinUrl = /meet/<código> com o endereço do site).
+// Reunião da agenda do chat (meetingId = id do evento, joinUrl = /meet/<código> com o endereço do site).
 export interface MessageMeeting {
-  provider: 'msteams' | 'wescc';
+  provider: 'wescc';
   kind: 'created' | 'linked';
-  meetingId: string; // id em meetings
+  meetingId: string; // id do evento
   joinUrl: string;
   subject: string;
   startsAt?: string | null;
@@ -384,19 +270,11 @@ export interface MessageMeeting {
   by: { _id: string; username: string; name?: string };
 }
 
-export interface ExternalPresence {
-  provider: 'msteams';
-  availability: string; // Available, Busy, DoNotDisturb, Away, BeRightBack, Offline, PresenceUnknown...
-  activity: string; // InACall, InAMeeting, Presenting, OutOfOffice...
-  label: string; // pt-BR (teamsPresenceLabel)
-  updatedAt: string;
-}
-
 // ---------- Contas da pessoa ----------
 
 export interface LinkedAccount {
-  provider: 'jira' | 'microsoft';
-  method: 'token' | 'oauth' | 'directory';
+  provider: 'jira';
+  method: 'token' | 'oauth';
   displayName: string;
   email?: string | null;
   site?: string | null;
@@ -405,7 +283,6 @@ export interface LinkedAccount {
   secretExpiresAt?: string | null;
   lastUsedAt?: string | null;
   createdAt: string;
-  busySync?: boolean; // microsoft, fase 3
 }
 
 // O que o chat pode mostrar para a pessoa (GET integrations.me).
@@ -423,21 +300,11 @@ export interface IntegrationsMe {
     site: string;
     account: LinkedAccount | null;
   };
-  msteams: {
-    enabled: boolean;
-    meetings: 'off' | 'links' | 'graph';
-    canMeet: boolean; // start-msteams-meeting
-    canManage: boolean; // manage-msteams
-    defaultMinutes: number;
-    presence: boolean;
-    emailTrusted: boolean; // e-mail do chat confirmado (users.email_verified): Criar agora e presença funcionam
-    account: LinkedAccount | null; // conta Microsoft 365 encontrada pelo e-mail (fase 3)
-  };
 }
 
 // Alerta para quem configura (ou para a própria pessoa, nos tokens pessoais).
 export interface IntegrationAlert {
-  key: string; // 'jira.connection', 'msteams.service', 'jira.linked:<usuário>'...
+  key: string; // 'jira.connection', 'jira.linked:<usuário>'...
   provider: Provider;
   tone: 'warn' | 'err';
   text: string; // pt-BR
@@ -447,9 +314,9 @@ export interface IntegrationAlert {
 
 // ---------- Respostas que só a pessoa vê ----------
 
-export type EphemeralModal = 'jira-create' | 'jira-link' | 'jira-comment' | 'jira-assign' | 'msteams-meeting';
+export type EphemeralModal = 'jira-create' | 'jira-link' | 'jira-comment' | 'jira-assign';
 // Únicos endpoints que uma resposta efêmera pode chamar (servidor e cliente conferem a mesma lista).
-export const EPHEMERAL_API_ENDPOINTS = ['jira.search.more', 'jira.issue.share', 'jira.issue.assign', 'msteams.meeting.link'] as const;
+export const EPHEMERAL_API_ENDPOINTS = ['jira.search.more', 'jira.issue.share', 'jira.issue.assign'] as const;
 export type EphemeralApiEndpoint = (typeof EPHEMERAL_API_ENDPOINTS)[number];
 export type EphemeralAction =
   | { kind: 'api'; label: string; icon?: string; endpoint: EphemeralApiEndpoint; body: Record<string, unknown>; primary?: boolean }
@@ -497,41 +364,13 @@ export function unwrapSafeLinks(raw: string): string {
   return s;
 }
 
-export const TEAMS_MEETING_HOSTS = ['teams.microsoft.com', 'teams.live.com', 'teams.cloud.microsoft', 'gov.teams.microsoft.us', 'dod.teams.microsoft.us'];
-
-// Link de reunião do Teams (Safe Links desembrulhado): https, host da lista e caminho de reunião. Devolve o link limpo ou null.
-export function normalizeTeamsMeetingUrl(raw: string): string | null {
-  const s = unwrapSafeLinks(raw);
-  if (s.length > 2048) return null;
-  let u: URL;
-  try {
-    u = new URL(s);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== 'https:' || u.username || u.password || u.port) return null;
-  if (!TEAMS_MEETING_HOSTS.includes(u.hostname.toLowerCase())) return null;
-  return /^\/(l\/meetup-join\/|meet\/)/.test(u.pathname) ? u.toString() : null;
-}
-export const isTeamsMeetingUrl = (raw: string) => normalizeTeamsMeetingUrl(raw) !== null;
-
-// "2026-10-22T14:30:00-03:00": hora local de quem marcou (offsetMinutes = -new Date().getTimezoneOffset() no navegador).
+// "2026-10-22T14:30:00-03:00": hora local de quem escolheu (offsetMinutes = -new Date().getTimezoneOffset() no navegador).
 export function localIso(d: Date, offsetMinutes: number): string {
   const t = new Date(d.getTime() + offsetMinutes * 60000);
   const sign = offsetMinutes >= 0 ? '+' : '-';
   const abs = Math.abs(offsetMinutes);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${t.toISOString().slice(0, 19)}${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
-}
-
-// Formulário de nova reunião do Teams já preenchido (abre o Teams; nada é criado até a pessoa salvar).
-// Espaços viram %20 (o Teams não decodifica "+"); convidados só por UPN.
-export function teamsScheduleLink(p: { subject: string; start: Date; end: Date; offsetMinutes: number; content?: string; attendeesUpn?: string[] }): string {
-  const enc = encodeURIComponent;
-  const parts = [`subject=${enc(p.subject.slice(0, 200))}`, `startTime=${enc(localIso(p.start, p.offsetMinutes))}`, `endTime=${enc(localIso(p.end, p.offsetMinutes))}`];
-  if (p.content) parts.push(`content=${enc(p.content.slice(0, 500))}`);
-  if (p.attendeesUpn?.length) parts.push(`attendees=${p.attendeesUpn.slice(0, 20).map(enc).join(',')}`);
-  return `https://teams.microsoft.com/l/meeting/new?${parts.join('&')}`;
 }
 
 // INTEGRATIONS_ALLOWED_HOSTS: "host[:porta]" separados por vírgula. Só no ambiente do servidor, nunca pela tela.
@@ -561,26 +400,4 @@ export function jiraSiteAllowed(raw: string, allowed: string[]): { origin: strin
   return { origin: u.origin };
 }
 
-const PRESENCE_LABEL: Record<string, string> = {
-  InACall: 'Em chamada',
-  InAConferenceCall: 'Em chamada',
-  InAMeeting: 'Em reunião',
-  Presenting: 'Apresentando',
-  DoNotDisturb: 'Não incomodar',
-  Busy: 'Ocupado',
-  Away: 'Ausente',
-  BeRightBack: 'Volto logo',
-  OutOfOffice: 'Fora do escritório',
-  OffWork: 'Fora do expediente',
-  Available: 'Disponível',
-  Offline: 'Offline',
-};
-
-export function teamsPresenceLabel(availability: string, activity: string): string {
-  return PRESENCE_LABEL[activity] ?? PRESENCE_LABEL[availability.replace(/Idle$/, '')] ?? 'Desconhecido';
-}
-
-// Atividades do Teams que contam como "ocupado" para a sincronização opcional.
-export const TEAMS_BUSY_ACTIVITIES = ['InACall', 'InAConferenceCall', 'InAMeeting', 'Presenting', 'DoNotDisturb'];
-
-export const INTEGRATION_CALLBACK = { jira: '/integrations/jira/callback', msteams: '/integrations/msteams/callback' } as const;
+export const INTEGRATION_CALLBACK = { jira: '/integrations/jira/callback' } as const;

@@ -6,12 +6,12 @@ import { audit } from '../services/audit';
 import { clearAlert, raiseAlert } from './alerts';
 import { publishChanged } from './state';
 
-// Contas externas de cada pessoa (Jira e Microsoft 365). Tokens cifrados; nunca saem pela API.
+// Contas do Jira de cada pessoa. Tokens cifrados; nunca saem pela API.
 
 export interface LinkedRow {
   userId: string;
-  provider: 'jira' | 'microsoft';
-  method: 'token' | 'oauth' | 'directory';
+  provider: 'jira';
+  method: 'token' | 'oauth';
   externalId: string;
   displayName: string;
   email: string | null;
@@ -200,17 +200,6 @@ export async function removeLinked(userId: string, provider: LinkedRow['provider
   publishChanged('account', userId);
 }
 
-// Junta campos em meta (por exemplo busySync da conta Microsoft).
-export async function setLinkedMeta(userId: string, provider: LinkedRow['provider'], patch: Record<string, unknown>): Promise<LinkedRow | null> {
-  const r = await one(
-    `UPDATE linked_accounts SET meta = meta || $3::jsonb, updated_at = now() WHERE user_id = $1 AND provider = $2 RETURNING *`,
-    [userId, provider, JSON.stringify(patch)],
-  );
-  if (!r) return null;
-  publishChanged('account', userId);
-  return mapRow(r);
-}
-
 export async function userForExternal(provider: LinkedRow['provider'], externalId: string): Promise<{ id: string; username: string } | null> {
   const r = await one(
     `SELECT u.id, u.username FROM linked_accounts l JOIN users u ON u.id = l.user_id
@@ -234,6 +223,5 @@ export function mapLinked(row: LinkedRow): LinkedAccount {
     secretExpiresAt: iso(row.secretExpiresAt),
     lastUsedAt: iso(row.lastUsedAt ?? null),
     createdAt: iso(row.createdAt ?? null) ?? new Date(0).toISOString(),
-    ...(row.provider === 'microsoft' ? { busySync: row.meta?.busySync === true } : {}),
   };
 }

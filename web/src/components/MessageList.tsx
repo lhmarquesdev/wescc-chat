@@ -13,7 +13,7 @@ import { Icon } from './Icon';
 import type { IconName } from './icons';
 import { MessageItem, type MessageActions } from './MessageItem';
 import { Avatar, Empty, GroupAvatar, SkeletonMessages } from './ui';
-// Integrações (Jira/Teams)
+// Integrações (Jira)
 import type { ReactNode } from 'react';
 import { placeEphemeral, useRoomEphemeral } from '../lib/ephemeral';
 import { EphemeralRow } from './integrations/EphemeralRow';
@@ -384,7 +384,7 @@ export function MessageList({
     return out;
   }, [list, unreadSince, meId, groupingPeriod, jumpTo]);
 
-  // Integrações (Jira/Teams): respostas que só a pessoa vê, entre as linhas pela hora (fora de não lidas, dias e grupos)
+  // Integrações (Jira): respostas que só a pessoa vê, entre as linhas pela hora (fora de não lidas, dias e grupos)
   const ephemeral = useRoomEphemeral(rid, null);
   const ephSlots = useMemo(() => placeEphemeral(ephemeral, list), [ephemeral, list]);
   const lastDay = days[days.length - 1]?.key;
@@ -507,11 +507,11 @@ export function MessageList({
             <div className="day-sep">
               <span>{formatDay(d.ts)}</span>
             </div>
-            {/* Integrações (Jira/Teams): linhas e efêmeras do dia; a linha depois de uma efêmera começa outro grupo */}
+            {/* Integrações (Jira): linhas e efêmeras do dia; a linha depois de uma efêmera começa outro grupo */}
             {dayItems(d)}
           </div>
         ))}
-        {/* Integrações (Jira/Teams): sala sem mensagens carregadas, as efêmeras ficam sozinhas */}
+        {/* Integrações (Jira): sala sem mensagens carregadas, as efêmeras ficam sozinhas */}
         {!days.length &&
           ephSlots.end.map((e) => (
             <EphemeralRow key={`eph-${e._id}`} m={e} />

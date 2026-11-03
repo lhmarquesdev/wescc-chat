@@ -1,4 +1,4 @@
-/* Integrações (Jira/Teams): administração e Minha conta → Contas conectadas. Só as classes do contrato (§8.9):
+/* Integrações (Jira): administração e Minha conta → Contas conectadas. Só as classes do contrato (§8.9):
    .int-hub, .int-steps, .int-targets, .int-target-row e .int-secret. Só tokens do design system; o resto das telas
    usa as classes dele (.card-head, .toggle-list, .row-actions, .callout, .copy-box…) sem mudá-las. */
 

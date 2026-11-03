@@ -328,7 +328,7 @@ add('Integrations', 'Scripts', 'Integrations_Scripts_Enabled', 'boolean', false,
 });
 add('Integrations', 'Outgoing', 'Integrations_Outgoing_Timeout', 'int', 10, { label: 'Tempo limite das chamadas de saída (segundos)' });
 
-// Integrações (Jira/Teams): telas próprias em Administração → Integrações. Segredos ficam em integration_secrets (cifrados).
+// Integração com o Jira: telas próprias em Administração → Integrações. Segredos ficam em integration_secrets (cifrados).
 // Nenhuma destas configurações é pública (settings.public não pede login); o cliente logado usa integrations.me.
 // O host do Jira é conferido aqui, em jira.config.save e de novo a cada uso (D25).
 function validateSiteUrl(v: unknown): string | null {
@@ -343,8 +343,6 @@ function validateProjectKeys(v: unknown): string | null {
   const bad = keys.find((k) => !/^[A-Za-z][A-Za-z0-9_]{0,19}$/.test(k));
   return bad ? `Chave de projeto inválida: ${bad}. Use as chaves, por exemplo OPS, SUP.` : null;
 }
-const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const validateGuid = (v: unknown) => (!String(v ?? '').trim() || GUID.test(String(v).trim()) ? null : 'Use o ID no formato 00000000-0000-0000-0000-000000000000.');
 
 add('Jira', 'Conexão', 'Jira_Enabled', 'boolean', false, { label: 'Ativar a integração com o Jira' });
 add('Jira', 'Conexão', 'Jira_Site_Url', 'string', '', { label: 'Endereço do Jira', validate: validateSiteUrl });
@@ -381,45 +379,8 @@ add('Jira', 'Chat', 'Jira_Projects_Visible', 'string', '', { label: 'Projetos vi
 add('Jira', 'Chat', 'Jira_Projects_Create', 'string', '', { label: 'Projetos em que o chat cria issues (vazio = todos que a pessoa pode)', validate: validateProjectKeys });
 add('Jira', 'Chat', 'Jira_Default_Project', 'string', '', { label: 'Projeto sugerido ao criar issues', validate: validateProjectKeys });
 
-add('MSTeams', 'Conexão', 'MSTeams_Enabled', 'boolean', false, { label: 'Ativar a integração com o Microsoft Teams' });
-add('MSTeams', 'Conexão', 'MSTeams_Tenant_Id', 'string', '', { label: 'ID do locatário (Directory/tenant ID)', validate: validateGuid });
-add('MSTeams', 'Conexão', 'MSTeams_Client_Id', 'string', '', { label: 'ID do aplicativo (Application/client ID)', validate: validateGuid });
-// 'polling' só é gravado por msteams.config.save com acceptPolling: true (auditado); a tela genérica esconde o grupo.
-add('MSTeams', 'Mensagens', 'MSTeams_Inbound_Mode', 'select', 'off', {
-  label: 'Como as mensagens do Teams chegam ao chat',
-  values: [
-    { key: 'off', label: 'Desligado' },
-    { key: 'notifications', label: 'Notificações do Microsoft 365 (precisa de https público)' },
-    { key: 'polling', label: 'Consulta periódica (contra a recomendação da Microsoft)' },
-  ],
-});
-add('MSTeams', 'Mensagens', 'MSTeams_Poll_Minutes', 'int', 2, { label: 'Intervalo da consulta aos canais do Teams (minutos)', validate: intRange(1, 15) });
-add('MSTeams', 'Reuniões', 'MSTeams_Meetings_Mode', 'select', 'links', {
-  label: 'Reuniões do Teams nas salas',
-  values: [
-    { key: 'off', label: 'Desligado' },
-    { key: 'links', label: 'Colar link e agendar pelo Teams' },
-    { key: 'graph', label: 'Também criar a reunião na hora (precisa de permissão no Microsoft 365)' },
-  ],
-});
-add('MSTeams', 'Reuniões', 'MSTeams_Meeting_Lobby', 'select', 'organization', {
-  label: 'Quem entra direto, sem sala de espera',
-  values: [
-    { key: 'organization', label: 'Pessoas da organização' },
-    { key: 'everyone', label: 'Todos' },
-    { key: 'organizer', label: 'Só o organizador' },
-  ],
-});
-add('MSTeams', 'Reuniões', 'MSTeams_Meeting_Minutes', 'int', 30, { label: 'Duração padrão (minutos)', validate: intRange(15, 240) });
-add('MSTeams', 'Presença', 'MSTeams_Presence_Enabled', 'boolean', false, { label: 'Mostrar a presença do Teams no chat' });
-add('MSTeams', 'Presença', 'MSTeams_Presence_Minutes', 'int', 5, { label: 'Intervalo de leitura da presença no modo consulta (minutos)', validate: intRange(5, 30) });
-
-// Agenda (tela própria em Administração › Integrações › Agenda; a tela genérica esconde o grupo).
+// Agenda (aparece na tela genérica de configurações, grupo Agenda).
 add('Calendar', 'Agenda', 'Calendar_Enabled', 'boolean', true, { public: true, label: 'Agenda e reuniões do chat' });
-add('Calendar', 'Agenda', 'Calendar_Sync_Minutes', 'int', 5, { label: 'Intervalo da sincronização com o Google e o Outlook (minutos)', validate: intRange(1, 60) });
-add('Calendar', 'Google', 'Calendar_Google_Enabled', 'boolean', false, { label: 'Permitir conectar o Google Agenda' });
-add('Calendar', 'Google', 'Calendar_Google_Client_Id', 'string', '', { label: 'ID do cliente OAuth do Google' });
-add('Calendar', 'Microsoft', 'Calendar_Microsoft_Enabled', 'boolean', false, { label: 'Permitir conectar o Outlook / Teams (usa o aplicativo do Teams)' });
 
 const cache = new Map<string, unknown>();
 

@@ -1,5 +1,5 @@
 // Lembretes da Agenda: reminder_minutes antes do início, para o dono e os convidados que não recusaram (aviso na tela e
-// push). Cada evento avisa uma vez por horário (mudar o horário zera reminded_at). Trazidos do Google/Outlook: sem lembrete.
+// push). Cada evento avisa uma vez por horário (mudar o horário zera reminded_at).
 import { many } from '../db/pool';
 import { bus } from '../realtime/bus';
 import { sendPush } from '../services/push';
@@ -13,7 +13,7 @@ export async function sendDueReminders(): Promise<number> {
     `UPDATE calendar_events SET reminded_at = now()
       WHERE id IN (
         SELECT id FROM calendar_events
-         WHERE status = 'confirmed' AND source = 'chat' AND reminded_at IS NULL AND reminder_minutes IS NOT NULL
+         WHERE status = 'confirmed' AND reminded_at IS NULL AND reminder_minutes IS NOT NULL
            AND starts_at - reminder_minutes * interval '1 minute' <= now() AND starts_at > now() - $1 * interval '1 minute'
          ORDER BY starts_at LIMIT 200 FOR UPDATE SKIP LOCKED)
       RETURNING id, owner_id, title, starts_at, all_day, is_meeting, meeting_code`,

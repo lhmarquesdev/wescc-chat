@@ -462,7 +462,7 @@ function ComposerView({
     );
   }
 
-  // Mensagem com apelido (ponte do Teams): o nome da pessoa, como no stream, e não o do robô.
+  // Mensagem com apelido (webhooks): o nome da pessoa, como no stream, e não o do robô.
   const quoteName = quoting ? quoting.alias || quoting.u.name || quoting.u.username : '';
   const format = (
     <>

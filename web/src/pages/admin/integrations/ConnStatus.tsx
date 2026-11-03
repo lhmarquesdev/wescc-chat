@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): estado da conexão e as linhas do último teste (§7.7).
+// Integrações (Jira): estado da conexão e as linhas do último teste (§7.7).
 import type { CSSProperties } from 'react';
 import type { ConnectorStatus } from '@shared/integrations';
 import { formatDateTime, formatRelative } from '../../../lib/format';
@@ -10,9 +10,9 @@ import './integrations-admin.css';
 type LineTone = 'ok' | 'warn' | 'err' | 'info';
 
 // As linhas chegam do servidor como texto, sem o tom de cada uma. Os passos que deram certo têm começo fixo
-// (CONFIG_TEXT.account/projects no Jira; appRoles/serviceLinked/serviceScopes no Teams); a dica da lista de IPs é só
+// (CONFIG_TEXT.account/projects no Jira); a dica da lista de IPs é só
 // informação. O resto segue o estado do teste: num teste com avisos ou com erro, é a linha que causou o selo.
-const OK_LINE = [/^Conta da integração: /, /^A conta da integração vê /, /^Permissões do aplicativo: /, /^Conta de serviço: /, /^Permissões da conta de serviço: /];
+const OK_LINE = [/^Conta da integração: /, /^A conta da integração vê /];
 const INFO_LINE = [/^Se a organização da Atlassian usa lista de IPs permitidos/];
 
 export function lineTone(line: string, status: ConnectorStatus['tone']): LineTone {

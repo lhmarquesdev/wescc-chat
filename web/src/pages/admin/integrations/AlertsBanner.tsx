@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): alertas abertos (conexão com erro, token perto de expirar, fluxo parado…) e os avisos da
+// Integrações (Jira): alertas abertos (conexão com erro, token perto de expirar, fluxo parado…) e os avisos da
 // chave de segredos (§7.2).
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -11,7 +11,7 @@ import { useIntegrationEvents } from './parts';
 import './integrations-admin.css';
 
 // Avisos da chave de segredos (integrations.overview). Valem para todas as integrações: aparecem no hub e nas páginas
-// do Jira e do Teams.
+// do Jira.
 export function SecretsKeyNotices({ secretsKey: key, paused }: { secretsKey?: IntegrationsOverview['secretsKey']; paused?: boolean }) {
   return (
     <>
@@ -40,7 +40,7 @@ export function SecretsKeyNotices({ secretsKey: key, paused }: { secretsKey?: In
   );
 }
 
-// Nas páginas do Jira e do Teams: os mesmos avisos da chave que o hub mostra.
+// Nas páginas do Jira: os mesmos avisos da chave que o hub mostra.
 export function SecretsKeyBanner() {
   const { data, reload } = useAsync(() => coreAdmin.overview(), []);
   useIntegrationEvents(reload);
@@ -52,7 +52,7 @@ export function SecretsKeyBanner() {
 const since = (iso: string) => `Desde ${formatWhen(iso).replace(/^Ontem/, 'ontem')}`;
 
 // O alerta secrets.key nunca entra aqui: ele repete os avisos da chave (SecretsKeyNotices), e o servidor o manda com
-// provider 'jira', então sumiria das páginas do Teams.
+// provider 'jira', então apareceria duas vezes.
 export function AlertsBanner({ provider }: { provider?: Provider }) {
   const { data, reload } = useAsync(() => coreAdmin.alerts(), []);
   useIntegrationEvents(reload);

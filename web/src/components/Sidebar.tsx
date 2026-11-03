@@ -314,7 +314,7 @@ async function setTheme(theme: Theme) {
 }
 
 function useAdminHome() {
-  // Quem abre qualquer seção da Administração vê o item (figurinhas, chamadas, Jira/Teams...): a lista sai das seções.
+  // Quem abre qualquer seção da Administração vê o item (figurinhas, chamadas, Jira...): a lista sai das seções.
   const canAdmin = usePermission(ADMIN_MENU_PERMS);
   const canStats = usePermission('view-statistics');
   const canImport = usePermission(['run-import', 'view-import-operations']);

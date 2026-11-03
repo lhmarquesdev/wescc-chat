@@ -9,12 +9,12 @@ import { startJobWorker, sweepJobs } from './jobs';
 import { activity, getState, mergeState } from './state';
 
 // Tarefas periódicas das integrações: leases no banco (uma instância por vez, sem segurar conexão durante HTTP),
-// consultas periódicas ao Jira e ao Teams, a fila de tarefas, a limpeza e as conferências diárias.
+// consultas periódicas ao Jira, a fila de tarefas, a limpeza e as conferências diárias.
 
 const INSTANCE = `${os.hostname()}:${process.pid}`;
 const runId = () => `${INSTANCE}:${crypto.randomBytes(6).toString('hex')}`;
 const shortHash = (s: string) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16);
-const LABEL: Record<Provider, string> = { jira: 'Jira', msteams: 'Teams' };
+const LABEL: Record<Provider, string> = { jira: 'Jira' };
 
 // ---------- Leases ----------
 
@@ -173,7 +173,7 @@ const dias = (n: number) => `${n} ${n === 1 ? 'dia' : 'dias'}`;
 // Segredos com validade informada e tokens pessoais do Jira que vencem em até 14 dias. Já vencido, o alerta continua
 // (com "expirou"): é quando ele mais importa.
 async function expiryCheck() {
-  const secrets = await many(`SELECT id, expires_at FROM integration_secrets WHERE id IN ('jira.apiToken', 'msteams.clientSecret')`);
+  const secrets = await many(`SELECT id, expires_at FROM integration_secrets WHERE id = 'jira.apiToken'`);
   const expiring = new Map(secrets.filter((s) => s.expires_at).map((s) => [s.id as string, new Date(s.expires_at)]));
   const expiryAlert = async (o: { id: string; key: string; provider: Provider; soon: (d: string) => string; expired: string; href: string }) => {
     const at = expiring.get(o.id);
@@ -189,14 +189,6 @@ async function expiryCheck() {
     soon: (d) => `O token da conta da integração do Jira expira em ${d}.`,
     expired: 'O token da conta da integração do Jira expirou. Gere um novo e cadastre na conexão do Jira.',
     href: '/admin/integrations/jira/conexao',
-  });
-  await expiryAlert({
-    id: 'msteams.clientSecret',
-    key: 'msteams.secret',
-    provider: 'msteams',
-    soon: (d) => `O segredo do aplicativo do Microsoft Entra expira em ${d}.`,
-    expired: 'O segredo do aplicativo do Microsoft Entra expirou. Crie um novo e cadastre na conexão do Teams.',
-    href: '/admin/integrations/teams/conexao',
   });
   const people = await many(
     `SELECT user_id, secret_expires_at FROM linked_accounts
@@ -250,9 +242,8 @@ export async function checkSecretsKey(log: (m: string) => void = () => {}): Prom
   const used =
     keyMismatch() ||
     getSetting('Jira_Enabled') === true ||
-    getSetting('MSTeams_Enabled') === true ||
     !!(await one(`SELECT 1 FROM integration_secrets LIMIT 1`)) ||
-    !!(await one(`SELECT 1 FROM integrations WHERE type IN ('jira-events', 'msteams-outgoing', 'msteams-incoming') LIMIT 1`));
+    !!(await one(`SELECT 1 FROM integrations WHERE type = 'jira-events' LIMIT 1`));
   if (!used) return;
   const info = keyInfo();
   // O alerta vai só para o papel admin: pode levar o caminho do arquivo e o erro do sistema.

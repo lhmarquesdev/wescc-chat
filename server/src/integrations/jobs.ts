@@ -55,11 +55,11 @@ interface Registered {
 }
 
 const handlers = new Map<string, Registered>();
-const DEFAULT_CONCURRENCY: Record<string, number> = { 'jira.post': 4, 'msteams.post': 4 };
+const DEFAULT_CONCURRENCY: Record<string, number> = { 'jira.post': 4 };
 const MAX_QUEUED = 20_000;
 const MAX_DELAY = 6 * 3600_000;
 const STALE_OFF_MS = 6 * 3600_000;
-const STALE_KINDS = ['jira.post', 'msteams.post', 'msteams.digest'];
+const STALE_KINDS = ['jira.post'];
 const STALE_TEXT = 'A integração ficou desligada por mais de 6 horas; este aviso antigo foi descartado.';
 const STUCK_TEXT = 'A tarefa travou ou derrubou o servidor nas últimas tentativas.';
 const WORKER_ID = `${os.hostname()}:${process.pid}:${crypto.randomBytes(4).toString('hex')}`;
@@ -68,7 +68,7 @@ export function registerJobHandler(kind: string, handler: JobHandler, opts: { pr
   handlers.set(kind, { handler, provider: opts.provider, concurrency: Math.max(1, opts.concurrency ?? DEFAULT_CONCURRENCY[kind] ?? 2), describe: opts.describe });
 }
 
-const providerOf = (kind: string): Provider => handlers.get(kind)?.provider ?? (kind.startsWith('msteams') ? 'msteams' : 'jira');
+const providerOf = (kind: string): Provider => handlers.get(kind)?.provider ?? 'jira';
 
 const mapJob = (r: any): JobRow => ({
   id: r.id,
@@ -161,7 +161,7 @@ const lastEnabled = new Map<Provider, boolean>();
 
 function providerOn(p: Provider): boolean {
   if (integrationsPaused()) return false;
-  return getSetting(p === 'jira' ? 'Jira_Enabled' : 'MSTeams_Enabled') === true;
+  return p === 'jira' && getSetting('Jira_Enabled') === true;
 }
 
 // Ao religar (e na subida), avisos guardados há mais de 6 horas não são mais publicados.
@@ -289,13 +289,6 @@ async function onDead(job: JobRow, provider: Provider, describe: ((job: JobRow) 
   const name = String(rule.name ?? '');
   if (provider === 'jira') {
     await raiseAlert({ key: `jira.rule:${job.integrationId}`, provider, tone: 'err', text: alertText(`A regra “${name}” do Jira não conseguiu publicar`, text), href: '/admin/integrations/jira/avisos', to: 'managers' }).catch(() => {});
-  } else if (job.kind === 'msteams.post' || job.kind === 'msteams.digest') {
-    await raiseAlert({ key: `msteams.out:${job.integrationId}`, provider, tone: 'err', text: alertText(`O envio “${name}” para o Teams falhou`, text), href: '/admin/integrations/teams/envio', to: 'managers' }).catch(() => {});
-  } else if (job.groupKey?.startsWith('msteams.in:')) {
-    const team = rule.config?.team?.name ?? rule.config?.teamName ?? name;
-    const channel = rule.config?.channel?.name ?? rule.config?.channelName ?? '';
-    const where = channel ? `${team} › ${channel}` : team;
-    await raiseAlert({ key: `msteams.in:${job.integrationId}`, provider, tone: 'err', text: alertText(`As mensagens do canal ${where} não estão chegando ao chat`, text), href: '/admin/integrations/teams/recebimento', to: 'managers' }).catch(() => {});
   }
 }
 

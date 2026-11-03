@@ -1,17 +1,12 @@
 /* ==========================================================================
-   Agenda: página (mês, semana, lista), editor, detalhes, agendas conectadas e a página do link da reunião.
-   Cores do evento: do chat em índigo, convite sem resposta tracejado, recusado apagado, Google e Outlook com a cor
-   de cada um em tom suave.
+   Agenda: página (mês, semana, lista), editor, detalhes e a página do link da reunião.
+   Cores do evento: do chat em índigo, convite sem resposta tracejado, recusado apagado.
    ========================================================================== */
 
 .cal-page {
   --cal-ev-bg: var(--accent-soft);
   --cal-ev-fg: var(--accent-text);
   --cal-ev-bar: var(--accent);
-  --cal-google: light-dark(#1a73e8, #8ab4f8);
-  --cal-google-soft: light-dark(#e8f0fe, #1c2a40);
-  --cal-ms: light-dark(#0f6cbd, #6cb8f6);
-  --cal-ms-soft: light-dark(#e6f0fa, #172838);
   --cal-meet: light-dark(#0f8a6a, #4cd2a8);
   --cal-meet-soft: light-dark(#e3f6ef, #13291f);
   overflow: hidden;
@@ -29,6 +24,10 @@
   grid-template-columns: minmax(0, 1fr) 300px;
   gap: var(--space-6);
   padding: var(--space-4) var(--space-8) var(--space-6);
+}
+/* Sem convites pendentes não há coluna lateral: a agenda ocupa a largura toda. */
+.cal-layout:not(:has(> .cal-side)) {
+  grid-template-columns: minmax(0, 1fr);
 }
 .cal-main {
   min-width: 0;
@@ -98,16 +97,6 @@
   --ev-bg: var(--cal-meet-soft);
   --ev-fg: var(--cal-meet);
   --ev-bar: var(--cal-meet);
-}
-.cal-ev.src-google {
-  --ev-bg: var(--cal-google-soft);
-  --ev-fg: var(--cal-google);
-  --ev-bar: var(--cal-google);
-}
-.cal-ev.src-microsoft {
-  --ev-bg: var(--cal-ms-soft);
-  --ev-fg: var(--cal-ms);
-  --ev-bar: var(--cal-ms);
 }
 .cal-ev.pending {
   background: var(--bg-canvas);
@@ -481,120 +470,6 @@
   font-size: var(--fs-12);
 }
 
-.cal-accounts {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-.cal-account {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-1) var(--space-3);
-}
-.cal-account + .cal-account {
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
-}
-.cal-brand {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-canvas);
-}
-.cal-account-text {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.cal-account-text small {
-  font-size: var(--fs-12);
-  line-height: var(--lh-12);
-}
-.cal-account-problem {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-1);
-  margin-top: 2px;
-  color: var(--danger);
-}
-.cal-account-actions {
-  display: flex;
-  gap: var(--space-half);
-}
-.cal-account-dir {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1-5);
-}
-.cal-account-dir .seg-nav {
-  width: 100%;
-}
-.cal-account-dir .seg-nav button {
-  flex: 1;
-}
-.cal-account-dir small {
-  font-size: var(--fs-12);
-  line-height: var(--lh-12);
-}
-.cal-account-sk {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.cal-dir-options {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.cal-dir {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
-}
-.cal-dir > .icon {
-  margin-top: 1px;
-  color: var(--fg-muted);
-}
-.cal-dir span {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.cal-dir small {
-  color: var(--fg-muted);
-  font-size: var(--fs-12);
-  line-height: var(--lh-12);
-}
-.cal-dir:hover {
-  border-color: var(--border-hover);
-}
-.cal-dir.on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-.cal-dir.on > .icon {
-  color: var(--accent-text);
-}
-
 /* Botão redondo de nova reunião no celular (acima da barra de abas). */
 .cal-fab {
   position: fixed;
@@ -692,10 +567,6 @@
 .cal-meet-link > span {
   flex: 1;
   min-width: 0;
-}
-.cal-ext-join,
-.cal-open-ext {
-  align-self: flex-start;
 }
 .cal-people {
   margin: var(--space-2) 0 0;

@@ -16,13 +16,11 @@ import { addUserToRoom, createRoom, getRoom, notifyRoomUpdated, removeUserFromRo
 import { getSetting } from '../services/settings';
 import { siteUrl } from '../services/sso';
 import { actorOf, type Ctx } from '../services/users';
-import { markDirty } from './dirty';
 
 export const CAL_TEXT = {
   off: 'A Agenda está desativada neste chat.',
   notFound: 'Evento não encontrado.',
   meetingNotFound: 'Reunião não encontrada. Confira o link.',
-  readOnly: 'Este evento veio da sua conta externa. Edite-o no Google Agenda ou no Outlook.',
   onlyOwner: 'Só quem criou o evento pode alterá-lo.',
   canceled: 'Este evento foi cancelado.',
   title: 'Dê um título ao evento.',
@@ -103,16 +101,13 @@ async function hydrate(rows: any[], viewer: Viewer): Promise<CalendarEvent[]> {
       startsAt: new Date(r.starts_at).toISOString(),
       endsAt: new Date(r.ends_at).toISOString(),
       allDay: r.all_day,
-      source: r.source,
       status: r.status,
       owner: { _id: r.owner_id, username: owner?.username ?? '', name: owner?.name ?? '' },
       attendees: list.map((a) => ({ _id: a.id, username: a.username, name: a.name ?? '', response: a.response })),
       myResponse: r.owner_id === viewer.userId ? 'organizer' : (mine?.response ?? 'pending'),
       reminderMinutes: r.reminder_minutes ?? null,
       meeting: r.is_meeting ? { code: r.meeting_code, url: meetingUrl(r.meeting_code), rid: r.room_id ?? null, access: r.meeting_access } : null,
-      externalUrl: r.external_url ?? null,
-      externalJoinUrl: r.external_join_url ?? null,
-      canEdit: r.source === 'chat' && r.owner_id === viewer.userId && r.status === 'confirmed',
+      canEdit: r.owner_id === viewer.userId && r.status === 'confirmed',
       updatedAt: new Date(r.updated_at).toISOString(),
     } satisfies CalendarEvent;
   });
@@ -125,7 +120,6 @@ export async function eventFor(id: string, viewerId: string): Promise<CalendarEv
 
 async function canSee(userId: string, row: any): Promise<boolean> {
   if (row.owner_id === userId) return true;
-  if (row.source !== 'chat') return false;
   return !!(await one('SELECT 1 FROM calendar_attendees WHERE event_id = $1 AND user_id = $2', [row.id, userId]));
 }
 
@@ -272,7 +266,6 @@ export async function changed(userIds: string[]) {
   const ids = [...new Set(userIds)];
   if (!ids.length) return;
   bus.publish({ users: ids }, { type: 'calendar.changed' });
-  await markDirty(ids);
 }
 
 const whenFmt = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: process.env.TZ || 'America/Sao_Paulo' });
@@ -377,7 +370,6 @@ export async function createEvent(ctx: Ctx, input: Partial<CalendarEventInput>):
 async function ownRow(ctx: Ctx, id: string) {
   const row = await one('SELECT * FROM calendar_events WHERE id = $1', [id]);
   if (!row || !(await canSee(ctx.userId, row))) throw notFound('error-event-not-found', CAL_TEXT.notFound);
-  if (row.source !== 'chat') throw badRequest('error-event-read-only', CAL_TEXT.readOnly);
   if (row.owner_id !== ctx.userId) throw forbidden(CAL_TEXT.onlyOwner);
   if (row.status !== 'confirmed') throw badRequest('error-event-canceled', CAL_TEXT.canceled);
   return row;

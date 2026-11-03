@@ -61,7 +61,6 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
   'create-calendar-meeting': { label: 'Criar reuniões na Agenda (com sala e link)', defaults: [A, U] },
   'use-jira': { label: 'Usar o Jira no chat', defaults: [A, U] },
   'create-jira-issue': { label: 'Criar issues do Jira', defaults: [A, U] },
-  'start-msteams-meeting': { label: 'Marcar reuniões do Teams', defaults: [A, U] },
   'create-personal-access-tokens': { label: 'Criar tokens de acesso pessoal', defaults: [A, U], description: 'Tokens para scripts e integrações agirem em nome da pessoa.' },
 
   // Moderação de salas (valem nas salas onde a pessoa é dona, moderadora ou líder, ou em todas pelo papel global)
@@ -133,7 +132,6 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
   'manage-integrations': { label: 'Gerenciar todas as integrações e webhooks', defaults: [A] },
   'manage-own-integrations': { label: 'Gerenciar as próprias integrações', defaults: [A] },
   'manage-jira': { label: 'Configurar o Jira', defaults: [A] },
-  'manage-msteams': { label: 'Configurar o Microsoft Teams', defaults: [A] },
   'manage-oauth-apps': { label: 'Gerenciar provedores OAuth', defaults: [A] },
   'manage-emoji': { label: 'Gerenciar emojis personalizados', defaults: [A] },
   'manage-sticker-packs': { label: 'Gerenciar os pacotes de figurinhas da empresa', defaults: [A] },
@@ -236,10 +234,10 @@ export const RBAC_GROUPS: RbacGroup[] = [
       { id: 'stickers', label: 'Figurinhas', description: 'Figurinhas pessoais (as da empresa ficam em Administração).', levels: [{ label: 'Criar figurinhas', keys: ['create-personal-stickers'] }], extras: [] },
       {
         id: 'work-tools',
-        label: 'Jira e Teams',
+        label: 'Jira',
         description: 'Uso das integrações nas conversas (a configuração fica em Administração).',
         levels: [],
-        extras: ['use-jira', 'create-jira-issue', 'start-msteams-meeting'],
+        extras: ['use-jira', 'create-jira-issue'],
       },
       { id: 'tokens', label: 'Tokens de acesso', description: 'Tokens pessoais para scripts e integrações.', levels: [], extras: ['create-personal-access-tokens'] },
     ],
@@ -340,9 +338,9 @@ export const RBAC_GROUPS: RbacGroup[] = [
       {
         id: 'admin-integrations',
         label: 'Integrações',
-        description: 'Jira, Microsoft Teams, webhooks e bots.',
+        description: 'Jira, webhooks e bots.',
         levels: [{ label: MANAGE, keys: ['manage-integrations'] }],
-        extras: ['manage-own-integrations', 'manage-jira', 'manage-msteams'],
+        extras: ['manage-own-integrations', 'manage-jira'],
         adminSection: 'integrations',
       },
       { id: 'admin-oauth', label: 'OAuth', description: 'Login com provedores externos.', levels: [{ label: MANAGE, keys: ['manage-oauth-apps'] }], extras: [], adminSection: 'oauth' },

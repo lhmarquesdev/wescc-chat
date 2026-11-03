@@ -4,7 +4,7 @@ import { getSetting } from '../services/settings';
 
 export { neutralizeMentions, unwrapSafeLinks } from '@shared/integrations';
 
-// Texto vindo do Jira ou do Teams antes de entrar numa mensagem do chat. O markdown do chat não tem escape com "\",
+// Texto vindo do Jira antes de entrar numa mensagem do chat. O markdown do chat não tem escape com "\",
 // então a sintaxe é quebrada com um caractere invisível (U+200B).
 const ZWSP = '​';
 
@@ -87,7 +87,7 @@ export function excerpt(text: string, max: number): string {
   return `${truncate(s, Math.max(0, max - 1)).trimEnd()}…`;
 }
 
-// Para o Jira e o Teams: tira negrito, itálico, tachado, código e citação do chat, mantém os links.
+// Para o Jira: tira negrito, itálico, tachado, código e citação do chat, mantém os links.
 export function plainFromMarkdown(md: string): string {
   return String(md ?? '')
     .replace(/```[^\n]*\n?([\s\S]*?)```/g, (_m, code: string) => code.replace(/\n$/, ''))

@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): campo de segredo (§7.6). O valor gravado nunca volta do servidor: só "cadastrado",
+// Integrações (Jira): campo de segredo (§7.6). O valor gravado nunca volta do servidor: só "cadastrado",
 // o final e as datas. value: undefined = manter, null = apagar ao salvar, texto = trocar.
 import { useEffect, useRef, useState } from 'react';
 import type { SecretState } from '@shared/integrations';

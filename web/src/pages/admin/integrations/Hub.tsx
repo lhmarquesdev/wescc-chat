@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): página inicial de Administração → Integrações (§7.2).
+// Integrações: página inicial de Administração → Integrações (§7.2).
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { Tone } from '@shared/integrations';
@@ -50,13 +50,11 @@ function HubCard({ to, icon, title, children, meta, tone }: { to: string; icon: 
 export function Hub() {
   const siteName = useSetting<string>('Site_Name') || 'Wescc Chat';
   const canJira = usePermission('manage-jira');
-  const canTeams = usePermission('manage-msteams');
   const canAllHooks = usePermission('manage-integrations');
   const canHooks = usePermission(['manage-integrations', 'manage-own-integrations']);
-  const canCalendar = usePermission('edit-privileged-setting');
   const isAdmin = useStore((s) => !!s.me?.roles?.includes('admin'));
   // Quem só gerencia os próprios webhooks não lê a visão geral (403): o cartão aparece sem os números.
-  const canOverview = canJira || canTeams || canAllHooks;
+  const canOverview = canJira || canAllHooks;
   const { data, error, reload } = useAsync(() => (canOverview ? coreAdmin.overview() : Promise.resolve(null)), [canOverview]);
   useIntegrationEvents(reload);
   const [acked, setAcked] = useState(readAck);
@@ -104,17 +102,6 @@ export function Hub() {
             Avisos de issues nos canais, prévias, criar issues a partir de mensagens e o comando /jira.
           </HubCard>
         )}
-        {canTeams && (
-          <HubCard
-            to="/admin/integrations/teams"
-            icon="int-teams"
-            title="Microsoft Teams"
-            tone={data ? (data.msteams.enabled ? data.msteams.status.tone : 'off') : loading ? null : undefined}
-            meta={meta(data ? `${plural(data.msteams.outRules, 'envio', 'envios')} · ${plural(data.msteams.inRules, 'recebimento', 'recebimentos')}` : null)}
-          >
-            Mensagens entre salas do chat e canais do Teams, e reuniões do Teams nas salas.
-          </HubCard>
-        )}
         {canHooks && (
           <HubCard
             to="/admin/integrations/webhooks"
@@ -123,11 +110,6 @@ export function Hub() {
             meta={canOverview ? meta(data ? `${data.webhooks.incoming.toLocaleString('pt-BR')} de entrada · ${data.webhooks.outgoing.toLocaleString('pt-BR')} de saída` : null) : null}
           >
             Webhooks de entrada e de saída para outros sistemas, no formato do Slack.
-          </HubCard>
-        )}
-        {canCalendar && (
-          <HubCard to="/admin/integrations/calendar" icon="nav-calendar" title="Agenda" meta={null}>
-            Cada pessoa conecta o Google Agenda ou o Outlook / Teams e escolhe o sentido da sincronização.
           </HubCard>
         )}
       </div>

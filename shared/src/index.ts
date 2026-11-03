@@ -1,8 +1,8 @@
 // Tipos compartilhados entre servidor e cliente web.
 
 import type { MessageSticker } from './stickers';
-// Integrações (Jira/Teams)
-import type { EphemeralMessage, ExternalPresence, IntegrationAlert, MessageBridge, MessageJira, MessageMeeting } from './integrations';
+// Integração com o Jira e cartões de reunião
+import type { EphemeralMessage, IntegrationAlert, MessageJira, MessageMeeting } from './integrations';
 // Agenda
 import type { CalendarEvent } from './calendar';
 
@@ -165,7 +165,7 @@ export interface Attachment {
   message_link?: string;
   text?: string;
   author_name?: string;
-  author_alias?: string; // apelido do autor (integração, ponte do Teams); só o servidor preenche
+  author_alias?: string; // apelido do autor (integração, webhooks); só o servidor preenche
   ts?: string;
   // anexos de integrações e mensagens importadas do Slack
   pretext?: string;
@@ -231,10 +231,9 @@ export interface Message {
   alias?: string;
   emoji?: string;
   avatar?: string;
-  // Integrações (Jira/Teams): conteúdo gerado pelo servidor (messages.extra)
+  // Integrações (Jira) e reuniões da agenda: conteúdo gerado pelo servidor (messages.extra)
   jira?: MessageJira;
   meeting?: MessageMeeting;
-  bridge?: MessageBridge;
   jiraNoPreview?: boolean; // o autor removeu a prévia; edições não a recriam
 }
 
@@ -406,10 +405,9 @@ export type ServerEvent =
   | { type: 'import.progress'; operation: ImportProgress }
   | { type: 'stickers.changed'; scope: 'org' | 'mine' }
   | { type: 'sticker.removed'; fileId: string }
-  // Integrações (Jira/Teams)
+  // Integrações (Jira)
   | { type: 'ephemeral'; message: EphemeralMessage }
   | { type: 'integrations.changed'; scope: 'config' | 'account' }
-  | { type: 'presence.external'; userId: string; presence: ExternalPresence | null }
   | { type: 'integrations.alert'; alert: IntegrationAlert }
   // Agenda: algo mudou na agenda da pessoa, convite novo e lembrete antes do início
   | { type: 'calendar.changed' }

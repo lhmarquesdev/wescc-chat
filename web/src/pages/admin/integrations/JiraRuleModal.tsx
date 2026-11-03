@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): criar ou editar uma regra de avisos do Jira (§7.3). Salva direto (jira.rules.save);
+// Integrações (Jira): criar ou editar uma regra de avisos do Jira (§7.3). Salva direto (jira.rules.save);
 // a prévia usa jira.rules.preview, que não publica nada.
 import { useCallback, useId, useState, type FormEvent } from 'react';
 import { JIRA_DEFAULT_EVENTS, JIRA_EVENT_KINDS, JIRA_EVENT_LABEL, type JiraConfig, type JiraEventKind, type JiraRule, type JiraRuleInput, type MessageJira } from '@shared/integrations';

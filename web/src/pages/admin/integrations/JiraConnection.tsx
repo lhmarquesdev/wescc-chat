@@ -1,4 +1,4 @@
-// Integrações (Jira/Teams): Jira → Conexão (§7.3). Salvar chama jira.config.save, que testa quando muda a conexão.
+// Integrações (Jira): Jira → Conexão (§7.3). Salvar chama jira.config.save, que testa quando muda a conexão.
 import { useEffect, useId, useState } from 'react';
 import type { JiraConfig, JiraConfigInput } from '@shared/integrations';
 import { useSetting, useStore } from '../../../lib/store';

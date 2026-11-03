@@ -201,7 +201,7 @@ export default function JiraIssueModal({ req, onClose }: { req: IntegrationModal
   const count = [...summary].length;
   const summaryOk = summary.trim().length > 0 && count <= 255;
   const ready = !!meta && meta.identity !== 'none' && !!type && !blockers.length && summaryOk;
-  // Na cópia do Teams (e em webhooks) o autor é o alias, como no cabeçalho da mensagem.
+  // Em webhooks o autor é o alias, como no cabeçalho da mensagem.
   const author = source ? authorName(source) : '';
 
   const linked = () => {

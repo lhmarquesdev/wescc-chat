@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { AttendeeResponse, CalendarEvent } from '@shared/calendar';
-import { PROVIDER_LABEL, RESPONSE_LABEL } from '@shared/calendar';
+import { RESPONSE_LABEL } from '@shared/calendar';
 import { errorMessage } from '../../lib/api';
 import { calendarApi, reminderLabel, whenLabel } from '../../lib/calendar';
 import { useStore } from '../../lib/store';
@@ -26,7 +26,6 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
   const toast = useStore((s) => s.toast);
   const [busy, setBusy] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const external = event.source !== 'chat';
   const counts = event.attendees.reduce<Record<AttendeeResponse, number>>((a, x) => ((a[x.response] += 1), a), { accepted: 0, declined: 0, tentative: 0, pending: 0 });
 
   const respond = async (r: 'accepted' | 'declined' | 'tentative') => {
@@ -71,7 +70,7 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
     }
   };
 
-  const canRespond = event.myResponse !== 'organizer' && !external;
+  const canRespond = event.myResponse !== 'organizer';
   const meetPath = event.meeting ? `/meet/${event.meeting.code}` : null;
 
   return (
@@ -79,7 +78,7 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
       title={event.title}
       onClose={onClose}
       className="cal-details"
-      description={external ? `Do ${PROVIDER_LABEL[event.source as 'google' | 'microsoft']} · só leitura aqui` : event.meeting ? 'Reunião do chat' : undefined}
+      description={event.meeting ? 'Reunião do chat' : undefined}
       footer={
         event.canEdit ? (
           <>
@@ -97,7 +96,7 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
       <div className="cal-detail">
         <Row icon="cal-time">
           <strong>{whenLabel(event)}</strong>
-          {event.reminderMinutes !== null && !external && <small className="muted">Lembrete: {reminderLabel(event.reminderMinutes)}</small>}
+          {event.reminderMinutes !== null && <small className="muted">Lembrete: {reminderLabel(event.reminderMinutes)}</small>}
         </Row>
 
         {event.meeting && (
@@ -117,12 +116,6 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
             </button>
           </div>
         )}
-        {external && event.externalJoinUrl && (
-          <a className="btn primary cal-ext-join" href={event.externalJoinUrl} target="_blank" rel="noopener noreferrer">
-            <Icon name="meeting-join" />
-            Entrar na chamada
-          </a>
-        )}
 
         {event.location && <Row icon="cal-location">{event.location}</Row>}
         {event.description && (
@@ -131,41 +124,32 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
           </Row>
         )}
 
-        {!external && (
-          <Row icon="cal-people">
-            <span className="muted small">
-              {event.attendees.length
-                ? `Organizado por ${event.owner.name || event.owner.username} · ${counts.accepted} vão${counts.tentative ? ` · ${counts.tentative} talvez` : ''}${counts.declined ? ` · ${counts.declined} não vão` : ''}${counts.pending ? ` · ${counts.pending} sem resposta` : ''}`
-                : `Organizado por ${event.owner.name || event.owner.username}`}
-            </span>
-            {event.attendees.length > 0 && (
-              <ul className="cal-people">
-                <li>
-                  <UserAvatar username={event.owner.username} size={24} />
-                  <span className="ellipsis">{event.owner.name || event.owner.username}</span>
-                  <span className="pill small">Organizador</span>
+        <Row icon="cal-people">
+          <span className="muted small">
+            {event.attendees.length
+              ? `Organizado por ${event.owner.name || event.owner.username} · ${counts.accepted} vão${counts.tentative ? ` · ${counts.tentative} talvez` : ''}${counts.declined ? ` · ${counts.declined} não vão` : ''}${counts.pending ? ` · ${counts.pending} sem resposta` : ''}`
+              : `Organizado por ${event.owner.name || event.owner.username}`}
+          </span>
+          {event.attendees.length > 0 && (
+            <ul className="cal-people">
+              <li>
+                <UserAvatar username={event.owner.username} size={24} />
+                <span className="ellipsis">{event.owner.name || event.owner.username}</span>
+                <span className="pill small">Organizador</span>
+              </li>
+              {event.attendees.map((a) => (
+                <li key={a._id}>
+                  <UserAvatar username={a.username} size={24} />
+                  <span className="ellipsis">{a.name || a.username}</span>
+                  <span className={`cal-resp ${a.response}`} title={RESPONSE_LABEL[a.response]}>
+                    <Icon name={RESPONSE_ICON[a.response]} size={14} />
+                    {RESPONSE_LABEL[a.response]}
+                  </span>
                 </li>
-                {event.attendees.map((a) => (
-                  <li key={a._id}>
-                    <UserAvatar username={a.username} size={24} />
-                    <span className="ellipsis">{a.name || a.username}</span>
-                    <span className={`cal-resp ${a.response}`} title={RESPONSE_LABEL[a.response]}>
-                      <Icon name={RESPONSE_ICON[a.response]} size={14} />
-                      {RESPONSE_LABEL[a.response]}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Row>
-        )}
-
-        {external && event.externalUrl && (
-          <a className="btn small cal-open-ext" href={event.externalUrl} target="_blank" rel="noopener noreferrer">
-            <Icon name="cal-open" />
-            Abrir no {PROVIDER_LABEL[event.source as 'google' | 'microsoft']}
-          </a>
-        )}
+              ))}
+            </ul>
+          )}
+        </Row>
 
         {canRespond && (
           <div className="cal-rsvp" role="group" aria-label="Sua resposta">

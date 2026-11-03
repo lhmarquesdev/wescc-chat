@@ -1,13 +1,11 @@
-// Integrações (Jira/Teams): Minha conta → Contas conectadas (§7.9). A conta do Jira de cada pessoa (OAuth ou token)
-// e a conta do Microsoft 365 encontrada pelo e-mail, para a presença do Teams.
+// Integração com o Jira: Minha conta → Contas conectadas (§7.9). A conta do Jira de cada pessoa (OAuth ou token).
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { LinkedAccount } from '@shared/integrations';
 import { formatDateTime, formatRelative } from '../../lib/format';
 import { jiraApi, linkedApi, loadIntegrationsMe, useIntegrationsMe } from '../../lib/integrations';
-import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
-import { Empty, Skeleton, Toggle, confirmDialog } from '../../components/ui';
+import { Empty, Skeleton, confirmDialog } from '../../components/ui';
 import { PageHead } from '../admin/parts';
 import { done, fail, motivoText, useIntegrationEvents } from '../admin/integrations/parts';
 import '../admin/integrations/integrations-admin.css';
@@ -143,61 +141,12 @@ function JiraCard({ userAuth, createAsIntegration, account }: { userAuth: 'token
   );
 }
 
-function MicrosoftCard({ emailTrusted, account }: { emailTrusted: boolean; account: LinkedAccount | null }) {
-  const myEmail = useStore((s) => s.me?.email ?? '');
-  const [busy, setBusy] = useState(false);
-  const busySync = !!account?.busySync;
-
-  const update = async (v: boolean) => {
-    setBusy(true);
-    try {
-      await linkedApi.update({ provider: 'microsoft', busySync: v });
-      await loadIntegrationsMe(true);
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <section className="card" aria-labelledby="linked-ms-title">
-      <div className="card-head">
-        <span className="card-icon">
-          <Icon name="int-teams" size={20} />
-        </span>
-        <div>
-          <h2 id="linked-ms-title">Microsoft 365</h2>
-          {!emailTrusted ? (
-            <p>Seu e-mail no chat não foi confirmado pelo administrador. Peça para conferir antes de usar a presença do Teams.</p>
-          ) : account ? (
-            <p>
-              Encontramos sua conta pelo e-mail: <strong>{account.displayName}</strong>
-              {account.email && ` (${account.email})`}.
-            </p>
-          ) : (
-            <p>Não encontramos uma conta do Microsoft 365 com o seu e-mail ({myEmail || 'sem e-mail'}).</p>
-          )}
-          <Toggle
-            checked={busySync}
-            disabled={!emailTrusted || !account || busy}
-            onChange={update}
-            label="Ficar como Ocupado no chat quando eu estiver em reunião ou chamada no Teams"
-            description="Depois da reunião, o chat volta para o status que você tinha escolhido."
-          />
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export function ConnectedAccounts() {
   const me = useIntegrationsMe();
   useJiraReturn();
   useIntegrationEvents(() => void loadIntegrationsMe(true));
 
   const showJira = !!me && me.jira.enabled && me.jira.userAuth !== 'off';
-  const showMs = !!me && me.msteams.presence;
   return (
     <>
       <PageHead title="Contas conectadas" />
@@ -214,14 +163,13 @@ export function ConnectedAccounts() {
             </div>
           </div>
         </div>
-      ) : !showJira && !showMs ? (
+      ) : !showJira ? (
         <Empty icon="int-linked" title="Nenhuma conta para conectar">
           O administrador ainda não ligou integrações que usam a sua conta.
         </Empty>
       ) : (
         <div className="grid-2 int-hub">
           {showJira && <JiraCard userAuth={me.jira.userAuth as 'token' | 'oauth'} createAsIntegration={me.jira.createAsIntegration} account={me.jira.account} />}
-          {showMs && <MicrosoftCard emailTrusted={me.msteams.emailTrusted} account={me.msteams.account} />}
         </div>
       )}
     </>

@@ -12,7 +12,7 @@ import { AdminSettings } from './AdminSettings';
 import { AdminEngagement } from './AdminEngagement';
 import { AdminAudit } from './AdminAudit';
 import { AdminDevices, AdminEmoji, AdminInvites, AdminModeration } from './AdminMisc';
-// Integrações (Jira/Teams): hub com Jira, Microsoft Teams e os webhooks (AdminIntegrations, agora em /admin/integrations/webhooks)
+// Integrações: hub com Jira e os webhooks (AdminIntegrations, agora em /admin/integrations/webhooks)
 import { IntegrationsAdmin } from './integrations';
 import { AdminOAuth } from './AdminOAuth';
 import { AdminImport } from './import';
@@ -53,7 +53,7 @@ export function AdminPage() {
         {section === 'devices' && <AdminDevices />}
         {section === 'audit' && <AdminAudit />}
         {section === 'moderation' && <AdminModeration />}
-        {/* Integrações (Jira/Teams) */}
+        {/* Integrações (Jira) */}
         {section === 'integrations' && <IntegrationsAdmin />}
         {section === 'oauth' && <AdminOAuth />}
         {section === 'emoji' && <AdminEmoji />}

@@ -134,7 +134,7 @@ export function useForYou(max = 3): ForYouItem[] {
   return useMemo(() => {
     const mentions: ForYouItem[] = rooms.map((s) => {
       const m = last[s.rid];
-      // O alias (cópia do Teams, webhook) no lugar do robô, como no cabeçalho da mensagem.
+      // O alias (webhook) no lugar do robô, como no cabeçalho da mensagem.
       const who = m ? authorName(m) : '';
       return {
         key: `m-${s.rid}`,

@@ -10,19 +10,17 @@ import { BOT_AVATAR } from './assets';
 import { sendEphemeral } from './ephemeral';
 import { activity, getState, once } from './state';
 
-// Usuários robôs das integrações: quem publica os avisos do Jira e as mensagens do Teams nas salas. São visíveis
+// Usuários robôs das integrações: quem publica os avisos do Jira nas salas. São visíveis
 // como pessoas (entram na sala com a mensagem de sistema de sempre) e seguem todas as regras da sala.
 
-export type BotKind = 'jira' | 'msteams';
+export type BotKind = 'jira';
 export const BOTS: Record<BotKind, { username: string; name: string }> = {
   jira: { username: 'jira.bot', name: 'Jira' },
-  msteams: { username: 'msteams.bot', name: 'Microsoft Teams' },
 };
 
-const MANAGED_TYPES = ['jira-events', 'msteams-outgoing', 'msteams-incoming'];
+const MANAGED_TYPES = ['jira-events'];
 const DM_TEXT: Record<BotKind, string> = {
   jira: 'Eu só publico avisos do Jira nas salas. Use /jira ajuda para ver o que dá para fazer.',
-  msteams: 'Eu só levo mensagens entre o chat e o Microsoft Teams. Use /teams ajuda para marcar reuniões.',
 };
 
 const inactiveText = (username: string) => `O usuário ${username} foi desativado. Reative-o em Administração → Usuários para as regras voltarem a publicar.`;
@@ -83,9 +81,9 @@ let botCache: { at: number; ids: string[]; byId: Map<string, BotKind> } | null =
 
 async function loadBots() {
   if (botCache && Date.now() - botCache.at < 60_000) return botCache;
-  const rows = await many(`SELECT id, data FROM integration_state WHERE id IN ('bot.jira', 'bot.msteams')`);
+  const rows = await many(`SELECT id, data FROM integration_state WHERE id = 'bot.jira'`);
   const byId = new Map<string, BotKind>();
-  for (const r of rows) if (r.data?.id) byId.set(String(r.data.id), r.id === 'bot.jira' ? 'jira' : 'msteams');
+  for (const r of rows) if (r.data?.id) byId.set(String(r.data.id), 'jira');
   botCache = { at: Date.now(), ids: [...byId.keys()], byId };
   return botCache;
 }
@@ -154,7 +152,7 @@ export async function checkTargets(ctx: Ctx, kind: BotKind, roomIds: string[], m
     if (mode === 'read') {
       const roomRoles: string[] = callerSub?.roles ?? [];
       if (!roomRoles.includes('owner') && !roomRoles.includes('moderator') && !callerGlobal.includes('admin')) {
-        out.push(fail('Só donos e moderadores da sala podem enviar as mensagens dela para o Teams.', { botMember }));
+        out.push(fail('Só donos e moderadores da sala podem enviar as mensagens dela para fora do chat.', { botMember }));
         continue;
       }
     }
@@ -209,7 +207,7 @@ export async function prepareTargets(ctx: Ctx, kind: BotKind, roomIds: string[],
 
 // Uma mensagem do robô na sala, sem menção a ninguém. Uma falha (sala arquivada, robô silenciado) vira atividade.
 // Só textos fixos do servidor (regra criada ou removida): o aviso sai também num canal de avisos ou numa sala somente
-// leitura em que o robô só lê (Sala → Teams), sem torná-lo publicador; os membros precisam saber para onde vão as mensagens.
+// leitura em que o robô só lê, sem torná-lo publicador; os membros precisam saber para onde vão as mensagens.
 export async function announce(kind: BotKind, roomId: string, text: string): Promise<void> {
   const bot = await ensureBotUser(kind);
   try {

@@ -29,7 +29,7 @@ interface AlertState {
 }
 
 const DAY = 24 * 3600_000;
-const MANAGE: Record<Provider, string> = { jira: 'manage-jira', msteams: 'manage-msteams' };
+const MANAGE: Record<Provider, string> = { jira: 'manage-jira' };
 
 async function recipients(a: Pick<AlertInput, 'provider' | 'to'>): Promise<{ id: string; email: string | null }[]> {
   if (typeof a.to === 'object') return many(`SELECT id, email FROM users WHERE id = $1 AND active`, [a.to.userId]);
@@ -88,14 +88,14 @@ export async function activeAlerts(o: { provider?: Provider; userId?: string }):
 }
 
 // Para a API: o que esta pessoa pode ver, conforme as permissões que tem.
-export async function alertsFor(userId: string, can: { jira: boolean; msteams: boolean; admin: boolean }): Promise<IntegrationAlert[]> {
+export async function alertsFor(userId: string, can: { jira: boolean; admin: boolean }): Promise<IntegrationAlert[]> {
   const rows = await many(`SELECT id, data FROM integration_state WHERE id LIKE 'alert:%' ORDER BY updated_at DESC`);
   return rows
     .filter((r) => {
       const s = r.data as AlertState;
       if (typeof s.to === 'object') return s.to.userId === userId;
       if (s.to === 'admins') return can.admin;
-      return s.provider === 'jira' ? can.jira : can.msteams;
+      return s.provider === 'jira' && can.jira;
     })
     .map((r) => toAlert(String(r.id).slice('alert:'.length), r.data as AlertState));
 }

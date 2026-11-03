@@ -13,10 +13,10 @@ export function lastOwnEditable(list: readonly Message[], meId: string, allowEdi
   return undefined;
 }
 
-// Nome de quem escreveu, como no cabeçalho da mensagem: o alias (webhooks, cópias do Teams) vem antes do usuário.
+// Nome de quem escreveu, como no cabeçalho da mensagem: o alias (webhooks) vem antes do usuário.
 export const authorName = (m: Message) => m.alias || m.u.name || m.u.username;
 
-// A mensagem continua o grupo da anterior (sem avatar nem nome): mesmo usuário e mesmo alias (as cópias do Teams são
+// A mensagem continua o grupo da anterior (sem avatar nem nome): mesmo usuário e mesmo alias (mensagens de webhook são
 // todas do robô, com a pessoa no alias), nenhuma das duas de sistema, no mesmo dia e dentro do intervalo.
 export function continuesGroup(prev: Message, m: Message, periodMs: number) {
   const a = new Date(prev.ts);

@@ -26,7 +26,7 @@ export interface SlashCommand {
   params: string;
   description: string;
   run(ctx: Ctx, room: any, args: string, tmid: string | null): Promise<unknown>;
-  // Integrações (Jira/Teams): esconde o comando da lista e da ajuda para quem não pode usá-lo.
+  // Integrações (Jira): esconde o comando da lista e da ajuda para quem não pode usá-lo.
   visible?: (ctx: Ctx) => boolean | Promise<boolean>;
 }
 
@@ -36,7 +36,7 @@ function reg(command: string, params: string, description: string, run: SlashCom
   commands.set(command, { command, params, description, run });
 }
 
-// Integrações (Jira/Teams): módulos registram os próprios comandos.
+// Integrações (Jira): módulos registram os próprios comandos.
 export function registerCommand(cmd: SlashCommand) {
   commands.set(cmd.command, cmd);
 }

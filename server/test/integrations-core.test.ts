@@ -8,7 +8,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { jiraSiteAllowed, type MessageBridge, type MessageJira, type MessageMeeting } from '@shared/integrations';
+import { jiraSiteAllowed, type MessageJira, type MessageMeeting } from '@shared/integrations';
 import { stickerPreviewText } from '@shared/stickers';
 import { config } from '../src/config';
 import { migrate } from '../src/db/migrate';
@@ -30,10 +30,9 @@ import {
   setSecret,
 } from '../src/lib/secrets';
 import { alertText, clearAlert, raiseAlert } from '../src/integrations/alerts';
-import { OUT_TEXT } from '../src/integrations/msteams/outgoing';
 import { rawClient } from '../src/integrations/jira/client';
 import { BOT_AVATAR } from '../src/integrations/assets';
-import { BOTS, botCtx, botIds, checkTargets, ensureBotUser, prepareTargets, releaseTargets } from '../src/integrations/bots';
+import { botCtx, botIds, checkTargets, ensureBotUser, prepareTargets, releaseTargets } from '../src/integrations/bots';
 import { sendEphemeral, sessionTag } from '../src/integrations/ephemeral';
 import {
   PermanentError,
@@ -57,7 +56,7 @@ import { claimPost, getState, mergeState, releasePost, setState } from '../src/i
 import { excerpt, messagePermalink, plainFromMarkdown, safeExternalText, trustedLinkHost } from '../src/integrations/text';
 import { runSync, type LdapSource } from '../src/ldap/sync';
 import { registerCommand } from '../src/services/commands';
-import { getMessageRow, removeMessageRow, replaceMessageText, sendMessage, setMessageExtra } from '../src/services/messages';
+import { getMessageRow, removeMessageRow, sendMessage, setMessageExtra } from '../src/services/messages';
 import { OPERACAO_PERMISSIONS, rolesWithPermission, seedPermissions, setPermissionRoles } from '../src/services/permissions';
 import { createDirect } from '../src/services/rooms';
 import { updateSettings } from '../src/services/settings';
@@ -78,7 +77,7 @@ for (const k of [
 }
 reloadSecretsKey();
 
-// Integrações com Jira e Teams, núcleo. Fase 0: migração 016, API genérica, configurações, permissões,
+// Integração com o Jira, núcleo. Fase 0: migração 016, API genérica, configurações, permissões,
 // mensagens de integração (§2.6), comandos (§2.7) e o texto de figurinha nos webhooks de saída.
 
 let A: Auth;
@@ -125,7 +124,7 @@ async function botUser() {
   return { userId: r.user._id as string, username };
 }
 
-async function managedRule(type: 'jira-events' | 'msteams-outgoing' | 'msteams-incoming', userId: string, username: string) {
+async function managedRule(type: 'jira-events', userId: string, username: string) {
   const id = newId();
   await pool.query(`INSERT INTO integrations (id, type, name, token, user_id, username, config) VALUES ($1, $2, $3, '', $4, $5, '{"x": 1}')`, [id, type, `Regra ${type}`, userId, username]);
   return id;
@@ -149,31 +148,37 @@ const snapshot = (): MessageJira => ({
   event: { kind: 'status', at: new Date().toISOString() },
 });
 const meeting = (by: { userId: string; username: string }): MessageMeeting => ({
-  provider: 'msteams',
-  kind: 'linked',
+  provider: 'wescc',
+  kind: 'created',
   meetingId: newId(),
-  joinUrl: 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_teste%40thread.v2/0',
+  joinUrl: 'https://chat.explorer.example/meet/abc-defg-hij',
   subject: 'Alinhamento',
   by: { _id: by.userId, username: by.username },
 });
-const bridge = (): MessageBridge => ({ provider: 'msteams', externalId: '1700000000000', author: 'Ana (Teams)' });
 
 // ---------- Migração ----------
 
 describe('Fase 0: migração 016', () => {
   it('os tipos novos passam na restrição, um tipo desconhecido não, e as tabelas e índices existem', async () => {
-    for (const type of ['jira-events', 'msteams-outgoing', 'msteams-incoming'] as const) await managedRule(type, A.userId, A.username);
+    await managedRule('jira-events', A.userId, A.username);
+    for (const type of ['msteams-outgoing', 'msteams-incoming']) {
+      const gone = await pool.query(`INSERT INTO integrations (id, type, name, token, user_id, username) VALUES ($1, $2, 'x', '', $3, 'admin')`, [newId(), type, A.userId]).catch((e) => e);
+      expect(gone.code).toBe('23514');
+    }
     const bad = await pool.query(`INSERT INTO integrations (id, type, name, token, user_id, username) VALUES ($1, 'outro', 'x', '', $2, 'admin')`, [newId(), A.userId]).catch((e) => e);
     expect(bad.code).toBe('23514');
     const objects = [
       'integration_secrets', 'integration_state', 'integration_activity', 'linked_accounts', 'integration_oauth_states', 'integration_jobs',
-      'integration_seen', 'jira_threads', 'msteams_bridge_messages', 'msteams_subscriptions', 'meetings', 'external_presence',
+      'integration_seen', 'jira_threads',
       'integrations_type_idx', 'integration_activity_idx', 'integration_activity_rule_idx', 'linked_accounts_external_idx',
       'integration_jobs_dedupe_idx', 'integration_jobs_due_idx', 'integration_jobs_group_idx', 'integration_jobs_running_idx',
-      'integration_jobs_rule_idx', 'integration_seen_age_idx', 'msteams_bridge_message_idx', 'msteams_subscriptions_exp_idx', 'meetings_room_idx',
+      'integration_jobs_rule_idx', 'integration_seen_age_idx',
     ];
     const missing = (await pool.query(`SELECT o FROM unnest($1::text[]) o WHERE to_regclass(o) IS NULL`, [objects])).rows.map((r) => r.o);
     expect(missing).toEqual([]);
+    // Migração 020: as tabelas do Teams saíram.
+    const gone = ['msteams_bridge_messages', 'msteams_subscriptions', 'meetings', 'external_presence'];
+    expect((await pool.query(`SELECT o FROM unnest($1::text[]) o WHERE to_regclass(o) IS NOT NULL`, [gone])).rows).toEqual([]);
     const row = await one(`SELECT config, secret, last_ok_at FROM integrations WHERE type = 'webhook-incoming' LIMIT 1`);
     expect(row === null || JSON.stringify(row.config) === '{}').toBe(true);
   });
@@ -213,10 +218,9 @@ describe('Fase 0: migração 016', () => {
 // ---------- API genérica, configurações e permissões ----------
 
 describe('Fase 0: API genérica de integrações', () => {
-  it('integrations.list esconde os tipos do Jira e do Teams; get/update/remove/history/clearHistory recusam', async () => {
+  it('integrations.list esconde o tipo do Jira; get/update/remove/history/clearHistory recusam', async () => {
     const generic = await api('POST', 'integrations.create', { type: 'webhook-incoming', name: 'CI', username: 'admin', channel: '#geral' }, A);
     const jira = await managedRule('jira-events', A.userId, A.username);
-    const teams = await managedRule('msteams-outgoing', A.userId, A.username);
 
     const list = await api('GET', 'integrations.list', { count: '500' }, A);
     expect(list.integrations.map((i: any) => i.type).every((t: string) => t === 'webhook-incoming' || t === 'webhook-outgoing')).toBe(true);
@@ -225,60 +229,51 @@ describe('Fase 0: API genérica de integrações', () => {
     expect(await api('GET', 'integrations.list', { type: 'jira-events' }, A)).toMatchObject({ status: 400, errorType: 'error-integration-managed' });
 
     const jiraText = 'Esta integração é configurada em Administração → Integrações → Jira.';
-    const teamsText = 'Esta integração é configurada em Administração → Integrações → Microsoft Teams.';
     expect(await api('GET', 'integrations.get', { integrationId: jira }, A)).toMatchObject({ status: 400, errorType: 'error-integration-managed', error: jiraText });
-    expect(await api('GET', 'integrations.get', { integrationId: teams }, A)).toMatchObject({ status: 400, error: teamsText });
     expect(await api('PUT', 'integrations.update', { integrationId: jira, type: 'webhook-incoming', name: 'Trocada', username: 'admin', channel: '#geral' }, A)).toMatchObject({
       status: 400,
       errorType: 'error-integration-managed',
     });
-    expect(await api('POST', 'integrations.remove', { integrationId: teams }, A)).toMatchObject({ status: 400, error: teamsText });
+    expect(await api('POST', 'integrations.remove', { integrationId: jira }, A)).toMatchObject({ status: 400, error: jiraText });
     expect(await api('GET', 'integrations.history', { id: jira }, A)).toMatchObject({ status: 400, errorType: 'error-integration-managed' });
     expect(await api('POST', 'integrations.clearHistory', { integrationId: jira }, A)).toMatchObject({ status: 400, errorType: 'error-integration-managed' });
-    const rows = await pool.query(`SELECT name, config FROM integrations WHERE id = ANY($1) ORDER BY type`, [[jira, teams]]);
-    expect(rows.rows).toEqual([
-      { name: 'Regra jira-events', config: { x: 1 } },
-      { name: 'Regra msteams-outgoing', config: { x: 1 } },
-    ]);
+    const rows = await pool.query(`SELECT name, config FROM integrations WHERE id = ANY($1) ORDER BY type`, [[jira]]);
+    expect(rows.rows).toEqual([{ name: 'Regra jira-events', config: { x: 1 } }]);
   });
 });
 
 describe('Fase 0: configurações e permissões', () => {
-  it('M17: settings.public não expõe nada do Jira nem do Teams', async () => {
+  it('M17: settings.public não expõe nada do Jira, e o Teams não tem mais configurações', async () => {
     const pub = await api('GET', 'settings.public');
     expect(pub.settings.length).toBeGreaterThan(0);
     expect(pub.settings.filter((s: any) => /^(Jira|MSTeams)_/.test(s._id))).toEqual([]);
     const all = await api('GET', 'settings', undefined, A);
     const ids = (all.settings ?? []).map((s: any) => s._id);
-    expect(ids).toEqual(expect.arrayContaining(['Jira_Enabled', 'Jira_Site_Url', 'Jira_Events_Mode', 'MSTeams_Enabled', 'MSTeams_Inbound_Mode', 'MSTeams_Meetings_Mode']));
+    expect(ids).toEqual(expect.arrayContaining(['Jira_Enabled', 'Jira_Site_Url', 'Jira_Events_Mode']));
+    expect(ids.filter((id: string) => /^MSTeams_|^Calendar_(Sync|Google|Microsoft)/.test(id))).toEqual([]);
   });
 
-  it('as configurações conferem o endereço do Jira, as chaves de projeto, os IDs do Entra e os intervalos', async () => {
+  it('as configurações conferem o endereço do Jira, as chaves de projeto e os intervalos', async () => {
     const set = (settings: Record<string, unknown>) => api('POST', 'settings', { settings }, A);
     const evil = await set({ Jira_Site_Url: 'https://evil.example' });
     expect(evil).toMatchObject({ status: 400, errorType: 'error-invalid-setting-value' });
     expect(evil.error).toContain('termina em .atlassian.net');
     expect((await set({ Jira_Site_Url: 'https://explorer.atlassian.net/browse' })).error).toContain('sem caminho');
     expect((await set({ Jira_Projects_Visible: 'OPS, 1X' })).error).toContain('Chave de projeto inválida: 1X.');
-    expect((await set({ MSTeams_Tenant_Id: 'abc' })).error).toContain('00000000-0000-0000-0000-000000000000');
     expect((await set({ Jira_Poll_Minutes: 20 })).status).toBe(400);
-    expect((await set({ MSTeams_Meeting_Minutes: 10 })).status).toBe(400);
-    expect((await set({ MSTeams_Inbound_Mode: 'webhook' })).status).toBe(400);
-    const ok = await set({ Jira_Site_Url: 'https://explorer.atlassian.net', Jira_Projects_Visible: 'OPS, SUP', MSTeams_Tenant_Id: '0b3c1d2e-1111-4222-8333-444455556666', Jira_Poll_Minutes: 5 });
+    const ok = await set({ Jira_Site_Url: 'https://explorer.atlassian.net', Jira_Projects_Visible: 'OPS, SUP', Jira_Poll_Minutes: 5 });
     expect(ok.success).toBe(true);
-    await set({ Jira_Site_Url: '', Jira_Projects_Visible: '', MSTeams_Tenant_Id: '', Jira_Poll_Minutes: 2 });
+    await set({ Jira_Site_Url: '', Jira_Projects_Visible: '', Jira_Poll_Minutes: 2 });
   });
 
-  it('as cinco permissões vêm semeadas (também num banco que já existia) e a Operação não tem nenhuma', async () => {
-    const five = ['use-jira', 'create-jira-issue', 'manage-jira', 'start-msteams-meeting', 'manage-msteams'];
+  it('as três permissões vêm semeadas (também num banco que já existia) e a Operação não tem nenhuma', async () => {
+    const five = ['use-jira', 'create-jira-issue', 'manage-jira'];
     await pool.query('DELETE FROM permissions WHERE id = ANY($1)', [five]);
     await seedPermissions();
     const rows = (await pool.query('SELECT id, grp, roles FROM permissions WHERE id = ANY($1) ORDER BY id', [five])).rows;
     expect(rows).toEqual([
       { id: 'create-jira-issue', grp: 'chat', roles: ['admin', 'user'] },
       { id: 'manage-jira', grp: 'admin', roles: ['admin'] },
-      { id: 'manage-msteams', grp: 'admin', roles: ['admin'] },
-      { id: 'start-msteams-meeting', grp: 'chat', roles: ['admin', 'user'] },
       { id: 'use-jira', grp: 'chat', roles: ['admin', 'user'] },
     ]);
     expect(five.filter((p) => OPERACAO_PERMISSIONS.includes(p))).toEqual([]);
@@ -290,19 +285,18 @@ describe('Fase 0: configurações e permissões', () => {
 // ---------- Mensagens (§2.6) ----------
 
 describe('Fase 0: mensagens de integração', () => {
-  it('chat.sendMessage ignora jira, meeting, bridge, jiraNoPreview e mentionsAllowed vindos do cliente', async () => {
+  it('chat.sendMessage ignora jira, meeting, jiraNoPreview e mentionsAllowed vindos do cliente', async () => {
     const ana = await newUser(A);
     const ch = await channel(A, [ana.username]);
     const r = await api(
       'POST',
       'chat.sendMessage',
-      { message: { rid: ch._id, msg: `oi @${ana.username}`, jira: snapshot(), meeting: meeting(A), bridge: bridge(), jiraNoPreview: true, mentionsAllowed: [] } },
+      { message: { rid: ch._id, msg: `oi @${ana.username}`, jira: snapshot(), meeting: meeting(A), jiraNoPreview: true, mentionsAllowed: [] } },
       A,
     );
     expect(r.success).toBe(true);
     expect(r.message).not.toHaveProperty('jira');
     expect(r.message).not.toHaveProperty('meeting');
-    expect(r.message).not.toHaveProperty('bridge');
     const row = await getMessageRow(r.message._id);
     expect(row.extra).toEqual({});
     expect(row.mentions.map((m: any) => m.username)).toEqual([ana.username]);
@@ -311,20 +305,19 @@ describe('Fase 0: mensagens de integração', () => {
     expect(empty).toMatchObject({ status: 400, errorType: 'error-invalid-message' });
   });
 
-  it('sendMessage com integration grava jira, meeting e bridge e aceita texto vazio com cartão', async () => {
+  it('sendMessage com integration grava jira e meeting e aceita texto vazio com cartão', async () => {
     const bot = await botUser();
     const ch = await channel(A, [bot.username]);
     const j = snapshot();
-    const m = await sendMessage(ctxOf(bot), { rid: ch._id, msg: '', jira: j, bridge: bridge() }, { skipCommands: true, trusted: true, internalAttachments: true, integration: true });
+    const m = await sendMessage(ctxOf(bot), { rid: ch._id, msg: '', jira: j }, { skipCommands: true, trusted: true, internalAttachments: true, integration: true });
     expect(m.jira).toEqual(j);
-    expect(m.bridge).toEqual(bridge());
     const mt = meeting(bot);
     const m2 = await sendMessage(ctxOf(bot), { rid: ch._id, meeting: mt }, { skipCommands: true, trusted: true, internalAttachments: true, integration: true });
     expect((await getMessageRow(m2._id)).extra).toEqual({ meeting: mt });
-    // Só bridge não é cartão: sem texto continua vazia.
-    await expect(sendMessage(ctxOf(bot), { rid: ch._id, bridge: bridge() }, { integration: true })).rejects.toMatchObject({ errorType: 'error-invalid-message' });
+    // Sem cartão e sem texto continua vazia.
+    await expect(sendMessage(ctxOf(bot), { rid: ch._id }, { integration: true })).rejects.toMatchObject({ errorType: 'error-invalid-message' });
     // Sem opts.integration nada disso vale, nem do código do servidor.
-    const plain = await sendMessage(ctxOf(bot), { rid: ch._id, msg: 'texto', jira: j, meeting: mt, bridge: bridge() }, { skipCommands: true, trusted: true });
+    const plain = await sendMessage(ctxOf(bot), { rid: ch._id, msg: 'texto', jira: j, meeting: mt }, { skipCommands: true, trusted: true });
     expect((await getMessageRow(plain._id)).extra).toEqual({});
   });
 
@@ -383,30 +376,10 @@ describe('Fase 0: mensagens de integração', () => {
     }
   });
 
-  it('replaceMessageText guarda o histórico, tira as menções e marca a edição', async () => {
-    const bot = await botUser();
-    const ana = await newUser(A);
-    const ch = await channel(A, [bot.username, ana.username]);
-    const m = await sendMessage(ctxOf(bot), { rid: ch._id, msg: 'original', bridge: bridge(), mentionsAllowed: [ana.username] }, { skipCommands: true, trusted: true, integration: true });
-    const out = await replaceMessageText(m._id, `  editada @${ana.username} #${ch.name}  `, { id: bot.userId, username: bot.username }, { bridge: { ...bridge(), editedAt: '2026-10-22T12:00:00.000Z' } });
-    expect(out.msg).toBe(`editada @${ana.username} #${ch.name}`);
-    expect(out.mentions).toEqual([]);
-    expect(out.channels).toEqual([]);
-    expect(out.bridge.editedAt).toBe('2026-10-22T12:00:00.000Z');
-    expect(out.editedBy).toMatchObject({ _id: bot.userId, username: bot.username });
-    expect(out.editedAt).toBeTruthy();
-    const hist = (await pool.query('SELECT msg, edited_by FROM message_history WHERE message_id = $1', [m._id])).rows;
-    expect(hist).toEqual([{ msg: 'original', edited_by: bot.userId }]);
-    const room = await one('SELECT last_message FROM rooms WHERE id = $1', [ch._id]);
-    expect(room.last_message.msg).toBe(`editada @${ana.username} #${ch.name}`);
-    const sys = await one(`SELECT id FROM messages WHERE room_id = $1 AND t IS NOT NULL LIMIT 1`, [ch._id]);
-    if (sys) expect(await replaceMessageText(sys.id, 'x', { id: bot.userId, username: bot.username })).toBeNull();
-  });
-
-  it('M1: removeMessageRow de uma raiz com respostas tira extra.jira, meeting e bridge', async () => {
+  it('M1: removeMessageRow de uma raiz com respostas tira extra.jira e meeting', async () => {
     const bot = await botUser();
     const ch = await channel(A, [bot.username]);
-    const root = await sendMessage(ctxOf(bot), { rid: ch._id, msg: 'OPS-1 mudou', jira: snapshot(), meeting: meeting(bot), bridge: bridge() }, { skipCommands: true, trusted: true, integration: true });
+    const root = await sendMessage(ctxOf(bot), { rid: ch._id, msg: 'OPS-1 mudou', jira: snapshot(), meeting: meeting(bot) }, { skipCommands: true, trusted: true, integration: true });
     await sendMessage(ctxOf(A), { rid: ch._id, msg: 'resposta', tmid: root._id }, { skipCommands: true });
     await sendMessage(ctxOf(bot), { rid: ch._id, msg: 'thread', tmid: root._id, tshow: true }, { skipCommands: true, trusted: true, integration: true });
     await removeMessageRow(await getMessageRow(root._id));
@@ -677,13 +650,13 @@ describe('Núcleo: segredos no banco', () => {
 
   it('SECRETS_KEY_PREVIOUS abre os segredos antigos e reencryptAll passa segredos, regras, contas e OAuth para a chave nova', async () => {
     const oldKey = TEST_KEY;
-    await setSecret('msteams.clientSecret', 'segredo-do-entra-123456', A.userId);
-    const rule = await managedRule('msteams-outgoing', A.userId, A.username);
+    await setSecret('jira.oauthClientSecret', 'segredo-do-oauth-123456', A.userId);
+    const rule = await managedRule('jira-events', A.userId, A.username);
     await pool.query('UPDATE integrations SET secret = $2 WHERE id = $1', [rule, encryptSecret('https://fluxo.example/gatilho?sig=abc', aadFor.rule(rule))]);
     const u = await newUser(A);
-    await saveLinked({ userId: u.userId, provider: 'microsoft', method: 'directory', externalId: `oid-${newId()}`, displayName: 'Ana', email: null, site: null, tokenExpiresAt: null, secretExpiresAt: null, scopes: [], meta: {}, access: 'ms-acesso', refresh: 'ms-renovacao' });
+    await saveLinked({ userId: u.userId, provider: 'jira', method: 'oauth', externalId: `acc-${newId()}`, displayName: 'Ana', email: null, site: null, tokenExpiresAt: null, secretExpiresAt: null, scopes: [], meta: {}, access: 'jira-acesso', refresh: 'jira-renovacao' });
     const { reply } = fakeReply();
-    const { state } = await startOAuth(reply, { purpose: 'msteams-service', userId: A.userId, redirectUri: 'http://localhost:3000/integrations/msteams/callback', returnTo: '/admin/integrations/teams/conexao', codeVerifier: 'verificador-pkce-de-teste' });
+    const { state } = await startOAuth(reply, { purpose: 'jira-user', userId: A.userId, redirectUri: 'http://localhost:3000/integrations/jira/callback', returnTo: '/account/connected', codeVerifier: 'verificador-pkce-de-teste' });
 
     TEST_KEY = crypto.randomBytes(32).toString('base64');
     process.env.SECRETS_KEY = TEST_KEY;
@@ -693,7 +666,7 @@ describe('Núcleo: segredos no banco', () => {
       // A instância com a chave nova passa a ser a referência (a anterior bate com o kid gravado).
       expect(await checkSharedKey()).toEqual({ ok: true });
       expect(await getState('secrets.kid')).toEqual({ kid: kidOfKey(TEST_KEY) });
-      expect(await getSecret('msteams.clientSecret')).toBe('segredo-do-entra-123456');
+      expect(await getSecret('jira.oauthClientSecret')).toBe('segredo-do-oauth-123456');
       const { count } = await reencryptAll();
       expect(count).toBeGreaterThanOrEqual(6);
       const blobs = [
@@ -709,13 +682,13 @@ describe('Núcleo: segredos no banco', () => {
       reloadSecretsKey();
     }
     // Sem a anterior, tudo continua abrindo.
-    expect(await getSecret('msteams.clientSecret')).toBe('segredo-do-entra-123456');
+    expect(await getSecret('jira.oauthClientSecret')).toBe('segredo-do-oauth-123456');
     expect(await getSecret('jira.apiToken', 'https://explorer.atlassian.net')).toBe('ATATT3x-token-de-teste-1234');
-    expect(await linkedSecrets(u.userId, 'microsoft')).toEqual({ access: 'ms-acesso', refresh: 'ms-renovacao' });
+    expect(await linkedSecrets(u.userId, 'jira')).toEqual({ access: 'jira-acesso', refresh: 'jira-renovacao' });
     const nonce = cookieValue(reply.getHeader('set-cookie')).value;
-    expect(await finishOAuth(fakeReq(state, nonce), 'msteams-service')).toMatchObject({ codeVerifier: 'verificador-pkce-de-teste' });
+    expect(await finishOAuth(fakeReq(state, nonce), 'jira-user')).toMatchObject({ codeVerifier: 'verificador-pkce-de-teste' });
     await pool.query('DELETE FROM integrations WHERE id = $1', [rule]);
-    await setSecret('msteams.clientSecret', null, A.userId);
+    await setSecret('jira.oauthClientSecret', null, A.userId);
   });
 
   it('sem chave: salvar um segredo responde 500 error-secret-key-missing e as integrações ficam paradas (overview diz source none, não chave diferente)', async () => {
@@ -803,12 +776,16 @@ describe('Núcleo: safeFetch', () => {
       'https://explorer.atlassian.net.evil.example/',
       'ftp://explorer.atlassian.net/',
       'https://login.microsoftonline.com.evil.example/',
+      // Microsoft e Google saíram junto com o Teams e a sincronização da Agenda.
+      'https://graph.microsoft.com/v1.0/me',
+      'https://login.microsoftonline.com/x',
+      'https://www.googleapis.com/calendar/v3',
     ];
     for (const u of notAllowed) expect(await code(safeFetch(u)), u).toBe('error-url-not-allowed');
     const e = await safeFetch('https://evil.example/').catch((x) => x);
     expect(e.message).toBe(SAFE_FETCH_TEXT['error-url-not-allowed']);
     // Fornecedores conhecidos passam na conferência da URL.
-    for (const u of ['https://explorer.atlassian.net/rest/api/3/myself', 'https://api.atlassian.com/oauth/token/accessible-resources', 'https://graph.microsoft.com/v1.0/me', 'https://prod-01.environment.api.powerplatform.com/x']) {
+    for (const u of ['https://explorer.atlassian.net/rest/api/3/myself', 'https://api.atlassian.com/oauth/token/accessible-resources']) {
       expect(checkOutboundUrl(u).toString()).toBe(u);
     }
     // http em host liberado funciona; o mesmo host em outra porta não.
@@ -836,7 +813,7 @@ describe('Núcleo: safeFetch', () => {
     // Em teste, um fornecedor de verdade nunca é alcançado: o endereço público é recusado antes de conectar.
     const e = await safeFetch('https://publico.atlassian.net/rest/api/3/myself').catch((x) => x);
     expect(e).toMatchObject({ code: 'error-network' });
-    expect(e.message).toContain('Em teste, o chat não chama o Jira nem a Microsoft de verdade');
+    expect(e.message).toContain('Em teste, o chat não chama o Jira de verdade');
     expect(lookups).toEqual(['rebind.atlassian.net', 'publico.atlassian.net']);
   });
 
@@ -877,7 +854,7 @@ describe('Núcleo: safeFetch', () => {
   });
 
   it('H6: com proxy, o fornecedor vai como CONNECT host:443 pelo nome, sem consulta local; Basic no Proxy-Authorization e nunca nos textos; 407 → error-proxy-auth', async () => {
-    const answers: Record<string, number> = { 'explorer.atlassian.net:443': 407, 'graph.microsoft.com:443': 403 };
+    const answers: Record<string, number> = { 'explorer.atlassian.net:443': 407, 'api.atlassian.com:443': 403 };
     const proxy = await startProxy((t) => answers[t] ?? 403);
     const lookups: string[] = [];
     const real = dns.lookup;
@@ -889,14 +866,14 @@ describe('Núcleo: safeFetch', () => {
     try {
       const e407 = await safeFetch('https://explorer.atlassian.net/rest/api/3/myself', { headers: { authorization: 'Basic dGVzdGU=' } }).catch((x) => x);
       expect(e407).toMatchObject({ code: 'error-proxy-auth', message: SAFE_FETCH_TEXT['error-proxy-auth'] });
-      const e403 = await safeFetch('https://graph.microsoft.com/v1.0/me').catch((x) => x);
+      const e403 = await safeFetch('https://api.atlassian.com/me').catch((x) => x);
       expect(e403).toMatchObject({
         code: 'error-proxy',
-        message: 'O proxy recusou a conexão com graph.microsoft.com (HTTP 403). Peça para liberar graph.microsoft.com no proxy.',
+        message: 'O proxy recusou a conexão com api.atlassian.com (HTTP 403). Peça para liberar api.atlassian.com no proxy.',
       });
       expect(proxy.seen).toEqual([
         { target: 'explorer.atlassian.net:443', auth: `Basic ${Buffer.from('proxy.user:s3nh4@forte').toString('base64')}` },
-        { target: 'graph.microsoft.com:443', auth: `Basic ${Buffer.from('proxy.user:s3nh4@forte').toString('base64')}` },
+        { target: 'api.atlassian.com:443', auth: `Basic ${Buffer.from('proxy.user:s3nh4@forte').toString('base64')}` },
       ]);
       expect(lookups).toEqual([]);
       // Hosts liberados não passam pelo proxy (a não ser com INTEGRATIONS_PROXY_FOR_ALLOWED=1).
@@ -1355,7 +1332,7 @@ describe('Núcleo: leases e consultas periódicas', () => {
     let maxConcurrent = 0;
     registerPoller({
       id: 'teste.dois',
-      provider: 'msteams',
+      provider: 'jira',
       intervalMs: () => 60_000,
       enabled: () => on,
       alert: false,
@@ -1438,8 +1415,9 @@ describe('Núcleo: leases e consultas periódicas', () => {
   });
 
   it('alertText não põe ponto depois de frase terminada dentro de parênteses ou aspas (".)." ficava assim)', () => {
-    const t = alertText('O envio “Avisos” para o Teams falhou', OUT_TEXT.authNone('oid-1'));
-    expect(t).toBe(`O envio “Avisos” para o Teams falhou: ${OUT_TEXT.authNone('oid-1')}`);
+    const why = 'O fluxo aceita chamadas de qualquer um. (Ele está como Qualquer pessoa.)';
+    const t = alertText('A regra “Avisos” do Jira não conseguiu publicar', why);
+    expect(t).toBe(`A regra “Avisos” do Jira não conseguiu publicar: ${why}`);
     expect(t.endsWith('Qualquer pessoa.)')).toBe(true);
     expect(t).not.toContain('.).');
     expect(alertText('Falhou', 'Ele respondeu “tente depois.”')).toBe('Falhou: Ele respondeu “tente depois.”');
@@ -1481,15 +1459,14 @@ describe('Núcleo: robôs e salas de destino', () => {
     expect(await ensureBotUser('jira')).toEqual(b1);
     expect((await pool.query(`SELECT count(*)::int AS n FROM users WHERE type = 'bot' AND name = 'Jira'`)).rows[0].n).toBe(1);
 
-    const ms = await ensureBotUser('msteams');
-    expect(ms.username).toBe(BOTS.msteams.username);
-    expect(Buffer.byteLength(BOT_AVATAR.msteams, 'base64')).toBeLessThanOrEqual(8 * 1024);
+    expect(Buffer.byteLength(BOT_AVATAR.jira, 'base64')).toBeLessThanOrEqual(8 * 1024);
     // Apagado por fora (sem regras): a próxima chamada cria de novo.
-    await pool.query('DELETE FROM users WHERE id = $1', [ms.id]);
-    const ms2 = await ensureBotUser('msteams');
-    expect(ms2.id).not.toBe(ms.id);
-    expect(ms2.username).toBe('msteams.bot');
-    expect((await botIds()).sort()).toEqual([b1.id, ms2.id].sort());
+    await pool.query('DELETE FROM users WHERE id = $1', [b1.id]);
+    const again = await ensureBotUser('jira');
+    expect(again.id).not.toBe(b1.id);
+    expect(again.username).toBe('jira.bot2');
+    expect(await botIds()).toEqual([again.id]);
+    jiraBot = again;
   });
 
   it('robô desativado: a tarefa morre com o texto de reativação (nunca reativamos sozinhos)', async () => {
@@ -1514,7 +1491,7 @@ describe('Núcleo: robôs e salas de destino', () => {
   it('checkTargets: cada linha da tabela do §3.5, na ordem', async () => {
     const ctxA = ctxOf(A);
     const ctxU = ctxOf(U);
-    const one_ = async (ctx: Ctx, rid: string, o: { kind?: 'jira' | 'msteams'; mode?: 'post' | 'read'; grant?: boolean } = {}) =>
+    const one_ = async (ctx: Ctx, rid: string, o: { kind?: 'jira'; mode?: 'post' | 'read'; grant?: boolean } = {}) =>
       (await checkTargets(ctx, o.kind ?? 'jira', [rid], o.mode ?? 'post', o.grant ?? false))[0];
 
     // Sala inexistente e DM.
@@ -1536,16 +1513,16 @@ describe('Núcleo: robôs e salas de destino', () => {
     const arch = await channel(A);
     expect((await api('POST', 'channels.archive', { roomId: arch._id }, A)).success).toBe(true);
     expect(await one_(ctxA, arch._id)).toMatchObject({ ok: false, problem: 'A sala está arquivada.' });
-    // Envio para o Teams (read): só donos e moderadores da sala, ou admin global.
-    expect(await one_(ctxU, ch._id, { kind: 'msteams', mode: 'read' })).toMatchObject({ ok: false, problem: 'Só donos e moderadores da sala podem enviar as mensagens dela para o Teams.' });
-    expect(await one_(ctxA, ch._id, { kind: 'msteams', mode: 'read' })).toMatchObject({ ok: true });
+    // Leitura da sala para fora (read): só donos e moderadores da sala, ou admin global.
+    expect(await one_(ctxU, ch._id, { mode: 'read' })).toMatchObject({ ok: false, problem: 'Só donos e moderadores da sala podem enviar as mensagens dela para fora do chat.' });
+    expect(await one_(ctxA, ch._id, { mode: 'read' })).toMatchObject({ ok: true });
     // Canal de avisos e sala somente leitura.
     const avisos = await channel(A, [U.username], { extraData: { notice: true } });
     expect(await one_(ctxA, avisos._id)).toEqual(
       expect.objectContaining({ ok: false, needsPublisher: true, botMember: false, problem: 'Este é um canal de avisos. Marque “Permitir que o Jira publique neste canal de avisos”.' }),
     );
     const ro = await channel(A, [], { readOnly: true });
-    expect(await one_(ctxA, ro._id, { kind: 'msteams' })).toMatchObject({ ok: false, needsPublisher: true, problem: 'Esta sala é somente leitura. Marque “Permitir que o Microsoft Teams publique nesta sala”.' });
+    expect(await one_(ctxA, ro._id)).toMatchObject({ ok: false, needsPublisher: true, problem: 'Esta sala é somente leitura. Marque “Permitir que o Jira publique nesta sala”.' });
     expect(await one_(ctxA, avisos._id, { grant: true })).toMatchObject({ ok: true, needsPublisher: true });
     expect(await one_(ctxU, avisos._id, { grant: true })).toMatchObject({ ok: false, needsPublisher: true, problem: `Você não pode tornar o Jira publicador em #${avisos.name}.` });
     // Robô silenciado.
@@ -1783,21 +1760,16 @@ describe('Núcleo: contas conectadas', () => {
     expect((await api('GET', 'integrations.alerts', undefined, V)).alerts.map((a: any) => a.key)).toEqual([`jira.linked:${V.userId}`]);
   });
 
-  it('conta Microsoft: busySync em integrations.linked.update', async () => {
+  it('integrations.linked.update não existe mais (era só da conta Microsoft)', async () => {
     const U = await newUser(A);
-    expect(await api('POST', 'integrations.linked.update', { provider: 'microsoft', busySync: true }, U)).toMatchObject({ status: 404 });
-    await saveLinked({ userId: U.userId, provider: 'microsoft', method: 'directory', externalId: `oid-${newId()}`, displayName: 'Ana', email: 'ana@explorer.com.br', site: null, tokenExpiresAt: null, secretExpiresAt: null, scopes: [], meta: { upn: 'ana@explorer.com.br' } });
-    const r = await api('POST', 'integrations.linked.update', { provider: 'microsoft', busySync: true }, U);
-    expect(r.account).toMatchObject({ provider: 'microsoft', busySync: true });
-    expect((await getLinked(U.userId, 'microsoft'))?.meta).toEqual({ upn: 'ana@explorer.com.br', busySync: true });
-    expect(await api('POST', 'integrations.linked.update', { provider: 'jira', busySync: true }, U)).toMatchObject({ status: 400 });
+    expect((await api('POST', 'integrations.linked.update', { provider: 'jira', busySync: true }, U)).success).not.toBe(true);
   });
 });
 
 // ---------- OAuth ----------
 
 describe('Núcleo: estado do OAuth', () => {
-  const start = async (o: { purpose?: 'jira-user' | 'msteams-service'; cookie?: string; returnTo?: string; codeVerifier?: string } = {}) => {
+  const start = async (o: { purpose?: 'jira-user'; cookie?: string; returnTo?: string; codeVerifier?: string } = {}) => {
     const { reply, headers } = fakeReply(o.cookie);
     const { state } = await startOAuth(reply, {
       purpose: o.purpose ?? 'jira-user',
@@ -1828,17 +1800,12 @@ describe('Núcleo: estado do OAuth', () => {
     expect(await err(finishOAuth(fakeReq(s.state, s.cookie.value), 'jira-user'))).toBeInstanceOf(OAuthStateError);
   });
 
-  it('cookie errado, propósito errado, vencido e reusado são recusados (e a linha some mesmo assim)', async () => {
+  it('cookie errado, vencido e reusado são recusados (e a linha some mesmo assim)', async () => {
     const a = await start();
     const e1 = await err(finishOAuth(fakeReq(a.state, crypto.randomBytes(32).toString('base64url')), 'jira-user'));
     expect(e1).toBeInstanceOf(OAuthStateError);
     expect(e1.returnTo).toBe('/account/connected');
     expect(await err(finishOAuth(fakeReq(a.state, a.cookie.value), 'jira-user'))).toBeInstanceOf(OAuthStateError);
-
-    const b = await start({ returnTo: '/account/connected?aba=jira' });
-    const e2 = await err(finishOAuth(fakeReq(b.state, b.cookie.value), 'msteams-service'));
-    expect(e2).toBeInstanceOf(OAuthStateError);
-    expect(e2.returnTo).toBe('/admin/integrations/teams/conexao');
 
     const c = await start({ returnTo: '/account/connected?aba=jira' });
     await pool.query(`UPDATE integration_oauth_states SET expires_at = now() - interval '1 second' WHERE state_hash = $1`, [crypto.createHash('sha256').update(c.state).digest('hex')]);
@@ -1860,8 +1827,9 @@ describe('Núcleo: estado do OAuth', () => {
     for (const bad of ['https://evil.example/', '//evil.example/account/', '/\\evil.example', '/outra/pagina', 'javascript:alert(1)', '/account/\r\nx']) {
       expect(safeReturnTo(bad, 'jira-user'), bad).toBe('/account/connected');
     }
-    expect(safeReturnTo('/admin/integrations/jira/conexao?x=1', 'msteams-service')).toBe('/admin/integrations/jira/conexao?x=1');
-    expect(safeReturnTo(undefined, 'msteams-service')).toBe('/admin/integrations/teams/conexao');
+    expect(safeReturnTo('/admin/integrations/jira/conexao?x=1', 'jira-user')).toBe('/admin/integrations/jira/conexao?x=1');
+    expect(safeReturnTo('/calendar', 'jira-user')).toBe('/account/connected');
+    expect(safeReturnTo(undefined, 'jira-user')).toBe('/account/connected');
     const evil = await start({ returnTo: 'https://evil.example/' });
     expect((await finishOAuth(fakeReq(evil.state, evil.cookie.value), 'jira-user')).returnTo).toBe('/account/connected');
   });
@@ -1985,13 +1953,13 @@ describe('Núcleo: integrations.me e API comum', () => {
     expect(meA).toMatchObject({
       bots: expect.arrayContaining(bots),
       jira: { enabled: false, canUse: true, canCreate: true, canManage: true, userAuth: 'token', createAsIntegration: false, site: '', account: null },
-      msteams: { enabled: false, meetings: 'links', canMeet: true, canManage: true, defaultMinutes: 30, presence: false, account: null },
     });
+    expect(meA).not.toHaveProperty('msteams');
     expect(meA.sessionTag).toMatch(/^[A-Za-z0-9_-]{16}$/);
     const meU = await api('GET', 'integrations.me', undefined, U);
-    expect(meU).toMatchObject({ jira: { canUse: true, canCreate: true, canManage: false }, msteams: { canMeet: true, canManage: false, emailTrusted: false } });
+    expect(meU).toMatchObject({ jira: { canUse: true, canCreate: true, canManage: false } });
     const meO = await api('GET', 'integrations.me', undefined, O);
-    expect(meO).toMatchObject({ jira: { canUse: false, canCreate: false, canManage: false }, msteams: { canMeet: false, canManage: false } });
+    expect(meO).toMatchObject({ jira: { canUse: false, canCreate: false, canManage: false } });
     expect(meO.bots.sort()).toEqual([...bots].sort());
 
     await updateSettings({ Jira_Enabled: true, Jira_Site_Url: 'https://explorer.atlassian.net' });
@@ -2000,15 +1968,14 @@ describe('Núcleo: integrations.me e API comum', () => {
     } finally {
       await updateSettings({ Jira_Enabled: false, Jira_Site_Url: '' });
     }
-    await pool.query('UPDATE users SET email_verified = true WHERE id = $1', [U.userId]);
-    expect((await api('GET', 'integrations.me', undefined, U)).msteams.emailTrusted).toBe(true);
   });
 
   it('overview, activity e secretsKey.reencrypt conferem as permissões', async () => {
     const U = await newUser(A);
     expect(await api('GET', 'integrations.overview', undefined, U)).toMatchObject({ status: 403 });
     const ov = await api('GET', 'integrations.overview', undefined, A);
-    expect(ov).toMatchObject({ paused: false, secretsKey: { source: 'env', created: false }, jira: { enabled: false, status: expect.any(Object) }, msteams: { enabled: false } });
+    expect(ov).toMatchObject({ paused: false, secretsKey: { source: 'env', created: false }, jira: { enabled: false, status: expect.any(Object) } });
+    expect(ov).not.toHaveProperty('msteams');
     expect(ov.secretsKey.file).toBeUndefined();
     expect(await api('GET', 'integrations.activity', { provider: 'jira' }, U)).toMatchObject({ status: 403 });
     expect(await api('GET', 'integrations.activity', {}, A)).toMatchObject({ status: 400 });
@@ -2169,12 +2136,12 @@ describe('Revisão do núcleo', () => {
     const U = await newUser(A);
     await expect(createDirect(botCtx(bot), [U.username])).rejects.toMatchObject({ statusCode: 400, errorType: 'error-integration-bot-direct' });
     expect(await one(`SELECT 1 FROM rooms WHERE t = 'd' AND $1 = ANY(uids) AND $2 = ANY(uids)`, [bot.id, U.userId])).toBeNull();
-    const msg = 'O robô do Jira ou do Teams não pode publicar por um webhook.';
+    const msg = 'O robô do Jira não pode publicar por um webhook.';
     expect(await api('POST', 'integrations.create', { type: 'webhook-incoming', name: 'Relé', username: bot.username, channel: `@${U.username}` }, A)).toMatchObject({ status: 400, errorType: 'error-invalid-user', error: msg });
     expect(await api('POST', 'integrations.create', { type: 'webhook-incoming', name: 'Relé', username: bot.username, channel: '#geral' }, A)).toMatchObject({ status: 400, error: msg });
     const generic = await api('POST', 'integrations.create', { type: 'webhook-incoming', name: 'Genérico', username: 'admin', channel: '#geral' }, A);
     expect(generic.success).toBe(true);
-    expect(await api('PUT', 'integrations.update', { integrationId: generic.integration._id, name: 'Genérico', username: BOTS.msteams.username, channel: '#geral' }, A)).toMatchObject({ status: 400, error: msg });
+    expect(await api('PUT', 'integrations.update', { integrationId: generic.integration._id, name: 'Genérico', username: bot.username, channel: '#geral' }, A)).toMatchObject({ status: 400, error: msg });
     await api('POST', 'integrations.remove', { integrationId: generic.integration._id }, A);
   });
 
@@ -2222,9 +2189,9 @@ describe('Revisão do núcleo', () => {
       expect(hookCalls).toEqual([]);
       const u = await newUser(A);
       await expect(
-        saveLinked({ userId: u.userId, provider: 'microsoft', method: 'directory', externalId: `oid-${newId()}`, displayName: 'Ana', email: null, site: null, tokenExpiresAt: null, secretExpiresAt: null, scopes: [], meta: {}, access: 'tok-a', refresh: 'tok-r' }),
+        saveLinked({ userId: u.userId, provider: 'jira', method: 'oauth', externalId: `acc-${newId()}`, displayName: 'Ana', email: null, site: null, tokenExpiresAt: null, secretExpiresAt: null, scopes: [], meta: {}, access: 'tok-a', refresh: 'tok-r' }),
       ).rejects.toMatchObject({ errorType: 'error-secret-key' });
-      expect(await getLinked(u.userId, 'microsoft')).toBeNull();
+      expect(await getLinked(u.userId, 'jira')).toBeNull();
     } finally {
       await setState('secrets.kid', before);
       reloadSecretsKey();
@@ -2237,7 +2204,7 @@ describe('Revisão do núcleo', () => {
 
   it('reencryptAll numa instância com a chave errada é recusado e não muda a referência; com descarte explícito, a chave atual passa a valer', async () => {
     const goodKey = TEST_KEY;
-    await setSecret('msteams.clientSecret', 'segredo-do-entra-654321', A.userId);
+    await setSecret('jira.oauthClientSecret', 'segredo-do-oauth-654321', A.userId);
     const ref = await getState<{ kid: string }>('secrets.kid');
     expect(ref).toEqual({ kid: kidOfKey(goodKey) });
     const wrongKey = crypto.randomBytes(32).toString('base64');
@@ -2256,13 +2223,13 @@ describe('Revisão do núcleo', () => {
       expect(r.unreadable).toBeGreaterThanOrEqual(1);
       expect(await getState('secrets.kid')).toEqual({ kid: kidOfKey(wrongKey) });
       expect(keyMismatch()).toBe(false);
-      expect(await secretState('msteams.clientSecret')).toMatchObject({ set: true, unreadable: true });
+      expect(await secretState('jira.oauthClientSecret')).toMatchObject({ set: true, unreadable: true });
     } finally {
       process.env.SECRETS_KEY = goodKey;
       reloadSecretsKey();
       await setState('secrets.kid', ref);
       await checkSharedKey();
-      await setSecret('msteams.clientSecret', null, A.userId);
+      await setSecret('jira.oauthClientSecret', null, A.userId);
     }
     expect(integrationsPaused()).toBe(false);
   });
@@ -2386,14 +2353,12 @@ describe('Revisão do núcleo', () => {
     }
   });
 
-  it('conferência diária: o token da integração do Jira e o segredo do Entra já vencidos mantêm o alerta (com “expirou”)', async () => {
+  it('conferência diária: o token da integração do Jira já vencido mantém o alerta (com “expirou”)', async () => {
     const past = new Date(Date.now() - 2 * 24 * 3600_000).toISOString();
     await setSecret('jira.apiToken', 'ATATT3x-token-vencido-123', A.userId, { boundTo: 'https://explorer.atlassian.net', expiresAt: past });
-    await setSecret('msteams.clientSecret', 'segredo-vencido-do-entra-123', A.userId, { expiresAt: past });
     try {
       await runDailyChecks();
       expect(await getState<any>('alert:jira.token')).toMatchObject({ tone: 'err', text: 'O token da conta da integração do Jira expirou. Gere um novo e cadastre na conexão do Jira.' });
-      expect(await getState<any>('alert:msteams.secret')).toMatchObject({ tone: 'err', text: 'O segredo do aplicativo do Microsoft Entra expirou. Crie um novo e cadastre na conexão do Teams.' });
       // Dentro dos 14 dias: o texto do §3.14.
       const soon = new Date(Date.now() + 3 * 24 * 3600_000 - 60_000).toISOString();
       await setSecret('jira.apiToken', 'ATATT3x-token-vencido-123', A.userId, { boundTo: 'https://explorer.atlassian.net', expiresAt: soon });
@@ -2408,11 +2373,9 @@ describe('Revisão do núcleo', () => {
       await setState(`alert:jira.linked:${u.userId}`, null);
     } finally {
       await setSecret('jira.apiToken', null, A.userId);
-      await setSecret('msteams.clientSecret', null, A.userId);
       await runDailyChecks();
     }
     expect(await getState('alert:jira.token')).toBeNull();
-    expect(await getState('alert:msteams.secret')).toBeNull();
   });
 
   it('instalador (texto): -RemoveSecrets apaga o proxy das integrações; -RotateSecretsKey e -FinishSecretsKeyRotation fazem a troca de chave do README', () => {
@@ -2428,13 +2391,13 @@ describe('Revisão do núcleo', () => {
     expect(rotate).toBeLessThan(ps1.indexOf('if (Test-Path -LiteralPath $IntegrationsKeyFile) {\n  Ok "Chave de segredos das integrações'));
     expect(ps1).toContain('[IO.File]::Move($IntegrationsKeyFile, $IntegrationsKeyPreviousFile)');
     // -RemoveSecrets também apaga o proxy das integrações (pode ter usuário e senha).
-    const uninstall = ps1.slice(ps1.indexOf('# Integrações (Jira/Teams): a chave fica sempre.'), ps1.indexOf('if (Test-Path -LiteralPath $InstallJson) {\n    Invoke-Step "Anotar a remoção'));
+    const uninstall = ps1.slice(ps1.indexOf('# Integrações (Jira): a chave fica sempre.'), ps1.indexOf('if (Test-Path -LiteralPath $InstallJson) {\n    Invoke-Step "Anotar a remoção'));
     expect(uninstall).toContain('Invoke-Step "Apagar $IntegrationsProxyFile" { Remove-Item -LiteralPath $IntegrationsProxyFile -Force }');
     expect(readme).toContain('-RotateSecretsKey');
     expect(readme).toContain('-FinishSecretsKeyRotation');
   });
 
-  it('fake-vendors: sobe os falsos dos testes, com consentimento do Jira (Ana ou Bruno), GUIDs do Entra, token JWT e eventos simulados', async () => {
+  it('fake-vendors: sobe o Jira falso dos testes, com consentimento (Ana ou Bruno) e eventos simulados', async () => {
     const env: NodeJS.ProcessEnv = {};
     for (const [k, v] of Object.entries(process.env)) if (!/proxy/i.test(k)) env[k] = v;
     Object.assign(env, { NODE_ENV: 'development', INTEGRATIONS_DEV_ENDPOINTS: '1' });
@@ -2447,14 +2410,8 @@ describe('Revisão do núcleo', () => {
       for (let i = 0; i < 200 && !out.includes('Ctrl+C encerra.'); i++) await new Promise((r) => setTimeout(r, 100));
       expect(out).toContain('Ctrl+C encerra.');
       const jiraUrl = /Jira em (http:\/\/127\.0\.0\.1:\d+)/.exec(out)![1];
-      const msUrl = /Microsoft em (http:\/\/127\.0\.0\.1:\d+)/.exec(out)![1];
-      expect(out).toContain(`export INTEGRATIONS_ALLOWED_HOSTS=${new URL(jiraUrl).host},${new URL(msUrl).host}`);
-      const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-      const tenant = /ID do locatário: (\S+)/.exec(out)![1];
-      const client = /ID do aplicativo \(cliente\): (\S+)/.exec(out)![1];
-      const clientSecret = /Segredo do aplicativo: (\S+)/.exec(out)![1];
-      expect(tenant).toMatch(guid);
-      expect(client).toMatch(guid);
+      expect(out).toContain(`export INTEGRATIONS_ALLOWED_HOSTS=${new URL(jiraUrl).host}\n`);
+      expect(out).not.toContain('Microsoft');
       expect(out).not.toContain('qualquer texto');
 
       // Jira: tela de consentimento com duas pessoas; o código vale para quem foi escolhido.
@@ -2489,28 +2446,6 @@ describe('Revisão do núcleo', () => {
       expect(upd.status).toBe(200);
       const log = await (await fetch(`${jiraUrl}/rest/api/3/issue/OPS-1/changelog`, { headers: svc })).json();
       expect(log.values.at(-1).items[0]).toMatchObject({ field: 'status', toString: 'Concluído' });
-
-      // Microsoft: login da conta de serviço com PKCE, token em formato JWT e mensagem simulada num canal.
-      const verifier = crypto.randomBytes(32).toString('base64url');
-      const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
-      const msBack = 'http://localhost:9/integrations/msteams/callback';
-      const auth = await fetch(`${msUrl}/${tenant}/oauth2/v2.0/authorize?${new URLSearchParams({ client_id: client, redirect_uri: msBack, code_challenge: challenge, code_challenge_method: 'S256', scope: 'offline_access ChannelMessage.Read.All', state: 'st-2' })}`, { redirect: 'manual' });
-      const msLoc = new URL(auth.headers.get('location')!);
-      expect(msLoc.searchParams.get('state')).toBe('st-2');
-      const form = new URLSearchParams({ grant_type: 'authorization_code', client_id: client, client_secret: clientSecret, code: msLoc.searchParams.get('code')!, code_verifier: verifier, redirect_uri: msBack, scope: 'offline_access ChannelMessage.Read.All' });
-      const msTok = await (await fetch(`${msUrl}/${tenant}/oauth2/v2.0/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form })).json();
-      const parts = String(msTok.access_token).split('.');
-      expect(parts).toHaveLength(3);
-      expect(JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))).toMatchObject({ tid: tenant });
-      const graph = { authorization: `Bearer ${msTok.access_token}` };
-      const teams = (await (await fetch(`${msUrl}/v1.0/me/joinedTeams`, { headers: graph })).json()).value;
-      const team = teams.find((t: any) => t.displayName === 'Operação (teste)');
-      const channels = (await (await fetch(`${msUrl}/v1.0/teams/${team.id}/channels`, { headers: graph })).json()).value;
-      const channel = channels.find((c: any) => c.displayName === 'Avisos do turno');
-      const sent = await (await fetch(`${msUrl}/__fake/teams/message`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ canal: 'Avisos do turno', texto: 'Bom dia, turno' }) })).json();
-      expect(sent).toMatchObject({ ok: true, canal: 'Avisos do turno' });
-      const msgs = (await (await fetch(`${msUrl}/v1.0/teams/${team.id}/channels/${encodeURIComponent(channel.id)}/messages`, { headers: graph })).json()).value;
-      expect(msgs.map((m: any) => m.id)).toContain(sent.id);
     } finally {
       clearTimeout(killer);
       child.kill('SIGTERM');

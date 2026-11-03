@@ -54,7 +54,7 @@ describe('segredos das integrações: cifra', () => {
     useEnv({ SECRETS_KEY: newKey() });
     const blob = encryptSecret('segredo', aadFor.secret('jira.apiToken', 'https://explorer.atlassian.net'));
     expect(decryptSecret(blob, aadFor.secret('jira.apiToken', 'https://explorer.atlassian.net'))).toBe('segredo');
-    for (const aad of [aadFor.secret('jira.apiToken'), aadFor.secret('jira.apiToken', 'https://outra.atlassian.net'), aadFor.secret('msteams.clientSecret'), aadFor.rule('abc')]) {
+    for (const aad of [aadFor.secret('jira.apiToken'), aadFor.secret('jira.apiToken', 'https://outra.atlassian.net'), aadFor.secret('jira.oauthClientSecret'), aadFor.rule('abc')]) {
       expect(() => decryptSecret(blob, aad)).toThrow(expect.objectContaining({ statusCode: 500, errorType: 'error-secret-key' }));
     }
     // Um byte trocado no texto cifrado também não abre.
@@ -99,7 +99,6 @@ describe('segredos das integrações: cifra', () => {
     expect(aadFor.rule('r1')).toBe('integration:r1:secret');
     expect(aadFor.linked('u1', 'jira', 'access', 'https://explorer.atlassian.net')).toBe('linked:u1:jira:access:https://explorer.atlassian.net');
     expect(aadFor.linked('u1', 'jira', 'refresh', null)).toBe('linked:u1:jira:refresh:');
-    expect(aadFor.linked('u1', 'microsoft', 'refresh', 'ignorado')).toBe('linked:u1:microsoft:refresh');
     expect(aadFor.oauth('abc')).toBe('oauth:abc');
   });
 });

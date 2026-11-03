@@ -5,19 +5,16 @@ import { parseCookies } from '../api/http';
 import { aadFor, decryptSecret, derivedKey, encryptSecret, noteKeyUse } from '../lib/secrets';
 import { siteUrl } from '../services/sso';
 
-// OAuth das integrações (conta pessoal do Jira, conta de serviço do Teams): state de uso único, preso à pessoa e a um
+// OAuth das integrações (conta pessoal do Jira): state de uso único, preso à pessoa e a um
 // cookie HttpOnly deste navegador. Os retornos (/integrations/*/callback) não têm sessão: a pessoa vem só do state.
 
-export type OAuthPurpose = 'jira-user' | 'msteams-service' | 'calendar-google' | 'calendar-microsoft';
+export type OAuthPurpose = 'jira-user';
 
 export const OAUTH_COOKIE = 'wescc_int_oauth';
 const TTL_SECONDS = 600;
-const RETURN_PREFIXES = ['/account/', '/admin/integrations/', '/calendar/'];
+const RETURN_PREFIXES = ['/account/', '/admin/integrations/'];
 const DEFAULT_RETURN: Record<OAuthPurpose, string> = {
   'jira-user': '/account/connected',
-  'msteams-service': '/admin/integrations/teams/conexao',
-  'calendar-google': '/calendar',
-  'calendar-microsoft': '/calendar',
 };
 
 const sha = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
@@ -35,7 +32,7 @@ export function safeReturnTo(raw: unknown, purpose: OAuthPurpose): string {
   if (!s || !s.startsWith('/') || s.startsWith('//') || s.includes('\\') || /[\r\n\t]/.test(s)) return DEFAULT_RETURN[purpose];
   try {
     const u = new URL(s, 'http://x');
-    if (u.host !== 'x' || !(u.pathname === '/calendar' || RETURN_PREFIXES.some((p) => u.pathname.startsWith(p)))) return DEFAULT_RETURN[purpose];
+    if (u.host !== 'x' || !RETURN_PREFIXES.some((p) => u.pathname.startsWith(p))) return DEFAULT_RETURN[purpose];
     return `${u.pathname}${u.search}`;
   } catch {
     return DEFAULT_RETURN[purpose];

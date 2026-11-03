@@ -1,5 +1,5 @@
-// Servidores falsos do Jira Cloud, do Microsoft 365 (login e Graph) e do Workflows do Teams, para desenvolver as
-// integrações sem contas de verdade. São os mesmos dos testes (test/fake-jira.ts e test/fake-microsoft.ts), com uma
+// Servidor falso do Jira Cloud, para desenvolver a integração sem conta de verdade. É o mesmo dos testes
+// (test/fake-jira.ts), com uma
 // tela de consentimento e rotas para simular eventos. Uso, em server/:
 //
 //   INTEGRATIONS_DEV_ENDPOINTS=1 npm run dev:fake-vendors
@@ -11,9 +11,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { FakeReply, FakeRequest } from '../test/fake-http';
+import type { FakeReply } from '../test/fake-http';
 import { startFakeJira, type FakeAccount } from '../test/fake-jira';
-import { startFakeMicrosoft, type FakeChannel, type MsUser } from '../test/fake-microsoft';
 
 if (process.env.INTEGRATIONS_DEV_ENDPOINTS !== '1' || process.env.NODE_ENV === 'production') {
   console.error('fake-vendors é só para desenvolvimento: rode com INTEGRATIONS_DEV_ENDPOINTS=1 (e sem NODE_ENV=production).');
@@ -21,7 +20,6 @@ if (process.env.INTEGRATIONS_DEV_ENDPOINTS !== '1' || process.env.NODE_ENV === '
 }
 
 const jira = await startFakeJira();
-const ms = await startFakeMicrosoft();
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const html = (body: string): FakeReply => ({ headers: { 'content-type': 'text/html; charset=utf-8' }, body: `<!doctype html><meta charset="utf-8"><title>Consentimento (falso)</title>${body}` });
@@ -137,80 +135,14 @@ jira.server.on('POST', '/__fake/jira/issue-updated', async (r) => {
   return { body: { ok: true, updated: key, entrega: out } };
 });
 
-// ---------- Microsoft 365 ----------
-
-const team = ms.addTeam('Operação (teste)', [{ name: 'Avisos do turno' }, { name: 'Suporte' }]);
-const msPeople: Record<string, MsUser> = {
-  ana: ms.addUser('Ana Souza', 'ana.souza@explorer-teste.com.br'),
-  bruno: ms.addUser('Bruno Lima', 'bruno.lima@explorer-teste.com.br'),
-};
-const flowId = 'fluxo-falso-0001';
-
-// Recebimento por notificações: o Graph chama o endereço público do chat (Site_Url, https). Com FAKE_MS_PUBLIC_URL
-// (o Site_Url) e FAKE_MS_DELIVER_TO (onde o chat ouve aqui, http://127.0.0.1:porta), o aperto de mão e as
-// notificações vão para o chat local.
-if (process.env.FAKE_MS_PUBLIC_URL && process.env.FAKE_MS_DELIVER_TO) {
-  ms.validation = { from: process.env.FAKE_MS_PUBLIC_URL.replace(/\/+$/, ''), to: process.env.FAKE_MS_DELIVER_TO.replace(/\/+$/, '') };
-}
-
-// Login da conta de serviço (código + PKCE): volta na hora com um código que o falso aceita na troca.
-ms.server.on('GET', /^\/[^/]+\/oauth2\/v2\.0\/authorize$/, (r) => {
-  const q = r.query;
-  if (!q.redirect_uri || !q.code_challenge) return bad('redirect_uri e code_challenge são obrigatórios');
-  const code = ms.issueCode({ challenge: q.code_challenge, redirectUri: q.redirect_uri, scope: q.scope ?? '' });
-  return backTo(q.redirect_uri, { code, state: q.state });
-});
-
-const findChannel = (teamName: unknown, channelName: unknown): FakeChannel | null => {
-  const t = ms.teams.find((x) => !teamName || x.displayName === teamName) ?? null;
-  return t?.channels.find((c) => !channelName || c.displayName === channelName) ?? null;
-};
-
-// POST /__fake/teams/message {texto, canal?, time?, autor?: 'ana' | 'bruno', resposta?: id da mensagem raiz}
-ms.server.on('POST', '/__fake/teams/message', async (r: FakeRequest) => {
-  const b = r.json ?? {};
-  const text = String(b.texto ?? b.text ?? '').trim();
-  if (!text) return bad('texto é obrigatório');
-  const channel = findChannel(b.time, b.canal);
-  if (!channel) return bad('canal não encontrado');
-  const author = msPeople[String(b.autor ?? 'ana')] ?? msPeople.ana;
-  const root = b.resposta ? channel.messages.find((x) => x.data.id === String(b.resposta)) : null;
-  if (b.resposta && !root) return bad('mensagem raiz não encontrada');
-  const opts = { author, html: `<p>${esc(text)}</p>` };
-  const msg = root ? ms.reply(root, opts) : ms.post(channel, opts);
-  // Avisa as assinaturas deste canal, como o Graph faria (sem elas, a consulta delta acha a mensagem).
-  const subs = [...ms.subscriptions.values()].filter((s) => {
-    const res = decodeURIComponent(s.resource);
-    return res.includes(channel.team.id) && res.includes(channel.id);
-  });
-  const avisos: string[] = [];
-  for (const s of subs) {
-    try {
-      avisos.push(`assinatura ${(await ms.notify(s, msg)).status}`);
-    } catch (e) {
-      avisos.push(`assinatura falhou: ${(e as Error).message}`);
-    }
-  }
-  return { body: { ok: true, id: msg.data.id, canal: channel.displayName, avisos } };
-});
-
 // GET /__fake/jira/calls: as chamadas que o Jira falso recebeu (método, caminho e query; sem cabeçalhos nem corpo).
 jira.server.on('GET', '/__fake/jira/calls', () => ({ body: { calls: jira.server.calls.filter((c) => !c.path.startsWith('/__fake/')).map((c) => ({ method: c.method, path: c.path, query: c.query })) } }));
 
-// GET /__fake/teams/flow-calls: os cartões que o fluxo recebeu (sem os cabeçalhos), para scripts de teste.
-ms.server.on('GET', '/__fake/teams/flow-calls', () => ({ body: { calls: ms.flowCalls(flowId).map((c) => ({ at: c.at, card: c.card })) } }));
-
 // ---------- Registro das chamadas (sem cabeçalhos: nada de token na tela) ----------
 
-const seen = { jira: 0, ms: 0, flow: 0 };
+const seen = { jira: 0 };
 setInterval(() => {
   for (; seen.jira < jira.server.calls.length; seen.jira++) console.log(`[Jira falso] ${jira.server.calls[seen.jira].method} ${jira.server.calls[seen.jira].path}`);
-  for (; seen.ms < ms.server.calls.length; seen.ms++) console.log(`[Microsoft falso] ${ms.server.calls[seen.ms].method} ${ms.server.calls[seen.ms].path}`);
-  const flows = ms.flowCalls(flowId);
-  for (; seen.flow < flows.length; seen.flow++) {
-    const first = flows[seen.flow].card?.body?.find?.((x: any) => typeof x?.text === 'string')?.text ?? '(sem texto)';
-    console.log(`[Workflows falso] cartão recebido: ${String(first).slice(0, 120)}`);
-  }
 }, 500).unref();
 
 // ---------- Chave de segredos para desenvolvimento (fora da pasta do projeto) ----------
@@ -222,15 +154,13 @@ try {
   if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
 }
 
-// GET /__fake/info (nos dois servidores): o mesmo que a tela mostra, em JSON, para scripts de teste. Tudo falso.
+// GET /__fake/info: o mesmo que a tela mostra, em JSON, para scripts de teste. Tudo falso.
 const info = {
   env: {
     INTEGRATIONS_DEV_ENDPOINTS: '1',
-    INTEGRATIONS_ALLOWED_HOSTS: `${jira.host},${ms.host}`,
+    INTEGRATIONS_ALLOWED_HOSTS: jira.host,
     JIRA_API_GATEWAY: jira.origin,
     ATLASSIAN_AUTH_URL: jira.origin,
-    MS_LOGIN_URL: ms.url,
-    MS_GRAPH_URL: ms.url,
     SECRETS_KEY_FILE: keyFile,
   },
   jira: {
@@ -240,31 +170,18 @@ const info = {
     projects: jira.projects.map((p) => p.key),
     people: Object.fromEntries(Object.entries(PEOPLE).map(([id, p]) => [id, { email: p.account.email, token: p.token }])),
   },
-  msteams: {
-    tenantId: ms.tenantId,
-    clientId: ms.clientId,
-    clientSecret: ms.clientSecret,
-    serviceAccount: ms.service.userPrincipalName,
-    team: team.displayName,
-    channels: team.channels.map((c) => c.displayName),
-    flowUrl: ms.flowUrl(flowId),
-    people: Object.fromEntries(Object.entries(msPeople).map(([id, u]) => [id, u.mail ?? u.userPrincipalName])),
-  },
 };
 jira.server.on('GET', '/__fake/info', () => ({ body: info }));
-ms.server.on('GET', '/__fake/info', () => ({ body: info }));
 
 const tokens = Object.values(PEOPLE)
   .map((p) => `    ${p.account.email}, token ${p.token}`)
   .join('\n');
-console.log(`Servidores falsos no ar: Jira em ${jira.origin}, Microsoft em ${ms.url}. Exporte antes de "npm run dev":
+console.log(`Servidor falso no ar: Jira em ${jira.origin}. Exporte antes de "npm run dev":
 
 export INTEGRATIONS_DEV_ENDPOINTS=1
-export INTEGRATIONS_ALLOWED_HOSTS=${jira.host},${ms.host}
+export INTEGRATIONS_ALLOWED_HOSTS=${jira.host}
 export JIRA_API_GATEWAY=${jira.origin}
 export ATLASSIAN_AUTH_URL=${jira.origin}
-export MS_LOGIN_URL=${ms.url}
-export MS_GRAPH_URL=${ms.url}
 export SECRETS_KEY_FILE=${keyFile}
 
 Jira (Administração → Integrações → Jira):
@@ -276,23 +193,12 @@ ${tokens}
   Simular uma mudança: curl -X POST ${jira.origin}/__fake/jira/issue-updated -H 'content-type: application/json' -d '{"key":"OPS-1","status":"Concluído"}'
   (com FAKE_JIRA_WEBHOOK_URL e FAKE_JIRA_WEBHOOK_SECRET, a mudança também chega pelo webhook assinado)
 
-Teams (Administração → Integrações → Teams):
-  ID do locatário: ${ms.tenantId}
-  ID do aplicativo (cliente): ${ms.clientId}
-  Segredo do aplicativo: ${ms.clientSecret}
-  Conta de serviço: ${ms.service.userPrincipalName}
-  Time "${team.displayName}", canais: ${team.channels.map((c) => `"${c.displayName}"`).join(', ')}
-  Endereço do fluxo do Workflows: ${ms.flowUrl(flowId)}
-  Simular uma mensagem do Teams: curl -X POST ${ms.url}/__fake/teams/message -H 'content-type: application/json' -d '{"canal":"Avisos do turno","texto":"Bom dia, turno"}'
-  Recebimento por notificações: suba com FAKE_MS_PUBLIC_URL (o Site_Url https do chat) e FAKE_MS_DELIVER_TO
-  (http://127.0.0.1:<porta do chat>). Cartões recebidos pelo fluxo: GET ${ms.url}/__fake/teams/flow-calls
-
-Os mesmos dados em JSON: GET ${ms.url}/__fake/info
+Os mesmos dados em JSON: GET ${jira.origin}/__fake/info
 
 Ctrl+C encerra.`);
 
 const stop = () => {
-  void Promise.allSettled([jira.close(), ms.close()]).finally(() => process.exit(0));
+  void Promise.allSettled([jira.close()]).finally(() => process.exit(0));
 };
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);

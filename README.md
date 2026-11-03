@@ -52,12 +52,12 @@ Para desenvolver o front com recarga automática, rode `npm run dev -w web` em o
 | `INTERNAL_PORT` | `3080` | Só com HTTPS próprio: porta em `127.0.0.1` para os webhooks do servidor de chamadas |
 | `TRUST_PROXY` | `false` com HTTPS próprio, `true` sem | Proxies cujo `X-Forwarded-For` vale: `true`, `false` ou endereços e faixas separados por vírgula |
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET_FILE` | — | Servidor de chamadas em grupo (o instalador do LiveKit grava os valores) |
-| `SECRETS_KEY_FILE` / `SECRETS_KEY` | — | Chave de segredos das integrações Jira e Teams: caminho completo de um arquivo com 32 bytes aleatórios em base64 (ou o valor) |
+| `SECRETS_KEY_FILE` / `SECRETS_KEY` | — | Chave de segredos das integrações (Jira): caminho completo de um arquivo com 32 bytes aleatórios em base64 (ou o valor) |
 | `SECRETS_KEY_PREVIOUS_FILE` / `SECRETS_KEY_PREVIOUS` | — | Chave anterior, só durante a troca da chave de segredos |
-| `INTEGRATIONS_ALLOWED_HOSTS` | — | `host[:porta]` que as integrações podem chamar além do Jira Cloud e do Microsoft 365, separados por vírgula |
+| `INTEGRATIONS_ALLOWED_HOSTS` | — | `host[:porta]` que as integrações podem chamar além do Jira Cloud, separados por vírgula |
 | `INTEGRATIONS_PROXY_FILE` / `INTEGRATIONS_PROXY` | `HTTPS_PROXY` | Proxy das integrações: `http://[usuário:senha@]proxy:porta` |
 | `INTEGRATIONS_PROXY_FOR_ALLOWED` | — | `1` manda também os hosts de `INTEGRATIONS_ALLOWED_HOSTS` pelo proxy |
-| `INTEGRATIONS_DEV_ENDPOINTS` | — | Só em desenvolvimento: `1` deixa `JIRA_API_GATEWAY`, `ATLASSIAN_AUTH_URL`, `MS_LOGIN_URL` e `MS_GRAPH_URL` apontarem para os servidores falsos |
+| `INTEGRATIONS_DEV_ENDPOINTS` | — | Só em desenvolvimento: `1` deixa `JIRA_API_GATEWAY`, e `ATLASSIAN_AUTH_URL` apontarem para os servidores falsos |
 
 Senhas e chaves podem vir de arquivo: `DATABASE_URL_FILE`, `TLS_PFX_PASSPHRASE_FILE` e `LIVEKIT_API_SECRET_FILE`
 apontam para um arquivo com o valor (espaços e quebras de linha no fim são ignorados) e têm precedência sobre
@@ -808,16 +808,16 @@ ter conta no chat, com os papéis, canais e times da sua operação, e quem sai 
 - **Login**: a senha é conferida no AD. A senha local só vale quando o servidor LDAP está fora do ar
   (`LDAP_Login_Fallback`), nunca quando o AD recusa a senha ou a conta.
 
-## Integrações: Jira e Microsoft Teams
+## Integração: Jira
 
-Em Administração › Integrações o chat se liga ao Jira Cloud (avisos de issues nas salas, prévias, `/jira`) e ao
-Microsoft Teams (mensagens das salas para canais do Teams, mensagens do Teams nas salas e reuniões). Os avisos são
-publicados pelos usuários robôs `jira.bot` e `msteams.bot`, que entram nas salas como qualquer pessoa (com a mensagem
-de sempre) e seguem as regras da sala. Um robô não recebe conversas diretas novas.
+Em Administração › Integrações o chat se liga ao Jira Cloud (avisos de issues nas salas, prévias, `/jira`). Os avisos
+são publicados pelo usuário robô `jira.bot`, que entra nas salas como qualquer pessoa (com a mensagem de sempre) e
+segue as regras da sala. A integração com o Microsoft Teams e a sincronização da Agenda com Google e Outlook foram
+retiradas (migração 020). Um robô não recebe conversas diretas novas.
 
 ### Chave de segredos
 
-Tokens, segredos de aplicativo e endereços do Workflows ficam cifrados no banco (AES-256-GCM) com a chave de
+Tokens e segredos de aplicativo ficam cifrados no banco (AES-256-GCM) com a chave de
 `SECRETS_KEY_FILE`. Sem a chave, o chat funciona normalmente, mas nenhuma integração roda e nenhum segredo pode ser
 salvo; o hub de integrações mostra o aviso. A chave nunca é criada na pasta de trabalho do serviço, e um
 `SECRETS_KEY_FILE` sem caminho completo é recusado.
@@ -859,8 +859,7 @@ salvo; o hub de integrações mostra o aviso. A chave nunca é criada na pasta d
 
 ### Rede, proxy e certificados
 
-- **Firewall/proxy**: libere a saída https (443) só para `*.atlassian.net`, `api.atlassian.com`, `auth.atlassian.com`,
-  `login.microsoftonline.com`, `graph.microsoft.com` e `*.environment.api.powerplatform.com`. O chat não chama
+- **Firewall/proxy**: libere a saída https (443) só para `*.atlassian.net`, `api.atlassian.com` e `auth.atlassian.com`. O chat não chama
   nenhum outro endereço pelas integrações: outro servidor (um Jira na rede interna, por exemplo) só com
   `INTEGRATIONS_ALLOWED_HOSTS`, definido no ambiente do servidor (nunca pela tela). Endereços da rede interna são
   recusados, também quando um nome resolve para eles.
@@ -880,19 +879,19 @@ salvo; o hub de integrações mostra o aviso. A chave nunca é criada na pasta d
 ### Várias instâncias
 
 Fica no banco e vale para todas: a fila de tarefas (com a ordem por regra e sala), as consultas periódicas (uma
-instância por vez, com lease), o orçamento de envios do Workflows, os alertas e a conferência da chave. Fica em cada
+instância por vez, com lease), os alertas e a conferência da chave. Fica em cada
 instância: os limites por pessoa (`/jira`, buscas, criação de issues), os limites de chamadas ao Jira e os caches
 (prévias, metadados). As tarefas periódicas só rodam nas instâncias sem `DISABLE_CRON`.
 
-### O que é preciso para ligar cada fase
+### O que é preciso para ligar o Jira
 
-Em todas as fases: a chave de segredos (acima), com a cópia de segurança fora do backup do banco; como o servidor sai
+Antes de tudo: a chave de segredos (acima), com a cópia de segurança fora do backup do banco; como o servidor sai
 para a internet (direto ou por proxy com endereço e porta, não arquivo PAC; o tipo de autenticação do proxy; o
 certificado raiz da empresa, se houver inspeção de https); a liberação no firewall dos endereços de "Rede, proxy e
-certificados"; e por quanto tempo as cópias de mensagens do Teams e os avisos do Jira podem ficar no chat (padrão: o
+certificados"; e por quanto tempo os avisos do Jira podem ficar no chat (padrão: o
 mesmo prazo das outras mensagens).
 
-1. **Jira** (avisos nas salas, prévias, `/jira`, criação de issues):
+Para o **Jira** (avisos nas salas, prévias, `/jira`, criação de issues):
    - o endereço do Jira Cloud (`https://<nome>.atlassian.net`); Jira Data Center fica para uma etapa futura;
    - uma conta de serviço da Atlassian com token com escopos (`read:jira-work`, `write:jira-work`, `read:jira-user`):
      e-mail, token e validade, com o perfil da conta em português (Brasil);
@@ -907,41 +906,14 @@ mesmo prazo das outras mensagens).
      (`Jira_Events_Mode = polling`, o padrão);
    - as decisões: a Operação pode usar `/jira` e criar issues (padrão: não); quem não conectou a conta pode criar
      issues pela conta da integração (padrão: não).
-2. **Teams: envio, recebimento e reuniões**:
-   - envio: uma equipe e um canal de teste (padrão, não privado) e um fluxo do Workflows nesse canal ("postar em um
-     canal quando uma solicitação de webhook for recebida") criado por uma conta de serviço dedicada, com o endereço
-     gerado; o Workflows liberado no centro de administração do Teams e não bloqueado pela política de dados (DLP) do
-     Power Platform. O envio não precisa de mais nada. A Microsoft desliga fluxos sem uso por 90 dias; o chat avisa
-     quem gerencia o Teams aos 75;
-   - recebimento e reuniões: o registro de aplicativo no Microsoft Entra (ID do locatário, ID do aplicativo, segredo do
-     cliente com a validade, endereço de retorno `{Site_Url}/integrations/msteams/callback`) com consentimento de um
-     Administrador de Função Privilegiada ou Administrador Global para as permissões delegadas `User.Read`,
-     `offline_access`, `Team.ReadBasic.All`, `Channel.ReadBasic.All`, `ChannelMessage.Read.All` e de aplicativo
-     `User.Read.All`, `OnlineMeetings.ReadWrite.All`;
-   - uma conta de serviço do Microsoft 365 com licença do Teams, membro da equipe e do canal de teste, com senha que
-     não expira (ou a data de troca), liberada pelo Acesso Condicional para uso a partir do servidor, e quem aprova o
-     MFA no primeiro login;
-   - para receber mensagens: `{Site_Url}/hooks/msteams/` publicado na internet com https e certificado de autoridade
-     pública (`MSTeams_Inbound_Mode = notifications`). Sem isso, só com o aceite por escrito da leitura periódica a
-     cada 2 minutos, que a Microsoft pode limitar ou suspender (o que também pararia reuniões e presença);
-   - para "Criar agora": um administrador do Teams para a política de acesso de aplicativo, com a lista das pessoas
-     que criam reuniões (a liberação é por pessoa e leva até 30 minutos), e "Permitir alterar e-mail" desligado. Até
-     lá, reuniões por link (`MSTeams_Meetings_Mode = links`, o padrão);
-   - duas pessoas de teste cujo e-mail no chat (vindo do AD) é o e-mail ou o nome de entrada (UPN) no Microsoft 365, e
-     se, na empresa, e-mail e UPN são iguais.
-3. **Presença do Teams**: `Presence.Read.All` (delegada e de aplicativo) no mesmo registro de aplicativo, "Permitir
-   alterar e-mail" desligado e a entrega escolhida (notificações, com o endereço público acima, ou consulta a cada 5
-   minutos só com o aceite da leitura periódica). Padrão: desligada.
 
-### Desenvolvimento sem Jira nem Microsoft 365
+### Desenvolvimento sem Jira
 
 `npm run dev:fake-vendors` (em `server/`, com `INTEGRATIONS_DEV_ENDPOINTS=1`) sobe os mesmos servidores falsos dos
-testes: o Jira (com o consentimento do OAuth, as pessoas Ana e Bruno e os campos obrigatórios na criação de issues),
-o login e o Graph da Microsoft (com um time e canais) e um fluxo do Workflows. Ele mostra as variáveis para exportar
-antes de `npm run dev` (com uma `SECRETS_KEY_FILE` de teste fora do projeto), os dados para colar nas telas (os
-identificadores do Entra são GUIDs) e como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue e
-`POST /__fake/teams/message` publica uma mensagem num canal do Teams (e avisa as assinaturas). Os testes nunca chamam a
-Atlassian nem a Microsoft.
+testes: o Jira (com o consentimento do OAuth, as pessoas Ana e Bruno e os campos obrigatórios na criação de issues).
+Ele mostra as variáveis para exportar
+antes de `npm run dev` (com uma `SECRETS_KEY_FILE` de teste fora do projeto), os dados para colar nas telas e
+como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os testes nunca chamam a Atlassian.
 
 ## Segurança
 
@@ -966,22 +938,8 @@ da Operação valem também aqui: quem não pode chamar alguém numa conversa di
 com link pede a permissão `create-calendar-meeting` (papéis `admin` e `user`). Os lembretes chegam no chat e por push
 (padrão 10 minutos antes). A chamada da reunião usa o servidor das chamadas em grupo (veja **Chamadas em grupo**).
 
-### Google Agenda e Outlook/Teams
+### Só agenda interna
 
-Cada pessoa conecta a própria agenda em Agenda › Agendas conectadas e escolhe o sentido: **os dois** (padrão),
-**trazer** (os eventos de lá aparecem no chat, só leitura) ou **levar** (os eventos e reuniões do chat vão para lá). O
-sentido pode ser trocado depois sem conectar de novo. O que muda no chat vai na hora; o que muda no Google ou no
-Outlook chega no intervalo de Administração › Integrações › Agenda (padrão 5 minutos). Ao desconectar, os eventos
-trazidos saem do chat e as cópias de eventos futuros são apagadas de lá.
+A Agenda é só do chat: não se conecta ao Google Agenda nem ao Outlook. Para ligar ou desligar a Agenda, use
+Administração › Configurações › Agenda (`Calendar_Enabled`).
 
-O administrador libera os fornecedores em Administração › Integrações › Agenda (precisa da chave de segredos, veja
-**Integrações: Jira e Microsoft Teams**):
-
-- **Google**: no Google Cloud Console, ative a Google Calendar API, configure a tela de permissão OAuth (Interno, escopo
-  `calendar.events`) e crie um ID do cliente OAuth do tipo Aplicativo da Web com a URI de redirecionamento
-  `https://<site>/integrations/calendar/google/callback`. Cole o ID e a chave secreta na tela.
-- **Outlook/Teams**: usa o aplicativo do Microsoft Entra já cadastrado para o Teams. Adicione a URI
-  `https://<site>/integrations/calendar/microsoft/callback` em Autenticação › Web e as permissões delegadas
-  `Calendars.ReadWrite`, `User.Read` e `offline_access` do Microsoft Graph (com o consentimento do administrador).
-- **Firewall**: além dos endereços da Microsoft, libere a saída https do servidor para `oauth2.googleapis.com` e
-  `www.googleapis.com` (o login em `accounts.google.com` acontece no navegador de cada pessoa).

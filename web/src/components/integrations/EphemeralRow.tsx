@@ -13,7 +13,6 @@ import './integrations.css';
 
 const SOURCE = {
   jira: { name: 'Jira', icon: 'int-jira' },
-  msteams: { name: 'Microsoft Teams', icon: 'int-teams' },
 } as const;
 
 const toast = (text: string, kind: 'success' | 'error' | 'info' = 'info') => useStore.getState().toast(text, kind);
