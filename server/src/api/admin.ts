@@ -99,7 +99,7 @@ export function adminRoutes(app: FastifyInstance) {
   // channels.addOwner e afins (setRoomRole): Definir donos/moderadores na sala, a trava de concessão do papel, a última
   // dona, a mensagem de sistema e a auditoria. Antes gravava direto na inscrição: quem tinha manage-roles virava Dono
   // de qualquer sala. Repetir o pedido não muda nada (compatível com o Rocket.Chat).
-  route(app, 'POST', 'roles.addUserToRole', { permissions: ['access-permissions', 'manage-roles'] }, async (req, _rep, ctx) => {
+  route(app, 'POST', 'roles.addUserToRole', { permissions: ['assign-roles'] }, async (req, _rep, ctx) => {
     const body = b(req);
     const role = str(body.roleId ?? body.roleName, 'roleId');
     if (!(await one('SELECT 1 FROM roles WHERE id = $1', [role]))) throw notFound('error-invalid-roleId', 'Papel não encontrado.');
@@ -118,7 +118,7 @@ export function adminRoutes(app: FastifyInstance) {
     }
     return { role: { _id: role } };
   });
-  route(app, 'POST', 'roles.removeUserFromRole', { permissions: ['access-permissions', 'manage-roles'] }, async (req, _rep, ctx) => {
+  route(app, 'POST', 'roles.removeUserFromRole', { permissions: ['assign-roles'] }, async (req, _rep, ctx) => {
     const body = b(req);
     const role = str(body.roleId ?? body.roleName, 'roleId');
     if (!(await one('SELECT 1 FROM roles WHERE id = $1', [role]))) throw notFound('error-invalid-roleId', 'Papel não encontrado.');
@@ -150,7 +150,14 @@ export function adminRoutes(app: FastifyInstance) {
           `SELECT u.*, count(*) OVER() AS total FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.room_id = $1 AND $2 = ANY(s.roles) ORDER BY u.username LIMIT ${p.count} OFFSET ${p.offset}`,
           [rid, role],
         )
-      : await many(`SELECT *, count(*) OVER() AS total FROM users WHERE $1 = ANY(roles) ORDER BY username LIMIT ${p.count} OFFSET ${p.offset}`, [role]);
+      : roleScope(role) === 'Subscriptions'
+        ? // Papel de sala sem sala: quem tem o papel em alguma sala (antes procurava em users.roles e vinha sempre vazio).
+          await many(
+            `SELECT u.*, count(*) OVER() AS total FROM users u WHERE EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND $1 = ANY(s.roles))
+             ORDER BY u.username LIMIT ${p.count} OFFSET ${p.offset}`,
+            [role],
+          )
+        : await many(`SELECT *, count(*) OVER() AS total FROM users WHERE $1 = ANY(roles) ORDER BY username LIMIT ${p.count} OFFSET ${p.offset}`, [role]);
     return { users: rows.map((r) => mapUser(r, { full: true })), total: Number(rows[0]?.total ?? 0) };
   });
   // Diagnóstico das conversas diretas restritas: papéis, exceções, brechas por outras permissões e DMs bloqueadas.

@@ -6,6 +6,7 @@ import { badRequest, forbidden, notFound } from '../lib/errors';
 import { integrationsPaused, keyInfo, keyMismatch, keyReady, reencryptAll } from '../lib/secrets';
 import { audit } from '../services/audit';
 import { getUserRoles, hasPermission } from '../services/permissions';
+import { isRootUser } from '../services/rbac';
 import { canAccessRoom } from '../services/rooms';
 import { getSetting } from '../services/settings';
 import { actorOf, type Ctx } from '../services/users';
@@ -51,7 +52,8 @@ async function requireManage(ctx: Ctx, provider: Provider) {
   if (!(await hasPermission(ctx.userId, MANAGE[provider]))) throw forbidden();
 }
 
-const isAdmin = async (userId: string) => (await getUserRoles(userId)).includes('admin');
+// O papel raiz pela flag (roles.is_root), não pelo id.
+const isAdmin = isRootUser;
 
 const originOf = (raw: unknown) => {
   try {

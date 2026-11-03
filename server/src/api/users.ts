@@ -340,12 +340,22 @@ export function usersRoutes(app: FastifyInstance) {
     if (roles.length) await recordHistory(pool, { entityType: 'user', entityId: row.id, entityLabel: row.username, action: 'create', actor: { id: ctx.userId, username: ctx.username }, changes: [{ field: 'roles', before: null, after: row.roles }] });
     return { user: mapUser(row, { full: true }) };
   });
-  route(app, 'POST', 'users.update', { permissions: ['edit-other-user-info'] }, async (req, _rep, ctx) => {
+  // Dados e papéis têm chaves separadas: edit-other-user-info para nome, e-mail, bio e o resto; assign-roles para os
+  // papéis. A tela manda só o que mudou, então quem só dá papéis salva sem esbarrar nos dados (e vice-versa).
+  route(app, 'POST', 'users.update', { permissions: ['edit-other-user-info', 'assign-roles'] }, async (req, _rep, ctx) => {
     const body = b(req);
     const d = { ...(body.data ?? {}) };
     const userId = str(body.userId, 'userId');
+    const dataKeys = Object.keys(d).filter((k) => k !== 'roles');
+    if (dataKeys.length && !(await hasPermission(ctx.userId, 'edit-other-user-info'))) throw forbidden('Sem permissão para editar os dados de outras pessoas.');
+    if (d.roles !== undefined && !(await hasPermission(ctx.userId, 'assign-roles'))) throw forbidden('Sem permissão para dar ou tirar papéis.');
     // Hierarquia: não altera quem tem papel acima do ator (inclusive senha e dados).
     await assertCanManageUser(ctx, userId);
+    // Ativar e desativar têm chave própria (como users.setActiveStatus); só pesa quando o valor muda de fato.
+    if (d.active !== undefined && userId !== ctx.userId) {
+      const cur = await one<{ active: boolean }>('SELECT active FROM users WHERE id = $1', [userId]);
+      if (cur && !!bool(d.active) !== cur.active && !(await hasPermission(ctx.userId, 'edit-other-user-active-status'))) throw forbidden('Sem permissão para ativar ou desativar contas.');
+    }
     let roles: string[] | undefined;
     if (d.roles) {
       roles = strArray(d.roles);

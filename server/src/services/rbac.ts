@@ -2,28 +2,36 @@
 // com o histórico na mesma transação. As regras puras ficam em shared/rbac.ts (a tela usa as mesmas).
 import type pg from 'pg';
 import {
+  applyDelta,
   grantContextFor,
   keysNotHeld,
   LOCK_TEXT,
   RBAC_KEYS,
   roleDeleteLock,
   roleLock,
+  ROOT_KEEP,
   userLock,
   type GrantContext,
+  type LockReason,
   type RoleInfo,
 } from '@shared/rbac';
 import { many, one, tx } from '../db/pool';
 import { ApiError, badRequest, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
-import { getUserRoles, loadPermissions, mapRole, roleInfos } from './permissions';
+import { getUserRoles, loadPermissions, mapRole, roleInfos, rolesIncludeRoot } from './permissions';
 import { recordHistory, type HistorySource } from './rbacHistory';
 import type { Ctx } from './users';
 
 export const rbacError = (status: number, code: string, msg: string, details?: Record<string, unknown>) => new ApiError(status, code, msg, details);
 
-// Permissões que o papel raiz nunca perde: sem elas ninguém mais administraria os papéis.
-export const ROOT_KEEP = ['view-permissions', 'access-permissions', 'manage-roles'];
+// Permissões que o papel raiz nunca perde (do catálogo): sem elas ninguém mais administraria nem daria papéis.
+export { ROOT_KEEP };
+
+// Tem o papel raiz (pela flag is_root, não pelo id 'admin').
+export async function isRootUser(userId: string): Promise<boolean> {
+  return rolesIncludeRoot(await getUserRoles(userId));
+}
 
 export async function grantContext(userId: string): Promise<GrantContext> {
   return grantContextFor(userId, await getUserRoles(userId), roleInfos());
@@ -60,6 +68,9 @@ export async function assertRoleChange(ctx: Ctx, targetId: string, before: strin
   const known = new Set(infos.map((r) => r.id));
   const bad = after.filter((r) => !known.has(r));
   if (bad.length) throw badRequest('error-invalid-role', `Papel inexistente: ${bad.join(', ')}`);
+  // Papel de sala (Dono, Moderador…) não vira papel global: ele valeria em todas as salas.
+  const roomScoped = after.filter((r) => !before.includes(r) && infos.find((x) => x.id === r)?.scope === 'Subscriptions');
+  if (roomScoped.length) throw badRequest('error-invalid-role', `Papel de sala não vale como papel global: ${roomScoped.join(', ')}`);
   const changed = [...after.filter((r) => !before.includes(r)), ...before.filter((r) => !after.includes(r))];
   if (!changed.length) return;
   const lock = userLock(g, targetId, before, infos);
@@ -111,33 +122,97 @@ export function publishUserRoles(user: { id: string; username: string; roles: st
   bus.publish({ all: true }, { type: 'user', action: 'updated', user: { _id: user.id, username: user.username, roles: user.roles } });
 }
 
-// Ação em massa: dá e tira papéis de várias pessoas, tudo ou nada, com um batch_id no histórico.
-export async function bulkUserRoles(ctx: Ctx, userIds: string[], add: string[], remove: string[]) {
+export type BulkBlockReason = Exclude<LockReason, null | 'own-role' | 'protected'> | 'self' | 'not-assignable' | 'last-admin';
+interface BulkPerson {
+  _id: string;
+  username: string;
+}
+
+// Ação em massa: dá e tira papéis de várias pessoas, com um batch_id no histórico. A prévia (dryRun) diz quem muda,
+// quem já está assim e quem fica de fora e por quê. Sem skipBlocked é tudo ou nada (o erro de hoje); com skipBlocked
+// grava só quem pode e conta quem ficou de fora.
+export async function bulkUserRoles(ctx: Ctx, userIds: string[], add: string[], remove: string[], opts: { dryRun?: boolean; skipBlocked?: boolean } = {}) {
   const g = await grantContext(ctx.userId);
-  const users = await many<{ id: string; username: string; roles: string[] }>('SELECT id, username, roles FROM users WHERE id = ANY($1)', [userIds]);
+  const infos = roleInfos();
+  const known = new Set(infos.map((r) => r.id));
+  const badRoles = [...add, ...remove].filter((r) => !known.has(r));
+  if (badRoles.length) throw badRequest('error-invalid-role', `Papel inexistente: ${badRoles.join(', ')}`);
+  const roomScoped = add.filter((r) => infos.find((x) => x.id === r)?.scope === 'Subscriptions');
+  if (roomScoped.length) throw badRequest('error-invalid-role', `Papel de sala não vale como papel global: ${roomScoped.join(', ')}`);
+  const users = await many<{ id: string; username: string; roles: string[]; active: boolean }>('SELECT id, username, roles, active FROM users WHERE id = ANY($1) ORDER BY username', [userIds]);
   if (users.length !== new Set(userIds).size) throw badRequest('error-invalid-user', 'Usuário não encontrado.');
-  const plan = users.map((u) => ({ u, next: [...new Set([...u.roles.filter((r) => !remove.includes(r)), ...add])] }));
-  for (const p of plan) await assertRoleChange(ctx, p.u.id, p.u.roles, p.next, g);
+  const root = infos.find((r) => r.root)?.id;
+  const ok: (BulkPerson & { next: string[]; roles: string[] })[] = [];
+  const unchanged: BulkPerson[] = [];
+  const blocked: (BulkPerson & { reason: BulkBlockReason; roles?: string[] })[] = [];
+  // Quantos administradores ativos sobram se tirar o papel raiz de todos os escolhidos.
+  let activeRoots = root ? Number((await one<{ n: number }>(`SELECT count(*)::int AS n FROM users WHERE $1 = ANY(roles) AND active`, [root]))?.n ?? 0) : 0;
+  for (const u of users) {
+    const next = [...new Set([...u.roles.filter((r) => !remove.includes(r)), ...add])];
+    const person = { _id: u.id, username: u.username };
+    const changed = [...next.filter((r) => !u.roles.includes(r)), ...u.roles.filter((r) => !next.includes(r))];
+    if (!changed.length) {
+      unchanged.push(person);
+      continue;
+    }
+    const lock = userLock(g, u.id, u.roles, infos);
+    if (lock) {
+      blocked.push({ ...person, reason: lock === 'own-role' || lock === 'protected' ? 'superior' : lock });
+      continue;
+    }
+    const locked = changed.filter((id) => {
+      const r = infos.find((x) => x.id === id);
+      return r && roleLock(g, r);
+    });
+    if (locked.length) {
+      blocked.push({ ...person, reason: 'not-assignable', roles: locked });
+      continue;
+    }
+    if (root && u.active && u.roles.includes(root) && !next.includes(root)) {
+      if (activeRoots <= 1) {
+        blocked.push({ ...person, reason: 'last-admin' });
+        continue;
+      }
+      activeRoots--;
+    }
+    ok.push({ ...person, next, roles: u.roles });
+  }
+  if (opts.dryRun) return { ok: ok.map(({ _id, username }) => ({ _id, username })), blocked, unchanged };
+  if (blocked.length && !opts.skipBlocked) {
+    // O mesmo erro de antes (tudo ou nada), na ordem: pessoa travada, papel travado, último administrador.
+    const first = blocked[0];
+    const u = users.find((x) => x.id === first._id)!;
+    const next = [...new Set([...u.roles.filter((r) => !remove.includes(r)), ...add])];
+    if (first.reason === 'last-admin') throw badRequest('error-action-not-allowed', 'Não é possível remover o último administrador.');
+    await assertRoleChange(ctx, u.id, u.roles, next, g);
+    throw lockError('superior', 'RBAC_TARGET_SUPERIOR', { userId: u.id });
+  }
+  if (!ok.length) return { batchId: null, users: 0, skipped: blocked.length };
   const batchId = newId();
   const rows = await tx(async (c) => {
     const out = [];
-    for (const p of plan) out.push((await writeUserRoles(c, p.u.id, p.next, { actor: ctx, action: 'bulk', batchId })).row);
+    for (const p of ok) out.push((await writeUserRoles(c, p._id, p.next, { actor: ctx, action: 'bulk', batchId })).row);
     return out;
   });
   rows.forEach(publishUserRoles);
-  return { batchId, users: rows.length };
+  return { batchId, users: rows.length, skipped: blocked.length };
 }
 
 // ---------- Papéis ----------
 
 export interface RoleInput {
   description?: string;
+  // "Para que serve": uma frase simples que a tela mostra embaixo do nome.
+  purpose?: string;
   scope?: 'Users' | 'Subscriptions';
   mandatory2fa?: boolean;
   restrictDirect?: boolean;
   permissions?: string[];
   // O catálogo que a tela tinha ao abrir: chaves atuais fora dele são mantidas (uma aba antiga não apaga chave nova).
   knownPermissions?: string[];
+  // As permissões que a tela tinha ao abrir o papel: grava só a diferença (base → permissions) sobre o estado atual, e
+  // o que outra pessoa salvou nesse meio-tempo em outras chaves fica. Substitui knownPermissions.
+  basePermissions?: string[];
   delegable?: string[];
 }
 
@@ -146,6 +221,7 @@ const RESTRICT_GLOBAL_ONLY = 'Só papéis globais podem ser restritos em convers
 function roleFields(r: any, permissions: string[]) {
   return {
     description: r.description,
+    purpose: r.purpose ?? '',
     scope: r.scope,
     mandatory2fa: r.mandatory_2fa,
     restrictDirect: !!r.restrict_direct,
@@ -202,9 +278,10 @@ export async function createRole(ctx: Ctx, name: string, input: RoleInput, opts:
   }
   const row = await tx(async (c) => {
     const row = (
-      await c.query('INSERT INTO roles (id, description, scope, protected, mandatory_2fa, restrict_direct, delegable_roles) VALUES ($1,$2,$3,false,$4,$5,$6) RETURNING *', [
+      await c.query('INSERT INTO roles (id, description, purpose, scope, protected, mandatory_2fa, restrict_direct, delegable_roles) VALUES ($1,$2,$3,$4,false,$5,$6,$7) RETURNING *', [
         name,
         String(input.description ?? ''),
+        String(input.purpose ?? '').slice(0, 200),
         scope,
         !!input.mandatory2fa,
         restrictDirect,
@@ -224,7 +301,7 @@ export async function createRole(ctx: Ctx, name: string, input: RoleInput, opts:
     });
     return row;
   });
-  await afterRoleChange();
+  await afterRoleChange({ roles: [name], by: ctx.userId });
   return mapRole(row);
 }
 
@@ -240,9 +317,12 @@ export async function updateRole(ctx: Ctx, id: string, input: RoleInput, opts: {
 
     let after = before;
     if (input.permissions) {
-      const requested = new Set(input.permissions);
-      const known = new Set(input.knownPermissions ?? [...Object.keys(RBAC_KEYS), ...before]);
-      after = [...new Set([...requested, ...before.filter((k) => !known.has(k))])].sort();
+      if (input.basePermissions) after = applyDelta(before, input.basePermissions, input.permissions);
+      else {
+        const requested = new Set(input.permissions);
+        const known = new Set(input.knownPermissions ?? [...Object.keys(RBAC_KEYS), ...before]);
+        after = [...new Set([...requested, ...before.filter((k) => !known.has(k))])].sort();
+      }
       const changed = after.length !== before.length || after.some((k) => !before.includes(k));
       if (changed) {
         if (!opts.canEditPermissions) throw rbacError(403, 'error-not-allowed', 'Sem permissão para alterar permissões.');
@@ -254,9 +334,11 @@ export async function updateRole(ctx: Ctx, id: string, input: RoleInput, opts: {
       } else after = before;
     }
 
-    const meta = { description: input.description, mandatory2fa: input.mandatory2fa, scope: existing.protected ? undefined : input.scope, restrictDirect: input.restrictDirect };
+    const purpose = input.purpose === undefined ? undefined : String(input.purpose).slice(0, 200);
+    const meta = { description: input.description, purpose, mandatory2fa: input.mandatory2fa, scope: existing.protected ? undefined : input.scope, restrictDirect: input.restrictDirect };
     const metaChanged =
       (meta.description !== undefined && meta.description !== existing.description) ||
+      (meta.purpose !== undefined && meta.purpose !== (existing.purpose ?? '')) ||
       (meta.mandatory2fa !== undefined && meta.mandatory2fa !== existing.mandatory_2fa) ||
       (meta.scope !== undefined && meta.scope !== existing.scope) ||
       (meta.restrictDirect !== undefined && meta.restrictDirect !== existing.restrict_direct);
@@ -279,9 +361,9 @@ export async function updateRole(ctx: Ctx, id: string, input: RoleInput, opts: {
     const row = (
       await c.query(
         `UPDATE roles SET description = COALESCE($2, description), mandatory_2fa = COALESCE($3, mandatory_2fa), scope = COALESCE($4, scope),
-           restrict_direct = COALESCE($5, restrict_direct), delegable_roles = $6
+           restrict_direct = COALESCE($5, restrict_direct), delegable_roles = $6, purpose = COALESCE($7, purpose)
          WHERE id = $1 RETURNING *`,
-        [id, meta.description ?? null, meta.mandatory2fa ?? null, meta.scope ?? null, meta.restrictDirect ?? null, delegable],
+        [id, meta.description ?? null, meta.mandatory2fa ?? null, meta.scope ?? null, meta.restrictDirect ?? null, delegable, meta.purpose ?? null],
       )
     ).rows[0];
     await setRolePermissions(c, id, before, after);
@@ -296,10 +378,10 @@ export async function updateRole(ctx: Ctx, id: string, input: RoleInput, opts: {
       revertsId: opts.revertsId,
       changes: (Object.keys(fa) as (keyof typeof fa)[]).map((field) => ({ field, before: fb[field], after: fa[field] })),
     });
-    return { row, historyId };
+    return { row, historyId, permissions: after };
   });
-  await afterRoleChange();
-  return { role: mapRole(out.row), historyId: out.historyId };
+  await afterRoleChange({ roles: [id], by: ctx.userId });
+  return { role: mapRole(out.row), permissions: out.permissions, historyId: out.historyId };
 }
 
 export async function deleteRole(ctx: Ctx, id: string, opts: { action?: 'delete' | 'rollback'; revertsId?: number | null; batchId?: string } = {}) {
@@ -335,60 +417,87 @@ export async function deleteRole(ctx: Ctx, id: string, opts: { action?: 'delete'
       changes: Object.entries(f).map(([field, before]) => ({ field, before, after: null })),
     });
   });
-  await afterRoleChange();
+  await afterRoleChange({ roles: [id], by: ctx.userId });
+}
+
+// ---------- Várias permissões em vários papéis (matriz) ----------
+
+export interface PermissionDelta {
+  roleId: string;
+  add: string[];
+  remove: string[];
+}
+
+// O único caminho para mexer em permissões de vários papéis de uma vez (matriz e permissions.update do Rocket.Chat):
+// lê cada papel do banco travado (FOR UPDATE, em ordem de id para duas matrizes não se travarem), aplica só o que
+// entra e sai, confere a hierarquia de concessão de cada papel e grava tudo ou nada, com um lote no histórico.
+export async function applyPermissionDeltas(ctx: Ctx, changes: PermissionDelta[]): Promise<{ roles: { _id: string; permissions: string[] }[]; batchId: string | null }> {
+  if (!changes.length) throw badRequest('error-invalid-params', 'Nenhuma alteração.');
+  const merged = new Map<string, { add: Set<string>; remove: Set<string> }>();
+  for (const ch of changes) {
+    const m = merged.get(ch.roleId) ?? { add: new Set(), remove: new Set() };
+    ch.add.forEach((k) => m.add.add(k));
+    ch.remove.forEach((k) => m.remove.add(k));
+    merged.set(ch.roleId, m);
+  }
+  if (merged.size > 50) throw badRequest('error-invalid-params', 'Até 50 papéis por vez.');
+  for (const m of merged.values()) if ([...m.add].some((k) => m.remove.has(k))) throw badRequest('error-invalid-params', 'A mesma permissão não pode entrar e sair do mesmo papel.');
+  const known = new Set((await many<{ id: string }>('SELECT id FROM roles')).map((r) => r.id));
+  for (const id of merged.keys()) if (!known.has(id)) throw notFound('error-invalid-roleId', `Papel não encontrado: ${id}.`);
+  await assertKnownKeys([...new Set([...merged.values()].flatMap((m) => [...m.add]))]);
+  const g = await grantContext(ctx.userId);
+  const ids = [...merged.keys()].sort();
+  const plan: { id: string; before: string[]; after: string[] }[] = [];
+  const batchId = await tx(async (c) => {
+    for (const id of ids) {
+      const row = (await c.query('SELECT * FROM roles WHERE id = $1 FOR UPDATE', [id])).rows[0];
+      const before = await rolePermissions(c, id);
+      const m = merged.get(id)!;
+      const after = [...new Set([...before.filter((k) => !m.remove.has(k)), ...m.add])].sort();
+      if (after.length === before.length && after.every((k, i) => k === before[i])) continue;
+      const info: RoleInfo = { id, scope: row.scope, protected: row.protected, root: row.is_root, permissions: before, delegable: row.delegable_roles ?? [] };
+      const lock = roleLock(g, info);
+      if (lock) throw lockError(lock, 'RBAC_ROLE_SUPERIOR', { roleId: id });
+      const notHeld = keysNotHeld(g, before, after);
+      if (notHeld.length) throw rbacError(403, 'RBAC_PERMISSION_NOT_HELD', 'Você só dá ou tira permissões que você tem.', { keys: notHeld, roleId: id });
+      const lost = row.is_root ? ROOT_KEEP.filter((k) => before.includes(k) && !after.includes(k)) : [];
+      if (lost.length) throw rbacError(400, 'RBAC_ROOT_LOCKOUT', 'O papel Administrador não pode perder a gestão de papéis.', { keys: lost, roleId: id });
+      plan.push({ id, before, after });
+    }
+    const batch = plan.length > 1 ? newId() : null;
+    for (const p of plan) {
+      await setRolePermissions(c, p.id, p.before, p.after);
+      await recordHistory(c, { entityType: 'role', entityId: p.id, action: 'update', actor: actorOfCtx(ctx), batchId: batch, changes: [{ field: 'permissions', before: p.before, after: p.after }] });
+    }
+    return batch;
+  });
+  if (plan.length) await afterRoleChange({ roles: plan.map((p) => p.id), by: ctx.userId });
+  return { roles: plan.map((p) => ({ _id: p.id, permissions: p.after })), batchId };
 }
 
 // Compatibilidade com a API do Rocket.Chat (permissions.update): cada permissão com a lista de papéis. Vira, por papel,
-// a mesma checagem e o mesmo histórico do editor.
+// o que entra e sai contra o estado atual, e segue o mesmo caminho da matriz (mesmas regras, mesmo histórico).
 export async function updatePermissionMatrix(ctx: Ctx, updates: { _id: string; roles: string[] }[]) {
-  const g = await grantContext(ctx.userId);
-  const infos = roleInfos();
-  const known = new Set(infos.map((r) => r.id));
   await assertKnownKeys(updates.map((u) => u._id));
+  const known = new Set(roleInfos().map((r) => r.id));
   const current = new Map((await many<{ id: string; roles: string[] }>('SELECT id, roles FROM permissions')).map((r) => [r.id, r.roles]));
-  const perRole = new Map<string, { before: Set<string>; after: Set<string> }>();
-  const roleSets = (id: string) => {
-    if (!perRole.has(id)) {
-      const p = infos.find((r) => r.id === id)!.permissions;
-      perRole.set(id, { before: new Set(p), after: new Set(p) });
-    }
-    return perRole.get(id)!;
-  };
+  const perRole = new Map<string, PermissionDelta>();
+  const delta = (id: string) => perRole.get(id) ?? (perRole.set(id, { roleId: id, add: [], remove: [] }), perRole.get(id)!);
   for (const u of updates) {
     const next = new Set(u.roles.filter((r) => known.has(r)));
     const prev = new Set(current.get(u._id) ?? []);
-    for (const r of new Set([...next, ...prev])) {
-      if (next.has(r) === prev.has(r)) continue;
-      const s = roleSets(r);
-      if (next.has(r)) s.after.add(u._id);
-      else s.after.delete(u._id);
-    }
+    for (const r of next) if (!prev.has(r)) delta(r).add.push(u._id);
+    for (const r of prev) if (!next.has(r) && known.has(r)) delta(r).remove.push(u._id);
   }
-  for (const [id, s] of perRole) {
-    const lock = roleLock(g, infos.find((r) => r.id === id)!);
-    if (lock) throw lockError(lock, 'RBAC_ROLE_SUPERIOR', { roleId: id });
-    const notHeld = keysNotHeld(g, s.before, s.after);
-    if (notHeld.length) throw rbacError(403, 'RBAC_PERMISSION_NOT_HELD', 'Você só dá ou tira permissões que você tem.', { keys: notHeld, roleId: id });
-    if (infos.find((r) => r.id === id)!.root) {
-      const lost = ROOT_KEEP.filter((k) => s.before.has(k) && !s.after.has(k));
-      if (lost.length) throw rbacError(400, 'RBAC_ROOT_LOCKOUT', 'O papel Administrador não pode perder a gestão de papéis.', { keys: lost });
-    }
-  }
-  const batchId = perRole.size > 1 ? newId() : null;
-  await tx(async (c) => {
-    for (const [id, s] of perRole) {
-      await setRolePermissions(c, id, [...s.before], [...s.after]);
-      await recordHistory(c, { entityType: 'role', entityId: id, action: 'update', actor: actorOfCtx(ctx), batchId, changes: [{ field: 'permissions', before: [...s.before], after: [...s.after] }] });
-    }
-  });
-  await afterRoleChange();
+  if (!perRole.size) return { roles: [], batchId: null };
+  return applyPermissionDeltas(ctx, [...perRole.values()]);
 }
 
-async function afterRoleChange() {
+async function afterRoleChange(meta: { roles?: string[]; by?: string } = {}) {
   const { invalidateMandatory2faCache } = await import('./users');
   invalidateMandatory2faCache();
   await loadPermissions();
-  bus.permissionsChanged();
+  bus.permissionsChanged(meta);
 }
 
 export { roleInfo };

@@ -267,6 +267,7 @@ export interface Role {
   restrictDirect: boolean; // "Restrito em conversas diretas" (só papéis globais)
   root?: boolean; // papel raiz (Administrador): passa pela hierarquia de concessão
   delegable?: string[]; // papéis que quem tem este pode dar e editar mesmo sem ter tudo o que eles dão
+  purpose?: string; // "Para que serve": uma frase simples que a tela mostra embaixo do nome
 }
 
 export interface Permission {
@@ -390,7 +391,8 @@ export type ServerEvent =
   | { type: 'notification'; rid: string; title: string; text: string; messageId: string; sender: UserRef; tmid?: string | null }
   | { type: 'reads'; rid: string; messageIds: string[] }
   | { type: 'user'; action: 'updated'; user: Partial<User> & { _id: string } }
-  | { type: 'permissions.changed' }
+  // roles: papéis alterados; by: quem alterou (vazio quando foi o sistema). Campos opcionais: ouvintes antigos seguem iguais.
+  | { type: 'permissions.changed'; roles?: string[]; by?: string }
   | { type: 'settings.changed'; settings: { _id: string; value: unknown }[] }
   | { type: 'force_logout' }
   | { type: 'call'; call: Call }

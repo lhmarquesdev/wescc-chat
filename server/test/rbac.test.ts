@@ -23,7 +23,7 @@ beforeAll(async () => {
   const sv = await api('POST', 'rbac.roles.create', {
     name: 'supervisor',
     description: 'Supervisor',
-    permissions: ['view-user-administration', 'create-user', 'edit-other-user-info', 'edit-other-user-active-status', 'view-permissions', 'access-permissions', 'manage-roles'],
+    permissions: ['view-user-administration', 'create-user', 'edit-other-user-info', 'edit-other-user-active-status', 'view-permissions', 'access-permissions', 'manage-roles', 'assign-roles'],
   }, A);
   expect(sv.success).toBe(true);
   sup = await newUser(A, { roles: ['user', 'supervisor'] });

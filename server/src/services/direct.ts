@@ -2,6 +2,7 @@ import {
   blockedPair,
   bringInBlockMessage,
   checkDirect,
+  DIRECT_LOOPHOLES,
   directBlockMessage,
   isExempt,
   isRestricted,
@@ -178,7 +179,7 @@ export async function callPolicies(ctx: Ctx, roomIds: string[]): Promise<Map<str
 }
 
 // Permissões que deixam duas pessoas restritas conversarem em particular fora das mensagens diretas.
-const LOOPHOLE_PERMISSIONS = ['create-p', 'create-team', 'start-discussion', 'start-discussion-other-user'];
+const LOOPHOLE_PERMISSIONS = DIRECT_LOOPHOLES;
 
 export async function directRestrictionReport(): Promise<DirectRestrictionReport> {
   const rules = currentDirectRules();

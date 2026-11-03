@@ -1,22 +1,35 @@
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { DIRECT_LOOPHOLES } from '@shared/direct';
 import {
+  applyDelta,
+  AREA_GROUP,
   areaLevel,
   diffPermissions,
   effectiveAccess,
   grantContextFor,
+  isRoomChecked,
+  KEY_AREA,
+  keyMatches,
   keysNotHeld,
   planNewKeys,
   RBAC_AREAS,
+  RBAC_GROUPS,
   RBAC_KEYS,
+  RBAC_TEMPLATES,
   roleDeleteLock,
   roleLock,
+  ROOT_KEEP,
+  sensitiveAdded,
+  templatePlan,
   userLock,
   VISIBLE_KEYS,
+  whoCanRoles,
   withAreaLevel,
   type RoleInfo,
 } from '@shared/rbac';
+import { foldText } from '@shared/search';
 import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 
 // O catálogo único de permissões (shared/rbac.ts): cada chave com nome, numa área só, e nenhuma "decorativa".
@@ -184,5 +197,109 @@ describe('nascimento de chaves novas', () => {
     const plan = planNewKeys(existing, ['admin', 'gestor'], false);
     expect([...plan.keys()]).toEqual(['view-permissions']);
     expect(plan.get('view-permissions')).toEqual(['admin', 'gestor']);
+  });
+});
+
+describe('catálogo v2: descrição, sensível e sala', () => {
+  it('toda chave visível tem uma descrição simples de uma frase, terminando em ponto', () => {
+    const bad = VISIBLE_KEYS.filter((k) => {
+      const d = RBAC_KEYS[k].description?.trim() ?? '';
+      return !d || d.length > 200 || !d.endsWith('.');
+    });
+    expect(bad).toEqual([]);
+  });
+
+  it('todo aviso de chave sensível é uma frase terminando em ponto', () => {
+    const bad = Object.entries(RBAC_KEYS).filter(([, d]) => d.sensitive !== undefined && (!d.sensitive.trim() || !d.sensitive.trim().endsWith('.')));
+    expect(bad.map(([k]) => k)).toEqual([]);
+    for (const k of ['can-audit', 'assign-roles', 'assign-admin-role', 'start-dm-between-restricted', 'delete-user']) expect(RBAC_KEYS[k].sensitive, k).toBeTruthy();
+  });
+
+  it('o Administrador nunca perde a gestão de papéis nem a de dar papéis', () => {
+    expect(ROOT_KEEP.filter((k) => !RBAC_KEYS[k])).toEqual([]);
+    expect(ROOT_KEEP).toContain('assign-roles');
+  });
+
+  it('chaves do grupo de salas são de sala; a marca room só aparece fora dele', () => {
+    const roomGroup = RBAC_GROUPS.find((g) => g.id === 'room')!;
+    const roomKeys = roomGroup.areas.flatMap((a) => [...a.levels.flatMap((l) => l.keys), ...a.extras]);
+    expect(roomKeys.filter((k) => !isRoomChecked(k))).toEqual([]);
+    expect(Object.entries(RBAC_KEYS).filter(([k, d]) => d.room && AREA_GROUP[KEY_AREA[k]] === 'room').map(([k]) => k)).toEqual([]);
+    expect(isRoomChecked('mention-all')).toBe(true);
+    expect(isRoomChecked('can-audit')).toBe(false);
+  });
+
+  it('assign-roles nasce com quem já dava papéis e fica primeiro nos extras de Usuários', () => {
+    expect(RBAC_KEYS['assign-roles']).toMatchObject({ label: 'Dar e tirar papéis de pessoas', defaults: ['admin'], inheritsFrom: ['edit-other-user-info', 'access-permissions', 'manage-roles'] });
+    expect(RBAC_AREAS.find((a) => a.id === 'admin-users')!.extras[0]).toBe('assign-roles');
+  });
+});
+
+describe('modelos de papel', () => {
+  it('só chaves visíveis, ids únicos', () => {
+    const ids = RBAC_TEMPLATES.map((t) => t.id);
+    expect(ids.filter((x, i) => ids.indexOf(x) !== i)).toEqual([]);
+    for (const t of RBAC_TEMPLATES) expect(t.keys.filter((k) => !VISIBLE_KEYS.includes(k)), t.id).toEqual([]);
+    for (const t of RBAC_TEMPLATES) expect(t.description.trim().endsWith('.'), t.id).toBe(true);
+  });
+
+  it('o Operador é restrito e não leva nenhuma brecha de conversa particular', () => {
+    const op = RBAC_TEMPLATES.find((t) => t.id === 'operador')!;
+    expect(op.restrictDirect).toBe(true);
+    expect(op.keys.filter((k) => DIRECT_LOOPHOLES.includes(k))).toEqual([]);
+    expect(op.keys).toContain('view-c-room');
+  });
+
+  it('modelo com chave sensível exige 2FA', () => {
+    for (const t of RBAC_TEMPLATES) if (t.keys.some((k) => RBAC_KEYS[k].sensitive)) expect(t.mandatory2fa, t.id).toBe(true);
+    expect(RBAC_TEMPLATES.filter((t) => t.mandatory2fa).map((t) => t.id).sort()).toEqual(['auditor-mensagens', 'gestor-pessoas', 'supervisor-operacao']);
+  });
+
+  it('templatePlan: quem não é raiz leva só o que tem e não define delegação', () => {
+    const sup = RBAC_TEMPLATES.find((t) => t.id === 'supervisor-operacao')!;
+    const roles = [R('admin', [], { root: true }), R('operacao', ['view-c-room']), R('owner', [], { scope: 'Subscriptions' })];
+    const rootCtx = grantContextFor('a', ['admin'], roles);
+    expect(templatePlan(sup, rootCtx, roles)).toEqual({ keys: sup.keys, stripped: [], delegable: ['operacao'], delegationSkipped: [] });
+    const g = grantContextFor('s', ['gestor'], [...roles, R('gestor', ['view-c-room', 'create-user'])]);
+    const plan = templatePlan(sup, g, roles);
+    expect(plan.keys).toEqual(['view-c-room', 'create-user']);
+    expect(plan.stripped).toHaveLength(sup.keys.length - 2);
+    expect(plan.delegable).toEqual([]);
+    expect(plan.delegationSkipped).toEqual(['operacao']);
+    // Papel que não existe, de sala ou raiz nunca entra na delegação.
+    const odd = { ...sup, delegable: ['nao-existe', 'owner', 'admin', 'operacao'] };
+    expect(templatePlan(odd, rootCtx, roles).delegable).toEqual(['operacao']);
+  });
+});
+
+describe('funções puras v2', () => {
+  it('applyDelta aplica só o que a tela mudou sobre o estado atual', () => {
+    // Outra pessoa acrescentou create-p; a tela (base sem ele) acrescentou create-c e tirou mention-all.
+    expect(applyDelta(['view-c-room', 'mention-all', 'create-p'], ['view-c-room', 'mention-all'], ['view-c-room', 'create-c'])).toEqual(['create-c', 'create-p', 'view-c-room']);
+    // Chave que a tela não conhece (base sem ela) fica.
+    expect(applyDelta(['x-nova', 'a'], ['a'], ['a'])).toEqual(['a', 'x-nova']);
+    expect(applyDelta([], [], [])).toEqual([]);
+  });
+
+  it('whoCanRoles separa globais, de sala e de sala sem efeito', () => {
+    const roles = [R('admin', ['delete-message', 'can-audit'], { root: true }), R('owner', ['delete-message', 'can-audit'], { scope: 'Subscriptions' }), R('user', [])];
+    expect(whoCanRoles('delete-message', roles)).toEqual({ global: ['admin'], room: ['owner'], inert: [] });
+    expect(whoCanRoles('can-audit', roles)).toEqual({ global: ['admin'], room: [], inert: ['owner'] });
+    expect(whoCanRoles('create-c', roles)).toEqual({ global: [], room: [], inert: [] });
+  });
+
+  it('sensitiveAdded: só as sensíveis que entram, na ordem do catálogo', () => {
+    expect(sensitiveAdded(['view-c-room'], ['view-c-room', 'can-audit', 'create-c', 'assign-roles'])).toEqual(['assign-roles', 'can-audit']);
+    expect(sensitiveAdded(['can-audit'], ['can-audit'])).toEqual([]);
+  });
+
+  it('busca sem acento por nome, descrição, id, área e grupo', () => {
+    expect(foldText('Permissão É')).toBe('permissao e');
+    expect(keyMatches('edit-other-user-password', 'senha')).toBe(true);
+    expect(keyMatches('delete-message', 'apagar mensagens de outras')).toBe(true);
+    expect(keyMatches('can-audit', 'auditoria')).toBe(true);
+    expect(keyMatches('can-audit', 'administracao')).toBe(true);
+    expect(keyMatches('create-c', 'can-audit')).toBe(false);
+    expect(keyMatches('create-c', '')).toBe(true);
   });
 });

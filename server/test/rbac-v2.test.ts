@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pool } from '../src/db/pool';
-import { loadPermissions } from '../src/services/permissions';
-import { admin, api, newUser, startServer, stopServer, type Auth } from './helpers';
+import { loadPermissions, seedPermissions } from '../src/services/permissions';
+import { admin, api, connectWs, newUser, startServer, stopServer, type Auth } from './helpers';
 
 // Papéis e permissões v2. Primeiro os dois buracos fechados: dar papel de sala por roles.addUserToRole (quem tinha
 // manage-roles virava Dono de qualquer sala) e pôr gente em qualquer sala pelo Admin › Salas só com "Visualizar".
@@ -14,6 +14,8 @@ const grants = async (role: string) => (await pool.query('SELECT id FROM permiss
 const subRoles = async (rid: string, uid: string) => (await pool.query('SELECT roles FROM subscriptions WHERE room_id = $1 AND user_id = $2', [rid, uid])).rows[0]?.roles as string[] | undefined;
 const isMember = async (rid: string, uid: string) => (await pool.query('SELECT 1 FROM subscriptions WHERE room_id = $1 AND user_id = $2', [rid, uid])).rowCount === 1;
 const systemCount = async (rid: string, t: string) => Number((await pool.query('SELECT count(*) AS n FROM messages WHERE room_id = $1 AND t = $2', [rid, t])).rows[0].n);
+const lastHistory = async (entityId: string) => (await pool.query('SELECT * FROM rbac_history WHERE entity_id = $1 ORDER BY id DESC LIMIT 1', [entityId])).rows[0];
+const rolesOf = async (userId: string) => (await pool.query('SELECT roles FROM users WHERE id = $1', [userId])).rows[0].roles as string[];
 const geralId = async () => (await pool.query(`SELECT id FROM rooms WHERE name = 'geral'`)).rows[0].id as string;
 
 async function roleWith(name: string, permissions: string[], scope: 'Users' | 'Subscriptions' = 'Users') {
@@ -28,12 +30,65 @@ beforeAll(async () => {
 });
 afterAll(() => stopServer());
 
+describe('assign-roles: dar e tirar papéis de pessoas', () => {
+  it('nasce numa instalação existente com quem já dava papéis (e com histórico do sistema)', async () => {
+    await pool.query(`INSERT INTO roles (id, description, scope) VALUES ('gestor-v2', 'Gestor', 'Users')`);
+    await pool.query(`UPDATE permissions SET roles = array_append(roles, 'gestor-v2') WHERE id = 'edit-other-user-info'`);
+    const holdersBefore = (await pool.query(`SELECT roles FROM permissions WHERE id = 'assign-roles'`)).rows[0].roles as string[];
+    await pool.query(`DELETE FROM permissions WHERE id = 'assign-roles'`);
+    try {
+      await seedPermissions();
+      expect(await grants('gestor-v2')).toEqual(['assign-roles', 'edit-other-user-info']);
+      expect(await grants('user')).not.toContain('assign-roles');
+      expect(await grants('admin')).toContain('assign-roles');
+      const h = await lastHistory('gestor-v2');
+      expect(h).toMatchObject({ entity_type: 'role', source: 'system', actor_id: null });
+      expect(h.changes[0]).toMatchObject({ field: 'permissions', before: ['edit-other-user-info'], after: ['assign-roles', 'edit-other-user-info'] });
+    } finally {
+      await pool.query(`UPDATE permissions SET roles = array_remove(roles, 'gestor-v2')`);
+      await pool.query(`DELETE FROM roles WHERE id = 'gestor-v2'`);
+      await pool.query(`UPDATE permissions SET roles = $1 WHERE id = 'assign-roles'`, [holdersBefore]);
+      await loadPermissions();
+    }
+  });
+
+  it('users.update separa dados de papéis', async () => {
+    await roleWith('leitor-u', ['view-c-room']);
+    await roleWith('rh-v2', ['view-user-administration', 'assign-roles']);
+    await roleWith('dados-v2', ['view-user-administration', 'edit-other-user-info']);
+    // A delegação deixa os dois agirem sobre quem tem o papel Usuário.
+    for (const r of ['rh-v2', 'dados-v2']) expect((await api('POST', 'rbac.roles.update', { roleId: r, delegable: ['user', 'leitor-u'] }, A)).success).toBe(true);
+    const rh = await newUser(A, { roles: ['rh-v2'] });
+    const dados = await newUser(A, { roles: ['dados-v2'] });
+    const alvo = await newUser(A, { roles: ['user'] });
+    expect((await api('POST', 'users.update', { userId: alvo.userId, data: { roles: ['user', 'leitor-u'] } }, rh)).status).toBe(200);
+    expect(await rolesOf(alvo.userId)).toEqual(['user', 'leitor-u']);
+    const rhName = await api('POST', 'users.update', { userId: alvo.userId, data: { name: 'Outro nome' } }, rh);
+    expect(rhName).toMatchObject({ status: 403, error: 'Sem permissão para editar os dados de outras pessoas.' });
+    expect((await api('POST', 'users.update', { userId: alvo.userId, data: { name: 'Nome novo' } }, dados)).status).toBe(200);
+    const dadosRoles = await api('POST', 'users.update', { userId: alvo.userId, data: { roles: ['user'] } }, dados);
+    expect(dadosRoles).toMatchObject({ status: 403, error: 'Sem permissão para dar ou tirar papéis.' });
+    expect((await api('POST', 'rbac.users.setRoles', { userId: alvo.userId, roles: ['user'] }, dados)).status).toBe(403);
+    // Ativar e desativar pedem a chave própria, também por users.update (o mesmo valor passa).
+    expect((await api('POST', 'users.update', { userId: alvo.userId, data: { active: false } }, dados)).status).toBe(403);
+    expect((await api('POST', 'users.update', { userId: alvo.userId, data: { active: true, name: 'Nome novo' } }, dados)).status).toBe(200);
+    expect(await rolesOf(alvo.userId)).toEqual(['user', 'leitor-u']);
+  });
+
+  it('papel de sala não vira papel global', async () => {
+    const u = await newUser(A);
+    const r = await api('POST', 'rbac.users.setRoles', { userId: u.userId, roles: ['user', 'moderator'] }, A);
+    expect(r).toMatchObject({ status: 400, errorType: 'error-invalid-role' });
+    expect((await api('POST', 'rbac.users.bulkRoles', { userIds: [u.userId], add: ['owner'] }, A)).status).toBe(400);
+  });
+});
+
 describe('roles.addUserToRole com sala passa pelas regras de papel de sala', () => {
   let ana: Auth;
   let bia: Auth;
   beforeAll(async () => {
     // Gerencia papéis, mas não tem Definir donos (set-owner) em sala nenhuma.
-    await roleWith('papeis', ['view-permissions', 'manage-roles', 'access-permissions']);
+    await roleWith('papeis', ['view-permissions', 'manage-roles', 'access-permissions', 'assign-roles']);
     ana = await newUser(A, { roles: ['user', 'papeis'] });
     bia = await newUser(A, { roles: ['user'] });
   });
@@ -150,6 +205,241 @@ describe('migração 033', () => {
     } finally {
       await pool.query(`UPDATE permissions SET roles = array_remove(array_remove(roles, 'salas-mig'), 'sala-mig')`);
       await pool.query(`DELETE FROM roles WHERE id IN ('salas-mig', 'sala-mig')`);
+      await loadPermissions();
+    }
+  });
+});
+
+describe('roles.getUsersInRole de papel de sala', () => {
+  it('sem roomId, devolve quem tem o papel em alguma sala', async () => {
+    await api('POST', 'channels.create', { name: uniq('dono-alguma') }, A);
+    const r = await api('GET', 'roles.getUsersInRole', { role: 'owner' }, A);
+    expect(r.total).toBeGreaterThanOrEqual(1);
+    expect(r.users.map((u: any) => u._id)).toContain(A.userId);
+  });
+});
+
+describe('matriz, deltas, Quem pode…?, papéis em salas, simulação e lote', () => {
+  let sup: Auth;
+  let plain: Auth;
+  let viewer: Auth;
+  let auditor: Auth;
+  beforeAll(async () => {
+    await roleWith('sup-v2', ['view-user-administration', 'create-user', 'edit-other-user-info', 'edit-other-user-active-status', 'view-permissions', 'access-permissions', 'manage-roles', 'assign-roles']);
+    await roleWith('leitor-v2', ['view-c-room']);
+    await roleWith('ver-papeis', ['view-permissions']);
+    sup = await newUser(A, { roles: ['user', 'sup-v2'] });
+    plain = await newUser(A, { roles: ['user'] });
+    viewer = await newUser(A, { roles: ['user', 'ver-papeis'] });
+    auditor = await newUser(A, { roles: ['user', 'auditor'] });
+  });
+
+  it('rbac.matrix.update: dois papéis num lote só, com auditoria', async () => {
+    const r = await api('POST', 'rbac.matrix.update', { changes: [{ roleId: 'leitor-v2', add: ['create-c'] }, { roleId: 'ver-papeis', add: ['mention-here'] }] }, A);
+    expect(r.status).toBe(200);
+    expect(r.batchId).toBeTruthy();
+    expect(r.roles).toEqual([
+      { _id: 'leitor-v2', permissions: ['create-c', 'view-c-room'] },
+      { _id: 'ver-papeis', permissions: ['mention-here', 'view-permissions'] },
+    ]);
+    const rows = (await pool.query('SELECT entity_id FROM rbac_history WHERE batch_id = $1 ORDER BY entity_id', [r.batchId])).rows;
+    expect(rows.map((x) => x.entity_id)).toEqual(['leitor-v2', 'ver-papeis']);
+    const log = (await pool.query(`SELECT * FROM audit_log WHERE action = 'permissions.changed' ORDER BY created_at DESC LIMIT 1`)).rows[0];
+    expect(log.data.changes).toHaveLength(2);
+    await api('POST', 'rbac.matrix.update', { changes: [{ roleId: 'leitor-v2', remove: ['create-c'] }, { roleId: 'ver-papeis', remove: ['mention-here'] }] }, A);
+  });
+
+  it('rbac.matrix.update: mesmas travas, e nada grava quando um papel falha', async () => {
+    const notHeld = await api('POST', 'rbac.matrix.update', { changes: [{ roleId: 'leitor-v2', add: ['manage-calls'] }] }, sup);
+    expect(notHeld).toMatchObject({ status: 403, errorType: 'RBAC_PERMISSION_NOT_HELD', details: { keys: ['manage-calls'], roleId: 'leitor-v2' } });
+    expect((await api('POST', 'rbac.matrix.update', { changes: [{ roleId: 'admin', remove: ['assign-roles'] }] }, A)).errorType).toBe('RBAC_ROOT_LOCKOUT');
+    expect((await api('POST', 'rbac.matrix.update', { changes: [{ roleId: 'nao-existe', add: ['create-c'] }] }, A)).status).toBe(404);
+    expect((await api('POST', 'rbac.matrix.update', { changes: [] }, A))).toMatchObject({ status: 400, error: 'Nenhuma alteração.' });
+    expect((await api('POST', 'rbac.matrix.update', { changes: [{ roleId: 'leitor-v2', add: ['create-c'], remove: ['create-c'] }] }, A)).status).toBe(400);
+    // Tudo ou nada: o primeiro papel seria válido, o segundo não.
+    const mixed = await api('POST', 'rbac.matrix.update', { changes: [{ roleId: 'leitor-v2', add: ['create-c'] }, { roleId: 'ver-papeis', add: ['manage-calls'] }] }, sup);
+    expect(mixed.status).toBe(403);
+    expect(await grants('leitor-v2')).toEqual(['view-c-room']);
+    // Sem access-permissions, nem chega.
+    expect((await api('POST', 'rbac.matrix.update', { changes: [{ roleId: 'leitor-v2', add: ['create-c'] }] }, viewer)).status).toBe(403);
+  });
+
+  it('salvar papel aplica a diferença: o que outra pessoa salvou nesse meio-tempo fica', async () => {
+    const base = await grants('leitor-v2');
+    // B salva pela matriz enquanto A está com o papel aberto.
+    expect((await api('POST', 'rbac.matrix.update', { changes: [{ roleId: 'leitor-v2', add: ['create-p'] }] }, A)).status).toBe(200);
+    const r = await api('POST', 'rbac.roles.update', { roleId: 'leitor-v2', permissions: [...base, 'create-c'], basePermissions: base }, A);
+    expect(r.status).toBe(200);
+    expect(r.role.permissions).toEqual(['create-c', 'create-p', 'view-c-room']);
+    expect(await grants('leitor-v2')).toEqual(['create-c', 'create-p', 'view-c-room']);
+    // Sem basePermissions, o comportamento antigo (a lista que veio vale).
+    expect((await api('POST', 'rbac.roles.update', { roleId: 'leitor-v2', permissions: ['view-c-room'] }, A)).status).toBe(200);
+    expect(await grants('leitor-v2')).toEqual(['view-c-room']);
+  });
+
+  it('permissions.update (Rocket.Chat) segue o mesmo caminho: lote quando muda dois papéis', async () => {
+    const roles = (await pool.query(`SELECT roles FROM permissions WHERE id = 'pin-message'`)).rows[0].roles as string[];
+    const r = await api('POST', 'permissions.update', { permissions: [{ _id: 'pin-message', roles: [...roles, 'leitor-v2', 'ver-papeis'] }] }, A);
+    expect(r.status).toBe(200);
+    const h = await lastHistory('leitor-v2');
+    expect(h.batch_id).toBeTruthy();
+    expect((await lastHistory('ver-papeis')).batch_id).toBe(h.batch_id);
+    expect((await api('POST', 'permissions.update', { permissions: [{ _id: 'pin-message', roles }] }, A)).status).toBe(200);
+    expect(await grants('leitor-v2')).toEqual(['view-c-room']);
+  });
+
+  it('o evento permissions.changed diz quais papéis mudaram e quem mudou', async () => {
+    const ws = connectWs(A);
+    await ws.ready;
+    try {
+      await api('POST', 'rbac.matrix.update', { changes: [{ roleId: 'leitor-v2', add: ['create-c'] }] }, A);
+      const ev = await ws.waitFor((e) => e.type === 'permissions.changed' && e.roles?.includes('leitor-v2'));
+      expect(ev).toMatchObject({ type: 'permissions.changed', roles: ['leitor-v2'], by: A.userId });
+    } finally {
+      ws.close();
+      await api('POST', 'rbac.matrix.update', { changes: [{ roleId: 'leitor-v2', remove: ['create-c'] }] }, A);
+    }
+  });
+
+  it('Quem pode…?: papéis globais, de sala, sem efeito e pessoas com o porquê', async () => {
+    const audit = await api('GET', 'rbac.whoCan', { permission: 'can-audit' }, A);
+    expect(audit).toMatchObject({ permission: 'can-audit', legacy: false, checkedIn: 'global' });
+    expect(audit.roles.map((r: any) => r._id)).toEqual(expect.arrayContaining(['admin', 'auditor']));
+    expect(audit.roles.find((r: any) => r._id === 'admin').root).toBe(true);
+    const person = audit.people.items.find((p: any) => p._id === auditor.userId);
+    expect(person).toMatchObject({ via: ['auditor'], active: true, restricted: false });
+
+    await api('POST', 'channels.create', { name: uniq('quem-pode') }, A);
+    const del = await api('GET', 'rbac.whoCan', { permission: 'delete-message' }, A);
+    expect(del.checkedIn).toBe('room');
+    expect(del.roomRoles.find((r: any) => r._id === 'owner').assignments).toBeGreaterThanOrEqual(1);
+    // Papel de sala com uma chave que não é checada nas salas: aparece como sem efeito.
+    await pool.query(`UPDATE permissions SET roles = array_append(roles, 'owner') WHERE id = 'can-audit'`);
+    await loadPermissions();
+    try {
+      expect((await api('GET', 'rbac.whoCan', { permission: 'can-audit' }, A)).inert).toEqual(['owner']);
+    } finally {
+      await pool.query(`UPDATE permissions SET roles = array_remove(roles, 'owner') WHERE id = 'can-audit'`);
+      await loadPermissions();
+    }
+
+    // Sem ver usuários: só os papéis.
+    const v = await api('GET', 'rbac.whoCan', { permission: 'can-audit' }, viewer);
+    expect(v.status).toBe(200);
+    expect(v.people).toBeNull();
+    expect((await api('GET', 'rbac.whoCan', { permission: 'can-audit' }, plain)).status).toBe(403);
+
+    // Desativada só com includeInactive; filtro por nome.
+    await api('POST', 'users.setActiveStatus', { userId: auditor.userId, activeStatus: false }, A);
+    try {
+      expect((await api('GET', 'rbac.whoCan', { permission: 'can-audit' }, A)).people.items.map((p: any) => p._id)).not.toContain(auditor.userId);
+      const all = await api('GET', 'rbac.whoCan', { permission: 'can-audit', includeInactive: 'true', q: auditor.username }, A);
+      expect(all.people.items).toEqual([expect.objectContaining({ _id: auditor.userId, active: false })]);
+      expect(all.people.total).toBe(1);
+    } finally {
+      await api('POST', 'users.setActiveStatus', { userId: auditor.userId, activeStatus: true }, A);
+    }
+    expect((await api('GET', 'rbac.whoCan', { permission: 'nao-existe' }, A))).toMatchObject({ status: 400, errorType: 'error-invalid-permission' });
+    expect((await api('GET', 'rbac.whoCan', { permission: 'view-p-room' }, A)).legacy).toBe(true);
+  });
+
+  it('Quem pode…? marca quem é restrito (Operação)', async () => {
+    const op = await newUser(A, { roles: ['operacao'] });
+    const r = await api('GET', 'rbac.whoCan', { permission: 'create-d', q: op.username }, A);
+    expect(r.people.items).toEqual([expect.objectContaining({ _id: op.userId, via: ['operacao'], restricted: true })]);
+  });
+
+  it('papéis em salas: por papel, com grupo privado oculto para quem não participa; DMs nunca', async () => {
+    const ch = (await api('POST', 'channels.create', { name: uniq('canal-dono') }, A)).channel;
+    const grp = (await api('POST', 'groups.create', { name: uniq('grupo-oculto') }, A)).group;
+    await api('POST', 'im.create', { username: plain.username }, A);
+    const all = await api('GET', 'rbac.roomRoles', { role: 'owner', count: 100 }, A);
+    expect(all.items.find((i: any) => i.room._id === ch._id)).toMatchObject({ room: { name: ch.name, t: 'c' }, user: { _id: A.userId }, roles: ['owner'] });
+    expect(all.items.find((i: any) => i.room._id === grp._id)?.room.name).toBe(grp.name);
+    expect(all.items.every((i: any) => i.room.t !== 'd')).toBe(true);
+    const v = await api('GET', 'rbac.roomRoles', { role: 'owner', userId: A.userId, count: 100 }, viewer);
+    expect(v.status).toBe(200);
+    expect(v.items.some((i: any) => i.room.hidden && i.room.t === 'p')).toBe(true);
+    expect(v.items.some((i: any) => i.room._id === grp._id)).toBe(false);
+    expect(v.items.some((i: any) => i.room._id === ch._id)).toBe(true);
+    expect((await api('GET', 'rbac.roomRoles', {}, A))).toMatchObject({ status: 400, error: 'Escolha um papel, uma pessoa ou uma sala.' });
+  });
+
+  it('acesso efetivo: simula antes de salvar e mostra as restrições', async () => {
+    const r = await api('GET', 'rbac.users.effective', { userId: plain.userId, roles: 'user,auditor' }, A);
+    expect(r.simulated.roles).toEqual(['user', 'auditor']);
+    expect(r.simulated.diff.areas).toEqual(expect.arrayContaining([expect.objectContaining({ area: 'admin-audit', direction: 'up' })]));
+    expect(r.restrictions).toEqual({ restrictDirect: [], mandatory2fa: [] });
+    expect((await api('GET', 'rbac.users.effective', { userId: plain.userId, roles: 'user,nao-existe' }, A))).toMatchObject({ status: 400, errorType: 'error-invalid-role' });
+    const op = await newUser(A, { roles: ['operacao'] });
+    expect((await api('GET', 'rbac.users.effective', { userId: op.userId }, A)).restrictions.restrictDirect).toEqual(['operacao']);
+  });
+
+  it('papéis em lote com prévia: quem recebe, quem fica de fora e por quê', async () => {
+    const ids = [plain.userId, A.userId, sup.userId];
+    const preview = await api('POST', 'rbac.users.bulkRoles', { userIds: ids, add: ['leitor-v2'], dryRun: true }, sup);
+    expect(preview.ok).toEqual([{ _id: plain.userId, username: plain.username }]);
+    expect(preview.blocked).toEqual(
+      expect.arrayContaining([
+        { _id: A.userId, username: 'admin', reason: 'root-only' },
+        { _id: sup.userId, username: sup.username, reason: 'self' },
+      ]),
+    );
+    expect(preview.unchanged).toEqual([]);
+    expect(await rolesOf(plain.userId)).toEqual(['user']);
+    const all = await api('POST', 'rbac.users.bulkRoles', { userIds: ids, add: ['leitor-v2'] }, sup);
+    expect(all.status).toBe(403);
+    expect(await rolesOf(plain.userId)).toEqual(['user']);
+    const skip = await api('POST', 'rbac.users.bulkRoles', { userIds: ids, add: ['leitor-v2'], skipBlocked: true }, sup);
+    expect(skip).toMatchObject({ status: 200, users: 1, skipped: 2 });
+    expect(await rolesOf(plain.userId)).toEqual(['user', 'leitor-v2']);
+    const rows = (await pool.query('SELECT action, entity_id FROM rbac_history WHERE batch_id = $1', [skip.batchId])).rows;
+    expect(rows).toEqual([{ action: 'bulk', entity_id: plain.userId }]);
+    // Quem já tem fica em "já têm"; papel que não pode dar vem com o nome.
+    const again = await api('POST', 'rbac.users.bulkRoles', { userIds: [plain.userId], add: ['leitor-v2'], dryRun: true }, sup);
+    expect(again.unchanged).toEqual([{ _id: plain.userId, username: plain.username }]);
+    const notAssignable = await api('POST', 'rbac.users.bulkRoles', { userIds: [plain.userId], add: ['bot'], dryRun: true }, sup);
+    expect(notAssignable.blocked).toEqual([{ _id: plain.userId, username: plain.username, reason: 'not-assignable', roles: ['bot'] }]);
+  });
+
+  it('o último administrador ativo não sai pelo lote', async () => {
+    const r = await api('POST', 'rbac.users.bulkRoles', { userIds: [A.userId], remove: ['admin'], dryRun: true }, A);
+    expect(r.blocked).toEqual([{ _id: A.userId, username: 'admin', reason: 'last-admin' }]);
+    expect((await api('POST', 'rbac.users.bulkRoles', { userIds: [A.userId], remove: ['admin'] }, A)).status).toBe(400);
+  });
+
+  it('"Para que serve": cria, atualiza, histórico, reversão e limite de 200 caracteres', async () => {
+    const c = await api('POST', 'rbac.roles.create', { name: 'proposito', description: 'Propósito', purpose: 'Cuida do turno da noite.' }, A);
+    expect(c.role.purpose).toBe('Cuida do turno da noite.');
+    const u = await api('POST', 'rbac.roles.update', { roleId: 'proposito', purpose: 'Cuida dos turnos da noite e do fim de semana.' }, A);
+    expect(u.role.purpose).toBe('Cuida dos turnos da noite e do fim de semana.');
+    const h = await lastHistory('proposito');
+    expect(h.changes).toEqual([expect.objectContaining({ field: 'purpose', before: 'Cuida do turno da noite.', after: 'Cuida dos turnos da noite e do fim de semana.' })].concat(h.changes.filter((x: any) => x.field !== 'purpose')));
+    expect((await api('POST', 'rbac.history.rollback', { id: h.id }, A)).success).toBe(true);
+    expect((await pool.query(`SELECT purpose FROM roles WHERE id = 'proposito'`)).rows[0].purpose).toBe('Cuida do turno da noite.');
+    await api('POST', 'rbac.roles.update', { roleId: 'proposito', purpose: 'x'.repeat(260) }, A);
+    expect((await pool.query(`SELECT purpose FROM roles WHERE id = 'proposito'`)).rows[0].purpose).toHaveLength(200);
+    const list = await api('GET', 'rbac.roles', {}, A);
+    expect(list.roles.find((r: any) => r._id === 'operacao').purpose).toBe('Turno de operação: lê canais e conversa em particular só com quem não é restrito.');
+  });
+
+  it('o papel raiz pela flag nas integrações', async () => {
+    expect((await api('POST', 'integrations.secretsKey.reencrypt', {}, sup)).status).toBe(403);
+    expect((await api('POST', 'integrations.secretsKey.reencrypt', {}, A)).status).not.toBe(403);
+  });
+});
+
+describe('migração 033: para que serve', () => {
+  it('descrição longa ou com pontuação vira o para que serve; a curta continua só nome', async () => {
+    const long = 'Equipe que atende os chamados do turno noturno';
+    await pool.query(`INSERT INTO roles (id, description, scope) VALUES ('mig-longo', $1, 'Users'), ('mig-curto', 'Curto', 'Users'), ('mig-ponto', 'Faz isso.', 'Users')`, [long]);
+    try {
+      await pool.query(fs.readFileSync(path.resolve(import.meta.dirname, '../src/db/migrations/033_rbac_v2.sql'), 'utf8'));
+      const rows = Object.fromEntries((await pool.query(`SELECT id, purpose FROM roles WHERE id LIKE 'mig-%'`)).rows.map((r) => [r.id, r.purpose]));
+      expect(rows).toEqual({ 'mig-longo': long, 'mig-curto': '', 'mig-ponto': 'Faz isso.' });
+      expect((await pool.query(`SELECT purpose FROM roles WHERE id = 'admin'`)).rows[0].purpose).toBe('');
+    } finally {
+      await pool.query(`DELETE FROM roles WHERE id LIKE 'mig-%'`);
       await loadPermissions();
     }
   });

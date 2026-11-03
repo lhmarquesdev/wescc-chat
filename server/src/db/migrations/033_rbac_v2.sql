@@ -1,8 +1,22 @@
--- Papéis e permissões v2: Admin › Salas sem escrita escondida em "Visualizar".
--- Ninguém ganha poder novo: só formaliza o que view-room-administration já deixava fazer pelo painel de salas.
+-- Papéis e permissões v2: o "para que serve" de cada papel, e Admin › Salas sem escrita escondida em "Visualizar".
+-- Ninguém ganha poder novo: (b) só formaliza o que view-room-administration já deixava fazer pelo painel de salas.
 -- A chave nova assign-roles não está aqui: nasce no boot pelo catálogo, com quem já dava papéis (inheritsFrom).
 
--- Admin › Salas › adicionar pessoa passa a checar add-user-to-any-c-room (canal) e add-user-to-any-p-room (grupo
+-- (a) Para que serve o papel: uma frase simples que a tela mostra embaixo do nome. O nome exibido continua em
+-- roles.description (até 32 caracteres vira o nome, web/src/lib/format.ts).
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT '';
+
+-- Papel criado pelo administrador com descrição longa ou terminada em pontuação: ela não vira nome e já é, na
+-- prática, o "para que serve". Copia; a descrição fica como está.
+UPDATE roles SET purpose = left(btrim(description), 200)
+WHERE NOT protected AND purpose = '' AND btrim(description) <> ''
+  AND (length(btrim(description)) > 32 OR btrim(description) ~ '[.!?]$');
+
+-- O papel Operação (migração 013) ganha a frase dele, se ninguém escreveu outra.
+UPDATE roles SET purpose = 'Turno de operação: lê canais e conversa em particular só com quem não é restrito.'
+WHERE id = 'operacao' AND purpose = '';
+
+-- (b) Admin › Salas › adicionar pessoa passa a checar add-user-to-any-c-room (canal) e add-user-to-any-p-room (grupo
 -- privado), como o resto do chat. Quem tem view-room-administration num papel global já fazia isso pelo painel: recebe
 -- as duas que faltam. (Num papel de sala view-room-administration não vale, então ele não ganha nada.) Cada papel que
 -- ganhou fica no histórico (autor: migração) com o antes e o depois completos. Todas as partes do WITH leem o estado
