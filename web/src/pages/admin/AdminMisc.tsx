@@ -59,7 +59,7 @@ export function AdminDevices() {
                     <UserCell username={s.username} name={s.name} />
                   </td>
                   <td data-label="Dispositivo">
-                    <DeviceCell device={s.device} />
+                    <DeviceCell device={s.device} tag={s.device?.newDevice && <span className="pill warn tag">Dispositivo novo</span>} />
                   </td>
                   <td className="muted nowrap col-xl" data-label="Login">
                     {formatDateTime(s.createdAt)}

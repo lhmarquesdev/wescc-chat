@@ -41,6 +41,8 @@ const PANELS: { id: PanelId; icon: IconName; label: string; when?: (r: Room) => 
   { id: 'notifications', icon: 'panel-notifications', label: 'Notificações' },
   { id: 'invite', icon: 'panel-invite', label: 'Link de convite', when: (r) => r.t !== 'd', perm: 'create-invite-links' },
   { id: 'prune', icon: 'panel-prune', label: 'Limpar histórico', when: (r) => r.t !== 'd', perm: 'clean-channel-history' },
+  // Sem "when": numa conversa direta exporta quem tem a permissão global (o administrador).
+  { id: 'export', icon: 'panel-export', label: 'Exportar mensagens', perm: 'export-room-messages' },
   // Permissões do canal: quem fala e o que cada pessoa pode fazer nele (donos e moderadores).
   {
     id: 'access',

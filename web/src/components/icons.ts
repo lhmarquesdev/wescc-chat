@@ -255,6 +255,9 @@ import {
   ChevronRight as FilesChevron,
 } from 'lucide-react';
 
+// Exportar mensagens e Meus dados (LGPD)
+import { FileDown as ExportFileDown, FolderDown as ExportFolderDown } from 'lucide-react';
+
 export const ICONS = {
   // ---------- Dono 1: comuns ----------
   close: X,
@@ -631,6 +634,9 @@ export const ICONS = {
   'files-all': FilesMany,
   'files-activity': FilesHistory,
   'files-expand': FilesChevron,
+  // ---------- Exportar mensagens e Meus dados (LGPD) ----------
+  'panel-export': ExportFileDown,
+  'my-data': ExportFolderDown,
 } as const;
 
 export type IconName = keyof typeof ICONS;

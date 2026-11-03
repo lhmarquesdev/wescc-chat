@@ -19,6 +19,8 @@ const StickersSection = lazy(() => import('./account/StickersSection'));
 // Integrações (Jira): Contas conectadas (Jira e Microsoft 365)
 import { useIntegrationsMe } from '../lib/integrations';
 import { ConnectedAccounts } from './account/ConnectedAccounts';
+// Meus dados (LGPD): cópia dos próprios dados num .zip.
+import { MyDataSection } from './account/MyDataSection';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -32,6 +34,8 @@ export function AccountPage() {
   // Integração com o Jira: o item só aparece quando há uma conta para conectar.
   const integrations = useIntegrationsMe();
   const canConnected = !!integrations && integrations.jira.enabled && integrations.jira.userAuth !== 'off';
+  // Meus dados: configuração pública, então o item some na hora quando o administrador desliga.
+  const userDataOn = useSetting<boolean>('UserData_EnableDownload');
   return (
     <div className="page with-nav takeover account-page">
       <TakeoverHead title="Minha conta" />
@@ -61,6 +65,12 @@ export function AccountPage() {
           <Icon name="devices" />
           Dispositivos
         </NavLink>
+        {userDataOn && (
+          <NavLink to="/account/data">
+            <Icon name="my-data" />
+            Meus dados
+          </NavLink>
+        )}
         {canTokens && (
           <NavLink to="/account/tokens">
             <Icon name="tokens" />
@@ -87,6 +97,7 @@ export function AccountPage() {
         )}
         {section === 'security' && <Security />}
         {section === 'devices' && <Devices />}
+        {section === 'data' && (userDataOn ? <MyDataSection /> : <Empty icon="my-data" title="Meus dados está desativado">O administrador desligou o download dos dados.</Empty>)}
         {section === 'tokens' && <Tokens />}
         {/* Integrações (Jira) */}
         {section === 'connected' && <ConnectedAccounts />}
@@ -592,7 +603,15 @@ function Devices() {
               {data?.sessions.map((s: any) => (
                 <tr key={s._id}>
                   <td>
-                    <DeviceCell device={s.device} tag={s.current && <span className="pill accent tag">Esta sessão</span>} />
+                    <DeviceCell
+                      device={s.device}
+                      tag={
+                        <>
+                          {s.current && <span className="pill accent tag">Esta sessão</span>}
+                          {s.device?.newDevice && <span className="pill warn tag">Dispositivo novo</span>}
+                        </>
+                      }
+                    />
                   </td>
                   <td className="nowrap" data-label="Último uso">
                     {s.current ? 'Agora' : lastSeen(s.lastActiveAt)}

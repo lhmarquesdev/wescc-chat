@@ -119,6 +119,10 @@ h4 .head-count {
 .cell-name > .pill {
   margin-left: var(--space-1-5);
 }
+/* Duas etiquetas ("Esta sessão" e "Dispositivo novo"): no celular a linha quebra em vez de cortar a segunda. */
+.cell-name:has(> .pill + .pill) {
+  white-space: normal;
+}
 .pill.tag {
   height: 18px;
   padding: 0 6px;
@@ -349,6 +353,48 @@ h4 .head-count {
 /* ---------- Minha conta ---------- */
 .account-col {
   max-width: 640px;
+}
+/* Meus dados (LGPD): o estado do último pedido e o botão embaixo do texto do cartão. */
+.card-head > .my-data-body {
+  flex: 1;
+  min-width: 0;
+}
+.my-data-body > h2 {
+  margin: 0;
+}
+.my-data-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.my-data-status > svg {
+  flex-shrink: 0;
+}
+.my-data-ready {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+.my-data-ready .my-data-status {
+  margin-top: var(--space-4);
+}
+.my-data-ready > .btn {
+  margin-top: var(--space-4);
+}
+.my-data-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.my-data-actions > p,
+.my-data-foot {
+  margin: 0;
 }
 .profile-card .avatar-edit {
   gap: var(--space-5);
