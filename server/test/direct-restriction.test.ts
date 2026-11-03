@@ -59,6 +59,9 @@ describe('papel operacao e migração 013', () => {
   });
 
   it('a migração 013 recria o papel e as permissões num banco antigo', async () => {
+    // A 013 dá ao papel as chaves que existiam nela; chaves do catálogo mais novas (Arquivos, migração 022) chegam ao
+    // papel pelo seed de chaves novas no boot, não pela migração.
+    const AFTER_013 = ['view-files'];
     const forget013 = async () => {
       await pool.query(`UPDATE permissions SET roles = array_remove(roles, 'operacao')`);
       await pool.query(`DELETE FROM roles WHERE id = 'operacao'`);
@@ -69,7 +72,7 @@ describe('papel operacao e migração 013', () => {
       await pool.query(`UPDATE permissions SET roles = array_remove(roles, 'publisher') WHERE id = ANY($1)`, [PUBLISHER_PERMISSIONS]);
       await migrate(() => {});
       await loadPermissions();
-      expect(await grantsOf('operacao')).toEqual([...OPERACAO_PERMISSIONS].sort());
+      expect(await grantsOf('operacao')).toEqual(OPERACAO_PERMISSIONS.filter((k) => !AFTER_013.includes(k)).sort());
       expect(await grantsOf('publisher')).toEqual([...PUBLISHER_PERMISSIONS].sort());
       const role = (await pool.query(`SELECT * FROM roles WHERE id = 'operacao'`)).rows[0];
       expect(role).toMatchObject({ description: 'Operação', scope: 'Users', protected: false, restrict_direct: true });
@@ -84,6 +87,7 @@ describe('papel operacao e migração 013', () => {
     } finally {
       await forget013();
       await migrate(() => {});
+      await pool.query(`UPDATE permissions SET roles = array_append(roles, 'operacao') WHERE id = ANY($1)`, [AFTER_013]);
       await loadPermissions();
     }
     expect(await grantsOf('operacao')).toEqual([...OPERACAO_PERMISSIONS].sort());
