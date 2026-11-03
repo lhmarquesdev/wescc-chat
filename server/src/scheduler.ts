@@ -55,6 +55,9 @@ export function startScheduler(log: (m: string) => void) {
         await query(`DELETE FROM realtime_spill WHERE created_at < now() - interval '5 minutes'`);
         await query(`DELETE FROM sessions WHERE expires_at < now()`);
         await query(`DELETE FROM login_attempts WHERE updated_at < now() - interval '1 day' AND (blocked_until IS NULL OR blocked_until < now())`);
+        // Dispositivos sem login há mais de 400 dias (o prazo do cookie): o próximo login conta como novo.
+        const { cleanupUserDevices } = await import('./services/loginDevices');
+        await cleanupUserDevices();
       }).catch((e) => log(`limpeza falhou: ${e.message}`));
     }),
   );

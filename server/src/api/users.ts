@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { many, one, pool } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
 import { audit } from '../services/audit';
+import { readDeviceId } from '../services/loginDevices';
 import { mapUser } from '../services/mappers';
 import { getUserRoles, hasPermission, permissionsForRoles } from '../services/permissions';
 import { getSetting } from '../services/settings';
@@ -73,14 +74,16 @@ export function usersRoutes(app: FastifyInstance) {
       reply.header('set-cookie', clearSsoBrowserCookie());
       const u = enabled ? await consumeSsoCredential(str(body.credentialToken, 'credentialToken'), method, nonce) : null;
       if (!u || !u.active) throw new (await import('../lib/errors')).ApiError(401, 'error-unauthorized', 'Login SSO expirado. Tente novamente.');
-      const s = await createSession(u.id, { userAgent: req.headers['user-agent'], ip: req.ip });
+      const s = await createSession(u.id, { userAgent: req.headers['user-agent'], ip: req.ip, deviceId: readDeviceId(req.headers.cookie) });
+      reply.header('set-cookie', s.deviceCookie); // vai junto com o que apaga o cookie do SSO
       await audit({ id: u.id, username: u.username, ip: req.ip }, 'auth.login', { sessionId: s.sessionId, method });
       return { status: 'success', data: { userId: u.id, authToken: s.authToken, me: await meResponse(u.id) } };
     }
     const user = str(body.user ?? body.username ?? body.email, 'user');
     const password = str(body.password, 'password');
     try {
-      const r = await login({ user, password, code: body.code, device: { userAgent: req.headers['user-agent'], ip: req.ip } });
+      const r = await login({ user, password, code: body.code, device: { userAgent: req.headers['user-agent'], ip: req.ip, deviceId: readDeviceId(req.headers.cookie) } });
+      reply.header('set-cookie', r.deviceCookie);
       return { status: 'success', data: { userId: r.user.id, authToken: r.authToken, me: await meResponse(r.user.id) } };
     } catch (e) {
       if (e instanceof TwoFactorRequired) {

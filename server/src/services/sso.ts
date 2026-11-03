@@ -16,7 +16,8 @@ export function siteUrl() {
   return String(getSetting('Site_Url') || 'http://localhost:3000').replace(/\/+$/, '');
 }
 
-function cookieAttrs(maxAge: number) {
+// Também o cookie do dispositivo (loginDevices.ts): mesmo caminho e os mesmos atributos.
+export function cookieAttrs(maxAge: number) {
   const secure = siteUrl().startsWith('https:') ? '; Secure' : '';
   return `Path=${BROWSER_COOKIE_PATH}; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${secure}`;
 }

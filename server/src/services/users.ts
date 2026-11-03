@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword } from '../lib/password';
 import { generateSecret, otpauthUrl, verifyTotp } from '../lib/totp';
 import { bus } from '../realtime/bus';
 import { audit, type Actor } from './audit';
+import { announceNewDevice, deviceCookieHeader, rememberLoginDevice } from './loginDevices';
 import { mapUser } from './mappers';
 import { getSetting } from './settings';
 import { recordActivity } from './stats';
@@ -169,6 +170,7 @@ export interface DeviceInfo {
   userAgent?: string;
   ip?: string;
   name?: string;
+  deviceId?: string; // cookie wescc_device do navegador (e-mail de login em dispositivo novo)
 }
 
 function parseDevice(d: DeviceInfo) {
@@ -178,17 +180,22 @@ function parseDevice(d: DeviceInfo) {
   return { userAgent: ua, ip: d.ip, os, browser, name: d.name ?? `${browser} em ${os}` };
 }
 
+// Todo login (senha, LDAP, SAML, OAuth) passa por aqui: o dispositivo fica anotado e, se for novo numa conta que já
+// tinha outro, a sessão sai marcada e o e-mail vai em segundo plano. deviceCookie: o Set-Cookie do wescc_device.
 export async function createSession(userId: string, device: DeviceInfo) {
   const token = randomToken();
   const id = newId();
   const days = getSetting<number>('Accounts_LoginExpiration') || 90;
+  const parsed = parseDevice(device);
+  const seen = await rememberLoginDevice(userId, device, parsed);
   await query(
     `INSERT INTO sessions (id, user_id, token_hash, device, expires_at) VALUES ($1,$2,$3,$4, now() + ($5 || ' days')::interval)`,
-    [id, userId, sha256(token), JSON.stringify(parseDevice(device)), String(days)],
+    [id, userId, sha256(token), JSON.stringify(seen.isNew ? { ...parsed, newDevice: true } : parsed), String(days)],
   );
   await query('UPDATE users SET last_login = now() WHERE id = $1', [userId]);
   void recordActivity(userId, 'session');
-  return { sessionId: id, authToken: token };
+  if (seen.isNew) void announceNewDevice(userId, parsed, device.ip, id).catch(() => {});
+  return { sessionId: id, authToken: token, deviceCookie: deviceCookieHeader(seen.deviceId) };
 }
 
 export class TwoFactorRequired extends Error {
