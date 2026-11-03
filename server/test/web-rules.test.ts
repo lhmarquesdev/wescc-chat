@@ -134,3 +134,88 @@ describe('ícones dos grupos do RBAC (tela Papéis e permissões)', () => {
     expect(groupIcon('grupo-que-nao-existe')).toBe('rbac-admin');
   });
 });
+
+describe('matriz de permissões (web/src/pages/admin/rbac/matrix.ts)', () => {
+  const role = (id: string, extra: Record<string, unknown> = {}) => ({ _id: id, scope: 'Users' as const, users: 0, protected: true, ...extra });
+
+  it('colunas padrão: Administrador, personalizados, do sistema globais com gente e os de sala principais, até 8', async () => {
+    const { defaultColumns } = await import('../../web/src/pages/admin/rbac/matrix');
+    const roles = [
+      role('user', { users: 10 }),
+      role('guest'),
+      role('admin', { root: true, users: 1 }),
+      role('supervisor', { protected: false }),
+      role('owner', { scope: 'Subscriptions' }),
+      role('moderator', { scope: 'Subscriptions' }),
+      role('publisher', { scope: 'Subscriptions' }),
+      role('leader', { scope: 'Subscriptions' }),
+    ];
+    expect(defaultColumns(roles)).toEqual(['admin', 'supervisor', 'user', 'owner', 'moderator', 'publisher']);
+    const many = [role('admin', { root: true }), ...Array.from({ length: 10 }, (_, i) => role(`p${i}`, { protected: false }))];
+    const cols = defaultColumns(many);
+    expect(cols).toHaveLength(8);
+    expect(cols[0]).toBe('admin');
+  });
+
+  it('matrixChanges grava só o que entrou e saiu, e papel sem mudança fica de fora', async () => {
+    const { matrixChanges } = await import('../../web/src/pages/admin/rbac/matrix');
+    const initial = { a: ['x', 'y', 'legada'], b: ['x'] };
+    const draft = { a: new Set(['y', 'z', 'legada']), b: new Set(['x']) };
+    expect(matrixChanges(initial, draft)).toEqual([{ roleId: 'a', add: ['z'], remove: ['x'] }]);
+    expect(matrixChanges(initial, { a: new Set(initial.a), b: new Set(initial.b) })).toEqual([]);
+  });
+
+  it('differs: só com dois papéis ou mais, quando uns têm e outros não', async () => {
+    const { differs } = await import('../../web/src/pages/admin/rbac/matrix');
+    const perms = { a: new Set(['x']), b: new Set<string>(), c: new Set(['x']) };
+    expect(differs('x', ['a', 'b'], perms)).toBe(true);
+    expect(differs('x', ['a', 'c'], perms)).toBe(false);
+    expect(differs('x', ['a'], perms)).toBe(false);
+    expect(differs('y', ['a', 'b'], perms)).toBe(false);
+  });
+
+  it('cellLock segue as travas do servidor, na ordem', async () => {
+    const { cellLock } = await import('../../web/src/pages/admin/rbac/matrix');
+    const { LOCK_TEXT } = await import('@shared/rbac');
+    const grant = { root: false, held: ['create-c'], roleLocks: { admin: 'root-only' as const, user: null } };
+    expect(cellLock('create-c', { _id: 'user' }, grant, false)).toBe('Você pode ver, mas não alterar permissões.');
+    expect(cellLock('create-c', { _id: 'admin', root: true }, grant, true)).toBe(LOCK_TEXT['root-only']);
+    expect(cellLock('create-p', { _id: 'user' }, grant, true)).toBe('Você não tem esta permissão, então não pode dá-la nem tirá-la.');
+    expect(cellLock('create-c', { _id: 'user' }, grant, true)).toBeNull();
+    const root = { root: true, held: [], roleLocks: {} };
+    expect(cellLock('manage-roles', { _id: 'admin', root: true }, root, true)).toBe('O Administrador sempre gerencia papéis.');
+    expect(cellLock('assign-roles', { _id: 'admin', root: true }, root, true)).toBe('O Administrador sempre gerencia papéis.');
+    expect(cellLock('create-p', { _id: 'admin', root: true }, root, true)).toBeNull();
+  });
+
+  it('cellState: papel de sala em permissão que não é checada na sala não tem efeito', async () => {
+    const { cellState } = await import('../../web/src/pages/admin/rbac/matrix');
+    const owner = role('owner', { scope: 'Subscriptions' });
+    expect(cellState('create-p', owner, new Set(['create-p']), null)).toBe('inert');
+    expect(cellState('delete-message', owner, new Set(['delete-message']), null)).toBe('on');
+    expect(cellState('mention-here', owner, new Set(), null)).toBe('off');
+    expect(cellState('create-p', role('user'), new Set(), 'trava')).toBe('locked');
+    expect(cellState('create-p', role('user'), new Set(['create-p']), null)).toBe('on');
+  });
+
+  it('estado na URL: ida e volta, só o que foge do padrão', async () => {
+    const { matrixQuery, parseMatrixQuery } = await import('../../web/src/pages/admin/rbac/matrix');
+    const q = { roles: ['operacao', 'supervisor-operacao'], group: 'admin', q: 'apagar mensagens', diff: true, sens: true };
+    expect(parseMatrixQuery(matrixQuery(q))).toEqual(q);
+    expect(matrixQuery({ roles: ['a', 'b'], group: 'all', q: '', diff: true, sens: false })).toBe('?roles=a,b&diff=1');
+    expect(matrixQuery({ roles: [], group: 'all', q: '', diff: false, sens: false })).toBe('');
+    expect(parseMatrixQuery('')).toEqual({ roles: [], group: 'all', q: '', diff: false, sens: false });
+  });
+});
+
+describe('trava de uma pessoa na tela de Usuários (userLockOf)', () => {
+  it('administrador sem trava; a própria pessoa; senão a primeira trava dos papéis dela', async () => {
+    const { userLockOf } = await import('../../web/src/pages/admin/rbac/userLock');
+    const grant = { root: false, userId: 'me', roleLocks: { admin: 'root-only' as const, operacao: null, auditor: 'superior' as const } };
+    expect(userLockOf({ ...grant, root: true }, 'me', { _id: 'x', roles: ['admin'] })).toBeNull();
+    expect(userLockOf(grant, 'me', { _id: 'me', roles: ['operacao'] })).toBe('self');
+    expect(userLockOf(grant, 'me', { _id: 'x', roles: ['operacao', 'admin'] })).toBe('root-only');
+    expect(userLockOf(grant, 'me', { _id: 'x', roles: ['operacao'] })).toBeNull();
+    expect(userLockOf(grant, 'me', { _id: 'x', roles: ['auditor'] })).toBe('superior');
+  });
+});

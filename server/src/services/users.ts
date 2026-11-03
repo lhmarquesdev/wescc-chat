@@ -464,7 +464,7 @@ export async function disableTotp(ctx: Ctx, code: string) {
 export async function updateUser(
   actor: Ctx,
   userId: string,
-  data: Partial<{ username: string; name: string; email: string; password: string; bio: string; statusText: string; active: boolean; roles: string[]; requirePasswordChange: boolean; verified: boolean }>,
+  data: Partial<{ username: string; name: string; email: string; password: string; bio: string; statusText: string; active: boolean; requirePasswordChange: boolean; verified: boolean }>,
   opts: { asAdmin: boolean; currentPassword?: string },
 ) {
   const u = await getUserById(userId);
@@ -506,7 +506,6 @@ export async function updateUser(
       // "Ativo" mudado à mão é decisão do administrador: a sincronização do LDAP só reativa o que ela mesma desativou.
       if (data.active !== u.active) sets.push('ldap_deactivated_at = NULL', 'ldap_deactivated_reason = NULL');
     }
-    if (data.roles !== undefined) sets.push(`roles = $${params.push(data.roles.length ? data.roles : ['user'])}`);
     if (data.requirePasswordChange !== undefined) sets.push(`require_password_change = $${params.push(data.requirePasswordChange)}`);
     if (data.verified !== undefined && data.email === undefined) sets.push(`email_verified = $${params.push(data.verified)}`);
   }
@@ -519,7 +518,7 @@ export async function updateUser(
     await revokeAllSessions(userId);
   }
   if (data.password && !self) await revokeAllSessions(userId);
-  if (!self || data.roles || data.active !== undefined) {
+  if (!self || data.active !== undefined) {
     await audit(actorOf(actor), 'user.updated', { userId, username: row.username }, { fields: Object.keys(data).filter((k) => k !== 'password'), passwordChanged: !!data.password });
   }
   bus.publish({ all: true }, { type: 'user', action: 'updated', user: mapUser(row) });

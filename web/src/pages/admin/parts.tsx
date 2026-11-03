@@ -70,10 +70,15 @@ export function UserCell({ username, name, status, tag, sub }: { username: strin
     <div className="cell-entity">
       <UserAvatar username={username} size={28} status={status} />
       <div>
-        <span className="cell-name">
-          {hasName ? name : `@${username}`}
-          {tag}
-        </span>
+        {tag ? (
+          // Com marcas (Restrita, Bot, cadeado): o nome encurta com reticências e as marcas ficam sempre à vista.
+          <span className="cell-name has-tags">
+            <span className="cell-name-text">{hasName ? name : `@${username}`}</span>
+            {tag}
+          </span>
+        ) : (
+          <span className="cell-name">{hasName ? name : `@${username}`}</span>
+        )}
         {second && <span className="cell-sub">{second}</span>}
       </div>
     </div>

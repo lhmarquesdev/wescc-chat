@@ -3,7 +3,7 @@ import { many, one, query } from '../db/pool';
 import { ApiError, badRequest } from '../lib/errors';
 import { on } from '../services/hooks';
 import { sendMessage } from '../services/messages';
-import { getUserRoles, hasPermission, rolesHavePermission } from '../services/permissions';
+import { getUserRoles, hasPermission, rolesHavePermission, rolesIncludeRoot } from '../services/permissions';
 import { addUserToRoom, canAccessRoom, getRoom, getSubscriptionRow, removeUserFromRoom, setRoomRole } from '../services/rooms';
 import { createUser, getUserByUsername, setAvatar, type Ctx } from '../services/users';
 import { BOT_AVATAR } from './assets';
@@ -151,7 +151,7 @@ export async function checkTargets(ctx: Ctx, kind: BotKind, roomIds: string[], m
     }
     if (mode === 'read') {
       const roomRoles: string[] = callerSub?.roles ?? [];
-      if (!roomRoles.includes('owner') && !roomRoles.includes('moderator') && !callerGlobal.includes('admin')) {
+      if (!roomRoles.includes('owner') && !roomRoles.includes('moderator') && !rolesIncludeRoot(callerGlobal)) {
         out.push(fail('Só donos e moderadores da sala podem enviar as mensagens dela para fora do chat.', { botMember }));
         continue;
       }

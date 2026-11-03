@@ -228,6 +228,10 @@ import {
   CopyPlus,
   UserCog,
   Wrench,
+  Table2,
+  UserSearch,
+  Columns2,
+  LayoutTemplate,
 } from 'lucide-react';
 
 // Arquivos (pastas compartilhadas)
@@ -603,6 +607,11 @@ export const ICONS = {
   'rbac-areas': Layers,
   'rbac-id': IdCard,
   'rbac-power': Sparkles,
+  'rbac-matrix': Table2,
+  'rbac-who': UserSearch,
+  'rbac-compare': Columns2,
+  'rbac-sensitive': ShieldAlert,
+  'rbac-template': LayoutTemplate,
   // ---------- Mensagens de voz ----------
   'voice-play': Play,
   'voice-pause': Pause,

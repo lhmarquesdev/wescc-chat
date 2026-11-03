@@ -1,12 +1,14 @@
 // Rotas de Papéis e permissões (RBAC): papéis com as permissões, contexto de concessão para a tela travar antes da API
 // recusar, acesso efetivo de uma pessoa, papéis em massa e o histórico com reversão.
 import type { FastifyInstance } from 'fastify';
-import { effectiveAccess, roleDeleteLock, roleLock, userLock } from '@shared/rbac';
+import { diffPermissions, effectiveAccess, isRoomChecked, KEY_AREA, RBAC_KEYS, roleDeleteLock, roleLock, userLock, whoCanRoles, type RoleInfo } from '@shared/rbac';
 import { many, one, tx } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
-import { hasAnyPermission, hasPermission, roleInfos } from '../services/permissions';
+import { audit } from '../services/audit';
+import { hasAnyPermission, hasPermission, restrictedRoleIds, roleInfos } from '../services/permissions';
 import { getHistory, historyActors, listHistory, type HistoryEntity, type HistoryRow } from '../services/rbacHistory';
 import {
+  applyPermissionDeltas,
   assertRoleChange,
   bulkUserRoles,
   createRole,
@@ -19,8 +21,8 @@ import {
   type RoleInput,
 } from '../services/rbac';
 import { listRoles } from '../services/permissions';
-import type { Ctx } from '../services/users';
-import { route, str } from './http';
+import { actorOf, type Ctx } from '../services/users';
+import { paging, route, str } from './http';
 
 const b = (req: any) => req.body ?? {};
 const q = (req: any) => req.query ?? {};
@@ -28,16 +30,20 @@ const strList = (v: unknown) => (Array.isArray(v) ? v.map(String) : typeof v ===
 
 export const RBAC_VIEW = ['view-permissions', 'access-permissions', 'manage-roles'];
 export const RBAC_WRITE = ['access-permissions', 'manage-roles'];
-export const USER_ROLE_WRITE = ['edit-other-user-info', 'access-permissions', 'manage-roles'];
+// Dar e tirar papéis de pessoas tem chave própria (antes saía de edit-other-user-info, access-permissions ou manage-roles,
+// que agora só a herdam numa instalação existente).
+export const USER_ROLE_WRITE = ['assign-roles'];
 
 function roleInput(body: any): RoleInput {
   return {
     description: body.description === undefined ? undefined : String(body.description).slice(0, 500),
+    purpose: body.purpose === undefined ? undefined : String(body.purpose).slice(0, 200),
     scope: body.scope === 'Subscriptions' ? 'Subscriptions' : body.scope === 'Users' ? 'Users' : undefined,
     mandatory2fa: body.mandatory2fa === undefined ? undefined : !!body.mandatory2fa,
     restrictDirect: body.restrictDirect === undefined ? undefined : !!body.restrictDirect,
     permissions: Array.isArray(body.permissions) ? body.permissions.map(String) : undefined,
     knownPermissions: Array.isArray(body.knownPermissions) ? body.knownPermissions.map(String) : undefined,
+    basePermissions: Array.isArray(body.basePermissions) ? body.basePermissions.map(String) : undefined,
     delegable: Array.isArray(body.delegable) ? body.delegable.map(String) : undefined,
   };
 }
@@ -45,7 +51,7 @@ function roleInput(body: any): RoleInput {
 async function visibleHistoryTypes(userId: string): Promise<HistoryEntity[]> {
   const out: HistoryEntity[] = [];
   if (await hasAnyPermission(userId, RBAC_VIEW)) out.push('role');
-  if (await hasAnyPermission(userId, [...USER_ROLE_WRITE, 'view-permissions'])) out.push('user');
+  if (await hasAnyPermission(userId, ['assign-roles', 'view-permissions'])) out.push('user');
   return out;
 }
 
@@ -100,7 +106,8 @@ export function registerRbac(app: FastifyInstance) {
   route(app, 'POST', 'rbac.roles.update', { permissions: RBAC_WRITE }, async (req, _rep, ctx) => {
     const body = b(req);
     const out = await updateRole(ctx, str(body.roleId, 'roleId'), roleInput(body), { canEditPermissions: await hasPermission(ctx.userId, 'access-permissions'), canEditRole: true });
-    return { role: out.role };
+    // Com as permissões como ficaram (podem incluir o que outra pessoa salvou nesse meio-tempo).
+    return { role: { ...out.role, permissions: out.permissions } };
   });
 
   route(app, 'POST', 'rbac.roles.delete', { permissions: RBAC_WRITE }, async (req, _rep, ctx) => {
@@ -108,14 +115,139 @@ export function registerRbac(app: FastifyInstance) {
     return {};
   });
 
-  // Acesso efetivo de uma pessoa: o que ela pode em cada área e de qual papel vem.
+  // Acesso efetivo de uma pessoa: o que ela pode em cada área e de qual papel vem, as restrições que os papéis dela
+  // trazem e, com roles (lista com vírgula), a simulação de como fica antes de salvar.
   route(app, 'GET', 'rbac.users.effective', { permissions: ['view-user-administration', ...RBAC_VIEW] }, async (req, _rep, ctx) => {
     const userId = str(q(req).userId, 'userId');
     const u = await one<{ id: string; roles: string[] }>('SELECT id, roles FROM users WHERE id = $1', [userId]);
     if (!u) throw notFound('error-invalid-user', 'Usuário não encontrado.');
     const infos = roleInfos();
     const g = await grantContext(ctx.userId);
-    return { roles: u.roles, areas: effectiveAccess(u.roles, infos), lock: userLock(g, userId, u.roles, infos) };
+    const rows = await listRoles();
+    const restrictionsOf = (roles: string[]) => {
+      const mine = rows.filter((r) => r.scope === 'Users' && roles.includes(r._id));
+      return { restrictDirect: mine.filter((r) => r.restrictDirect).map((r) => r._id), mandatory2fa: mine.filter((r) => r.mandatory2fa).map((r) => r._id) };
+    };
+    const out: Record<string, unknown> = { roles: u.roles, areas: effectiveAccess(u.roles, infos), lock: userLock(g, userId, u.roles, infos), restrictions: restrictionsOf(u.roles) };
+    if (q(req).roles !== undefined) {
+      const asked = strList(q(req).roles);
+      const known = new Set(infos.map((r) => r.id));
+      const bad = asked.filter((r) => !known.has(r));
+      if (bad.length) throw badRequest('error-invalid-role', `Papel inexistente: ${bad.join(', ')}`);
+      // Mesma regra de writeUserRoles: sem papel nenhum, a pessoa fica com Usuário.
+      const roles = asked.length ? [...new Set(asked)] : ['user'];
+      out.simulated = {
+        roles,
+        areas: effectiveAccess(roles, infos),
+        restrictions: restrictionsOf(roles),
+        diff: { areas: diffPermissions(heldBy(u.roles, infos), heldBy(roles, infos)).areas },
+      };
+    }
+    return out;
+  });
+
+  // Matriz de permissões: várias permissões em vários papéis, gravando só o que entra e sai de cada papel.
+  route(app, 'POST', 'rbac.matrix.update', { permissions: ['access-permissions'] }, async (req, _rep, ctx) => {
+    const raw = b(req).changes;
+    if (!Array.isArray(raw)) throw badRequest('error-invalid-params', 'Nenhuma alteração.');
+    const changes = raw.map((c: any) => ({ roleId: str(c?.roleId, 'roleId'), add: strList(c?.add), remove: strList(c?.remove) }));
+    const out = await applyPermissionDeltas(ctx, changes);
+    await audit(actorOf(ctx), 'permissions.changed', {}, { changes });
+    return out;
+  });
+
+  // Quem pode…? Da ação para os papéis e as pessoas, com o porquê (via qual papel).
+  route(app, 'GET', 'rbac.whoCan', { permissions: RBAC_VIEW }, async (req, _rep, ctx) => {
+    const query = q(req);
+    const key = str(query.permission, 'permission');
+    if (!(await one('SELECT 1 FROM permissions WHERE id = $1', [key]))) throw badRequest('error-invalid-permission', `Permissão inexistente: ${key}`);
+    const infos = roleInfos();
+    const who = whoCanRoles(key, infos);
+    const counts = new Map(
+      (await many<{ role: string; n: number; active: number }>(`SELECT r AS role, count(*)::int AS n, count(*) FILTER (WHERE active)::int AS active FROM users, unnest(roles) r WHERE r = ANY($1) GROUP BY r`, [who.global])).map((r) => [r.role, r]),
+    );
+    const roomCounts = who.room.length
+      ? await many<{ role: string; assignments: number; users: number; rooms: number }>(
+          `SELECT r AS role, count(*)::int AS assignments, count(DISTINCT user_id)::int AS users, count(DISTINCT room_id)::int AS rooms
+           FROM subscriptions, unnest(roles) r WHERE r = ANY($1) GROUP BY r`,
+          [who.room],
+        )
+      : [];
+    let people: unknown = null;
+    if (await hasPermission(ctx.userId, 'view-user-administration')) {
+      const p = paging({ offset: query.offset, count: query.count ?? 25 });
+      const count = Math.min(p.count, 100);
+      const params: unknown[] = [who.global];
+      const w = ['roles && $1'];
+      if (query.includeInactive !== 'true') w.push('active');
+      if (query.includeBots !== 'true') w.push(`type <> 'bot'`);
+      if (query.q) w.push(`(username ILIKE $${params.push(`%${String(query.q)}%`)} OR name ILIKE $${params.length})`);
+      const rows = who.global.length
+        ? await many(`SELECT id, username, name, active, type, roles, count(*) OVER() AS total FROM users WHERE ${w.join(' AND ')} ORDER BY (type = 'bot'), username LIMIT ${count} OFFSET ${p.offset}`, params)
+        : [];
+      const restricted = new Set(restrictedRoleIds());
+      people = {
+        items: rows.map((r) => ({
+          _id: r.id,
+          username: r.username,
+          name: r.name,
+          active: r.active,
+          type: r.type,
+          via: who.global.filter((x) => r.roles.includes(x)),
+          restricted: r.roles.some((x: string) => restricted.has(x)),
+        })),
+        total: Number(rows[0]?.total ?? 0),
+        offset: p.offset,
+        count,
+      };
+    }
+    return {
+      permission: key,
+      legacy: !!RBAC_KEYS[key]?.legacy || !KEY_AREA[key],
+      checkedIn: isRoomChecked(key) ? 'room' : 'global',
+      roles: who.global.map((id) => ({ _id: id, users: counts.get(id)?.n ?? 0, activeUsers: counts.get(id)?.active ?? 0, root: !!infos.find((r) => r.id === id)?.root })),
+      roomRoles: who.room.map((id) => {
+        const c = roomCounts.find((r) => r.role === id);
+        // users: pessoas distintas (a mesma pessoa Dona em três salas conta uma vez); assignments: atribuições.
+        return { _id: id, users: c?.users ?? 0, assignments: c?.assignments ?? 0, rooms: c?.rooms ?? 0 };
+      }),
+      inert: who.inert,
+      people,
+    };
+  });
+
+  // Papéis de sala (Dono, Moderador, Publicador, os criados aqui): quem tem qual em que sala. Grupo privado de que o ator
+  // não participa aparece sem nome, a não ser para quem vê a administração de salas. DMs não têm papel de sala.
+  route(app, 'GET', 'rbac.roomRoles', { permissions: ['view-user-administration', ...RBAC_VIEW] }, async (req, _rep, ctx) => {
+    const query = q(req);
+    if (!query.role && !query.userId && !query.rid) throw badRequest('error-invalid-params', 'Escolha um papel, uma pessoa ou uma sala.');
+    const p = paging({ offset: query.offset, count: query.count ?? 50 });
+    const count = Math.min(p.count, 100);
+    const params: unknown[] = [ctx.userId];
+    const w = ['cardinality(s.roles) > 0', `r.t <> 'd'`];
+    if (query.role) w.push(`$${params.push(String(query.role))} = ANY(s.roles)`);
+    if (query.userId) w.push(`s.user_id = $${params.push(String(query.userId))}`);
+    if (query.rid) w.push(`s.room_id = $${params.push(String(query.rid))}`);
+    const rows = await many(
+      `SELECT s.room_id, s.user_id, s.roles, r.t, r.name, r.fname, u.username, u.name AS uname, u.active,
+              EXISTS (SELECT 1 FROM subscriptions me WHERE me.room_id = s.room_id AND me.user_id = $1) AS actor_in,
+              count(*) OVER() AS total
+       FROM subscriptions s JOIN rooms r ON r.id = s.room_id JOIN users u ON u.id = s.user_id
+       WHERE ${w.join(' AND ')}
+       ORDER BY lower(coalesce(r.fname, r.name)), u.username LIMIT ${count} OFFSET ${p.offset}`,
+      params,
+    );
+    const seeAll = await hasPermission(ctx.userId, 'view-room-administration');
+    return {
+      items: rows.map((r) => ({
+        room: r.t === 'p' && !r.actor_in && !seeAll ? { hidden: true, t: 'p' } : { _id: r.room_id, name: r.fname || r.name, t: r.t },
+        user: { _id: r.user_id, username: r.username, name: r.uname, active: r.active },
+        roles: r.roles,
+      })),
+      total: Number(rows[0]?.total ?? 0),
+      offset: p.offset,
+      count,
+    };
   });
 
   route(app, 'POST', 'rbac.users.setRoles', { permissions: USER_ROLE_WRITE }, async (req, _rep, ctx) => {
@@ -131,6 +263,8 @@ export function registerRbac(app: FastifyInstance) {
     return { roles: row.roles };
   });
 
+  // Papéis em lote: dryRun devolve a prévia (quem muda, quem já está assim, quem fica de fora e por quê); skipBlocked
+  // grava só quem pode. Sem nenhum dos dois, tudo ou nada.
   route(app, 'POST', 'rbac.users.bulkRoles', { permissions: USER_ROLE_WRITE }, async (req, _rep, ctx) => {
     const body = b(req);
     const userIds = strList(body.userIds).slice(0, 500);
@@ -138,7 +272,7 @@ export function registerRbac(app: FastifyInstance) {
     const remove = strList(body.remove);
     if (!userIds.length || (!add.length && !remove.length)) throw badRequest('error-invalid-params', 'Escolha as pessoas e os papéis.');
     await assertAdminRoleAllowed(ctx, [...add, ...remove]);
-    return await bulkUserRoles(ctx, userIds, add, remove);
+    return await bulkUserRoles(ctx, userIds, add, remove, { dryRun: body.dryRun === true, skipBlocked: body.skipBlocked === true });
   });
 
   route(app, 'GET', 'rbac.history', {}, async (req, _rep, ctx) => {
@@ -180,6 +314,9 @@ export function registerRbac(app: FastifyInstance) {
     return { ok: true };
   });
 }
+
+// União das permissões dos papéis globais da lista (os de sala ficam de fora, como no acesso efetivo).
+const heldBy = (roles: string[], infos: RoleInfo[]) => new Set(infos.filter((r) => r.scope === 'Users' && roles.includes(r.id)).flatMap((r) => r.permissions));
 
 async function loadVisible(ctx: Ctx, id: number) {
   if (!Number.isFinite(id)) throw badRequest('error-invalid-params', 'id inválido.');
@@ -237,6 +374,7 @@ async function planRollback(h: HistoryRow): Promise<RollbackPlan> {
   const row = await one('SELECT * FROM roles WHERE id = $1', [h.entityId]);
   const current: Record<string, unknown> = {
     description: row.description,
+    purpose: row.purpose ?? '',
     scope: row.scope,
     mandatory2fa: row.mandatory_2fa,
     restrictDirect: row.restrict_direct,
@@ -274,13 +412,14 @@ async function applyRollback(ctx: Ctx, h: HistoryRow, plan: RollbackPlan, swap: 
     await createRole(
       ctx,
       h.entityId,
-      { description: String(n.description ?? ''), scope: n.scope as any, mandatory2fa: !!n.mandatory2fa, restrictDirect: !!n.restrictDirect, permissions: arr(n.permissions), delegable: swap(arr(n.delegable)) },
+      { description: String(n.description ?? ''), purpose: String(n.purpose ?? ''), scope: n.scope as any, mandatory2fa: !!n.mandatory2fa, restrictDirect: !!n.restrictDirect, permissions: arr(n.permissions), delegable: swap(arr(n.delegable)) },
       { canEditPermissions: canPerms, ...opts, action: 'rollback' },
     );
   } else {
     const n = plan.next;
     const input: RoleInput = {};
     if ('description' in n) input.description = String(n.description ?? '');
+    if ('purpose' in n) input.purpose = String(n.purpose ?? '');
     if ('scope' in n) input.scope = n.scope as any;
     if ('mandatory2fa' in n) input.mandatory2fa = !!n.mandatory2fa;
     if ('restrictDirect' in n) input.restrictDirect = !!n.restrictDirect;

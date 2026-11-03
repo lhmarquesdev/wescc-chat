@@ -32,6 +32,10 @@ export interface DirectRestrictionReport {
 }
 
 const restrictedOf = (p: DirectParty, r: DirectRules) => p.roles.filter((x) => r.restrictedRoles.includes(x));
+// Permissões que deixam duas pessoas restritas conversarem em particular fora das mensagens diretas (um grupo
+// privado, um time ou uma discussão vira uma conversa particular). O diagnóstico e a revisão de papel avisam.
+export const DIRECT_LOOPHOLES = ['create-p', 'create-team', 'start-discussion', 'start-discussion-other-user'];
+
 export const isRestricted = (p: DirectParty, r: DirectRules) => restrictedOf(p, r).length > 0;
 export const isExempt = (p: DirectParty, r: DirectRules) => p.roles.some((x) => r.exemptRoles.includes(x));
 

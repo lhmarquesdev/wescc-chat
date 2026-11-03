@@ -220,9 +220,10 @@ class Bus {
     void this.forward({ i: { type: '_settings', settings } });
     if (publicSettings.length) this.publish({ all: true }, { type: 'settings.changed', settings: publicSettings });
   }
-  permissionsChanged() {
+  // roles: os papéis alterados; by: quem alterou. As telas de Papéis e permissões recarregam e avisam quem está editando.
+  permissionsChanged(meta: { roles?: string[]; by?: string } = {}) {
     this.internal({ type: '_permissions' });
-    this.publish({ all: true }, { type: 'permissions.changed' });
+    this.publish({ all: true }, { type: 'permissions.changed', ...meta });
   }
   forceLogout(opts: { sessionIds?: string[]; userId?: string }) {
     this.internal({ type: '_logout', ...opts });

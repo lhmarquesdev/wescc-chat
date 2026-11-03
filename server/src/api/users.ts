@@ -3,13 +3,15 @@ import { many, one, pool } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
 import { audit } from '../services/audit';
 import { mapUser } from '../services/mappers';
-import { getUserRoles, hasPermission, permissionsForRoles } from '../services/permissions';
+import { getUserRoles, hasPermission, permissionsForRoles, roleInfos } from '../services/permissions';
 import { getSetting } from '../services/settings';
+import { userLock } from '@shared/rbac';
 import { bus } from '../realtime/bus';
-import { assertCanManageUser, assertRoleChange, writeUserRoles } from '../services/rbac';
+import { assertCanManageUser, assertRoleChange, effectiveRoles, grantContext, writeUserRoles } from '../services/rbac';
 import { recordHistory } from '../services/rbacHistory';
 import {
   actorOf,
+  type Ctx,
   createPersonalToken,
   createUser,
   deleteUser,
@@ -265,7 +267,9 @@ export function usersRoutes(app: FastifyInstance) {
   // ---------- Consulta ----------
   route(app, 'GET', 'users.info', {}, async (req, _rep, ctx) => {
     const u = await resolveUserParam(q(req));
-    const full = u.id === ctx.userId || (await hasPermission(ctx.userId, 'view-full-other-user-info'));
+    // Quem vê a administração de usuários já recebe esses dados em users.list (e-mail, verificado, último acesso):
+    // o editor abre pelo mesmo critério, em vez de mostrar campos vazios que a lista ao lado preenche.
+    const full = u.id === ctx.userId || (await hasPermission(ctx.userId, 'view-full-other-user-info')) || (await hasPermission(ctx.userId, 'view-user-administration'));
     const user: any = mapUser(u, { full });
     if (q(req).includeUserRooms === 'true' && u.id === ctx.userId) {
       user.rooms = await many('SELECT room_id AS rid, roles FROM subscriptions WHERE user_id = $1', [u.id]);
@@ -318,17 +322,18 @@ export function usersRoutes(app: FastifyInstance) {
   // ---------- Administração de usuários ----------
   route(app, 'POST', 'users.create', { permissions: ['create-user'] }, async (req, _rep, ctx) => {
     const body = b(req);
-    const roles = strArray(body.roles);
+    const roles = effectiveRoles(strArray(body.roles));
     if (roles.includes('admin') && !(await hasPermission(ctx.userId, 'assign-admin-role'))) throw forbidden();
-    // Hierarquia de concessão: só dá papéis que cabem no que o ator tem (ou delegados a ele).
-    if (roles.length) await assertRoleChange(ctx, '', [], roles);
+    // Hierarquia de concessão: só dá papéis que cabem no que o ator tem (ou delegados a ele), inclusive o Usuário
+    // que a conta recebe quando nenhum papel vem no pedido.
+    await assertRoleChange(ctx, '', [], roles);
     const row = await createUser(
       {
         username: str(body.username, 'username'),
         name: str(body.name, 'name'),
         email: body.email,
         password: str(body.password, 'password'),
-        roles: roles.length ? roles : ['user'],
+        roles,
         active: bool(body.active) ?? true,
         verified: bool(body.verified) ?? false,
         requirePasswordChange: bool(body.requirePasswordChange) ?? false,
@@ -337,23 +342,38 @@ export function usersRoutes(app: FastifyInstance) {
       },
       actorOf(ctx),
     );
-    if (roles.length) await recordHistory(pool, { entityType: 'user', entityId: row.id, entityLabel: row.username, action: 'create', actor: { id: ctx.userId, username: ctx.username }, changes: [{ field: 'roles', before: null, after: row.roles }] });
+    if (strArray(body.roles).length) await recordHistory(pool, { entityType: 'user', entityId: row.id, entityLabel: row.username, action: 'create', actor: { id: ctx.userId, username: ctx.username }, changes: [{ field: 'roles', before: null, after: row.roles }] });
     return { user: mapUser(row, { full: true }) };
   });
-  route(app, 'POST', 'users.update', { permissions: ['edit-other-user-info'] }, async (req, _rep, ctx) => {
+  // Dados e papéis têm chaves separadas: edit-other-user-info para nome, e-mail, bio e o resto; assign-roles para os
+  // papéis. A tela manda só o que mudou, então quem só dá papéis salva sem esbarrar nos dados (e vice-versa).
+  route(app, 'POST', 'users.update', { permissions: ['edit-other-user-info', 'assign-roles'] }, async (req, _rep, ctx) => {
     const body = b(req);
     const d = { ...(body.data ?? {}) };
     const userId = str(body.userId, 'userId');
+    const dataKeys = Object.keys(d).filter((k) => k !== 'roles');
+    if (dataKeys.length && !(await hasPermission(ctx.userId, 'edit-other-user-info'))) throw forbidden('Sem permissão para editar os dados de outras pessoas.');
+    if (d.roles !== undefined && !(await hasPermission(ctx.userId, 'assign-roles'))) throw forbidden('Sem permissão para dar ou tirar papéis.');
     // Hierarquia: não altera quem tem papel acima do ator (inclusive senha e dados).
     await assertCanManageUser(ctx, userId);
+    // Ativar e desativar têm chave própria (como users.setActiveStatus); só pesa quando o valor muda de fato.
+    if (d.active !== undefined && userId !== ctx.userId) {
+      const cur = await one<{ active: boolean }>('SELECT active FROM users WHERE id = $1', [userId]);
+      if (cur && !!bool(d.active) !== cur.active && !(await hasPermission(ctx.userId, 'edit-other-user-active-status'))) throw forbidden('Sem permissão para ativar ou desativar contas.');
+    }
+    // Papéis só gravam por writeUserRoles (hierarquia, último administrador, histórico, evento): updateUser nem
+    // recebe roles. Qualquer valor que não seja lista de nomes (ou nomes com vírgula) é recusado, nunca ignorado.
     let roles: string[] | undefined;
-    if (d.roles) {
-      roles = strArray(d.roles);
+    if (d.roles !== undefined) {
+      const raw = d.roles;
+      delete d.roles;
+      const valid = (Array.isArray(raw) && raw.every((x) => typeof x === 'string')) || (typeof raw === 'string' && raw.trim() !== '');
+      if (!valid) throw badRequest('error-invalid-params', 'roles precisa ser uma lista de papéis.');
+      roles = effectiveRoles(strArray(raw));
       const current = (await one<{ roles: string[] }>('SELECT roles FROM users WHERE id = $1', [userId]))?.roles ?? [];
       const changed = [...roles.filter((r) => !current.includes(r)), ...current.filter((r) => !roles!.includes(r))];
       if (changed.includes('admin') && !(await hasPermission(ctx.userId, 'assign-admin-role'))) throw forbidden();
       await assertRoleChange(ctx, userId, current, roles);
-      delete d.roles;
     }
     if (d.password && !(await hasPermission(ctx.userId, 'edit-other-user-password'))) throw forbidden();
     let row = await updateUser(ctx, userId, d, { asAdmin: true });
@@ -385,6 +405,33 @@ export function usersRoutes(app: FastifyInstance) {
     const n = await revokeAllSessions(userId);
     await audit(actorOf(ctx), 'user.logout.all', { userId }, { sessions: n });
     return { message: `Sessões encerradas: ${n}` };
+  });
+  // Ativar, desativar e encerrar sessões em lote (a tela seleciona até 500 pessoas): uma chamada só, sem esbarrar no
+  // limite de chamadas por minuto. Ficam de fora quem tem cadeado (papéis acima dos seus) e a própria conta.
+  route(app, 'POST', 'users.bulkSetActiveStatus', { permissions: ['edit-other-user-active-status'] }, async (req, _rep, ctx) => {
+    const body = b(req);
+    const active = !!bool(body.activeStatus);
+    const { targets, skipped } = await bulkAccountTargets(ctx, body.userIds);
+    let users = 0;
+    for (const t of targets) {
+      if (t.active === active) {
+        skipped.unchanged++;
+        continue;
+      }
+      await updateUser(ctx, t.id, { active }, { asAdmin: true });
+      users++;
+    }
+    return { users, skipped };
+  });
+  route(app, 'POST', 'users.bulkLogout', { permissions: ['logout-other-user'] }, async (req, _rep, ctx) => {
+    const { targets, skipped } = await bulkAccountTargets(ctx, b(req).userIds);
+    let sessions = 0;
+    for (const t of targets) {
+      const n = await revokeAllSessions(t.id);
+      await audit(actorOf(ctx), 'user.logout.all', { userId: t.id }, { sessions: n, bulk: true });
+      sessions += n;
+    }
+    return { users: targets.length, sessions, skipped };
   });
   route(app, 'POST', 'users.resetTOTP', { permissions: ['edit-other-user-totp'] }, async (req, _rep, ctx) => {
     const userId = str(b(req).userId, 'userId');
@@ -421,6 +468,26 @@ export function usersRoutes(app: FastifyInstance) {
     if (r.data) return reply.type(r.content_type).send(r.data);
     return reply.type('image/svg+xml').send(initialsSvg(r.fname || r.name || '#'));
   });
+}
+
+const BULK_MAX = 500;
+
+// Quem entra numa ação de conta em lote: até 500 pessoas, sem a própria conta e sem quem tem cadeado.
+async function bulkAccountTargets(ctx: Ctx, raw: unknown) {
+  const ids = [...new Set(strArray(raw))];
+  if (!ids.length) throw badRequest('error-invalid-params', 'Escolha as pessoas.');
+  if (ids.length > BULK_MAX) throw badRequest('error-invalid-params', `Até ${BULK_MAX} pessoas por vez.`);
+  const rows = await many<{ id: string; roles: string[]; active: boolean }>('SELECT id, roles, active FROM users WHERE id = ANY($1)', [ids]);
+  if (rows.length !== ids.length) throw notFound('error-invalid-user', 'Usuário não encontrado.');
+  const g = await grantContext(ctx.userId);
+  const infos = roleInfos();
+  const skipped = { self: 0, locked: 0, unchanged: 0 };
+  const targets = rows.filter((r) => {
+    if (r.id === ctx.userId) return (skipped.self++, false);
+    if (userLock(g, r.id, r.roles, infos)) return (skipped.locked++, false);
+    return true;
+  });
+  return { targets, skipped };
 }
 
 // Fundo do avatar com iniciais: todas as 12 cores passam de 4.99:1 com as iniciais brancas (Inter 600 a 40% do quadro).

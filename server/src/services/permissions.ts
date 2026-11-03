@@ -172,6 +172,7 @@ export function mapRole(r: any): Role {
     restrictDirect: !!r.restrict_direct,
     root: !!r.is_root,
     delegable: r.delegable_roles ?? [],
+    purpose: r.purpose ?? '',
   };
 }
 
@@ -182,6 +183,13 @@ export function roleScope(role: string) {
 // Figurinhas: "Visível para" de um pacote só aceita papéis que existem (globais, por padrão).
 export function roleExists(role: string, scope: Role['scope'] = 'Users'): boolean {
   return roleScopes.get(role) === scope;
+}
+
+// A pessoa tem o papel raiz (Administrador)? Pela flag do papel (migração 018), nunca pelo nome.
+export function rolesIncludeRoot(roles: Iterable<string>): boolean {
+  const root = new Set(roleRows.filter((r) => r.is_root && r.scope === 'Users').map((r) => r.id));
+  for (const r of roles) if (root.has(r)) return true;
+  return false;
 }
 
 // Papéis com as permissões de cada um, para a hierarquia de concessão e o acesso efetivo (shared/rbac.ts).

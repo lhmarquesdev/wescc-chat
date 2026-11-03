@@ -1,16 +1,17 @@
 // Editor de usuário (guia de layout): cabeçalho fixo com a pessoa, alterações pendentes, Reverter e Salvar; abas no
-// rodapé: Identidade, Acesso & Papéis (papéis com cadeado e o acesso efetivo), Segurança e Histórico. Salvar abre a
-// revisão; nada é gravado antes de confirmar.
+// rodapé: Identidade, Acesso & Papéis (papéis com cadeado, o acesso efetivo com a simulação e os papéis de sala),
+// Segurança e Histórico. Cada campo abre só com a permissão dele, e Salvar manda só o que mudou.
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, errorMessage } from '../../../lib/api';
 import { formatDateTime, roleLabel } from '../../../lib/format';
-import { useStore } from '../../../lib/store';
+import { usePermission, useStore } from '../../../lib/store';
 import { Icon } from '../../../components/Icon';
 import { Avatar, Empty, Field, Modal, SkeletonTable, Toggle, Tooltip, confirmDialog, useAsync } from '../../../components/ui';
 import { DeviceCell, lastSeen } from '../parts';
 import { EffectiveAccess } from './Effective';
 import { RbacHistory } from './History';
+import { useLeaveGuard } from './leaveGuard';
 import { EditorShell, Notice, Section, type EditorTab } from './shell';
 import { lockText, loadGrant, rbacFail, rbacOk } from './data';
 
@@ -55,6 +56,17 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
   const [version, setVersion] = useState(0);
   const roles = useAsync(() => api.get('roles.list').then((r) => (r.roles as any[]).filter((x) => x.scope === 'Users')), []);
   const grant = useAsync(loadGrant, []);
+  const perms = {
+    info: usePermission('edit-other-user-info'),
+    assign: usePermission('assign-roles'),
+    password: usePermission('edit-other-user-password'),
+    active: usePermission('edit-other-user-active-status'),
+    totp: usePermission('edit-other-user-totp'),
+    avatar: usePermission('edit-other-user-avatar'),
+    sessions: usePermission('view-device-management'),
+    logout: usePermission('logout-other-user'),
+    remove: usePermission('delete-user'),
+  };
 
   useEffect(() => {
     api
@@ -75,12 +87,8 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
   }, [f, initial]);
   const dirty = changed.length > 0;
 
-  useEffect(() => {
-    if (!dirty) return;
-    const h = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener('beforeunload', h);
-    return () => window.removeEventListener('beforeunload', h);
-  }, [dirty]);
+  // Sair com alterações (recarregar, fechar ou qualquer link do chat): pergunta antes.
+  useLeaveGuard(dirty, () => confirmDialog({ title: 'Descartar as alterações?', body: 'O que você mudou nesta pessoa ainda não foi salvo.', confirmLabel: 'Descartar', danger: true }));
 
   if (missing)
     return (
@@ -94,6 +102,7 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
 
   const g = grant.data;
   const self = id === me._id;
+  const can = perms;
   // Ninguém mexe nos próprios papéis (só o administrador); pessoa com papel acima de quem edita fica só para leitura.
   const selfLocked = self && !g.root;
   const targetLock = !g.root ? initial.roles.map((r) => g.roleLocks[r]).find(Boolean) ?? null : null;
@@ -106,11 +115,16 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
   const save = async () => {
     setSaving(true);
     try {
-      const data: Record<string, unknown> = { name: f.name, username: f.username, email: f.email, active: f.active, verified: f.verified, requirePasswordChange: f.requirePasswordChange, bio: f.bio };
-      // Papéis só vão quando mudaram: assim editar o nome de alguém não esbarra na trava dos papéis.
+      // Só o que mudou: quem só dá papéis salva sem esbarrar nos dados, e vice-versa.
+      const data: Record<string, unknown> = {};
+      for (const k of changed) if (k !== 'roles' && k !== 'password' && k !== 'active') data[k] = f[k as keyof Form];
       if (changed.includes('roles')) data.roles = f.roles;
       if (f.password) data.password = f.password;
-      await api.post('users.update', { userId: id, data });
+      // Ativar e desativar têm chave própria: sem a de dados, vai por users.setActiveStatus.
+      const activeChanged = changed.includes('active');
+      if (activeChanged && can.info) data.active = f.active;
+      if (Object.keys(data).length) await api.post('users.update', { userId: id, data });
+      if (activeChanged && !can.info) await api.post('users.setActiveStatus', { userId: id, activeStatus: f.active });
       rbacOk(`@${f.username} salvo.`);
       const next = { ...f, password: '' };
       setF(next);
@@ -134,6 +148,10 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
   };
 
   const isAdmin = initial.roles.includes('admin');
+  const dataEditable = !readOnly && can.info;
+  // users.info sem os dados completos (e-mail, verificado, último acesso): mostra travado com o motivo, nunca como
+  // campo vazio que dá para sobrescrever sem ver.
+  const hidden = user.emailVerified === undefined;
   const status = (
     <>
       {isAdmin && (
@@ -180,18 +198,19 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
               <div className="form">
                 <div className="two-col">
                   <Field label="Nome">
-                    <input value={f.name} disabled={readOnly} onChange={(e) => set({ name: e.target.value })} />
+                    <input value={f.name} disabled={!dataEditable} onChange={(e) => set({ name: e.target.value })} />
                   </Field>
                   <Field label="Nome de usuário">
-                    <input value={f.username} disabled={readOnly} onChange={(e) => set({ username: e.target.value })} />
+                    <input value={f.username} disabled={!dataEditable} onChange={(e) => set({ username: e.target.value })} />
                   </Field>
                 </div>
-                <Field label="E-mail">
-                  <input type="email" value={f.email} disabled={readOnly} onChange={(e) => set({ email: e.target.value })} />
+                <Field label="E-mail" hint={hidden ? 'Ver o e-mail pede a permissão Ver dados completos de outras pessoas.' : undefined}>
+                  <input type="email" value={hidden ? '' : f.email} placeholder={hidden ? 'Oculto' : undefined} disabled={!dataEditable || hidden} onChange={(e) => set({ email: e.target.value })} />
                 </Field>
                 <Field label="Bio">
-                  <textarea rows={3} value={f.bio} disabled={readOnly} maxLength={500} onChange={(e) => set({ bio: e.target.value })} />
+                  <textarea rows={3} value={f.bio} disabled={!dataEditable} maxLength={500} onChange={(e) => set({ bio: e.target.value })} />
                 </Field>
+                {!readOnly && !can.info && <p className="field-hint">Editar os dados de outras pessoas pede a permissão Editar dados de outras pessoas.</p>}
               </div>
             </Section>
             <Section icon="info" title="Sobre a conta">
@@ -203,9 +222,9 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
                 <dt>Criada em</dt>
                 <dd>{user.createdAt ? formatDateTime(user.createdAt) : '—'}</dd>
                 <dt>Último acesso</dt>
-                <dd>{user.lastLogin ? lastSeen(user.lastLogin) : '—'}</dd>
+                <dd>{hidden ? <span className="muted">Oculto</span> : user.lastLogin ? lastSeen(user.lastLogin) : '—'}</dd>
               </dl>
-              {!self && !readOnly && (
+              {!self && !readOnly && can.remove && (
                 <div className="rbac-about-actions">
                   <button className="btn small ghost danger" onClick={() => void remove()}>
                     <Icon name="delete" />
@@ -223,10 +242,10 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
               <div className="rbac-role-chips">
                 {roles.data.map((r) => {
                   const lock = g.roleLocks[r._id];
-                  const disabled = selfLocked || readOnly || !!lock;
+                  const disabled = selfLocked || readOnly || !!lock || !can.assign;
                   const on = f.roles.includes(r._id);
                   const was = initial.roles.includes(r._id);
-                  const tip = selfLocked ? lockText('self') : lock ? lockText(lock) : r.restrictDirect ? 'Restrito em conversas diretas' : null;
+                  const tip = selfLocked ? lockText('self') : lock ? lockText(lock) : !can.assign ? 'Dar e tirar papéis pede a permissão Dar e tirar papéis de pessoas.' : r.restrictDirect ? 'Restrito em conversas diretas' : null;
                   const chip = (
                     <label className={`chip selectable ${on ? 'on' : ''} ${disabled ? 'disabled' : ''} ${on !== was ? 'changed' : ''}`}>
                       <input type="checkbox" hidden checked={on} disabled={disabled} onChange={() => toggleRole(r._id)} />
@@ -249,20 +268,38 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
               )}
               {roles.data.some((r) => r.restrictDirect) && <p className="field-hint">Restrito: quem tem o papel não abre conversas diretas nem chamadas com outras pessoas restritas.</p>}
             </Section>
-            {changed.includes('roles') && <Notice>O acesso efetivo abaixo mostra os papéis salvos. Salve para ver o resultado da mudança.</Notice>}
-            <EffectiveAccess key={version} userId={id} />
+            <EffectiveAccess key={version} userId={id} draftRoles={changed.includes('roles') ? f.roles : undefined} />
           </div>
         )}
-        {tab === 'security' && <Security id={id} user={user} f={f} set={set} readOnly={readOnly} self={self} />}
+        {tab === 'security' && <Security id={id} user={user} f={f} set={set} readOnly={readOnly} self={self} can={can} hidden={hidden} />}
         {tab === 'history' && <RbacHistory entity={id} embedded onChanged={() => setVersion((v) => v + 1)} />}
       </EditorShell>
-      {review && <UserReview initial={initial} f={f} changed={changed} saving={saving} onClose={() => setReview(false)} onConfirm={() => void save()} />}
+      {review && <UserReview initial={initial} f={f} roles={roles.data} changed={changed} saving={saving} onClose={() => setReview(false)} onConfirm={() => void save()} />}
     </>
   );
 }
 
-function Security({ id, user, f, set, readOnly, self }: { id: string; user: any; f: Form; set: (p: Partial<Form>) => void; readOnly: boolean; self: boolean }) {
-  const sessions = useAsync(() => api.get('sessions.list.all', { userId: id, count: 50 }).then((r) => r.sessions as any[]), [id]);
+function Security({
+  id,
+  user,
+  f,
+  set,
+  readOnly,
+  self,
+  can,
+  hidden,
+}: {
+  id: string;
+  user: any;
+  f: Form;
+  set: (p: Partial<Form>) => void;
+  readOnly: boolean;
+  self: boolean;
+  can: Record<string, boolean>;
+  hidden: boolean;
+}) {
+  // Sem permissão de ver dispositivos, nem chama a API.
+  const sessions = useAsync(() => (can.sessions ? api.get('sessions.list.all', { userId: id, count: 50 }).then((r) => r.sessions as any[]) : Promise.resolve([] as any[])), [id, can.sessions]);
   const [twoFactor, setTwoFactor] = useState(!!user.twoFactorEnabled);
   const [avatar, setAvatar] = useState(!!user.avatarETag);
   const list = sessions.data ?? [];
@@ -279,29 +316,33 @@ function Security({ id, user, f, set, readOnly, self }: { id: string; user: any;
       <div className="rbac-grid-75">
         <Section icon="security" title="Acesso à conta" hint="Entrar no chat, senha e verificação.">
           <div className="form">
-            <Field label="Nova senha" hint="Deixe vazio para manter a atual.">
-              <input type="password" value={f.password} disabled={readOnly} autoComplete="new-password" onChange={(e) => set({ password: e.target.value })} />
+            <Field label="Nova senha" hint={can.password && can.info ? 'Deixe vazio para manter a atual.' : 'Trocar a senha pede a permissão Trocar a senha de outras pessoas.'}>
+              <input type="password" value={f.password} disabled={readOnly || !can.password || !can.info} autoComplete="new-password" onChange={(e) => set({ password: e.target.value })} />
             </Field>
             <div className="toggle-list">
               <Toggle
                 checked={f.active}
-                disabled={readOnly || self}
+                disabled={readOnly || self || !can.active}
                 onChange={(v) => set({ active: v })}
                 label="Ativo"
                 description={self ? 'Você não pode desativar a própria conta.' : f.active ? 'A pessoa consegue entrar no chat.' : 'Desligado, a pessoa não consegue entrar.'}
               />
-              <Toggle checked={f.verified} disabled={readOnly} onChange={(v) => set({ verified: v })} label="E-mail verificado" />
-              <Toggle checked={f.requirePasswordChange} disabled={readOnly} onChange={(v) => set({ requirePasswordChange: v })} label="Exigir troca de senha no próximo login" />
+              {hidden ? (
+                <p className="field-hint">E-mail verificado: oculto. Ver pede a permissão Ver dados completos de outras pessoas.</p>
+              ) : (
+                <Toggle checked={f.verified} disabled={readOnly || !can.info} onChange={(v) => set({ verified: v })} label="E-mail verificado" />
+              )}
+              <Toggle checked={f.requirePasswordChange} disabled={readOnly || !can.info} onChange={(v) => set({ requirePasswordChange: v })} label="Exigir troca de senha no próximo login" />
             </div>
           </div>
         </Section>
         <Section icon="rbac-technical" title="Ações imediatas" hint="Valem na hora, sem Salvar.">
           <div className="rbac-quick">
-            <button className="btn small" disabled={readOnly || !twoFactor} onClick={() => api.post('users.resetTOTP', { userId: id }).then(() => (rbacOk('2FA redefinido.'), setTwoFactor(false))).catch(fail)}>
+            <button className="btn small" disabled={readOnly || !twoFactor || !can.totp} title={can.totp ? undefined : 'Pede a permissão Redefinir o 2FA de outras pessoas.'} onClick={() => api.post('users.resetTOTP', { userId: id }).then(() => (rbacOk('2FA redefinido.'), setTwoFactor(false))).catch(fail)}>
               <Icon name="security" />
               {twoFactor ? 'Redefinir 2FA' : '2FA não configurado'}
             </button>
-            <button className="btn small" disabled={readOnly || !avatar} onClick={() => api.post('users.resetAvatar', { userId: id }).then(() => (rbacOk('Avatar removido.'), setAvatar(false))).catch(fail)}>
+            <button className="btn small" disabled={readOnly || !avatar || !can.avatar} title={can.avatar ? undefined : 'Pede a permissão Trocar a foto de outras pessoas.'} onClick={() => api.post('users.resetAvatar', { userId: id }).then(() => (rbacOk('Avatar removido.'), setAvatar(false))).catch(fail)}>
               <Icon name="image-remove" />
               Remover avatar
             </button>
@@ -311,12 +352,13 @@ function Security({ id, user, f, set, readOnly, self }: { id: string; user: any;
       <Section
         icon="devices"
         title="Sessões ativas"
-        count={list.length}
+        count={can.sessions ? list.length : undefined}
         flush
         action={
           list.length > 0 &&
           !self &&
-          !readOnly && (
+          !readOnly &&
+          can.logout && (
             <button className="btn small ghost danger" onClick={() => void logout()}>
               <Icon name="logout" />
               Encerrar todas
@@ -324,7 +366,9 @@ function Security({ id, user, f, set, readOnly, self }: { id: string; user: any;
           )
         }
       >
-        {sessions.loading && !sessions.data ? (
+        {!can.sessions ? (
+          <p className="muted small rbac-empty-areas">Ver as sessões pede a permissão Ver os dispositivos e as sessões.</p>
+        ) : sessions.loading && !sessions.data ? (
           <SkeletonTable rows={3} cols={2} />
         ) : list.length ? (
           <ul className="rbac-people">
@@ -343,9 +387,41 @@ function Security({ id, user, f, set, readOnly, self }: { id: string; user: any;
   );
 }
 
-function UserReview({ initial, f, changed, saving, onClose, onConfirm }: { initial: Form; f: Form; changed: string[]; saving: boolean; onClose: () => void; onConfirm: () => void }) {
-  const added = f.roles.filter((r) => !initial.roles.includes(r));
-  const removed = initial.roles.filter((r) => !f.roles.includes(r));
+function UserReview({
+  initial,
+  f,
+  roles,
+  changed,
+  saving,
+  onClose,
+  onConfirm,
+}: {
+  initial: Form;
+  f: Form;
+  roles: any[];
+  changed: string[];
+  saving: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  // Sem papel nenhum, o servidor grava Usuário: a revisão mostra o que fica de fato.
+  const next = f.roles.length ? f.roles : ['user'];
+  const added = next.filter((r) => !initial.roles.includes(r));
+  const removed = initial.roles.filter((r) => !next.includes(r));
+  // Restrições que os papéis trazem (Restrito, 2FA obrigatório): entram ou saem com a troca.
+  const flagged = (list: string[], k: 'restrictDirect' | 'mandatory2fa') => roles.filter((r) => r[k] && list.includes(r._id)).map((r) => r._id as string);
+  const notes: string[] = [];
+  if (changed.includes('roles')) {
+    const rdNow = flagged(initial.roles, 'restrictDirect');
+    const rdNext = flagged(next, 'restrictDirect');
+    const tfaNow = flagged(initial.roles, 'mandatory2fa');
+    const tfaNext = flagged(next, 'mandatory2fa');
+    if (!f.roles.length) notes.push('Sem papel nenhum, a pessoa fica com Usuário.');
+    if (!rdNow.length && rdNext.length) notes.push(`Passa a ser restrita em conversas diretas (via ${rdNext.map(roleLabel).join(', ')}).`);
+    if (rdNow.length && !rdNext.length) notes.push('Deixa de ser restrita em conversas diretas.');
+    if (!tfaNow.length && tfaNext.length) notes.push(`Passa a exigir 2FA (via ${tfaNext.map(roleLabel).join(', ')}): configura antes de voltar a usar o chat.`);
+    if (tfaNow.length && !tfaNext.length) notes.push('Deixa de exigir 2FA.');
+  }
   const show = (k: string, v: unknown) => (typeof v === 'boolean' ? (v ? 'Sim' : 'Não') : v === '' ? '—' : String(v));
   return (
     <Modal
@@ -372,6 +448,12 @@ function UserReview({ initial, f, changed, saving, onClose, onConfirm }: { initi
             {removed.length > 0 && <span className="rbac-review-keys del">− {removed.map(roleLabel).join(', ')}</span>}
           </li>
         )}
+        {notes.map((n) => (
+          <li key={n} className="mixed">
+            <Icon name="warning" size={12} />
+            <span>{n}</span>
+          </li>
+        ))}
         {changed
           .filter((k) => k !== 'roles')
           .map((k) => (

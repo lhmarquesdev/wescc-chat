@@ -9,7 +9,7 @@ import { assertRoleChange, createRole, deleteRole, updatePermissionMatrix, updat
 import { getSetting, isKnownSetting, isSecretSetting, listSettings, updateSettings } from '../services/settings';
 import { engagementChannels, engagementMessages, engagementUsers, workspaceStatistics } from '../services/stats';
 import { runRetention } from '../services/retention';
-import { notifySubscription } from '../services/rooms';
+import { getRoom, setRoomRole } from '../services/rooms';
 import { mapUser } from '../services/mappers';
 import { actorOf } from '../services/users';
 import { bus } from '../realtime/bus';
@@ -19,6 +19,15 @@ import { resolveUserParam } from './users';
 // A web recarrega "me" (e as permissões) ao ver os papéis mudarem; as outras telas atualizam a política de DM.
 function publishRoles(user: { id: string; username: string }, roles: string[] | undefined) {
   if (roles) bus.publish({ all: true }, { type: 'user', action: 'updated', user: { _id: user.id, username: user.username, roles } });
+}
+
+// A sala de um papel de sala: tem de existir e não pode ser DM (numa DM ninguém é dono, moderador ou publicador).
+async function roomRoleTarget(roomId: unknown): Promise<string> {
+  if (!roomId) throw badRequest('error-invalid-params', 'Papel de sala: escolha a sala (roomId).');
+  const room = await getRoom(String(roomId));
+  if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
+  if (room.t === 'd') throw badRequest('error-not-allowed', 'Mensagens diretas não têm papéis de sala.');
+  return room.id;
 }
 
 export function adminRoutes(app: FastifyInstance) {
@@ -86,41 +95,50 @@ export function adminRoutes(app: FastifyInstance) {
     await audit(actorOf(ctx), 'role.deleted', { role: id });
     return {};
   });
-  route(app, 'POST', 'roles.addUserToRole', { permissions: ['access-permissions', 'manage-roles'] }, async (req, _rep, ctx) => {
+  // Papel de sala (Dono, Moderador, Publicador, os criados aqui) com roomId passa pelas mesmas regras de
+  // channels.addOwner e afins (setRoomRole): Definir donos/moderadores na sala, a trava de concessão do papel, a última
+  // dona, a mensagem de sistema e a auditoria. Antes gravava direto na inscrição: quem tinha manage-roles virava Dono
+  // de qualquer sala. Repetir o pedido não muda nada (compatível com o Rocket.Chat).
+  route(app, 'POST', 'roles.addUserToRole', { permissions: ['assign-roles'] }, async (req, _rep, ctx) => {
     const body = b(req);
     const role = str(body.roleId ?? body.roleName, 'roleId');
     if (!(await one('SELECT 1 FROM roles WHERE id = $1', [role]))) throw notFound('error-invalid-roleId', 'Papel não encontrado.');
-    if (role === 'admin' && !(await hasPermission(ctx.userId, 'assign-admin-role'))) throw forbidden();
     const user = await resolveUserParam(body);
-    if (roleScope(role) === 'Subscriptions' && body.roomId) {
-      // Como em channels.addOwner e afins: numa DM ninguém é dono, moderador ou publicador.
-      if ((await one('SELECT t FROM rooms WHERE id = $1', [body.roomId]))?.t === 'd') throw badRequest('error-not-allowed', 'Mensagens diretas não têm papéis de sala.');
-      await query('UPDATE subscriptions SET roles = array_append(array_remove(roles, $3), $3), updated_at = now() WHERE room_id = $1 AND user_id = $2', [body.roomId, user.id, role]);
-      await notifySubscription(user.id, body.roomId, 'updated');
+    if (roleScope(role) === 'Subscriptions') {
+      const rid = await roomRoleTarget(body.roomId);
+      const sub = await one<{ roles: string[] }>('SELECT roles FROM subscriptions WHERE room_id = $1 AND user_id = $2', [rid, user.id]);
+      if (!sub?.roles.includes(role)) await setRoomRole(ctx, rid, user.id, role, true);
     } else {
+      if (role === 'admin' && !(await hasPermission(ctx.userId, 'assign-admin-role'))) throw forbidden();
       const next = [...new Set([...user.roles, role])];
       await assertRoleChange(ctx, user.id, user.roles, next);
       const { row } = await writeUserRoles(null, user.id, next, { actor: ctx });
       publishRoles(user, row.roles);
+      await audit(actorOf(ctx), 'role.user.added', { role, userId: user.id });
     }
-    await audit(actorOf(ctx), 'role.user.added', { role, userId: user.id, roomId: body.roomId });
     return { role: { _id: role } };
   });
-  route(app, 'POST', 'roles.removeUserFromRole', { permissions: ['access-permissions', 'manage-roles'] }, async (req, _rep, ctx) => {
+  route(app, 'POST', 'roles.removeUserFromRole', { permissions: ['assign-roles'] }, async (req, _rep, ctx) => {
     const body = b(req);
     const role = str(body.roleId ?? body.roleName, 'roleId');
+    if (!(await one('SELECT 1 FROM roles WHERE id = $1', [role]))) throw notFound('error-invalid-roleId', 'Papel não encontrado.');
     const user = await resolveUserParam(body);
-    if (body.roomId) {
-      await query('UPDATE subscriptions SET roles = array_remove(roles, $3), updated_at = now() WHERE room_id = $1 AND user_id = $2', [body.roomId, user.id, role]);
-      await notifySubscription(user.id, body.roomId, 'updated');
+    // Papel de sala gravado como global (versões antigas deixavam): sem roomId, sai da lista global.
+    const strayGlobal = !body.roomId && user.roles.includes(role);
+    if (roleScope(role) === 'Subscriptions' && !strayGlobal) {
+      const rid = await roomRoleTarget(body.roomId);
+      const sub = await one<{ roles: string[] }>('SELECT roles FROM subscriptions WHERE room_id = $1 AND user_id = $2', [rid, user.id]);
+      // setRoomRole recusa tirar a última dona da sala.
+      if (sub?.roles.includes(role)) await setRoomRole(ctx, rid, user.id, role, false);
     } else {
+      if (role === 'admin' && !(await hasPermission(ctx.userId, 'assign-admin-role'))) throw forbidden();
       const next = user.roles.filter((r: string) => r !== role);
       await assertRoleChange(ctx, user.id, user.roles, next);
       // writeUserRoles recusa tirar o último administrador.
       const { row } = await writeUserRoles(null, user.id, next, { actor: ctx });
       publishRoles(user, row.roles);
+      await audit(actorOf(ctx), 'role.user.removed', { role, userId: user.id });
     }
-    await audit(actorOf(ctx), 'role.user.removed', { role, userId: user.id, roomId: body.roomId });
     return {};
   });
   route(app, 'GET', 'roles.getUsersInRole', { permissions: ['access-permissions', 'view-permissions', 'view-user-administration'] }, async (req) => {
@@ -132,7 +150,14 @@ export function adminRoutes(app: FastifyInstance) {
           `SELECT u.*, count(*) OVER() AS total FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.room_id = $1 AND $2 = ANY(s.roles) ORDER BY u.username LIMIT ${p.count} OFFSET ${p.offset}`,
           [rid, role],
         )
-      : await many(`SELECT *, count(*) OVER() AS total FROM users WHERE $1 = ANY(roles) ORDER BY username LIMIT ${p.count} OFFSET ${p.offset}`, [role]);
+      : roleScope(role) === 'Subscriptions'
+        ? // Papel de sala sem sala: quem tem o papel em alguma sala (antes procurava em users.roles e vinha sempre vazio).
+          await many(
+            `SELECT u.*, count(*) OVER() AS total FROM users u WHERE EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND $1 = ANY(s.roles))
+             ORDER BY u.username LIMIT ${p.count} OFFSET ${p.offset}`,
+            [role],
+          )
+        : await many(`SELECT *, count(*) OVER() AS total FROM users WHERE $1 = ANY(roles) ORDER BY username LIMIT ${p.count} OFFSET ${p.offset}`, [role]);
     return { users: rows.map((r) => mapUser(r, { full: true })), total: Number(rows[0]?.total ?? 0) };
   });
   // Diagnóstico das conversas diretas restritas: papéis, exceções, brechas por outras permissões e DMs bloqueadas.

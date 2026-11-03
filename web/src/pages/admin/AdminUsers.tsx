@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime, plural, roleLabel, setRoleDescriptions } from '../../lib/format';
-import { useStore } from '../../lib/store';
+import { usePermission, useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, Menu, Modal, Pager, SkeletonTable, Toggle, Tooltip, confirmDialog, useAsync } from '../../components/ui';
 import { ActivePill, RolePills, RowMenu, UserCell, lastSeen } from './parts';
 import type { LockReason } from '@shared/rbac';
-import { loadGrant, lockText, rbacFail } from './rbac/data';
-import { Chips, ListStrip } from './rbac/shell';
+import { BulkRolesDialog } from './rbac/BulkRoles';
+import { loadGrant, lockText, rbacFail, userLockOf } from './rbac/data';
+import { Chips, ListStrip, LockHint } from './rbac/shell';
 import { UserEditor } from './rbac/UserEditor';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
@@ -46,7 +47,10 @@ export function AdminUsers() {
 }
 
 // Lista (guia de layout): faixa única com busca, contador, status, papel, exportar e Novo usuário; a linha abre o
-// editor; a seleção abre a barra flutuante das ações em lote.
+// editor; a seleção abre a barra flutuante das ações em lote. Cada ação aparece só para quem tem a permissão dela, e
+// pessoas com cadeado (papéis acima do que você dá) ficam de fora das ações de conta.
+const SELECT_MAX = 500;
+
 function UserList() {
   const me = useStore((s) => s.me)!;
   const navigate = useNavigate();
@@ -58,7 +62,15 @@ function UserList() {
   const [count, setCount] = useState(25);
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Pessoas já vistas (em qualquer página ou no "Selecionar todos"): a seleção vale entre páginas.
+  const [known, setKnown] = useState<Map<string, any>>(new Map());
+  const [selectingAll, setSelectingAll] = useState(false);
+  const [bulkRole, setBulkRole] = useState<{ role: string; mode: 'add' | 'remove' } | null>(null);
   const [exporting, setExporting] = useState(false);
+  const canCreate = usePermission('create-user');
+  const canAssign = usePermission('assign-roles');
+  const canActive = usePermission('edit-other-user-active-status');
+  const canLogout = usePermission('logout-other-user');
   const { data, loading, reload } = useAsync(() => api.get('users.list', { filter, status, role, offset, count }), [filter, status, role, offset, count]);
   // Contagens do controle segmentado (com a busca e o papel aplicados).
   const counts = useAsync(
@@ -75,10 +87,21 @@ function UserList() {
   const grant = useAsync(loadGrant, []);
   const globalRoles: any[] = (roles.data?.roles ?? []).filter((r: any) => r.scope === 'Users');
   const open = (u: any) => navigate(`/admin/users/edit/${encodeURIComponent(u._id)}`);
+  const lockOf = (u: any) => (grant.data ? userLockOf(grant.data, me._id, u) : null);
 
-  useEffect(() => setSelected(new Set()), [filter, status, role, offset, count]);
+  // Trocar filtro limpa a seleção; trocar de página não.
+  useEffect(() => setSelected(new Set()), [filter, status, role]);
+  useEffect(() => {
+    if (!data?.users?.length) return;
+    setKnown((m) => {
+      const n = new Map(m);
+      for (const u of data.users) n.set(u._id, u);
+      return n;
+    });
+  }, [data]);
 
   const users: any[] = data?.users ?? [];
+  const total: number = data?.total ?? 0;
   const allOnPage = users.length > 0 && users.every((u) => selected.has(u._id));
   const someOnPage = users.some((u) => selected.has(u._id));
   const toggle = (id: string) =>
@@ -88,44 +111,65 @@ function UserList() {
       else n.add(id);
       return n;
     });
-  const toggleAll = () => setSelected(allOnPage ? new Set() : new Set(users.map((u) => u._id)));
+  const toggleAll = () =>
+    setSelected((s) => {
+      const n = new Set(s);
+      for (const u of users) allOnPage ? n.delete(u._id) : n.add(u._id);
+      return n;
+    });
   const resetFilters = () => (setFilter(''), setStatus(''), setRole(''), setOffset(0));
-
-  // Ações em lote: uma chamada por pessoa, e um aviso só no fim. Desativar e encerrar sessões nunca valem para
-  // quem está usando a tela (a seleção de todos inclui a própria linha): seria trancar ou deslogar a si mesmo.
-  const selectedUsers = users.filter((u) => selected.has(u._id));
-  const others = selectedUsers.filter((u) => u._id !== me._id);
-  const selfSelected = others.length < selectedUsers.length;
-  const bulk = async (what: string, fn: (u: any) => Promise<unknown>, skipSelf = false) => {
-    const targets = skipSelf ? others : selectedUsers;
-    let done = 0;
-    for (const u of targets) {
-      try {
-        await fn(u);
-        done++;
-      } catch (e) {
-        fail(e);
+  // Todas as páginas do filtro (até 500), em páginas de 500 como a exportação.
+  const selectAll = async () => {
+    setSelectingAll(true);
+    try {
+      const all: any[] = [];
+      for (let o = 0; o < SELECT_MAX; o += 500) {
+        const r = await api.get('users.list', { filter, status, role, offset: o, count: 500 });
+        all.push(...r.users);
+        if (all.length >= r.total || !r.users.length) break;
       }
+      setKnown((m) => {
+        const n = new Map(m);
+        for (const u of all) n.set(u._id, u);
+        return n;
+      });
+      setSelected(new Set(all.slice(0, SELECT_MAX).map((u) => u._id)));
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSelectingAll(false);
     }
-    if (done) ok(`${what}: ${plural(done, 'pessoa', 'pessoas')}${skipSelf && selfSelected ? ' (você não foi incluído)' : ''}.`);
-    else if (skipSelf && selfSelected) ok('Nada a fazer: você não pode aplicar isso à sua própria conta.');
-    setSelected(new Set());
+  };
+
+  // Ações de conta em lote: uma chamada só para todas (até 500, sem esbarrar no limite de chamadas por minuto) e um
+  // aviso no fim. O servidor deixa de fora a própria conta e quem tem cadeado; a tela só antecipa as contagens.
+  const selectedUsers = [...selected].map((id) => known.get(id)).filter(Boolean) as any[];
+  const unlocked = selectedUsers.filter((u) => {
+    const l = lockOf(u);
+    return !l || l === 'self';
+  });
+  const lockedOut = selectedUsers.length - unlocked.length;
+  const others = unlocked.filter((u) => u._id !== me._id);
+  const selfSelected = selectedUsers.some((u) => u._id === me._id);
+  const bulk = async (what: string, path: 'users.bulkSetActiveStatus' | 'users.bulkLogout', extra: Record<string, unknown> = {}, mentionSelf = true) => {
+    try {
+      const r = await api.post(path, { userIds: [...selected], ...extra });
+      const sk = r.skipped ?? {};
+      const notes = [
+        mentionSelf && sk.self ? 'você não foi incluído' : '',
+        sk.locked ? `${sk.locked} com cadeado ${sk.locked === 1 ? 'ficou' : 'ficaram'} de fora` : '',
+        sk.unchanged ? `${sk.unchanged} já ${sk.unchanged === 1 ? 'estava' : 'estavam'} assim` : '',
+      ].filter(Boolean);
+      const tail = notes.length ? ` (${notes.join('; ')})` : '';
+      if (r.users) ok(`${what}: ${plural(r.users, 'pessoa', 'pessoas')}${tail}.`);
+      else ok(`Nada a fazer${tail || ': você não pode aplicar isso à sua própria conta'}.`);
+      setSelected(new Set());
+    } catch (e) {
+      fail(e);
+    }
     reload();
   };
-  const selfNote = selfSelected ? ' Sua própria conta fica de fora.' : '';
-  // Papéis em lote: uma chamada só, tudo ou nada, e um lote no histórico de Papéis e permissões.
-  const bulkRoles = async (roleId: string, mode: 'add' | 'remove') => {
-    const targets = grant.data?.root ? selectedUsers : others;
-    if (!targets.length) return ok('Nada a fazer: você não pode mudar os próprios papéis.');
-    try {
-      await api.post('rbac.users.bulkRoles', { userIds: targets.map((u) => u._id), [mode]: [roleId] });
-      ok(`Papel ${roleLabel(roleId)} ${mode === 'add' ? 'adicionado a' : 'removido de'} ${plural(targets.length, 'pessoa', 'pessoas')}${targets.length < selectedUsers.length ? ' (você não foi incluído)' : ''}.`);
-      setSelected(new Set());
-      reload();
-    } catch (e) {
-      rbacFail(e);
-    }
-  };
+  const selfNote = `${selfSelected ? ' Sua própria conta fica de fora.' : ''}${lockedOut ? ` ${plural(lockedOut, 'pessoa com cadeado fica', 'pessoas com cadeado ficam')} de fora.` : ''}`;
   const setActive = (active: boolean) => async () => {
     if (!active) {
       const yes = await confirmDialog({
@@ -136,7 +180,7 @@ function UserList() {
       });
       if (!yes) return;
     }
-    await bulk(active ? 'Ativadas' : 'Desativadas', (u) => api.post('users.setActiveStatus', { userId: u._id, activeStatus: active }), !active);
+    await bulk(active ? 'Ativadas' : 'Desativadas', 'users.bulkSetActiveStatus', { activeStatus: active }, !active);
   };
   const logoutSelected = async () => {
     const yes = await confirmDialog({
@@ -145,7 +189,7 @@ function UserList() {
       confirmLabel: 'Encerrar sessões',
       danger: true,
     });
-    if (yes) await bulk('Sessões encerradas', (u) => api.post('users.logout', { userId: u._id }), true);
+    if (yes) await bulk('Sessões encerradas', 'users.bulkLogout');
   };
 
   // Ações de uma linha (menu "Mais ações"): desativar e deslogar pedem confirmação, como em lote.
@@ -227,10 +271,12 @@ function UserList() {
             <Icon name={exporting ? 'loading' : 'download'} className={exporting ? 'spin' : undefined} />
           </button>
         </Tooltip>
-        <button className="btn primary" onClick={() => setCreating(true)}>
-          <Icon name="add-people" />
-          Novo usuário
-        </button>
+        {canCreate && (
+          <button className="btn primary" onClick={() => setCreating(true)}>
+            <Icon name="add-people" />
+            Novo usuário
+          </button>
+        )}
       </ListStrip>
       <div className="rbac-list-body flush">
         {loading && !data ? (
@@ -278,13 +324,29 @@ function UserList() {
               {users.map((u: any) => {
                 const from = origin(u);
                 const tag = u._id === me._id ? 'Você' : u.type === 'bot' ? 'Bot' : null;
+                const lock = lockOf(u);
+                const locked = !!lock && lock !== 'self';
+                const self = u._id === me._id;
                 return (
                   <tr key={u._id} className={selected.has(u._id) ? 'clickable selected' : 'clickable'} onClick={() => open(u)}>
                     <td className="sel-col" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" aria-label={`Selecionar @${u.username}`} checked={selected.has(u._id)} onChange={() => toggle(u._id)} />
                     </td>
                     <td>
-                      <UserCell username={u.username} name={u.name} status={u.status} tag={tag && <span className="pill tag">{tag}</span>} sub={from || undefined} />
+                      <UserCell
+                        username={u.username}
+                        name={u.name}
+                        status={u.status}
+                        tag={
+                          (tag || locked) && (
+                            <>
+                              {tag && <span className="pill tag">{tag}</span>}
+                              {locked && <LockHint text={lockText(lock)} />}
+                            </>
+                          )
+                        }
+                        sub={from || undefined}
+                      />
                     </td>
                     <td className="ellipsis-cell col-xl" data-label="E-mail" title={u.email || undefined}>
                       {u.email || <span className="muted">—</span>}
@@ -304,21 +366,25 @@ function UserList() {
                           {(close) => (
                             <>
                               <button onClick={() => (close(), open(u))}>
-                                <Icon name="edit" />
-                                Editar
+                                <Icon name={locked ? 'show' : 'edit'} />
+                                {locked ? 'Ver' : 'Editar'}
                               </button>
-                              <button disabled={u._id === me._id} title={u._id === me._id ? 'Você não pode desativar a própria conta.' : undefined} onClick={() => (close(), void setOneActive(u))}>
-                                <Icon name={u.active ? 'disabled-user' : 'success'} />
-                                {u.active ? 'Desativar' : 'Ativar'}
-                              </button>
-                              <button
-                                disabled={u._id === me._id}
-                                title={u._id === me._id ? 'Para sair dos seus dispositivos, use Minha conta › Dispositivos.' : undefined}
-                                onClick={() => (close(), void logoutOne(u))}
-                              >
-                                <Icon name="logout" />
-                                Encerrar sessões
-                              </button>
+                              {canActive && !locked && (
+                                <button disabled={self} title={self ? 'Você não pode desativar a própria conta.' : undefined} onClick={() => (close(), void setOneActive(u))}>
+                                  <Icon name={u.active ? 'disabled-user' : 'success'} />
+                                  {u.active ? 'Desativar' : 'Ativar'}
+                                </button>
+                              )}
+                              {canLogout && !locked && (
+                                <button
+                                  disabled={self}
+                                  title={self ? 'Para sair dos seus dispositivos, use Minha conta › Dispositivos.' : undefined}
+                                  onClick={() => (close(), void logoutOne(u))}
+                                >
+                                  <Icon name="logout" />
+                                  Encerrar sessões
+                                </button>
+                              )}
                             </>
                           )}
                         </RowMenu>
@@ -342,74 +408,109 @@ function UserList() {
             <Icon name="check" />
             {plural(selected.size, 'selecionado', 'selecionados')}
           </span>
-          <Menu
-            align="left"
-            placement="top"
-            label="Adicionar papel"
-            trigger={
-              <button type="button" className="btn small ghost">
-                <Icon name="admin-permissions" />
-                <span>Adicionar papel</span>
+          {allOnPage && total > selected.size && (
+            total <= SELECT_MAX ? (
+              <button type="button" className="link-btn rbac-bulk-all" disabled={selectingAll} aria-busy={selectingAll || undefined} onClick={() => void selectAll()}>
+                Selecionar os {total} resultados
               </button>
-            }
-          >
-            {(close) => globalRoles.map((r) => <BulkRoleItem key={r._id} role={r} lock={grant.data?.roleLocks[r._id]} onPick={() => (close(), void bulkRoles(r._id, 'add'))} />)}
-          </Menu>
-          <Menu
-            align="left"
-            placement="top"
-            label="Remover papel"
-            trigger={
-              <button type="button" className="btn small ghost">
-                <Icon name="remove-user" />
-                <span>Remover papel</span>
-              </button>
-            }
-          >
-            {(close) => globalRoles.map((r) => <BulkRoleItem key={r._id} role={r} lock={grant.data?.roleLocks[r._id]} onPick={() => (close(), void bulkRoles(r._id, 'remove'))} />)}
-          </Menu>
-          <button type="button" className="btn small ghost" onClick={setActive(true)}>
-            <Icon name="success" />
-            <span>Ativar</span>
-          </button>
-          <button type="button" className="btn small ghost" disabled={!others.length} onClick={() => void logoutSelected()}>
-            <Icon name="logout" />
-            <span>Encerrar sessões</span>
-          </button>
-          <button type="button" className="btn small ghost danger" disabled={!others.length} onClick={setActive(false)}>
-            <Icon name="disabled-user" />
-            <span>Desativar ({others.length})</span>
-          </button>
+            ) : (
+              <span className="muted small rbac-bulk-all">Selecione até 500 pessoas por vez.</span>
+            )
+          )}
+          {canAssign && (
+            <Menu
+              align="left"
+              placement="top"
+              label="Adicionar papel"
+              trigger={
+                <button type="button" className="btn small ghost">
+                  <Icon name="admin-permissions" />
+                  <span>Adicionar papel</span>
+                </button>
+              }
+            >
+              {(close) => globalRoles.map((r) => <BulkRoleItem key={r._id} role={r} lock={grant.data?.roleLocks[r._id]} onPick={() => (close(), setBulkRole({ role: r._id, mode: 'add' }))} />)}
+            </Menu>
+          )}
+          {canAssign && (
+            <Menu
+              align="left"
+              placement="top"
+              label="Remover papel"
+              trigger={
+                <button type="button" className="btn small ghost">
+                  <Icon name="remove-user" />
+                  <span>Remover papel</span>
+                </button>
+              }
+            >
+              {(close) => globalRoles.map((r) => <BulkRoleItem key={r._id} role={r} lock={grant.data?.roleLocks[r._id]} onPick={() => (close(), setBulkRole({ role: r._id, mode: 'remove' }))} />)}
+            </Menu>
+          )}
+          {canActive && (
+            <button type="button" className="btn small ghost" disabled={!unlocked.length} onClick={setActive(true)}>
+              <Icon name="success" />
+              <span>Ativar</span>
+            </button>
+          )}
+          {canLogout && (
+            <button type="button" className="btn small ghost" disabled={!others.length} onClick={() => void logoutSelected()}>
+              <Icon name="logout" />
+              <span>Encerrar sessões</span>
+            </button>
+          )}
+          {canActive && (
+            <button type="button" className="btn small ghost danger" disabled={!others.length} onClick={setActive(false)}>
+              <Icon name="disabled-user" />
+              <span>Desativar ({others.length})</span>
+            </button>
+          )}
           <button type="button" className="btn small ghost" aria-label="Limpar seleção" onClick={() => setSelected(new Set())}>
             <Icon name="close" />
           </button>
         </div>
       )}
-      {creating && <CreateUser roles={globalRoles} onClose={() => setCreating(false)} onCreated={(id) => (reload(), navigate(`/admin/users/edit/${encodeURIComponent(id)}`))} />}
+      {bulkRole && (
+        <BulkRolesDialog
+          role={bulkRole.role}
+          info={globalRoles.find((r) => r._id === bulkRole.role)}
+          mode={bulkRole.mode}
+          userIds={[...selected]}
+          onClose={() => setBulkRole(null)}
+          onDone={() => (setBulkRole(null), setSelected(new Set()), reload())}
+        />
+      )}
+      {creating && (
+        <CreateUser
+          roles={globalRoles.filter((r) => grant.data && !grant.data.roleLocks[r._id])}
+          onClose={() => setCreating(false)}
+          onCreated={(id) => (reload(), navigate(`/admin/users/edit/${encodeURIComponent(id)}`))}
+        />
+      )}
     </div>
   );
 }
 
 function BulkRoleItem({ role, lock, onPick }: { role: any; lock?: LockReason; onPick: () => void }) {
   return (
-    <button disabled={!!lock} title={lock ? lockText(lock) : undefined} onClick={onPick}>
+    <button role="menuitem" disabled={!!lock} aria-disabled={lock ? true : undefined} title={lock ? lockText(lock) : undefined} onClick={onPick}>
       {lock && <Icon name="rbac-lock" size={12} />}
       {roleLabel(role._id)}
     </button>
   );
 }
 
-// Criação por modal curto (guia de layout): o básico para a conta existir; papéis, segurança e o resto ficam no editor,
-// que abre logo em seguida.
+// Criação por modal curto (guia de layout): o básico para a conta existir e o papel inicial (só os que você dá);
+// segurança e o resto ficam no editor, que abre logo em seguida.
 function CreateUser({ roles, onClose, onCreated }: { roles: any[]; onClose: () => void; onCreated: (id: string) => void }) {
   const [f, setF] = useState({ name: '', username: '', email: '', password: '', type: 'user', joinDefaultChannels: true, verified: true });
+  const [initialRole, setInitialRole] = useState(roles.some((r) => r._id === 'user') ? 'user' : (roles[0]?._id ?? ''));
   const [busy, setBusy] = useState(false);
-  const hasUser = roles.some((r) => r._id === 'user');
   const valid = f.name.trim() && f.username.trim() && f.password;
   const create = async () => {
     setBusy(true);
     try {
-      const r = await api.post('users.create', { ...f, roles: hasUser ? ['user'] : [], requirePasswordChange: false, active: true });
+      const r = await api.post('users.create', { ...f, roles: initialRole ? [initialRole] : [], requirePasswordChange: false, active: true });
       ok(`@${r.user.username} criado.`);
       onCreated(r.user._id);
     } catch (e) {
@@ -422,7 +523,7 @@ function CreateUser({ roles, onClose, onCreated }: { roles: any[]; onClose: () =
     <Modal
       size="sm"
       title="Novo usuário"
-      description="Começa com o papel Usuário. Papéis, segurança e o resto você ajusta no editor, que abre em seguida."
+      description="Começa com o papel escolhido. Segurança e o resto você ajusta no editor, que abre em seguida."
       onClose={onClose}
       footer={
         <>
@@ -447,6 +548,16 @@ function CreateUser({ roles, onClose, onCreated }: { roles: any[]; onClose: () =
         </Field>
         <Field label="Senha">
           <input type="password" value={f.password} autoComplete="new-password" onChange={(e) => setF({ ...f, password: e.target.value })} />
+        </Field>
+        <Field label="Papel inicial" hint="Os outros papéis você ajusta no editor.">
+          <select value={initialRole} onChange={(e) => setInitialRole(e.target.value)}>
+            {roles.map((r) => (
+              <option key={r._id} value={r._id}>
+                {roleLabel(r._id)}
+                {r.restrictDirect ? ' (restrito)' : ''}
+              </option>
+            ))}
+          </select>
         </Field>
         <Field label="Tipo">
           <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
