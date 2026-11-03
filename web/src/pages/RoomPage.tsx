@@ -43,6 +43,8 @@ const PANELS: { id: PanelId; icon: IconName; label: string; when?: (r: Room) => 
   { id: 'prune', icon: 'panel-prune', label: 'Limpar histórico', when: (r) => r.t !== 'd', perm: 'clean-channel-history' },
   // Sem "when": numa conversa direta exporta quem tem a permissão global (o administrador).
   { id: 'export', icon: 'panel-export', label: 'Exportar mensagens', perm: 'export-room-messages' },
+  // Só com agendadas desta sala (ou com o painel aberto por link): RoomPage filtra.
+  { id: 'scheduled', icon: 'panel-scheduled', label: 'Mensagens agendadas' },
   // Permissões do canal: quem fala e o que cada pessoa pode fazer nele (donos e moderadores).
   {
     id: 'access',
@@ -118,8 +120,9 @@ function TypingIndicator({ id }: { id: string }) {
   }, []);
   const active = Object.entries(typing ?? {}).filter(([, ts]) => Date.now() - ts < 6000);
   const names = active.map(([u]) => nameOf(u));
-  // Todos gravando áudio: "gravando áudio…"; se alguém digita, vale o "digitando…".
-  const verb = active.length && active.every(([u]) => recording?.[u]) ? 'gravando áudio' : 'digitando';
+  // Todos gravando vídeo: "gravando vídeo…"; todos gravando (algum áudio): "gravando áudio…"; se alguém digita, vale o "digitando…".
+  const allRecording = active.length > 0 && active.every(([u]) => recording?.[u]);
+  const verb = !allRecording ? 'digitando' : active.every(([u]) => recording?.[u] === 'video') ? 'gravando vídeo' : 'gravando áudio';
   // A linha fica sobre o fim da lista: não ocupa espaço quando ninguém digita.
   return (
     <div className="typing" aria-live="polite">
@@ -317,6 +320,8 @@ export function RoomPage() {
   }, [sub]);
 
   const roles = useMemo(() => [...me.roles, ...roomRoles], [me.roles, roomRoles]);
+  // O painel "Mensagens agendadas" só aparece quando há agendadas aqui (ou quando já está aberto).
+  const scheduledHere = useStore((s) => s.scheduled.some((x) => x.rid === rid));
   const canModerate = roles.some((r) => ['admin', 'owner', 'moderator'].includes(r));
 
   const setPanel = (p: PanelId | null) => {
@@ -355,9 +360,24 @@ export function RoomPage() {
   const canSeeLimitedReceipts = canPostRO || (!!room?.broadcast && !membersHidden);
   // Vale para a lista e para a thread (que monta as próprias ações).
   const canPin = room?.t === 'd' || canWithRoles('pin-message', roles);
+  // Encaminhar a partir de sala criptografada o servidor recusa (o texto não sai da sala).
+  const canForwardFrom = !room?.encrypted;
+  // Votar: as mesmas recusas do servidor (membro, sala arquivada, silêncio, DM bloqueada). Somente leitura não barra.
+  const voteBlocked = !room
+    ? ''
+    : !sub
+      ? 'Entre na sala para votar.'
+      : room.archived
+        ? 'Esta sala está arquivada.'
+        : muted
+          ? 'Você está silenciado nesta sala.'
+          : directBlocked || '';
+  const canClosePolls = canWithRoles('delete-message', roles);
+  // Quem votou: num canal de avisos (ou com a lista oculta) só quem publica ou vê a lista.
+  const canSeePollVoters = !(room?.notice || room?.broadcast) || canPostRO || (!!room?.broadcast && !membersHidden);
   const gate = useMemo(
-    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin }),
-    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin],
+    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters }),
+    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters],
   );
 
   const actions = useMemo(
@@ -444,7 +464,13 @@ export function RoomPage() {
     }
   };
   const dmUser = room.t === 'd' && sub && !sub.name.includes(',') ? sub.name : null;
-  const panels = PANELS.filter((p) => (!p.when || p.when(room)) && (!p.perm || [p.perm].flat().some((x) => canWithRoles(x, roles))) && !(p.id === 'members' && membersHidden));
+  const panels = PANELS.filter(
+    (p) =>
+      (!p.when || p.when(room)) &&
+      (!p.perm || [p.perm].flat().some((x) => canWithRoles(x, roles))) &&
+      !(p.id === 'members' && membersHidden) &&
+      !(p.id === 'scheduled' && !scheduledHere && panel !== 'scheduled'),
+  );
   // Chamadas em grupo: a conversa a dois mantém voz e vídeo no cabeçalho em qualquer largura. Nas outras salas, abaixo
   // de 440 px iniciar vai para o Mais; a pílula de uma chamada viva fica e toma o lugar de Membros (que vai para o Mais).
   const pairDm = room.t === 'd' && room.uids?.length === 2;

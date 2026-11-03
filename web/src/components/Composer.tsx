@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Message } from '@shared/index';
-import { stickerPreviewText } from '@shared/stickers';
+import { mediaTypeAllowed, stickerPreviewText } from '@shared/stickers';
 import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
 import { slashCommands } from '../lib/commands';
 import { EMOJI, searchEmoji } from '../lib/emoji';
-import { formatBytes } from '../lib/format';
+import { formatBytes, roomPath } from '../lib/format';
+import { whenText } from '../lib/messageTimes';
 import { realtime } from '../lib/realtime';
 import { registerComposer, useStickers } from '../lib/stickers';
-import { useSetting, useStore } from '../lib/store';
+import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { namesIn, useNames } from '../lib/names';
 import { Icon, type IconName } from './Icon';
 import { fileIconName, FileTile, setEditingMessage } from './MessageItem';
-import { Portal, useAnchored, useIsPhone, useMedia } from './overlay';
+import { Portal, Sheet, useAnchored, useIsPhone, useMedia } from './overlay';
+import { PollModal } from './Poll';
+import { ScheduleArrow, ScheduledStrip, ScheduleItems, ScheduleModal } from './ScheduleControls';
+import { videoBlockedReason, VideoRecorder } from './VideoRecorder';
 import { ExpressionPicker } from './stickers/ExpressionPicker';
 import { StickerHost } from './stickers/StickerMenuItems';
 import { StickerSuggestions } from './stickers/StickerSuggestions';
-import { Avatar, Modal } from './ui';
+import { Avatar, Menu, Modal } from './ui';
 import { useVoiceRecorder, VoiceBar } from './VoiceRecorder';
 
 interface Suggestion {
@@ -116,6 +121,16 @@ function ComposerView({
   const anch = useAnchored({ open: sugs.length > 0, placement: 'top-start', gap: 6, minHeight: 120 });
   // Figurinhas: a sala (onde dá para enviar) e o pedido "Ver no seletor" do cartão da figurinha.
   const room = useStore((s) => s.rooms[rid]);
+  const sub = useStore((s) => s.subscriptions[rid]);
+  const navigate = useNavigate();
+  const whiteList = useSetting<string>('FileUpload_MediaTypeWhiteList') ?? '';
+  const blackList = useSetting<string>('FileUpload_MediaTypeBlackList') ?? '';
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [recordingVideo, setRecordingVideo] = useState(false);
+  const [creatingPoll, setCreatingPoll] = useState(false);
+  const [scheduleSheet, setScheduleSheet] = useState(false);
+  const [scheduleCustom, setScheduleCustom] = useState(false);
+  const sendPress = useRef<{ timer: number; fired: boolean } | null>(null);
   const pickerRequest = useStickers((s) => s.pickerRequest);
   const [request, setRequest] = useState<{ packId?: string; seq: number } | null>(null);
   const seenRequest = useRef(useStickers.getState().pickerRequest?.seq ?? 0);
@@ -238,6 +253,12 @@ function ComposerView({
     if (typingRef.current.timer) clearTimeout(typingRef.current.timer);
     typingRef.current.on = false;
     realtime.send({ type: 'typing', rid, tmid: tmid ?? null, typing: on, activity: 'recording' });
+  };
+  // "Gravando vídeo…": o mesmo esquema do áudio.
+  const sendVideoActivity = (on: boolean) => {
+    if (typingRef.current.timer) clearTimeout(typingRef.current.timer);
+    typingRef.current.on = false;
+    realtime.send({ type: 'typing', rid, tmid: tmid ?? null, typing: on, activity: 'video' });
   };
 
   const reqSeq = useRef(0);
@@ -373,8 +394,84 @@ function ComposerView({
     onActivity: sendRecording,
     onSend: (r) => void doUpload([r.file], '', { voice: '1', duration: r.duration.toFixed(1), waveform: r.waveform.join(',') }, 'mensagem de voz'),
   });
+  // Upload permitido nesta sala (conversa direta segue FileUpload_Enabled_Direct).
+  const uploadsHere = !!uploadsOn && !(room?.t === 'd' && uploadsInDirect === false);
   // Caixa vazia: o botão Enviar vira o microfone (como no WhatsApp).
-  const micOn = !!uploadsOn && !(room?.t === 'd' && uploadsInDirect === false) && !editing && !text.trim() && !pending.length;
+  const micOn = uploadsHere && !editing && !text.trim() && !pending.length;
+  // Itens do "+": vídeo (upload permitido e o tipo aceito), enquete (create-poll). Sala criptografada: nenhum dos dois
+  // (o servidor não lê o conteúdo), nem agendar.
+  const roles = [...me.roles, ...(sub?.roles ?? [])];
+  const encrypted = !!room?.encrypted;
+  const videoOn = uploadsHere && !encrypted && !editing && (mediaTypeAllowed('video/mp4', whiteList, blackList) || mediaTypeAllowed('video/webm', whiteList, blackList));
+  const pollOn = !encrypted && !editing && canWithRoles('create-poll', roles);
+  const canSchedule = !encrypted && canWithRoles('schedule-message', roles);
+  const schedulable = canSchedule && !!text.trim() && !editing && !quoting && !pending.length && !text.trim().startsWith('/') && !over;
+  const ackLabel = ackOption && !tmid ? (askAck ? 'Pede “Ciente”' : 'Sem “Ciente”') : undefined;
+
+  const openVideo = () => {
+    const why = videoBlockedReason();
+    if (why) return useStore.getState().toast(why, 'error');
+    setRecordingVideo(true);
+  };
+
+  // Agendar o texto do compositor: limpa a caixa e o rascunho como o envio.
+  const schedule = async (at: Date): Promise<boolean> => {
+    const msg = text.trim();
+    if (!msg) return false;
+    if (msg.length > maxSize) return (useStore.getState().toast(`A mensagem excede ${maxSize} caracteres.`, 'error'), false);
+    try {
+      const ackRequired = ackOption && askAck && !tmid ? true : undefined;
+      const r = await api.post('chat.scheduleMessage', { message: { rid, msg, tmid, tshow: tmid ? alsoChannel || undefined : undefined, ackRequired }, sendAt: at.toISOString() });
+      const st = useStore.getState();
+      st.upsertScheduled(r.scheduled);
+      sendTyping(false);
+      setText('');
+      saveDraft('');
+      reqSeq.current++;
+      setSugs([]);
+      const path = `${roomPath({ _id: rid, t: room?.t ?? sub?.t ?? 'c' })}?tab=scheduled`;
+      st.toast(`Mensagem agendada para ${whenText(r.scheduled.sendAt, new Date())}.`, 'success', { icon: 'schedule', action: { label: 'Ver', onClick: () => navigate(path) } });
+      return true;
+    } catch (e) {
+      useStore.getState().toast(errorMessage(e), 'error');
+      return false;
+    }
+  };
+
+  // Celular: segurar o Enviar por 450 ms abre "Agendar envio"; o clique que termina o toque longo não envia.
+  const sendPressProps =
+    phone && schedulable
+      ? {
+          onPointerDown: () => {
+            if (sendPress.current) clearTimeout(sendPress.current.timer);
+            const timer = window.setTimeout(() => {
+              if (sendPress.current) sendPress.current.fired = true;
+              navigator.vibrate?.(10);
+              setScheduleSheet(true);
+            }, 450);
+            sendPress.current = { timer, fired: false };
+          },
+          onPointerUp: () => {
+            const p = sendPress.current;
+            if (p && !p.fired) clearTimeout(p.timer);
+          },
+          onPointerLeave: () => {
+            const p = sendPress.current;
+            if (p && !p.fired) (clearTimeout(p.timer), (sendPress.current = null));
+          },
+          onPointerCancel: () => {
+            const p = sendPress.current;
+            if (p && !p.fired) (clearTimeout(p.timer), (sendPress.current = null));
+          },
+          onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+        }
+      : {};
+  const onSendClick = () => {
+    const p = sendPress.current;
+    sendPress.current = null;
+    if (p?.fired) return;
+    void send();
+  };
 
   const cancelEdit = () => {
     setEditing(null);
@@ -520,6 +617,7 @@ function ComposerView({
           </button>
         </div>
       ))}
+      {!tmid && <ScheduledStrip rid={rid} onOpen={() => navigate(`${roomPath({ _id: rid, t: room?.t ?? sub?.t ?? 'c' })}?tab=scheduled`)} />}
       {sugs.length > 0 && (
         <Portal>
           <div
@@ -606,22 +704,48 @@ function ComposerView({
       )}
       <div className="composer-tools">
         {voice.active && <VoiceBar voice={voice} />}
-        {uploadsOn && (
-          <label
-            className="tool-btn"
-            title="Enviar arquivo"
-            aria-label="Enviar arquivo"
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter' && e.key !== ' ') return;
-              e.preventDefault();
-              e.currentTarget.querySelector('input')?.click();
-            }}
+        {/* O input fica fora do menu: continua vivo depois que o menu fecha. */}
+        <input ref={fileInput} type="file" multiple hidden onChange={(e) => (e.target.files && setPending([...e.target.files]), (e.target.value = ''))} />
+        {videoOn || pollOn ? (
+          <Menu
+            label="Adicionar"
+            sheetTitle="Adicionar"
+            placement="top-start"
+            trigger={
+              <button type="button" className="tool-btn" title="Adicionar" aria-label="Adicionar">
+                <Icon name="add" size={phone ? 18 : 16} />
+              </button>
+            }
           >
-            <Icon name={phone ? 'add' : 'attach'} size={phone ? 18 : 16} />
-            <input type="file" multiple hidden onChange={(e) => (e.target.files && setPending([...e.target.files]), (e.target.value = ''))} />
-          </label>
+            {(close) => (
+              <>
+                {uploadsHere && (
+                  <button type="button" onClick={() => (close(), fileInput.current?.click())}>
+                    <Icon name="attach" size={16} />
+                    Enviar arquivo
+                  </button>
+                )}
+                {videoOn && (
+                  <button type="button" onClick={() => (close(), openVideo())}>
+                    <Icon name="video-message" size={16} />
+                    Gravar vídeo
+                  </button>
+                )}
+                {pollOn && (
+                  <button type="button" onClick={() => (close(), setCreatingPoll(true))}>
+                    <Icon name="poll" size={16} />
+                    Criar enquete
+                  </button>
+                )}
+              </>
+            )}
+          </Menu>
+        ) : (
+          uploadsHere && (
+            <button type="button" className="tool-btn" title="Enviar arquivo" aria-label="Enviar arquivo" onClick={() => fileInput.current?.click()}>
+              <Icon name={phone ? 'add' : 'attach'} size={phone ? 18 : 16} />
+            </button>
+          )
         )}
         {phone && (
           <button type="button" className={fmt ? 'tool-btn on' : 'tool-btn'} title="Formatação" aria-label="Formatação" aria-pressed={fmt} onClick={() => setFmt(!fmt)}>
@@ -668,12 +792,41 @@ function ComposerView({
             <Icon name={voice.phase === 'locked' ? 'send' : 'mic'} size={18} />
           </button>
         ) : (
-          <button type="button" className="btn primary send" onClick={send} disabled={!text.trim() || over} title="Enviar">
-            <Icon name="send" size={18} />
-            <span className="visually-hidden">Enviar</span>
-          </button>
+          <span className={`send-group${!phone && schedulable ? ' with-more' : ''}`}>
+            <button
+              type="button"
+              className="btn primary send"
+              onClick={onSendClick}
+              disabled={!text.trim() || over}
+              title={phone && schedulable ? 'Enviar (segure para agendar)' : 'Enviar'}
+              {...sendPressProps}
+            >
+              <Icon name="send" size={18} />
+              <span className="visually-hidden">Enviar</span>
+            </button>
+            {!phone && schedulable && <ScheduleArrow onPick={(at) => void schedule(at)} onCustom={() => setScheduleCustom(true)} />}
+          </span>
         )}
       </div>
+      {scheduleSheet && (
+        <Sheet onClose={() => setScheduleSheet(false)} className="menu schedule-menu" role="menu" label="Agendar envio">
+          <div className="sheet-scroll">
+            <div className="menu-title" role="presentation">
+              <strong>Agendar envio</strong>
+            </div>
+            <ScheduleItems sheetRole onPick={(at) => void schedule(at)} onCustom={() => setScheduleCustom(true)} close={() => setScheduleSheet(false)} />
+          </div>
+        </Sheet>
+      )}
+      {scheduleCustom && <ScheduleModal ackLabel={ackLabel} onSubmit={({ at }) => schedule(at)} onClose={() => setScheduleCustom(false)} />}
+      {recordingVideo && (
+        <VideoRecorder
+          onClose={() => setRecordingVideo(false)}
+          onActivity={sendVideoActivity}
+          onSend={(r) => void doUpload([r.file], '', { video: '1', duration: r.duration.toFixed(1) }, 'mensagem de vídeo')}
+        />
+      )}
+      {creatingPoll && <PollModal rid={rid} tmid={tmid ?? null} onClose={() => setCreatingPoll(false)} />}
       {picker && (
         <ExpressionPicker
           anchor={emojiBtn.current}

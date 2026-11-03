@@ -21,8 +21,10 @@ import { InCallBadge } from './call/LiveIndicators';
 import { RoomAccessPanel } from './RoomAccessPanel';
 // Exportar mensagens: período, formato e arquivos, com tíquete de download de uso único.
 import { ExportPanel } from './ExportPanel';
+// Envios agendados: só quem agendou vê as suas.
+import { ScheduledPanel } from './ScheduleControls';
 
-export type PanelId = 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune' | 'access' | 'export';
+export type PanelId = 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune' | 'access' | 'export' | 'scheduled';
 
 const TITLES: Record<PanelId, string> = {
   info: 'Informações da sala',
@@ -40,6 +42,7 @@ const TITLES: Record<PanelId, string> = {
   prune: 'Limpar histórico',
   access: 'Permissões do canal',
   export: 'Exportar mensagens',
+  scheduled: 'Mensagens agendadas',
 };
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
@@ -113,7 +116,7 @@ export function PanelHead({ title, sub, actions, onClose }: { title: string; sub
 
 export function RoomPanel(p: Props) {
   const esc = usePanelEscape(p.onClose);
-  const sub = p.id === 'members' && p.room.usersCount ? plural(p.room.usersCount, 'pessoa', 'pessoas') : undefined;
+  const sub = p.id === 'members' && p.room.usersCount ? plural(p.room.usersCount, 'pessoa', 'pessoas') : p.id === 'scheduled' ? 'Só você vê.' : undefined;
   // Numa conversa direta o painel fala da pessoa (ou do grupo), não de uma "sala".
   const title = p.id === 'info' && p.room.t === 'd' ? ((p.room.uids?.length ?? 0) > 2 ? 'Informações da conversa' : 'Informações do contato') : TITLES[p.id];
   return (
@@ -133,6 +136,7 @@ export function RoomPanel(p: Props) {
         {p.id === 'prune' && <PrunePanel {...p} />}
         {p.id === 'access' && <RoomAccessPanel room={p.room} onChanged={p.onChanged} />}
         {p.id === 'export' && <ExportPanel room={p.room} />}
+        {p.id === 'scheduled' && <ScheduledPanel room={p.room} />}
       </div>
     </aside>
   );

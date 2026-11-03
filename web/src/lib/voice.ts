@@ -138,9 +138,9 @@ export async function startVoiceRecording(onTick?: () => void, onLimit?: () => v
   };
 }
 
-// Só uma mensagem de voz toca por vez: dar play numa pausa a anterior.
-let playing: HTMLAudioElement | null = null;
-export function claimPlayback(el: HTMLAudioElement) {
+// Só uma mensagem de voz (ou de vídeo) toca por vez: dar play numa pausa a anterior.
+let playing: HTMLMediaElement | null = null;
+export function claimPlayback(el: HTMLMediaElement) {
   if (playing && playing !== el) playing.pause();
   playing = el;
 }

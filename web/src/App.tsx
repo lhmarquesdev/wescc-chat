@@ -21,6 +21,8 @@ import { CalendarPage } from './pages/CalendarPage';
 import { FilesPage } from './pages/FilesPage'; // Arquivos (pastas compartilhadas)
 import { MeetPage } from './pages/MeetPage';
 import { CalendarNotices } from './components/calendar/CalendarNotices';
+import { MessageNotices } from './components/MessageNotices';
+import { RemindersPage } from './pages/RemindersPage';
 
 function useCustomCss() {
   const css = useStore((s) => s.settings.Layout_Custom_CSS as string | undefined);
@@ -258,6 +260,7 @@ function Protected() {
       {phone && view !== 'room' && <MobileTabBar />}
       <CallOverlay />
       <CalendarNotices />
+      <MessageNotices />
     </div>
   );
 }
@@ -304,6 +307,7 @@ function Shell() {
           ))}
           <Route path="/calls" element={<CallsPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/reminders" element={<RemindersPage />} />
           <Route path="/files" element={<FilesPage />} />
           <Route path="/files/trash" element={<FilesPage />} />
           <Route path="/files/f/:folderId" element={<FilesPage />} />

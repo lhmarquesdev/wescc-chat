@@ -47,6 +47,16 @@ async function loadPresence() {
   useStore.setState({ presence });
 }
 
+// Mensagens: os lembretes e as agendadas da pessoa (no máximo 100 agendadas, o limite por pessoa).
+export async function loadReminders() {
+  const r = await api.get('reminders.list').catch(() => null);
+  if (r) useStore.getState().setReminders(r.reminders);
+}
+export async function loadScheduled() {
+  const r = await api.get('chat.getScheduledMessages').catch(() => null);
+  if (r) useStore.getState().setScheduled(r.scheduled.slice(0, 100));
+}
+
 export async function startSession() {
   const me = (await api.get('me')) as Me;
   useStore.getState().setMe(me);
@@ -61,6 +71,8 @@ export async function startSession() {
   invalidateSlashCommands();
   void loadPresence();
   void syncPushSubscription();
+  void loadReminders();
+  void loadScheduled();
   if (!started) {
     started = true;
     realtime.start(() => {
@@ -69,6 +81,8 @@ export async function startSession() {
       useStore.setState({ userRoles: {} });
       void loadSubscriptions();
       void loadPresence();
+      void loadReminders();
+      void loadScheduled();
       void api.get('me').then((m) => useStore.getState().setMe(m));
       // Eventos de figurinha podem ter se perdido na queda.
       invalidateStickers('org');
@@ -227,6 +241,19 @@ export function currentRoomId() {
   return m?.[2] ?? null;
 }
 
+// Notificação do sistema quando a janela não tem foco e a permissão foi dada; o clique abre o caminho. Devolve se mostrou.
+export function systemNotify(title: string, body: string, tag: string, path: string | null): boolean {
+  if (!('Notification' in window) || Notification.permission !== 'granted' || document.hasFocus()) return false;
+  const n = new Notification(title, { body, tag, icon: '/favicon.svg' });
+  n.onclick = () => {
+    window.focus();
+    if (path) history.pushState({}, '', path);
+    dispatchEvent(new PopStateEvent('popstate'));
+    n.close();
+  };
+  return true;
+}
+
 function showNotification(ev: { rid: string; title: string; text: string; messageId: string; tmid?: string | null }) {
   const st = useStore.getState();
   if (!ev.rid) {
@@ -237,15 +264,9 @@ function showNotification(ev: { rid: string; title: string; text: string; messag
   if (focusedHere) return;
   const prefs = st.me?.preferences ?? {};
   if (prefs.notificationSound !== false) beep();
-  if ('Notification' in window && Notification.permission === 'granted' && !document.hasFocus()) {
-    const sub = st.subscriptions[ev.rid];
-    const n = new Notification(ev.title, { body: ev.text, tag: ev.messageId, icon: '/favicon.svg' });
-    n.onclick = () => {
-      window.focus();
-      if (sub) history.pushState({}, '', roomPath(sub) + (ev.tmid ? `/thread/${ev.tmid}` : ''));
-      dispatchEvent(new PopStateEvent('popstate'));
-      n.close();
-    };
+  const sub = st.subscriptions[ev.rid];
+  if (systemNotify(ev.title, ev.text, ev.messageId, sub ? roomPath(sub) + (ev.tmid ? `/thread/${ev.tmid}` : '') : null)) {
+    // aviso do sistema mostrado
   } else if (!focusedHere) {
     st.toast(`${ev.title}: ${ev.text}`);
   }

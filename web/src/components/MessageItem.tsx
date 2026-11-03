@@ -20,7 +20,7 @@ import { api, errorMessage } from '../lib/api';
 import { formatBytes, formatDateTime, formatRelative, formatTime, formatWhen, nameList, plural, roomPath, systemIcon, systemText } from '../lib/format';
 import { resolveEmoji } from '../lib/emoji';
 import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
-import { authorName, editableKind } from '../lib/messageRules';
+import { authorName, editableKind, forwardableKind } from '../lib/messageRules';
 import { canRemoveEverywhere, useStickers } from '../lib/stickers';
 import { useNames } from '../lib/names';
 import { avatarBust, useSetting, useStore } from '../lib/store';
@@ -33,6 +33,11 @@ import { StickerCard } from './stickers/StickerCard';
 import { CreateStickerItem, StickerHost, StickerMenuItems, StickerRemoveItem, useCreateSticker } from './stickers/StickerMenuItems';
 import { StickerView } from './stickers/StickerView';
 import { VoicePlayer } from './VoicePlayer';
+import { VideoMessage } from './VideoMessage';
+import { ForwardCard } from './ForwardCard';
+import { ForwardModal } from './ForwardModal';
+import { PollCard } from './Poll';
+import { ReminderModal } from './ReminderModal';
 import { Avatar, confirmDialog, Empty, Field, Menu, Modal, SkeletonList, useAsync } from './ui';
 // Integrações (Jira)
 import { jiraApi, jiraCreateAvailable, openIntegrationModal, useIntegrations } from '../lib/integrations';
@@ -59,6 +64,12 @@ export type MessageGate = Pick<MessageActions, 'canReact' | 'canReply' | 'canDis
   canSeeLimitedReceipts?: boolean;
   // Fixar: permissão pin-message (global ou da sala); em DMs, qualquer participante. Padrão: true.
   canPin?: boolean;
+  // Encaminhar a partir desta sala (sala criptografada não). Padrão: true.
+  canForwardFrom?: boolean;
+  // Enquetes: motivo para não votar ('' = pode), encerrar as dos outros (delete-message) e ver quem votou.
+  voteBlocked?: string;
+  canClosePolls?: boolean;
+  canSeePollVoters?: boolean;
 };
 
 // As mesmas regras para toda mensagem da sala, inclusive as da thread, que monta as próprias ações.
@@ -274,6 +285,9 @@ function FileAttachment({ a, m, createSticker }: { a: Attachment; m?: Message; c
         {a.description && <div className="att-desc">{a.description}</div>}
       </div>
     );
+  // Mensagem de vídeo gravada no chat: player próprio (retângulo, toque para tocar com som).
+  const videoMsg = a.video_message ? safeHref(a.video_url) : undefined;
+  if (videoMsg) return <VideoMessage src={videoMsg} duration={a.video_duration} />;
   if (a.video_url) return <video className="att-video" src={safeHref(a.video_url)} controls preload="metadata" />;
   const audio = safeHref(a.audio_url);
   if (audio)
@@ -761,6 +775,9 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   const [receipts, setReceipts] = useState(false);
   const [report, setReport] = useState(false);
   const [stickerCard, setStickerCard] = useState<HTMLElement | null>(null);
+  const [forwarding, setForwarding] = useState(false);
+  const [reminding, setReminding] = useState(false);
+  const reminder = useStore((s) => (m.t ? undefined : s.reminders.find((r) => r.messageId === m._id)));
   const stickerGone = useStickers((st) => !!m.sticker && (m.sticker.removed || st.removed.has(m.sticker.fileId)));
   const createSticker = useCreateSticker(m, inThread);
   const editing = useIsEditing(m._id);
@@ -813,6 +830,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
     [
       opt(canEdit, { key: 'edit', icon: 'edit', label: 'Editar', run: () => actions.onEdit?.(m) }),
       opt(!m.drid && !inThread && actions.onDiscussion && canDiscuss, { key: 'disc', icon: 'start-discussion', label: 'Iniciar discussão', run: () => actions.onDiscussion?.(m) }),
+      opt(perms.includes('forward-message') && forwardableKind(m) && gate.canForwardFrom !== false, { key: 'forward', icon: 'forward', label: 'Encaminhar', run: () => setForwarding(true) }),
     ],
     [
       opt(allowPin && gate.canPin !== false, {
@@ -827,6 +845,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
         label: starred ? 'Remover dos favoritos' : 'Favoritar',
         run: () => void api.post(starred ? 'chat.unStarMessage' : 'chat.starMessage', { messageId: m._id }).catch(fail),
       }),
+      opt(!m.t, { key: 'remind', icon: 'remind', label: reminder ? 'Alterar lembrete' : 'Lembrar-me', run: () => setReminding(true) }),
       { key: 'link', icon: 'copy-link', label: 'Copiar link', run: copyLink } as MenuItem,
       opt(!m.sticker, { key: 'text', icon: 'copy', label: 'Copiar texto', run: () => copyText(m.msg, 'Texto copiado.') }),
       opt(!own, { key: 'unread', icon: 'mark-unread', label: 'Marcar como não lida', run: () => void api.post('subscriptions.unread', { firstUnreadMessage: { _id: m._id } }).catch(fail) }),
@@ -953,25 +972,43 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
     ) : null;
   // Figurinha: no lugar do texto, sem o emoji grande; a imagem de reserva (anexo 'sticker') é para outros clientes.
   const sticker = m.sticker && m.t !== 'rm' ? m.sticker : null;
-  const content = (
+  // Integrações (Jira): o anexo de reserva do Jira e da reunião some quando o cartão existe
+  const attachments = m.attachments?.map((a, i) =>
+    (sticker && a.type === 'sticker') || (a.type === 'jira' && m.jira) || (a.type === 'meeting' && m.meeting) ? null : (
+      <AttachmentView key={i} a={a} m={m} createSticker={createSticker ?? undefined} />
+    ),
+  );
+  const stickerView = sticker && <StickerView sticker={sticker} size="message" playbackKey={m._id} onOpen={setStickerCard} />;
+  const forward = m.forward && m.t !== 'rm' ? m.forward : null;
+  const poll = m.poll && m.t !== 'rm' ? m.poll : null;
+  const content = forward ? (
+    // Encaminhada: o comentário de quem encaminhou (com as menções da mensagem) e, abaixo, o cartão com o original
+    // (sem menções ativas: ninguém é avisado de novo).
     <>
-      {sticker ? (
-        <StickerView sticker={sticker} size="message" playbackKey={m._id} onOpen={setStickerCard} />
-      ) : (
-        !call &&
-        (text || !lifted) && (
+      {forward.comment && (
+        <div className="msg-body">
+          {withCopy(renderMarkdown(forward.comment, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick }))}
+          {grouped && edited}
+        </div>
+      )}
+      <ForwardCard f={forward}>
+        {stickerView ||
+          (m.msg && <div className={`msg-body ${isEmojiOnly(m.msg) ? 'big-emoji' : ''}`}>{withCopy(renderMarkdown(m.msg, { me: me.username, mentions: [], channels: [] }))}</div>)}
+        {attachments}
+      </ForwardCard>
+    </>
+  ) : poll ? (
+    <PollCard m={m} gate={{ voteBlocked: gate.voteBlocked, canClosePolls: gate.canClosePolls, canSeePollVoters: gate.canSeePollVoters }} />
+  ) : (
+    <>
+      {stickerView ||
+        (!call && (text || !lifted) && (
           <div className={`msg-body ${isEmojiOnly(text) ? 'big-emoji' : ''}`}>
             {body}
             {grouped && edited}
           </div>
-        )
-      )}
-      {/* Integrações (Jira): o anexo de reserva do Jira e da reunião some quando o cartão existe */}
-      {m.attachments?.map((a, i) =>
-        (sticker && a.type === 'sticker') || (a.type === 'jira' && m.jira) || (a.type === 'meeting' && m.meeting) ? null : (
-          <AttachmentView key={i} a={a} m={m} createSticker={createSticker ?? undefined} />
-        ),
-      )}
+        ))}
+      {attachments}
     </>
   );
 
@@ -1198,6 +1235,8 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
       {receipts && <ReadReceipts m={m} onClose={() => setReceipts(false)} />}
       {report && <ReportModal m={m} onClose={() => setReport(false)} />}
       {stickerCard && sticker && <StickerCard message={m} anchor={stickerCard} onClose={() => setStickerCard(null)} onReport={() => setReport(true)} />}
+      {forwarding && <ForwardModal m={m} onClose={() => setForwarding(false)} />}
+      {reminding && <ReminderModal m={m} onClose={() => setReminding(false)} />}
     </div>
   );
 }

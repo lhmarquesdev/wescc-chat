@@ -232,6 +232,12 @@ import {
   UserSearch,
   Columns2,
   LayoutTemplate,
+  // Mensagens: encaminhar, enquetes, lembretes e agendadas
+  Forward,
+  Vote,
+  AlarmClockPlus,
+  CalendarClock,
+  Square,
 } from 'lucide-react';
 
 // Arquivos (pastas compartilhadas)
@@ -646,6 +652,17 @@ export const ICONS = {
   // ---------- Exportar mensagens e Meus dados (LGPD) ----------
   'panel-export': ExportFileDown,
   'my-data': ExportFolderDown,
+  // ---------- Mensagens: encaminhar, vídeo, enquetes, lembretes e agendadas ----------
+  forward: Forward, // "Encaminhar" e o cabeçalho do cartão encaminhado
+  poll: Vote, // "Criar enquete" e o cartão
+  'poll-close': Lock, // "Encerrar enquete"
+  remind: AlarmClockPlus, // "Lembrar-me"
+  'nav-reminders': AlarmClock, // "Lembretes" (barra lateral e menu Você)
+  schedule: CalendarClock, // seta "Agendar envio" e faixa do compositor
+  'panel-scheduled': CalendarClock, // painel "Mensagens agendadas"
+  'video-message': Video, // "Gravar vídeo"
+  'record-start': Circle, // começar a gravar
+  'record-stop': Square, // parar
 } as const;
 
 export type IconName = keyof typeof ICONS;

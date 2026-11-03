@@ -52,7 +52,9 @@ export function MobileTabBar() {
   const mentions = useMentionTotal();
   const { status } = useMyStatus();
   const { pathname } = useLocation();
-  const meActive = pathname.startsWith('/account') || pathname.startsWith('/admin');
+  const meActive = pathname.startsWith('/account') || pathname.startsWith('/admin') || pathname.startsWith('/reminders');
+  // Lembrete avisado: um ponto no avatar da aba "Você" (o item fica no menu dela).
+  const remindersFired = useStore((s) => s.reminders.some((r) => r.firedAt));
   return (
     <nav className="tabbar" aria-label="Navegação principal">
       <Tab to="/home" icon="nav-chats" label="Conversas" badge={mentions} badgeKind="mention" />
@@ -65,6 +67,7 @@ export function MobileTabBar() {
           <button type="button" className={meActive ? 'tab me-btn active' : 'tab me-btn'} aria-current={meActive ? 'page' : undefined}>
             <span className="tab-icon">
               <UserAvatar username={me.username} size={24} status={status} />
+              {remindersFired && <span className="tab-dot" role="img" aria-label="Lembretes avisados" />}
             </span>
             <span className="tab-label">Você</span>
           </button>
