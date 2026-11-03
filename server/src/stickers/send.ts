@@ -108,19 +108,60 @@ async function resolveSticker(ctx: Ctx, roles: string[], manager: boolean, input
   return { file: facts.file, scope: 'personal', name: item?.name ?? DEFAULT_STICKER_NAME, emojis: item?.emojis ?? [], org: null };
 }
 
+// Regras da figurinha numa sala, depois das regras de envio dela (canPostInRoom). Divididas em partes para o envio pelo
+// seletor manter a ordem de sempre; o encaminhar usa todas de uma vez (assertStickerAllowedIn).
+export function assertStickersEnabled() {
+  if (!getSetting('Stickers_Enabled')) throw badRequest('error-stickers-disabled', 'As figurinhas estão desativadas.');
+}
+
+export function assertStickerRoomAllowed(room: any) {
+  if (room.notice && !getSetting('Stickers_In_Notice_Rooms')) {
+    throw new ApiError(403, 'error-sticker-not-allowed-here', 'Figurinhas não são permitidas em canais de avisos.');
+  }
+}
+
+async function assertStickerSenderAllowed(ctx: Ctx) {
+  if (await isSendBlocked(ctx.userId)) throw new ApiError(403, 'error-sticker-send-blocked', 'Seu perfil não pode enviar figurinhas.');
+}
+
+function assertStickerFileAllowed(room: any, f: { mime: string; animated: boolean }, scope: StickerScope) {
+  if (scope === 'personal') {
+    if (!getSetting('Stickers_Personal_Enabled')) throw new ApiError(403, 'error-sticker-personal-disabled', 'As figurinhas pessoais estão desativadas.');
+    if (!getSetting('FileUpload_Enabled') || !typeAllowed(f.mime) || (room.t === 'd' && !getSetting('FileUpload_Enabled_Direct'))) {
+      throw new ApiError(403, 'error-sticker-personal-not-allowed', 'Nesta conversa só dá para enviar figurinhas da organização.');
+    }
+  }
+  if (f.animated && !getSetting('Stickers_Animated_Enabled')) throw new ApiError(403, 'error-sticker-animated-disabled', 'Figurinhas animadas estão desativadas.');
+}
+
+// Encaminhar uma figurinha: a mesma imagem que quem encaminha já vê, com as regras de figurinha do destino. Arquivo que
+// saiu ou foi bloqueado pela moderação: "Esta figurinha foi removida".
+export async function assertStickerAllowedIn(ctx: Ctx, room: any, fileId: string, scope: StickerScope) {
+  assertStickersEnabled();
+  assertStickerRoomAllowed(room);
+  await assertStickerSenderAllowed(ctx);
+  const f = ID_RE.test(fileId) ? await one('SELECT id, mime, animated, blocked_at FROM sticker_files WHERE id = $1', [fileId]) : null;
+  if (!f || f.blocked_at) throw removedError();
+  assertStickerFileAllowed(room, f, scope);
+}
+
+// Fecha a corrida com uma remoção em andamento (o FOR SHARE espera por ela): depois da gravação, o arquivo continua liberado?
+export async function stickerStillUsable(fileId: string) {
+  const after = await one('SELECT blocked_at FROM sticker_files WHERE id = $1 FOR SHARE', [fileId], pool);
+  return !!after && !after.blocked_at;
+}
+
 export async function sendSticker(
   ctx: Ctx,
   input: { roomId: string; stickerId?: string; fileId?: string; tmid?: string | null; tshow?: boolean; quoteMessageId?: string; _id?: string },
 ): Promise<Message> {
-  if (!getSetting('Stickers_Enabled')) throw badRequest('error-stickers-disabled', 'As figurinhas estão desativadas.');
+  assertStickersEnabled();
   if (!!input.stickerId === !!input.fileId) throw badRequest('error-invalid-params', 'Informe a figurinha.');
   const room = input.roomId ? await getRoom(String(input.roomId)) : null;
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   // Antes de qualquer regra de figurinha: os erros de sala ficam idênticos aos do texto.
   await canPostInRoom(ctx, room);
-  if (room.notice && !getSetting('Stickers_In_Notice_Rooms')) {
-    throw new ApiError(403, 'error-sticker-not-allowed-here', 'Figurinhas não são permitidas em canais de avisos.');
-  }
+  assertStickerRoomAllowed(room);
   const clientId = input._id && ID_RE.test(input._id) ? input._id : null;
   return onePerId(clientId && `${ctx.userId}:${clientId}`, () => sendOnce(ctx, room, input, clientId));
 }
@@ -134,19 +175,13 @@ async function sendOnce(ctx: Ctx, room: any, input: Parameters<typeof sendSticke
     if (prev && sameSend(prev)) return withExtra(prev);
     id = prev ? undefined : clientId; // id de outra mensagem: sendMessage escolhe outro, como hoje
   }
-  if (await isSendBlocked(ctx.userId)) throw new ApiError(403, 'error-sticker-send-blocked', 'Seu perfil não pode enviar figurinhas.');
+  await assertStickerSenderAllowed(ctx);
   countSend(ctx.userId);
 
   const { roles, flags } = await stickerRoleInfo(ctx.userId);
   const r = await resolveSticker(ctx, roles, flags.manager, input);
   const f = r.file;
-  if (r.scope === 'personal') {
-    if (!getSetting('Stickers_Personal_Enabled')) throw new ApiError(403, 'error-sticker-personal-disabled', 'As figurinhas pessoais estão desativadas.');
-    if (!getSetting('FileUpload_Enabled') || !typeAllowed(f.mime) || (room.t === 'd' && !getSetting('FileUpload_Enabled_Direct'))) {
-      throw new ApiError(403, 'error-sticker-personal-not-allowed', 'Nesta conversa só dá para enviar figurinhas da organização.');
-    }
-  }
-  if (f.animated && !getSetting('Stickers_Animated_Enabled')) throw new ApiError(403, 'error-sticker-animated-disabled', 'Figurinhas animadas estão desativadas.');
+  assertStickerFileAllowed(room, f, r.scope);
 
   // Só do banco: o cliente nunca descreve a figurinha. O filtro roda de novo porque a lista pode ter mudado.
   const snapshot: MessageStickerLive = {
@@ -195,8 +230,7 @@ async function sendOnce(ctx: Ctx, room: any, input: Parameters<typeof sendSticke
   }
 
   // Fecha a corrida com uma remoção em andamento: o FOR SHARE espera por ela.
-  const after = await one('SELECT blocked_at FROM sticker_files WHERE id = $1 FOR SHARE', [f.id], pool);
-  if (!after || after.blocked_at) {
+  if (!(await stickerStillUsable(f.id))) {
     const rewritten = await rewriteRemovedStickerMessages(pool, f.id, message._id);
     const row = await getMessageRow(message._id);
     if (row) message = withExtra(row);

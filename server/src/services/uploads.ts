@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { Readable } from 'node:stream';
 import type { Attachment } from '@shared/index';
+import { VIDEO_MESSAGE_MAX_SECONDS } from '@shared/messages';
 import { config } from '../config';
 import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
@@ -85,7 +86,7 @@ async function writeFile(file: { file: Readable & { truncated?: boolean }; filen
   return { id, name: name && name !== '.' && name !== '..' ? name : 'arquivo', type, size, rel };
 }
 
-const UPLOAD_FIELDS = ['msg', 'description', 'tmid', 'voice', 'duration', 'waveform'];
+const UPLOAD_FIELDS = ['msg', 'description', 'tmid', 'voice', 'duration', 'waveform', 'video'];
 // Limites do multipart além do arquivo: sem eles cada campo de texto (até 1 MB, sem limite de quantidade) fica na memória.
 const FIELD_LIMITS = { files: 1, fields: 10, parts: 11, fieldSize: 64 * 1024 };
 
@@ -170,13 +171,28 @@ export function voiceFields(type: string, fields: { voice?: string; duration?: s
   return { duration, waveform };
 }
 
-export async function saveUpload(ctx: Ctx, rid: string, file: StoredFile, fields: { msg?: string; description?: string; tmid?: string; voice?: string; duration?: string; waveform?: string }) {
+// Mensagem de vídeo gravada no chat: video=1 e duration (segundos). Só vale para vídeo; fora do formato vira arquivo comum.
+export function videoFields(type: string, fields: { video?: string; duration?: string }) {
+  if (fields.video !== '1' || !type.startsWith('video/')) return null;
+  const d = Number(fields.duration);
+  return { duration: Number.isFinite(d) && d > 0 ? Math.min(Math.round(d * 10) / 10, VIDEO_MESSAGE_MAX_SECONDS + 5) : undefined };
+}
+
+export async function saveUpload(
+  ctx: Ctx,
+  rid: string,
+  file: StoredFile,
+  fields: { msg?: string; description?: string; tmid?: string; voice?: string; duration?: string; waveform?: string; video?: string },
+) {
   try {
+    // voice e video juntos: vale o que bate com o tipo do arquivo.
     const voice = voiceFields(file.type, fields);
+    const video = voice ? null : videoFields(file.type, fields);
     const f = await registerFile(file, rid, { userId: ctx.userId });
     const att = fileAttachment(file, fields.description);
     if (voice) Object.assign(att, { voice: true, audio_duration: voice.duration, audio_waveform: voice.waveform });
-    const files = [voice ? { ...f, voice: true, duration: voice.duration } : f];
+    if (video) Object.assign(att, { video_message: true, video_duration: video.duration });
+    const files = [voice ? { ...f, voice: true, duration: voice.duration } : video ? { ...f, video: true, duration: video.duration } : f];
     return await sendMessage(ctx, { rid, msg: fields.msg ?? '', tmid: fields.tmid || null, files, attachments: [att] }, { skipCommands: true, internalAttachments: true });
   } catch (e) {
     await discardFile(file);
@@ -211,8 +227,14 @@ export async function listRoomFiles(ctx: Ctx, rid: string, opts: { offset?: numb
   };
 }
 
+// Uma linha de files por sala: a mensagem encaminhada aponta para o mesmo arquivo em disco. Só apaga do disco quando
+// nenhuma outra linha usa o caminho. Hoje a aba Arquivos (drive_files) não compartilha caminho com files; quem passar
+// a compartilhar precisa conferir drive_files aqui também.
 export async function removeFiles(rows: { storage_path: string }[]) {
-  for (const r of rows) await fs.promises.rm(path.join(config.uploadDir, r.storage_path), { force: true }).catch(() => {});
+  for (const r of rows) {
+    if (await one('SELECT 1 FROM files WHERE storage_path = $1 LIMIT 1', [r.storage_path])) continue;
+    await fs.promises.rm(path.join(config.uploadDir, r.storage_path), { force: true }).catch(() => {});
+  }
 }
 
 export async function deleteFilesOfMessage(messageId: string) {

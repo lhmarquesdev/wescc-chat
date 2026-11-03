@@ -109,7 +109,7 @@ export function registerWebsocket(app: FastifyInstance) {
           case 'typing': {
             if (!c.rooms.has(ev.rid)) return;
             const u = await one('SELECT username FROM users WHERE id = $1', [c.userId]);
-            bus.publish({ room: ev.rid }, { type: 'typing', rid: ev.rid, tmid: ev.tmid ?? null, username: u.username, typing: !!ev.typing, activity: ev.activity === 'recording' ? 'recording' : undefined });
+            bus.publish({ room: ev.rid }, { type: 'typing', rid: ev.rid, tmid: ev.tmid ?? null, username: u.username, typing: !!ev.typing, activity: ev.activity === 'recording' || ev.activity === 'video' ? ev.activity : undefined });
             break;
           }
           case 'watch': {

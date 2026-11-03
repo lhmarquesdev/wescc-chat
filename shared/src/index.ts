@@ -5,6 +5,8 @@ import type { MessageSticker } from './stickers';
 import type { EphemeralMessage, IntegrationAlert, MessageJira, MessageMeeting } from './integrations';
 // Agenda
 import type { CalendarEvent } from './calendar';
+// Mensagens: encaminhar, enquetes, lembretes e envios agendados
+import type { MessageForward, MessagePoll, MessageReminder, ScheduledMessage } from './messages';
 
 export type UserStatus = 'online' | 'away' | 'busy' | 'offline';
 export type RoomType = 'c' | 'p' | 'd';
@@ -185,6 +187,9 @@ export interface Attachment {
   voice?: boolean;
   audio_duration?: number;
   audio_waveform?: number[];
+  // mensagem de vídeo gravada no chat (segundos)
+  video_message?: boolean;
+  video_duration?: number;
 }
 
 export interface MessageFile {
@@ -193,7 +198,8 @@ export interface MessageFile {
   type: string;
   size: number;
   voice?: boolean; // mensagem de voz (a prévia vira "🎤 Mensagem de voz")
-  duration?: number; // segundos, só nas mensagens de voz
+  video?: boolean; // mensagem de vídeo (duration vale também aqui)
+  duration?: number; // segundos, nas mensagens de voz e de vídeo
 }
 
 export interface Message {
@@ -235,6 +241,9 @@ export interface Message {
   jira?: MessageJira;
   meeting?: MessageMeeting;
   jiraNoPreview?: boolean; // o autor removeu a prévia; edições não a recriam
+  // Mensagens: origem de uma encaminhada e a enquete (messages.extra, montadas pelo servidor)
+  forward?: MessageForward;
+  poll?: MessagePoll;
 }
 
 export interface NoticeAcks {
@@ -384,7 +393,7 @@ export type ServerEvent =
   | { type: 'message'; action: 'inserted' | 'updated'; message: Message }
   | { type: 'message.deleted'; rid: string; _id: string; tmid?: string | null }
   | { type: 'messages.bulkDeleted'; rid: string; ids?: string[]; before?: string; filesOnly?: boolean }
-  | { type: 'typing'; rid: string; tmid?: string | null; username: string; typing: boolean; activity?: 'recording' }
+  | { type: 'typing'; rid: string; tmid?: string | null; username: string; typing: boolean; activity?: 'recording' | 'video' }
   | { type: 'subscription'; action: 'inserted' | 'updated' | 'removed'; subscription: Subscription }
   | { type: 'room'; action: 'inserted' | 'updated' | 'removed'; room: Room }
   | { type: 'presence'; userId: string; username: string; status: UserStatus; statusText?: string }
@@ -419,11 +428,16 @@ export type ServerEvent =
   | { type: 'calendar.reminder'; event: CalendarEvent }
   // Meus dados (LGPD): o pedido da pessoa mudou de estado (na fila, preparando, pronto, falhou, expirou)
   | { type: 'userdata.changed'; request: UserDataRequest }
+  // Mensagens: os próprios votos (outras abas), "Lembrar-me" e envios agendados (só para a pessoa)
+  | { type: 'poll.myVotes'; rid: string; messageId: string; optionIds: string[] }
+  | { type: 'message.reminder'; action: 'upserted' | 'fired' | 'removed'; reminder: MessageReminder }
+  | { type: 'message.scheduled'; action: 'upserted' | 'removed'; scheduled: ScheduledMessage; messageId?: string; notify?: boolean }
   | { type: 'pong' };
 
 // ---------- Exportar mensagens e Meus dados (LGPD) ----------
 
 export type { RoomExportFormat } from './dataExport';
+export type { MessageForward, MessagePoll, MessageReminder, ScheduledMessage } from './messages';
 export type UserDataStatus = 'pending' | 'running' | 'ready' | 'failed' | 'expired';
 export interface UserDataRequest {
   _id: string;
@@ -627,7 +641,7 @@ export type ClientEvent =
   | { type: 'auth'; token: string }
   | { type: 'ping' }
   | { type: 'idle'; idle: boolean }
-  | { type: 'typing'; rid: string; tmid?: string | null; typing: boolean; activity?: 'recording' }
+  | { type: 'typing'; rid: string; tmid?: string | null; typing: boolean; activity?: 'recording' | 'video' }
   | { type: 'watch'; rid: string }
   | { type: 'unwatch'; rid: string }
   | { type: 'status'; status: UserStatus }

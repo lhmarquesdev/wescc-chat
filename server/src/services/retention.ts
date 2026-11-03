@@ -2,7 +2,7 @@ import { many, query } from '../db/pool';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
 import { getSetting } from './settings';
-import { deleteFilesWhere } from './uploads';
+import { deleteFilesWhere, removeFiles } from './uploads';
 import { withExtra } from './messages';
 
 export interface PruneOptions {
@@ -43,11 +43,11 @@ export async function pruneMessages(rid: string, o: PruneOptions): Promise<numbe
   const target = await many(`SELECT id FROM messages WHERE ${w.join(' AND ')} ORDER BY created_at ${limit}`, params);
   if (!target.length) return 0;
   const ids = target.map((t) => t.id);
-  const fileRows = await many('DELETE FROM files WHERE message_id = ANY($1) RETURNING storage_path', [ids]);
-  const fs = await import('node:fs');
-  const path = await import('node:path');
-  const { config } = await import('../config');
-  for (const f of fileRows) await fs.promises.rm(path.join(config.uploadDir, f.storage_path), { force: true }).catch(() => {});
+  // O arquivo de uma mensagem encaminhada continua no disco enquanto outra sala tiver a cópia (removeFiles confere).
+  await removeFiles(await many('DELETE FROM files WHERE message_id = ANY($1) RETURNING storage_path', [ids]));
+  // "Lembrar-me": o lembrete sai com a mensagem, e o dono fica sabendo (a cascata do banco não avisa ninguém).
+  const { removeRemindersOfMessage } = await import('./reminders');
+  await removeRemindersOfMessage(ids);
   await query('DELETE FROM messages WHERE id = ANY($1)', [ids]);
   // Recalcula contadores de threads afetadas e a última mensagem.
   await query(
@@ -57,6 +57,8 @@ export async function pruneMessages(rid: string, o: PruneOptions): Promise<numbe
   await query(
     `UPDATE rooms SET last_message = (
        SELECT jsonb_build_object('_id', id, 'msg', left(CASE
+         WHEN extra ? 'poll' THEN '📊 ' || (extra->'poll'->>'question')
+         WHEN coalesce(extra->'forward'->>'comment', '') <> '' THEN extra->'forward'->>'comment'
          WHEN msg <> '' THEN msg
          WHEN extra->'sticker'->>'removed' = 'true' THEN 'Figurinha removida'
          WHEN extra ? 'sticker' THEN concat_ws(' ', nullif(extra->'sticker'->'emojis'->>0, ''), 'Figurinha' ||

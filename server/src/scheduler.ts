@@ -9,6 +9,8 @@
 //   727130 e 727131 (da sincronização da agenda com Google/Outlook, removida: não reusar) · 727132 lembretes da agenda
 //   727140 arquivos (lixeira vencida, uma vez por dia)
 //   727150 exportações (Meus dados: pedidos na fila, arquivos vencidos e tíquetes antigos, a cada 15 s)
+//   727160 mensagens (prazo das enquetes, envios agendados e "Lembrar-me", a cada 15 s; os lembretes da agenda, 727132,
+//   rodam a cada 30 s e não precisam andar juntos)
 import cron from 'node-cron';
 import { pool, query } from './db/pool';
 import { recoverInterrupted } from './importer/operations';
@@ -112,6 +114,20 @@ export function startScheduler(log: (m: string) => void) {
     }).catch((e) => log(`meus dados falhou: ${e.message}`));
   }, 15_000);
 
+  // Mensagens: enquetes com prazo, envios agendados e "Lembrar-me". Uma falha não impede as outras.
+  const messageJobs = setInterval(() => {
+    void withLock(727160, async () => {
+      const [{ closeDuePolls }, { sendDueScheduled }, { fireDueReminders }] = await Promise.all([
+        import('./services/polls'),
+        import('./services/scheduled'),
+        import('./services/reminders'),
+      ]);
+      let first: unknown;
+      for (const job of [closeDuePolls, sendDueScheduled, fireDueReminders]) await job().catch((e) => (first ??= e));
+      if (first) throw first;
+    }).catch((e) => log(`tarefas de mensagens falharam: ${e.message}`));
+  }, 15_000);
+
   let retentionExpr = '';
   let retentionTask: { stop(): void } | null = null;
   let ldapExpr = '';
@@ -147,6 +163,7 @@ export function startScheduler(log: (m: string) => void) {
     clearInterval(re);
     clearInterval(calendarReminders);
     clearInterval(dataExports);
+    clearInterval(messageJobs);
     clearTimeout(stickersBoot);
     for (const t of tasks) t.stop();
     retentionTask?.stop();

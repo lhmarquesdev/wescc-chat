@@ -1,7 +1,8 @@
 import type { Attachment, MessageFile, UserRef } from '@shared/index';
 import { EMOJI } from '@shared/emoji';
 import type { MessageJira, MessageMeeting } from '@shared/integrations';
-import { messagePreviewText, stickerPreviewText, type MessageSticker } from '@shared/stickers';
+import type { MessageForward, MessagePoll } from '@shared/messages';
+import { messagePreviewText, type MessageSticker } from '@shared/stickers';
 import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
@@ -84,6 +85,11 @@ export function withExtra(row: any) {
   return m;
 }
 
+// Prévia de uma linha de messages (enquete, encaminhada, figurinha, voz, vídeo, arquivo; cifrada sem o conteúdo).
+export function rowPreview(row: any, opts: { withName?: boolean } = {}) {
+  return messagePreviewText({ msg: row.msg, sticker: row.extra?.sticker, files: row.files, forward: row.extra?.forward, poll: row.extra?.poll, e2e: row.e2e }, opts);
+}
+
 export interface SendInput {
   _id?: string;
   rid: string;
@@ -102,6 +108,8 @@ export interface SendInput {
   meeting?: MessageMeeting;
   mentionsAllowed?: string[]; // usernames que podem virar menção numa mensagem de integração (só o responsável da issue)
   sticker?: MessageSticker; // figurinha (só chat.sendSticker preenche, com opts.sticker)
+  forward?: MessageForward; // só com opts.forward (chat.forwardMessage)
+  poll?: MessagePoll; // só com opts.poll (polls.create)
 }
 
 export async function canPostInRoom(ctx: Ctx, room: any, opts: WriteOpts = {}) {
@@ -163,7 +171,7 @@ async function quoteAttachment(ctx: Ctx, link: string): Promise<Attachment | nul
   if (!m || m.t === 'rm') return null;
   if (!(await canAccessRoom(ctx.userId, await getRoom(m.room_id)))) return null;
   const files = (m.files ?? []) as MessageFile[];
-  return { text: messagePreviewText({ msg: m.msg, sticker: m.extra?.sticker, files }, { withName: false }), author_name: m.username, ...aliasOf(m), ts: m.created_at, message_link: `?msg=${m.id}` };
+  return { text: rowPreview({ ...m, files }, { withName: false }), author_name: m.username, ...aliasOf(m), ts: m.created_at, message_link: `?msg=${m.id}` };
 }
 
 export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Attachment[]> {
@@ -205,10 +213,22 @@ export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Atta
 // trusted: mensagens de integrações, que podem definir apelido e avatar próprios.
 // internalAttachments: anexos montados pelo próprio servidor (upload de arquivo).
 // ignoreReadOnly: veja WriteOpts (só bots.ts announce).
+// forward / poll: conteúdo montado pelo servidor (chat.forwardMessage, polls.create); chat.sendMessage nunca os repassa.
+// onInserted: logo depois do INSERT, antes de qualquer evento; se falhar, a mensagem sai e o erro sobe.
 export async function sendMessage(
   ctx: Ctx,
   input: SendInput,
-  opts: { skipCommands?: boolean; trusted?: boolean; internalAttachments?: boolean; sticker?: boolean; integration?: boolean; ignoreReadOnly?: boolean } = {},
+  opts: {
+    skipCommands?: boolean;
+    trusted?: boolean;
+    internalAttachments?: boolean;
+    sticker?: boolean;
+    integration?: boolean;
+    ignoreReadOnly?: boolean;
+    forward?: boolean;
+    poll?: boolean;
+    onInserted?: (row: any) => Promise<unknown>;
+  } = {},
 ) {
   const sticker = opts.sticker ? input.sticker : undefined; // só o servidor monta figurinhas
   const room = await getRoom(input.rid);
@@ -219,7 +239,9 @@ export async function sendMessage(
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
   const attachments = opts.internalAttachments ? (input.attachments ?? []) : await sanitizeAttachments(ctx, input.attachments);
   const rich = opts.integration && (input.jira || input.meeting);
-  if (!msg && !attachments.length && !input.files?.length && !sticker && !rich) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  const forward = opts.forward ? input.forward : undefined;
+  const poll = opts.poll ? input.poll : undefined;
+  if (!msg && !attachments.length && !input.files?.length && !sticker && !rich && !forward && !poll) throw badRequest('error-invalid-message', 'Mensagem vazia.');
   if (sticker && (msg || input.ackRequired)) throw badRequest('error-invalid-message', 'Figurinha não leva texto nem pede “Ciente”.');
   if (input.ackRequired && (!room.notice || !room.notice_ack || input.tmid)) {
     throw badRequest('error-ack-not-allowed', 'Só avisos de um canal de avisos com “Ciente” ativado podem pedir confirmação.');
@@ -247,7 +269,9 @@ export async function sendMessage(
   }
 
   msg = filterBadWords(msg);
-  let { mentions, channels } = await parseMentions(msg, room);
+  // Encaminhada: o texto levado nunca menciona ninguém de novo; só o comentário de quem encaminhou (com as mesmas
+  // regras de @all e @here).
+  let { mentions, channels } = await parseMentions(opts.forward ? (forward?.comment ?? '') : msg, room);
   // Integrações (Jira): texto de fora não menciona ninguém; só o responsável escolhido pelo servidor. Nunca @all, @here, times ou #sala.
   if (opts.integration) {
     const allowed = new Set((input.mentionsAllowed ?? []).map((u) => u.toLowerCase()));
@@ -274,6 +298,8 @@ export async function sendMessage(
     if (input.meeting) extra.meeting = input.meeting;
   }
   if (sticker) extra.sticker = sticker;
+  if (forward) extra.forward = forward;
+  if (poll) extra.poll = poll;
   const row = await one(
     `INSERT INTO messages (id, room_id, user_id, username, user_name, msg, tmid, mentions, channels, attachments, files, alias, emoji, avatar, extra, unread, ack_required, sticker_file_id)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
@@ -298,12 +324,20 @@ export async function sendMessage(
       sticker?.fileId ?? null,
     ],
   );
-  if (input.files?.length) {
+  if (opts.onInserted) {
+    try {
+      await opts.onInserted(row);
+    } catch (e) {
+      await query('DELETE FROM messages WHERE id = $1', [id]); // nada foi publicado ainda
+      throw e;
+    }
+  }
+  if (input.files?.length && !opts.forward) {
     await query('UPDATE files SET message_id = $1 WHERE id = ANY($2)', [id, input.files.map((f) => f._id)]);
   }
 
   // Atualiza a sala
-  const preview = messagePreviewText({ msg, sticker, files: input.files });
+  const preview = rowPreview(row);
   const lastMessage = { _id: id, msg: truncate(preview, 200), u: { _id: ctx.userId, username: ctx.username, name: me?.name }, ts: row.created_at };
   if (!tmid || input.tshow) {
     await query(`UPDATE rooms SET msgs = msgs + 1, last_message = $2, lm = $3, updated_at = now() WHERE id = $1`, [room.id, JSON.stringify(lastMessage), row.created_at]);
@@ -337,7 +371,8 @@ export async function sendMessage(
   if (room.t === 'c' || room.t === 'p') await notifyRoomUpdated(room.id);
   else bus.publish({ room: room.id }, { type: 'room', action: 'updated', room: (await import('./mappers')).mapRoom(await getRoom(room.id)) });
   emit('message.sent', { room, message, user: { _id: ctx.userId, username: ctx.username, name: me?.name } });
-  if (input.files?.length) emit('file.uploaded', { room, message, file: input.files[0], user: { _id: ctx.userId, username: ctx.username } });
+  // Encaminhar não é upload: o arquivo já estava no chat.
+  if (input.files?.length && !opts.forward) emit('file.uploaded', { room, message, file: input.files[0], user: { _id: ctx.userId, username: ctx.username } });
   return message;
 }
 
@@ -394,6 +429,8 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   if (!m || (rid && m.room_id !== rid)) throw notFound('error-message-not-found', 'Mensagem não encontrada.');
   if (m.t) throw badRequest('error-action-not-allowed', 'Mensagens de sistema não podem ser editadas.');
   if (m.extra?.sticker) throw badRequest('error-sticker-not-editable', 'Figurinhas não podem ser editadas.');
+  if (m.extra?.poll) throw badRequest('error-poll-not-editable', 'Enquetes não podem ser editadas.');
+  if (m.extra?.forward) throw badRequest('error-forward-not-editable', 'Mensagens encaminhadas não podem ser editadas.');
   const roles = await getUserRoles(ctx.userId, m.room_id);
   const canEditAny = rolesHavePermission(roles, 'edit-message');
   const own = m.user_id === ctx.userId;
@@ -445,15 +482,19 @@ export async function deleteMessage(ctx: Ctx, msgId: string, opts: { asAdmin?: b
 export async function removeMessageRow(m: any) {
   const { deleteFilesOfMessage } = await import('./uploads');
   await deleteFilesOfMessage(m.id);
+  // "Lembrar-me": o lembrete sai com a mensagem e a pessoa fica sabendo (Lembretes, outras abas).
+  const { removeRemindersOfMessage } = await import('./reminders');
+  await removeRemindersOfMessage(m.id);
   if (m.tcount > 0) {
     // Raiz de thread com respostas: mantém o lugar como "mensagem removida", sem o pedido de "Ciente" nem as confirmações.
     const row = await one(
       `UPDATE messages SET msg = '', t = 'rm', attachments = '[]', files = '[]', reactions = '{}', ack_required = false, ack_count = 0,
-         -- Integrações (Jira): mensagem removida não guarda cartão
-         extra = extra - 'sticker' - 'jira' - 'meeting' - 'bridge', sticker_file_id = NULL, updated_at = now()
+         -- Integrações (Jira): mensagem removida não guarda cartão; nem enquete nem origem de encaminhada
+         extra = extra - 'sticker' - 'jira' - 'meeting' - 'bridge' - 'poll' - 'forward', sticker_file_id = NULL, updated_at = now()
        WHERE id = $1 RETURNING *`,
       [m.id],
     );
+    await query('DELETE FROM polls WHERE message_id = $1', [m.id]);
     if (m.ack_required) await query('UPDATE message_reads SET ack_at = NULL WHERE message_id = $1 AND ack_at IS NOT NULL', [m.id]);
     bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
   } else {
@@ -472,7 +513,7 @@ export async function removeMessageRow(m: any) {
   const room = await getRoom(m.room_id);
   if (room?.last_message?._id === m.id) {
     const last = await one(`SELECT * FROM messages WHERE room_id = $1 AND t IS NULL AND (tmid IS NULL OR extra->>'tshow' = 'true') ORDER BY created_at DESC LIMIT 1`, [m.room_id]);
-    const lm = last ? { _id: last.id, msg: truncate(last.msg || (last.extra?.sticker ? stickerPreviewText(last.extra.sticker) : ''), 200), u: { _id: last.user_id, username: last.username, name: last.user_name }, ts: last.created_at } : null;
+    const lm = last ? { _id: last.id, msg: truncate(rowPreview(last), 200), u: { _id: last.user_id, username: last.username, name: last.user_name }, ts: last.created_at } : null;
     await query('UPDATE rooms SET last_message = $2, updated_at = now() WHERE id = $1', [m.room_id, lm ? JSON.stringify(lm) : null]);
     await notifyRoomUpdated(m.room_id);
   }
@@ -545,7 +586,7 @@ export async function setPinned(ctx: Ctx, msgId: string, pinned: boolean) {
   bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
   if (pinned) {
     await sendSystemMessage(m.room_id, 'message_pinned', { id: ctx.userId, username: ctx.username }, '', {
-      attachments: [{ text: m.msg || (m.extra?.sticker ? stickerPreviewText(m.extra.sticker, { withName: false }) : ''), author_name: m.username, ...aliasOf(m), ts: m.created_at, message_link: `/msg/${m.id}` }],
+      attachments: [{ text: rowPreview(m, { withName: false }), author_name: m.username, ...aliasOf(m), ts: m.created_at, message_link: `/msg/${m.id}` }],
       pinnedMessageId: m.id,
     });
   }
