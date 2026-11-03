@@ -8,7 +8,11 @@ import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 import { listSettings } from '../src/services/settings';
 import { EMOJI as WEB_EMOJI } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
-import { authorName, continuesGroup, editableKind, lastOwnEditable } from '../../web/src/lib/messageRules';
+import { authorName, continuesGroup, editableKind, forwardableKind, forwardOrigin, lastOwnEditable, messageLink, pollMeta, pollShares } from '../../web/src/lib/messageRules';
+import { fromLocalInput, reminderPresets, schedulePresets, toLocalInput, whenText } from '../../web/src/lib/messageTimes';
+import { AHEAD_ERROR, aheadError, POLL_ERRORS, pollInputError, type MessageForward, type MessagePoll } from '@shared/messages';
+import { messagePreviewText } from '@shared/stickers';
+import { ENCRYPTED_PLACEHOLDER } from '@shared/dataExport';
 import { ADMIN_MENU_PERMS, ADMIN_SECTIONS, SETTINGS_GROUP, settingsPath } from '../../web/src/pages/admin/sections';
 
 // Regras puras do chat web que mais de uma tela usa (seta para cima, agrupamento, nome do autor, menu da
@@ -311,5 +315,191 @@ describe('regras das exportações', () => {
     expect(csvCell('normal')).toBe('normal');
     expect(csvCell(null)).toBe('');
     expect(csvCell(12)).toBe('12');
+  });
+});
+
+// ---------- Mensagens: encaminhar, enquetes, "Lembrar-me" e envio agendado ----------
+
+describe('encaminhar e editar: tipos de mensagem', () => {
+  it('editableKind recusa enquete e encaminhada', () => {
+    expect(editableKind(msg())).toBe(true);
+    expect(editableKind(msg({ poll: { question: 'Q', options: [], voters: 0, multiple: false, anonymous: false, closesAt: null, closedAt: null } }))).toBe(false);
+    expect(editableKind(msg({ forward: { mid: 'x', rid: 'r2', t: 'c', u: ME, ts: at(9, 0), hops: 1 } }))).toBe(false);
+  });
+  it('forwardableKind: sem sistema, sem enquete, sem figurinha removida', () => {
+    expect(forwardableKind(msg())).toBe(true);
+    expect(forwardableKind(msg({ sticker }))).toBe(true);
+    expect(forwardableKind(msg({ forward: { mid: 'x', rid: 'r2', t: 'c', u: ME, ts: at(9, 0), hops: 1 } }))).toBe(true);
+    expect(forwardableKind(msg({ t: 'uj' }))).toBe(false);
+    expect(forwardableKind(msg({ poll: { question: 'Q', options: [], voters: 0, multiple: false, anonymous: false, closesAt: null, closedAt: null } }))).toBe(false);
+    expect(forwardableKind(msg({ sticker: { fileId: 'f1', removed: true } }))).toBe(false);
+  });
+});
+
+describe('link de uma mensagem (messageLink)', () => {
+  it('canal, grupo, DM e resposta de tópico', () => {
+    expect(messageLink({ rid: 'r1', t: 'c', mid: 'm1' })).toBe('/channel/r1?msg=m1');
+    expect(messageLink({ rid: 'r2', t: 'p', mid: 'm2' })).toBe('/group/r2?msg=m2');
+    expect(messageLink({ rid: 'r3', t: 'd', mid: 'm3', tmid: null })).toBe('/direct/r3?msg=m3');
+    expect(messageLink({ rid: 'r1', t: 'c', mid: 'm4', tmid: 'm1' })).toBe('/channel/r1/thread/m1');
+  });
+});
+
+describe('origem da encaminhada (forwardOrigin)', () => {
+  const f = (over: Partial<MessageForward>): MessageForward => ({ mid: 'm1', rid: 'r1', t: 'c', u: ME, ts: at(9, 0), hops: 1, ...over });
+  const subs = {
+    r2: { t: 'p', name: 'projeto-x' },
+    r3: { t: 'd', name: 'ana.souza, bruno' },
+    r4: { t: 'c', name: 'vendas', fname: 'Vendas' },
+  };
+  it('canal público com nome: #nome e link', () => {
+    expect(forwardOrigin(f({ roomName: 'geral' }), {})).toEqual({ text: 'Encaminhada de #geral', link: '/channel/r1?msg=m1' });
+  });
+  it('grupo privado: o nome só para quem está nele', () => {
+    expect(forwardOrigin(f({ rid: 'r2', t: 'p' }), subs)).toEqual({ text: 'Encaminhada de projeto-x', link: '/group/r2?msg=m1' });
+    expect(forwardOrigin(f({ rid: 'r9', t: 'p' }), subs)).toEqual({ text: 'Encaminhada de um grupo privado', link: null });
+  });
+  it('DM nunca mostra quem está nela', () => {
+    expect(forwardOrigin(f({ rid: 'r3', t: 'd' }), subs)).toEqual({ text: 'Encaminhada de uma conversa direta', link: '/direct/r3?msg=m1' });
+    expect(forwardOrigin(f({ rid: 'r8', t: 'd' }), subs)).toEqual({ text: 'Encaminhada de uma conversa direta', link: null });
+  });
+  it('canal sem nome público: o da inscrição, ou "um canal"', () => {
+    expect(forwardOrigin(f({ rid: 'r4' }), subs).text).toBe('Encaminhada de #Vendas');
+    expect(forwardOrigin(f({ rid: 'r7' }), subs)).toEqual({ text: 'Encaminhada de um canal', link: null });
+  });
+  it('encaminhada de novo: "várias vezes"', () => {
+    expect(forwardOrigin(f({ roomName: 'geral', hops: 2 }), {}).text).toBe('Encaminhada várias vezes de #geral');
+  });
+  it('resposta de tópico: o link abre o tópico', () => {
+    expect(forwardOrigin(f({ roomName: 'geral', tmid: 'root' }), {}).link).toBe('/channel/r1/thread/root');
+  });
+});
+
+describe('enquetes: porcentagens e linha de cima', () => {
+  const poll = (votes: number[], over: Partial<MessagePoll> = {}): MessagePoll => ({
+    question: 'Q',
+    options: votes.map((v, i) => ({ id: `o${i + 1}`, text: `Opção ${i + 1}`, votes: v })),
+    voters: votes.reduce((a, b) => a + b, 0),
+    multiple: false,
+    anonymous: false,
+    closesAt: null,
+    closedAt: null,
+    ...over,
+  });
+  it('pollShares: maior resto, empate fica com a de cima, soma 100', () => {
+    expect(pollShares(poll([1, 1, 1]))).toEqual([34, 33, 33]);
+    expect(pollShares(poll([2, 1]))).toEqual([67, 33]);
+    expect(pollShares(poll([0, 0, 0]))).toEqual([0, 0, 0]);
+    expect(pollShares(poll([5, 0]))).toEqual([100, 0]);
+    for (const v of [[3, 3, 1], [1, 2, 3, 4, 5, 6, 7], [7, 7, 7, 7, 7, 7]]) expect(pollShares(poll(v)).reduce((a, b) => a + b, 0)).toBe(100);
+  });
+  it('pollMeta: aberta, várias, anônima, com prazo, encerrada', () => {
+    const now = new Date(2026, 10, 3, 14, 10);
+    expect(pollMeta(poll([0, 0]), now)).toBe('Uma resposta');
+    expect(pollMeta(poll([0, 0], { multiple: true }), now)).toBe('Várias respostas');
+    expect(pollMeta(poll([0, 0], { anonymous: true }), now)).toBe('Uma resposta · Anônima');
+    expect(pollMeta(poll([0, 0], { multiple: true, anonymous: true, closesAt: new Date(2026, 10, 4, 18, 0).toISOString() }), now)).toBe(
+      'Várias respostas · Anônima · Encerra amanhã às 18:00',
+    );
+    expect(pollMeta(poll([1, 0], { closedAt: new Date(2026, 10, 3, 12, 0).toISOString() }), now)).toBe('Encerrada');
+    // O prazo passou: encerrada mesmo antes do agendador gravar.
+    expect(pollMeta(poll([1, 0], { closesAt: new Date(2026, 10, 3, 14, 0).toISOString() }), now)).toBe('Encerrada');
+  });
+});
+
+describe('atalhos de horário (messageTimes)', () => {
+  const hhmm = (d: Date) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const list = (ps: { label: string; at: Date }[]) => ps.map((p) => `${p.label} → ${hhmm(p.at)}`);
+  it('reminderPresets numa terça às 14:10 e às 23:50', () => {
+    expect(list(reminderPresets(new Date(2026, 10, 3, 14, 10)))).toEqual([
+      'Em 20 minutos → 03/11 14:30',
+      'Em 1 hora → 03/11 15:10',
+      'Em 3 horas → 03/11 17:10',
+      'Amanhã às 9h → 04/11 09:00',
+    ]);
+    expect(list(reminderPresets(new Date(2026, 10, 3, 23, 50)))).toEqual([
+      'Em 20 minutos → 04/11 00:10',
+      'Em 1 hora → 04/11 00:50',
+      'Em 3 horas → 04/11 02:50',
+      'Amanhã às 9h → 04/11 09:00',
+    ]);
+  });
+  it('schedulePresets: "Hoje às 18h" só antes das 17h', () => {
+    expect(list(schedulePresets(new Date(2026, 10, 3, 16, 0)))).toEqual([
+      'Hoje às 18h → 03/11 18:00',
+      'Amanhã às 9h → 04/11 09:00',
+      'Amanhã às 14h → 04/11 14:00',
+      'Segunda-feira às 9h → 09/11 09:00',
+    ]);
+    expect(list(schedulePresets(new Date(2026, 10, 3, 17, 30)))).toEqual(['Amanhã às 9h → 04/11 09:00', 'Amanhã às 14h → 04/11 14:00', 'Segunda-feira às 9h → 09/11 09:00']);
+  });
+  it('schedulePresets: no domingo a segunda é amanhã; na segunda, a da semana seguinte', () => {
+    expect(list(schedulePresets(new Date(2026, 10, 8, 10, 0)))).toEqual(['Hoje às 18h → 08/11 18:00', 'Amanhã às 9h → 09/11 09:00', 'Amanhã às 14h → 09/11 14:00']);
+    expect(list(schedulePresets(new Date(2026, 10, 9, 10, 0)))).toEqual([
+      'Hoje às 18h → 09/11 18:00',
+      'Amanhã às 9h → 10/11 09:00',
+      'Amanhã às 14h → 10/11 14:00',
+      'Segunda-feira às 9h → 16/11 09:00',
+    ]);
+  });
+  it('whenText: hoje, amanhã, ontem, outro dia, outro ano', () => {
+    const now = new Date(2026, 10, 3, 14, 10);
+    const iso = (...a: [number, number, number, number, number]) => new Date(...a).toISOString();
+    expect(whenText(iso(2026, 10, 3, 15, 20), now)).toBe('hoje às 15:20');
+    expect(whenText(iso(2026, 10, 4, 9, 0), now)).toBe('amanhã às 09:00');
+    expect(whenText(iso(2026, 10, 2, 18, 0), now)).toBe('ontem às 18:00');
+    expect(whenText(iso(2026, 10, 5, 9, 0), now)).toBe('qui., 05/11 às 09:00');
+    expect(whenText(iso(2027, 10, 5, 9, 0), now)).toBe('05/11/2027 às 09:00');
+    expect(whenText('não é data', now)).toBe('');
+  });
+  it('datetime-local: ida e volta no fuso do aparelho', () => {
+    const d = new Date(2026, 10, 3, 9, 5);
+    expect(toLocalInput(d)).toBe('2026-11-03T09:05');
+    expect(fromLocalInput('2026-11-03T09:05')!.getTime()).toBe(d.getTime());
+    expect(fromLocalInput('')).toBeNull();
+    expect(fromLocalInput('03/11/2026')).toBeNull();
+  });
+});
+
+describe('prévia das mensagens novas (messagePreviewText)', () => {
+  it('enquete, encaminhada sem e com comentário, figurinha encaminhada, vídeo', () => {
+    expect(messagePreviewText({ msg: 'Qual dia?', poll: { question: 'Qual dia?' } })).toBe('📊 Qual dia?');
+    expect(messagePreviewText({ msg: 'o relatório saiu', forward: {} })).toBe('↪ o relatório saiu');
+    expect(messagePreviewText({ msg: 'o relatório saiu', forward: { comment: 'olha isso' } })).toBe('olha isso');
+    expect(messagePreviewText({ msg: '', sticker: { ...sticker, name: 'Gato', emojis: ['😺'] }, forward: {} })).toBe('↪ 😺 Figurinha “Gato”');
+    expect(messagePreviewText({ msg: '', files: [{ name: 'a.pdf' }], forward: {} })).toBe('↪ 📎 a.pdf');
+    expect(messagePreviewText({ msg: '', forward: {} })).toBe('↪ Mensagem encaminhada');
+    expect(messagePreviewText({ msg: '', files: [{ name: 'Mensagem de vídeo.mp4', video: true, duration: 42 }] })).toBe('🎥 Mensagem de vídeo (0:42)');
+    expect(messagePreviewText({ msg: '', files: [{ name: 'v.webm', video: true }] })).toBe('🎥 Mensagem de vídeo');
+    expect(messagePreviewText({ msg: 'x', poll: { question: 'x' }, e2e: { v: 1 } })).toBe(ENCRYPTED_PLACEHOLDER);
+  });
+});
+
+describe('validação de enquete e de horário (bordas exatas)', () => {
+  const now = new Date('2026-11-03T14:10:00.000Z');
+  const ms = (n: number) => new Date(now.getTime() + n).toISOString();
+  const base = { question: 'Qual dia?', options: ['Segunda', 'Terça'] };
+  it('pollInputError: pergunta, opções e prazo', () => {
+    expect(pollInputError(base, now)).toBeNull();
+    expect(pollInputError({ ...base, question: '   ' }, now)).toBe(POLL_ERRORS.question);
+    expect(pollInputError({ ...base, question: 'x'.repeat(301) }, now)).toBe(POLL_ERRORS.question);
+    expect(pollInputError({ ...base, options: ['Só uma', '  '] }, now)).toBe(POLL_ERRORS.count);
+    expect(pollInputError({ ...base, options: Array.from({ length: 11 }, (_, i) => `o${i}`) }, now)).toBe(POLL_ERRORS.count);
+    expect(pollInputError({ ...base, options: ['a', 'x'.repeat(101)] }, now)).toBe(POLL_ERRORS.optionLength);
+    expect(pollInputError({ ...base, options: ['Sim', ' sim '] }, now)).toBe(POLL_ERRORS.repeated);
+    expect(pollInputError({ ...base, closesAt: ms(5 * 60_000) }, now)).toBeNull();
+    expect(pollInputError({ ...base, closesAt: ms(5 * 60_000 - 1) }, now)).toBe(POLL_ERRORS.deadline);
+    expect(pollInputError({ ...base, closesAt: ms(90 * 86_400_000) }, now)).toBeNull();
+    expect(pollInputError({ ...base, closesAt: ms(90 * 86_400_000 + 1) }, now)).toBe(POLL_ERRORS.deadline);
+    expect(pollInputError({ ...base, closesAt: 'amanhã' }, now)).toBe(POLL_ERRORS.deadline);
+    expect(pollInputError({ ...base, closesAt: null }, now)).toBeNull();
+  });
+  it('aheadError: de 1 minuto a 365 dias', () => {
+    expect(aheadError(ms(60_000), now)).toBeNull();
+    expect(aheadError(ms(60_000 - 1), now)).toBe(AHEAD_ERROR);
+    expect(aheadError(ms(365 * 86_400_000), now)).toBeNull();
+    expect(aheadError(ms(365 * 86_400_000 + 1), now)).toBe(AHEAD_ERROR);
+    expect(aheadError('ontem', now)).toBe(AHEAD_ERROR);
+    expect(aheadError(undefined, now)).toBe(AHEAD_ERROR);
   });
 });
