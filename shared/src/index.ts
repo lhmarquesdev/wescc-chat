@@ -417,7 +417,23 @@ export type ServerEvent =
   | { type: 'calendar.changed' }
   | { type: 'calendar.invite'; event: CalendarEvent; by: UserRef }
   | { type: 'calendar.reminder'; event: CalendarEvent }
+  // Meus dados (LGPD): o pedido da pessoa mudou de estado (na fila, preparando, pronto, falhou, expirou)
+  | { type: 'userdata.changed'; request: UserDataRequest }
   | { type: 'pong' };
+
+// ---------- Exportar mensagens e Meus dados (LGPD) ----------
+
+export type { RoomExportFormat } from './dataExport';
+export type UserDataStatus = 'pending' | 'running' | 'ready' | 'failed' | 'expired';
+export interface UserDataRequest {
+  _id: string;
+  status: UserDataStatus;
+  requestedAt: string;
+  finishedAt?: string | null;
+  expiresAt?: string | null;
+  size?: number | null;
+  error?: string | null;
+}
 
 // ---------- Importação de dados ----------
 

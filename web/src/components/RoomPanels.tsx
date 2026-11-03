@@ -19,8 +19,10 @@ import { Avatar, Empty, Field, GroupAvatar, Menu, Segmented, SearchInput, Skelet
 import { InCallBadge } from './call/LiveIndicators';
 // Permissões do canal: quem fala e o que cada pessoa pode fazer nele.
 import { RoomAccessPanel } from './RoomAccessPanel';
+// Exportar mensagens: período, formato e arquivos, com tíquete de download de uso único.
+import { ExportPanel } from './ExportPanel';
 
-export type PanelId = 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune' | 'access';
+export type PanelId = 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune' | 'access' | 'export';
 
 const TITLES: Record<PanelId, string> = {
   info: 'Informações da sala',
@@ -37,6 +39,7 @@ const TITLES: Record<PanelId, string> = {
   invite: 'Convidar por link',
   prune: 'Limpar histórico',
   access: 'Permissões do canal',
+  export: 'Exportar mensagens',
 };
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
@@ -129,6 +132,7 @@ export function RoomPanel(p: Props) {
         {p.id === 'invite' && <InvitePanel {...p} />}
         {p.id === 'prune' && <PrunePanel {...p} />}
         {p.id === 'access' && <RoomAccessPanel room={p.room} onChanged={p.onChanged} />}
+        {p.id === 'export' && <ExportPanel room={p.room} />}
       </div>
     </aside>
   );

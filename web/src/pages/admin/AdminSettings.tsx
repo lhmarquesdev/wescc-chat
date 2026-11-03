@@ -76,6 +76,9 @@ const SECTION_LABEL: Record<string, string> = {
   Jitsi: 'Jitsi',
   // Figurinhas
   Stickers: 'Figurinhas',
+  // Exportar mensagens e Meus dados (LGPD)
+  Export: 'Exportação',
+  Privacy: 'Privacidade (LGPD)',
 };
 
 const LANGUAGES = [

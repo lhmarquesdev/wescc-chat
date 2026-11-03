@@ -10,7 +10,7 @@ import { useMedia } from '../components/overlay';
 import { Icon } from '../components/Icon';
 import { SideFoot, TakeoverBack, TakeoverHead } from '../components/Sidebar';
 import { QrCode } from '../components/QrCode';
-import { DeviceCell, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
+import { DeviceCell, NewDevicePill, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
 // Figurinhas: o item some com a função desligada.
 import { useStickerCaps } from '../lib/stickers';
 
@@ -19,6 +19,8 @@ const StickersSection = lazy(() => import('./account/StickersSection'));
 // Integrações (Jira): Contas conectadas (Jira e Microsoft 365)
 import { useIntegrationsMe } from '../lib/integrations';
 import { ConnectedAccounts } from './account/ConnectedAccounts';
+// Meus dados (LGPD): cópia dos próprios dados num .zip.
+import { MyDataSection } from './account/MyDataSection';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -32,6 +34,8 @@ export function AccountPage() {
   // Integração com o Jira: o item só aparece quando há uma conta para conectar.
   const integrations = useIntegrationsMe();
   const canConnected = !!integrations && integrations.jira.enabled && integrations.jira.userAuth !== 'off';
+  // Meus dados: configuração pública, então o item some na hora quando o administrador desliga.
+  const userDataOn = useSetting<boolean>('UserData_EnableDownload');
   return (
     <div className="page with-nav takeover account-page">
       <TakeoverHead title="Minha conta" />
@@ -61,6 +65,12 @@ export function AccountPage() {
           <Icon name="devices" />
           Dispositivos
         </NavLink>
+        {userDataOn && (
+          <NavLink to="/account/data">
+            <Icon name="my-data" />
+            Meus dados
+          </NavLink>
+        )}
         {canTokens && (
           <NavLink to="/account/tokens">
             <Icon name="tokens" />
@@ -87,6 +97,7 @@ export function AccountPage() {
         )}
         {section === 'security' && <Security />}
         {section === 'devices' && <Devices />}
+        {section === 'data' && (userDataOn ? <MyDataSection /> : <Empty icon="my-data" title="Meus dados está desativado">O administrador desligou o download dos dados.</Empty>)}
         {section === 'tokens' && <Tokens />}
         {/* Integrações (Jira) */}
         {section === 'connected' && <ConnectedAccounts />}
@@ -563,7 +574,9 @@ function Devices() {
   return (
     <>
       <PageHead title="Dispositivos" />
-      <p className="page-lead">Cada login cria uma sessão. Encerre as que você não reconhece.</p>
+      <p className="page-lead">
+        Cada login cria uma sessão. Encerre as que você não reconhece. “Dispositivo novo” marca o primeiro acesso da conta por um navegador ou programa.
+      </p>
       {/* Abaixo do texto, não no cabeçalho: a barra de 56px fica igual à das outras páginas da conta. */}
       {allowAll && others > 0 && (
         <div className="row-actions page-lead-actions">
@@ -592,7 +605,15 @@ function Devices() {
               {data?.sessions.map((s: any) => (
                 <tr key={s._id}>
                   <td>
-                    <DeviceCell device={s.device} tag={s.current && <span className="pill accent tag">Esta sessão</span>} />
+                    <DeviceCell
+                      device={s.device}
+                      tag={
+                        <>
+                          {s.current && <span className="pill accent tag">Esta sessão</span>}
+                          {s.device?.newDevice && <NewDevicePill current={s.current} />}
+                        </>
+                      }
+                    />
                   </td>
                   <td className="nowrap" data-label="Último uso">
                     {s.current ? 'Agora' : lastSeen(s.lastActiveAt)}

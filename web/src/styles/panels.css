@@ -1460,3 +1460,31 @@
     opacity: 1;
   }
 }
+
+/* ---------- Exportar mensagens ---------- */
+.export-panel > p {
+  margin: 0;
+}
+.export-period {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+.export-summary {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-2);
+}
+.export-summary.danger {
+  color: var(--danger);
+}
+.export-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.export-actions p {
+  margin: 0;
+}

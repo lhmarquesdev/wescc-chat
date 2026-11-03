@@ -1,11 +1,12 @@
 import type { UserPreferences, UserStatus } from '@shared/index';
-import { many, one, query, tx } from '../db/pool';
+import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound, unauthorized } from '../lib/errors';
 import { newId, randomToken, sha256 } from '../lib/ids';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { generateSecret, otpauthUrl, verifyTotp } from '../lib/totp';
 import { bus } from '../realtime/bus';
 import { audit, type Actor } from './audit';
+import { announceNewDevice, deviceCookieHeader, rememberLoginDevice } from './loginDevices';
 import { mapUser } from './mappers';
 import { getSetting } from './settings';
 import { recordActivity } from './stats';
@@ -169,6 +170,7 @@ export interface DeviceInfo {
   userAgent?: string;
   ip?: string;
   name?: string;
+  deviceId?: string; // cookie wescc_device do navegador (e-mail de login em dispositivo novo)
 }
 
 function parseDevice(d: DeviceInfo) {
@@ -178,17 +180,22 @@ function parseDevice(d: DeviceInfo) {
   return { userAgent: ua, ip: d.ip, os, browser, name: d.name ?? `${browser} em ${os}` };
 }
 
+// Todo login (senha, LDAP, SAML, OAuth) passa por aqui: o dispositivo fica anotado e, se for novo numa conta que já
+// tinha outro, a sessão sai marcada e o e-mail vai em segundo plano. deviceCookie: o Set-Cookie do wescc_device.
 export async function createSession(userId: string, device: DeviceInfo) {
   const token = randomToken();
   const id = newId();
   const days = getSetting<number>('Accounts_LoginExpiration') || 90;
+  const parsed = parseDevice(device);
+  const seen = await rememberLoginDevice(userId, device, parsed);
   await query(
     `INSERT INTO sessions (id, user_id, token_hash, device, expires_at) VALUES ($1,$2,$3,$4, now() + ($5 || ' days')::interval)`,
-    [id, userId, sha256(token), JSON.stringify(parseDevice(device)), String(days)],
+    [id, userId, sha256(token), JSON.stringify(seen.isNew ? { ...parsed, newDevice: true } : parsed), String(days)],
   );
   await query('UPDATE users SET last_login = now() WHERE id = $1', [userId]);
   void recordActivity(userId, 'session');
-  return { sessionId: id, authToken: token };
+  if (seen.isNew) void announceNewDevice(userId, parsed, device.ip, id).catch(() => {});
+  return { sessionId: id, authToken: token, deviceCookie: deviceCookieHeader(seen.deviceId) };
 }
 
 export class TwoFactorRequired extends Error {
@@ -531,6 +538,29 @@ async function propagateUsername(userId: string, oldU: string, newU: string) {
     `UPDATE rooms SET usernames = array_replace(usernames, $1, $2), fname = NULL WHERE t = 'd' AND $3 = ANY(uids)`,
     [oldU, newU, userId],
   );
+  await renameInReactions(oldU, newU);
+}
+
+// As reações guardam o @usuário, não o id da conta (messages.reactions = { ":x:": { usernames: [...] } }). Troca o nome
+// antigo pelo novo (conta renomeada) ou tira o nome (newU null, conta excluída): um @usuário reaproveitado nunca herda
+// as reações de outra pessoa, nem no chat nem em "Meus dados". Uma passada pelas mensagens com reação (é raro).
+async function renameInReactions(oldU: string, newU: string | null, db?: Queryable) {
+  await query(
+    `UPDATE messages m SET updated_at = now(), reactions = COALESCE(
+       (SELECT jsonb_object_agg(e.key, e.value || jsonb_build_object('usernames', s.us))
+          FROM jsonb_each(m.reactions) e
+          CROSS JOIN LATERAL (
+            SELECT jsonb_agg(d.v ORDER BY d.o) AS us FROM (
+              SELECT DISTINCT ON (r.v) r.v, r.o FROM (
+                SELECT CASE WHEN a.x = to_jsonb($1::text) THEN to_jsonb($2::text) ELSE a.x END AS v, a.o
+                  FROM jsonb_array_elements(COALESCE(e.value->'usernames', '[]'::jsonb)) WITH ORDINALITY a(x, o)) r
+               WHERE r.v IS NOT NULL ORDER BY r.v, r.o) d) s
+         WHERE s.us IS NOT NULL),
+       '{}'::jsonb)
+     WHERE m.reactions <> '{}'::jsonb AND jsonb_path_exists(m.reactions, '$.*.usernames[*] ? (@ == $u)', jsonb_build_object('u', $1::text))`,
+    [oldU, newU],
+    db,
+  );
 }
 
 export async function setPreferences(ctx: Ctx, prefs: UserPreferences) {
@@ -574,6 +604,8 @@ export async function deleteUser(actor: Ctx, userId: string, opts: { confirmReli
     await c.query(`DELETE FROM rooms WHERE t = 'd' AND $1 = ANY(uids)`, [userId]);
     const subs = await c.query('DELETE FROM subscriptions WHERE user_id = $1 RETURNING room_id', [userId]);
     for (const { room_id } of subs.rows) await c.query('UPDATE rooms SET users_count = GREATEST(users_count - 1, 0) WHERE id = $1', [room_id]);
+    // Na mesma transação: ninguém pega o @usuário e reage antes de as reações da conta saírem.
+    await renameInReactions(u.username, null, c);
     await c.query('DELETE FROM users WHERE id = $1', [userId]);
   });
   bus.forceLogout({ userId });

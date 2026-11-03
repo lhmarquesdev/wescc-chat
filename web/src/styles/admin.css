@@ -119,6 +119,35 @@ h4 .head-count {
 .cell-name > .pill {
   margin-left: var(--space-1-5);
 }
+/* Etiquetas do dispositivo ("Esta sessão", "Dispositivo novo"): juntas numa linha ao lado do nome. */
+.cell-tags {
+  display: inline-flex;
+  gap: var(--space-1);
+  margin-left: var(--space-1-5);
+  vertical-align: middle;
+}
+.cell-tags:empty {
+  display: none;
+}
+/* No computador a célula do dispositivo cabe o nome e as duas etiquetas sem quebrar (as outras ficam em 320px). */
+@media (min-width: 761px) {
+  .table-wrap .cell-entity.device-entity {
+    max-width: 480px;
+  }
+}
+/* No celular o nome e as etiquetas quebram linha, e a que desce começa alinhada com o nome, sem recuo. */
+@media (max-width: 760px) {
+  .cell-name:has(> .cell-tags) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-1-5);
+    white-space: normal;
+  }
+  .cell-name > .cell-tags {
+    display: contents;
+  }
+}
 .pill.tag {
   height: 18px;
   padding: 0 6px;
@@ -349,6 +378,38 @@ h4 .head-count {
 /* ---------- Minha conta ---------- */
 .account-col {
   max-width: 640px;
+}
+/* Meus dados (LGPD): o estado do último pedido e o botão embaixo do texto do cartão. */
+.card-head > .my-data-body {
+  flex: 1;
+  min-width: 0;
+}
+.my-data-body > h2 {
+  margin: 0;
+}
+.my-data-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.my-data-status > svg {
+  flex-shrink: 0;
+}
+/* Baixar (principal) e Pedir de novo lado a lado, alinhados à esquerda com o texto. */
+.my-data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.my-data-next {
+  margin: var(--space-3) 0 0;
+}
+.my-data-foot {
+  margin: 0;
 }
 .profile-card .avatar-edit {
   gap: var(--space-5);

@@ -99,6 +99,10 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   const { driveRoutes } = await import('./drive/api'); // Arquivos (pastas compartilhadas)
   driveRoutes(app);
 
+  // Exportar mensagens e Meus dados (LGPD)
+  const { dataExportRoutes } = await import('./api/dataExport');
+  dataExportRoutes(app);
+
   app.get('/health', async () => ({ ok: true }));
 
   // Cliente web (build do Vite), com fallback para o index.html (SPA).

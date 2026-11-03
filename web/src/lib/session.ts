@@ -121,6 +121,19 @@ export async function startSession() {
           },
         });
       }
+      // Meus dados (LGPD): o .zip ficou pronto (ou falhou) em segundo plano. Quem já está em Minha conta › Meus dados
+      // vê o cartão mudar: sem aviso repetido.
+      if (ev.type === 'userdata.changed' && (ev.request.status === 'ready' || ev.request.status === 'failed') && location.pathname !== '/account/data') {
+        const open = () => {
+          history.pushState({}, '', '/account/data');
+          dispatchEvent(new PopStateEvent('popstate'));
+        };
+        if (ev.request.status === 'ready') {
+          useStore.getState().toast('Seus dados estão prontos para baixar.', 'success', { icon: 'my-data', duration: 15_000, action: { label: 'Abrir', onClick: open } });
+        } else {
+          useStore.getState().toast('Não foi possível preparar seus dados.', 'error', { action: { label: 'Ver', onClick: open } });
+        }
+      }
     });
   }
   return me;

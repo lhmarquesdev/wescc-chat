@@ -41,6 +41,8 @@ const PANELS: { id: PanelId; icon: IconName; label: string; when?: (r: Room) => 
   { id: 'notifications', icon: 'panel-notifications', label: 'Notificações' },
   { id: 'invite', icon: 'panel-invite', label: 'Link de convite', when: (r) => r.t !== 'd', perm: 'create-invite-links' },
   { id: 'prune', icon: 'panel-prune', label: 'Limpar histórico', when: (r) => r.t !== 'd', perm: 'clean-channel-history' },
+  // Sem "when": numa conversa direta exporta quem tem a permissão global (o administrador).
+  { id: 'export', icon: 'panel-export', label: 'Exportar mensagens', perm: 'export-room-messages' },
   // Permissões do canal: quem fala e o que cada pessoa pode fazer nele (donos e moderadores).
   {
     id: 'access',
@@ -454,6 +456,9 @@ export function RoomPage() {
   const shortcuts = SHORTCUTS.map((id) => panels.find((p) => p.id === id)).filter((p): p is (typeof PANELS)[number] => !!p && inHeader.has(p.id));
   const menuPanels = panels.filter((p) => !shortcuts.includes(p));
   const hasInfo = panels.some((p) => p.id === 'info');
+  // ?tab= de um painel que esta pessoa não tem (link copiado de quem tem, como Exportar ou Limpar histórico): fica
+  // fechado, como no menu Mais. Com os papéis da sala ainda carregando, o painel aparece assim que eles chegam.
+  const openPanel = panel && panels.some((p) => p.id === panel) ? panel : null;
   const closePanel = () => (tmid ? navigate(roomPath(room)) : setPanel(null));
   const favorite = () => api.post('rooms.favorite', { roomId: rid, favorite: !sub?.f }).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
   // O # só nos canais públicos (não em grupos privados, times privados nem discussões, que têm nome livre).
@@ -474,7 +479,7 @@ export function RoomPage() {
 
   return (
     <MessageGateContext.Provider value={gate}>
-      <div className={`room ${panel || tmid ? 'with-panel' : ''}`}>
+      <div className={`room ${openPanel || tmid ? 'with-panel' : ''}`}>
         <div className="room-main">
           <header className="room-header" ref={setHeader}>
             <BackButton onClick={() => navigate('/home')} />
@@ -648,13 +653,13 @@ export function RoomPage() {
             </div>
           )}
         </div>
-        {(panel || tmid) && <div className="panel-scrim" aria-hidden="true" onClick={closePanel} />}
+        {(openPanel || tmid) && <div className="panel-scrim" aria-hidden="true" onClick={closePanel} />}
         {tmid ? (
           <ThreadPanel key={tmid} rid={rid} tmid={tmid} room={room} canModerate={canModerate} onClose={() => navigate(roomPath(room))} onUserClick={openUserCard} isMember={!!sub} disabledReason={disabledReason} />
-        ) : panel ? (
+        ) : openPanel ? (
           <RoomPanel
-            key={panel}
-            id={panel}
+            key={openPanel}
+            id={openPanel}
             room={room}
             sub={sub}
             roles={roles}

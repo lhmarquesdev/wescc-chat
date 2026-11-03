@@ -132,6 +132,26 @@ describe('origens e cookies', () => {
     expect((await wsOutcome({ cookie, origin: urlOf('').replace(/\/$/, '') })).connected).toBe(true);
   });
 
+  it('WebSocket com cookie e "auth" ao mesmo tempo entra uma vez só: cada evento chega uma vez', async () => {
+    const u = await newUser(A);
+    const ws = new WebSocket(urlOf('/websocket').replace('http', 'ws'), { headers: { cookie: `rc_uid=${u.userId}; rc_token=${u.authToken}`, origin: urlOf('').replace(/\/$/, '') } });
+    const events: any[] = [];
+    ws.on('message', (d) => events.push(JSON.parse(String(d))));
+    try {
+      await new Promise((r) => ws.on('open', r));
+      // O navegador manda o "auth" logo ao abrir, enquanto a autenticação pelo cookie ainda consulta o banco.
+      ws.send(JSON.stringify({ type: 'auth', token: u.authToken }));
+      for (let i = 0; i < 50 && !events.some((e) => e.type === 'connected'); i++) await sleep(20);
+      await sleep(300);
+      expect((await api('POST', 'users.requestDataDownload', {}, u)).success).toBe(true);
+      await sleep(500);
+      expect(events.filter((e) => e.type === 'connected')).toHaveLength(1);
+      expect(events.filter((e) => e.type === 'userdata.changed')).toHaveLength(1);
+    } finally {
+      ws.close();
+    }
+  });
+
   it('avatares e avatares de salas privadas não aparecem para quem não pode ver', async () => {
     const u = await newUser(A);
     expect((await api('POST', 'users.setAvatar', { avatarUrl: PNG }, u)).success).toBe(true);

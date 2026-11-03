@@ -4,7 +4,7 @@ import { formatDateTime, plural } from '../../lib/format';
 import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, FileButton, Modal, Pager, SearchInput, SkeletonList, SkeletonTable, confirmDialog, useAsync } from '../../components/ui';
-import { DeviceCell, PageHead, RoomCell, TableWrap, UserCell, deviceLabel, lastSeen } from './parts';
+import { DeviceCell, NewDevicePill, PageHead, RoomCell, TableWrap, UserCell, deviceLabel, lastSeen } from './parts';
 // Figurinhas: a figurinha denunciada e "Remover figurinha de todas as conversas".
 import { ReportSticker } from './stickers';
 
@@ -59,7 +59,7 @@ export function AdminDevices() {
                     <UserCell username={s.username} name={s.name} />
                   </td>
                   <td data-label="Dispositivo">
-                    <DeviceCell device={s.device} />
+                    <DeviceCell device={s.device} tag={s.device?.newDevice && <NewDevicePill />} />
                   </td>
                   <td className="muted nowrap col-xl" data-label="Login">
                     {formatDateTime(s.createdAt)}

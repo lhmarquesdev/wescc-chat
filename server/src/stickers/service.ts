@@ -58,7 +58,7 @@ import {
   type ValidSticker,
 } from './files';
 import { drainStickerTrash, queuePendingWrite } from './trash';
-import { zipStore } from './zip';
+import { zipStore } from '../lib/zip';
 
 // Figurinhas: papéis, catálogos, pacotes, favoritas, recentes e o aviso coalescido de mudanças.
 
