@@ -96,6 +96,8 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   stickersRoutes(app);
   const { calendarRoutes } = await import('./calendar/api');
   calendarRoutes(app);
+  const { driveRoutes } = await import('./drive/api'); // Arquivos (pastas compartilhadas)
+  driveRoutes(app);
 
   app.get('/health', async () => ({ ok: true }));
 

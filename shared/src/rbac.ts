@@ -142,6 +142,11 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
   'edit-privileged-setting': { label: 'Alterar configurações e LDAP / AD', defaults: [A] },
   'manage-retention-policy': { label: 'Rodar a política de retenção', defaults: [A] },
 
+  // Arquivos (aba Arquivos: pastas compartilhadas; o acesso a cada pasta é dado na própria pasta)
+  'view-files': { label: 'Usar a aba Arquivos', defaults: [A, U, OP], description: 'Mostra as pastas compartilhadas com a pessoa. Cada pasta ainda diz quem vê, quem edita e quem gerencia.' },
+  'create-files-folder': { label: 'Criar pastas principais em Arquivos', defaults: [A], description: 'Quem cria a pasta passa a gerenciá-la. Subpastas dependem só da permissão de editar a pasta de cima.' },
+  'manage-all-files': { label: 'Gerenciar todas as pastas e arquivos', defaults: [A], description: 'Vê e altera qualquer pasta, mesmo fora do compartilhamento, e esvazia a lixeira de todos.' },
+
 
   // Técnicas (bots e integrações)
   'message-impersonate': { label: 'Enviar mensagens com outro nome e avatar', defaults: [B, 'app'], technical: true },
@@ -368,6 +373,24 @@ export const RBAC_GROUPS: RbacGroup[] = [
         ],
         extras: ['manage-retention-policy'],
         adminSection: 'settings',
+      },
+    ],
+  },
+  // Arquivos (bloco próprio)
+  {
+    id: 'files',
+    label: 'Arquivos',
+    description: 'A aba Arquivos. Quem vê, edita ou gerencia cada pasta é definido no compartilhamento da própria pasta.',
+    areas: [
+      {
+        id: 'files',
+        label: 'Pastas e arquivos',
+        description: 'Usar a aba e criar pastas principais. Gerenciar todas passa por cima do compartilhamento de cada pasta.',
+        levels: [
+          { label: 'Usar', keys: ['view-files'] },
+          { label: 'Usar e criar pastas', keys: ['create-files-folder'] },
+        ],
+        extras: ['manage-all-files'],
       },
     ],
   },

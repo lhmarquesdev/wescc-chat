@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useFilesTab } from '../lib/files';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { Subscription } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
@@ -542,6 +543,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
   const siteName = useSetting<string>('Site_Name');
   const callsEnabled = useSetting<boolean>('Calls_Enabled');
   const calendarOn = useSetting<boolean>('Calendar_Enabled') !== false;
+  const filesOn = useFilesTab(); // Arquivos
   const phone = useIsPhone();
   const list = mode === 'list';
   const [filter, setFilter] = useState('');
@@ -663,6 +665,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
           <NavRow to="/home" icon="nav-home" label="Início" onNavigate={onNavigate} />
           {callsEnabled && <NavRow to="/calls" icon="nav-calls" label="Chamadas" extra={<CallsNavBadge />} onNavigate={onNavigate} />}
           {calendarOn && <NavRow to="/calendar" icon="nav-calendar" label="Agenda" onNavigate={onNavigate} />}
+          {filesOn && <NavRow to="/files" icon="nav-files" label="Arquivos" onNavigate={onNavigate} />}
           <NavRow to="/directory" icon="nav-directory" label="Diretório" onNavigate={onNavigate} />
         </nav>
       )}

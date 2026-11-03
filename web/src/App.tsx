@@ -18,6 +18,7 @@ import { AccountPage, applyTheme, TwoFactorCard } from './pages/AccountPage';
 import { AdminPage } from './pages/admin/AdminPage';
 import { CallsPage } from './pages/CallsPage';
 import { CalendarPage } from './pages/CalendarPage';
+import { FilesPage } from './pages/FilesPage'; // Arquivos (pastas compartilhadas)
 import { MeetPage } from './pages/MeetPage';
 import { CalendarNotices } from './components/calendar/CalendarNotices';
 
@@ -303,6 +304,9 @@ function Shell() {
           ))}
           <Route path="/calls" element={<CallsPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/files" element={<FilesPage />} />
+          <Route path="/files/trash" element={<FilesPage />} />
+          <Route path="/files/f/:folderId" element={<FilesPage />} />
           <Route path="/meet/:code" element={<MeetPage />} />
           <Route path="/account" element={<Navigate to="/account/profile" replace />} />
           <Route path="/account/:section" element={<AccountPage />} />

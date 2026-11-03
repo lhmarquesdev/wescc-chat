@@ -230,6 +230,31 @@ import {
   Wrench,
 } from 'lucide-react';
 
+// Arquivos (pastas compartilhadas)
+import {
+  Folder as FilesFolder,
+  FolderOpen as FilesFolderOpen,
+  FolderPlus as FilesFolderPlus,
+  FolderInput as FilesFolderInput,
+  FolderLock as FilesFolderLock,
+  CloudUpload as FilesCloudUpload,
+  Trash2 as FilesTrash,
+  Share2 as FilesShare,
+  LayoutGrid as FilesGrid,
+  List as FilesList,
+  HardDrive as FilesDisk,
+  Eye as FilesEye,
+  PencilLine as FilesPencil,
+  ShieldCheck as FilesShield,
+  Hash as FilesHash,
+  UserRound as FilesUser,
+  RotateCcw as FilesRestore,
+  Clock as FilesClock,
+  Files as FilesMany,
+  History as FilesHistory,
+  ChevronRight as FilesChevron,
+} from 'lucide-react';
+
 export const ICONS = {
   // ---------- Dono 1: comuns ----------
   close: X,
@@ -583,6 +608,29 @@ export const ICONS = {
   'voice-pause': Pause,
   'voice-lock': Lock,
   'voice-up': ChevronUp,
+  // ---------- Arquivos ----------
+  'nav-files': FilesFolder,
+  'files-folder': FilesFolder,
+  'files-folder-open': FilesFolderOpen,
+  'files-folder-new': FilesFolderPlus,
+  'files-move': FilesFolderInput,
+  'files-locked': FilesFolderLock,
+  'files-upload': FilesCloudUpload,
+  'files-trash': FilesTrash,
+  'files-share': FilesShare,
+  'files-grid': FilesGrid,
+  'files-list': FilesList,
+  'files-storage': FilesDisk,
+  'files-view': FilesEye,
+  'files-edit': FilesPencil,
+  'files-manage': FilesShield,
+  'files-room': FilesHash,
+  'files-user': FilesUser,
+  'files-restore': FilesRestore,
+  'files-recent': FilesClock,
+  'files-all': FilesMany,
+  'files-activity': FilesHistory,
+  'files-expand': FilesChevron,
 } as const;
 
 export type IconName = keyof typeof ICONS;

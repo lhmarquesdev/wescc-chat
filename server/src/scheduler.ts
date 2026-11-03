@@ -7,6 +7,7 @@
 //   727120–727124 integrações (Jira; as do Teams, removido, não reusar)
 //   727125 integrações: reserva da fila de tarefas (pg_advisory_xact_lock, só na transação curta da reserva)
 //   727130 e 727131 (da sincronização da agenda com Google/Outlook, removida: não reusar) · 727132 lembretes da agenda
+//   727140 arquivos (lixeira vencida, uma vez por dia)
 import cron from 'node-cron';
 import { pool, query } from './db/pool';
 import { recoverInterrupted } from './importer/operations';
@@ -77,6 +78,17 @@ export function startScheduler(log: (m: string) => void) {
 
   // Integração com o Jira
   tasks.push(startIntegrationsRuntime(log));
+
+  // Arquivos: o que passou do prazo na lixeira sai de vez (todo dia às 4h).
+  tasks.push(
+    cron.schedule('0 4 * * *', () => {
+      void withLock(727140, async () => {
+        const { purgeExpiredTrash } = await import('./drive/drive');
+        const r = await purgeExpiredTrash();
+        if (r.folders || r.files) log(`arquivos: lixeira esvaziada (${r.folders} pasta(s), ${r.files} arquivo(s))`);
+      }).catch((e) => log(`lixeira de arquivos falhou: ${e.message}`));
+    }),
+  );
 
   // Agenda: lembretes antes do início.
   const calendarReminders = setInterval(() => {

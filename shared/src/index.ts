@@ -409,6 +409,8 @@ export type ServerEvent =
   | { type: 'ephemeral'; message: EphemeralMessage }
   | { type: 'integrations.changed'; scope: 'config' | 'account' }
   | { type: 'integrations.alert'; alert: IntegrationAlert }
+  // Arquivos: só os ids das pastas que mudaram (cada aba pede de novo e o servidor confere o acesso)
+  | { type: 'drive.changed'; folderIds: string[] }
   // Agenda: algo mudou na agenda da pessoa, convite novo e lembrete antes do início
   | { type: 'calendar.changed' }
   | { type: 'calendar.invite'; event: CalendarEvent; by: UserRef }

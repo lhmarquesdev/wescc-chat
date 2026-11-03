@@ -943,3 +943,38 @@ com link pede a permissão `create-calendar-meeting` (papéis `admin` e `user`).
 A Agenda é só do chat: não se conecta ao Google Agenda nem ao Outlook. Para ligar ou desligar a Agenda, use
 Administração › Configurações › Agenda (`Calendar_Enabled`).
 
+
+## Arquivos (pastas compartilhadas)
+
+A aba **Arquivos** guarda documentos da empresa em pastas, com permissão por pasta. Cada pasta é compartilhada com
+**papéis** (ex.: Operação, Usuário), com **os membros de um canal ou grupo** (a equipe de uma operação) e com
+**pessoas**, cada um num nível:
+
+| Nível | O que pode |
+| --- | --- |
+| Pode ver | Abrir, pré-visualizar (imagem, PDF, vídeo, áudio, texto) e baixar |
+| Pode editar | Também enviar, renomear, mover, criar subpastas e mandar para a lixeira |
+| Gerencia | Também compartilhar, mudar permissões e apagar de vez da lixeira |
+
+Subpastas herdam o acesso da pasta de cima. Em **Compartilhar**, "Herdar o acesso da pasta de cima" desligado deixa a
+subpasta **restrita**: só quem está na lista dela entra (ex.: "Folha e salários" dentro de "Financeiro"). Quem tem
+acesso só a uma subpasta a vê como pasta principal, sem ver o nome das de cima.
+
+Permissões do RBAC (Papéis e permissões › Arquivos):
+
+- `view-files`: usar a aba (Administrador, Usuário e Operação numa instalação nova). Sem ela a aba some.
+- `create-files-folder`: criar pastas principais (só Administrador). Quem cria a pasta passa a gerenciá-la.
+- `manage-all-files`: ver e mudar qualquer pasta, mesmo fora do compartilhamento (só Administrador).
+
+Cada pasta tem o histórico (envios, downloads, renomeações, compartilhamento, lixeira) para quem a gerencia, e toda
+mudança de compartilhamento entra também no registro de auditoria (`drive.acl.update`). O que vai para a lixeira fica
+`Drive_Trash_Days` dias (padrão 30) e depois é apagado de vez às 4h.
+
+Espaço (Administração › Configurações › Arquivos):
+
+- `Drive_MaxFileSize_MB`: tamanho máximo de cada arquivo (padrão 200 MB). O proxy reverso precisa aceitar o mesmo
+  tamanho (`client_max_body_size` no nginx).
+- `Drive_Quota_GB`: espaço total da aba (padrão 20 GB; 0 = sem limite). Arquivos na lixeira contam até saírem.
+- `Drive_MinFreeDisk_MB`: o servidor recusa envios quando o disco fica com menos que isso livre (padrão 2048 MB).
+
+Os arquivos ficam no mesmo diretório dos anexos do chat (`UPLOAD_DIR`), então entram no mesmo backup.

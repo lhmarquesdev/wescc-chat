@@ -8,6 +8,7 @@ import { useMentionTotal } from './navState';
 import { CallsNavBadge } from './call/LiveIndicators';
 import { useMyStatus, UserMenu } from './Sidebar';
 import { UserAvatar } from './ui';
+import { useFilesTab } from '../lib/files';
 
 function Tab({
   to,
@@ -42,11 +43,12 @@ function Tab({
   );
 }
 
-// Barra de abas do celular (fora das salas): Conversas, Chamadas, Agenda, Diretório e Você.
+// Barra de abas do celular (fora das salas): Conversas, Chamadas, Agenda, Arquivos, Diretório e Você.
 export function MobileTabBar() {
   const me = useStore((s) => s.me)!;
   const callsEnabled = useSetting<boolean>('Calls_Enabled');
   const calendarOn = useSetting<boolean>('Calendar_Enabled') !== false;
+  const filesOn = useFilesTab(); // Arquivos
   const mentions = useMentionTotal();
   const { status } = useMyStatus();
   const { pathname } = useLocation();
@@ -56,6 +58,7 @@ export function MobileTabBar() {
       <Tab to="/home" icon="nav-chats" label="Conversas" badge={mentions} badgeKind="mention" />
       {callsEnabled && <Tab to="/calls" icon="nav-calls" label="Chamadas" extra={<CallsNavBadge />} />}
       {calendarOn && <Tab to="/calendar" icon="nav-calendar" label="Agenda" />}
+      {filesOn && <Tab to="/files" icon="nav-files" label="Arquivos" />}
       <Tab to="/directory" icon="nav-directory" label="Diretório" />
       <UserMenu
         trigger={

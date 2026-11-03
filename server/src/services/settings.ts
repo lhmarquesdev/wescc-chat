@@ -380,6 +380,13 @@ add('Jira', 'Chat', 'Jira_Default_Project', 'string', '', { label: 'Projeto suge
 // Agenda (aparece na tela genérica de configurações, grupo Agenda).
 add('Calendar', 'Agenda', 'Calendar_Enabled', 'boolean', true, { public: true, label: 'Agenda e reuniões do chat' });
 
+// Arquivos (aba Arquivos: pastas compartilhadas).
+add('Drive', 'Arquivos', 'Drive_Enabled', 'boolean', true, { public: true, label: 'Aba Arquivos (pastas compartilhadas)' });
+add('Drive', 'Arquivos', 'Drive_MaxFileSize_MB', 'int', 200, { public: true, label: 'Tamanho máximo de cada arquivo (MB)', validate: intRange(1, 10240) });
+add('Drive', 'Arquivos', 'Drive_Quota_GB', 'int', 20, { public: true, label: 'Espaço total da aba Arquivos (GB; 0 = sem limite)', validate: intRange(0, 100000) });
+add('Drive', 'Arquivos', 'Drive_MinFreeDisk_MB', 'int', 2048, { label: 'Recusar envios quando o disco do servidor ficar com menos que (MB livres)', validate: intRange(0, 1048576) });
+add('Drive', 'Arquivos', 'Drive_Trash_Days', 'int', 30, { public: true, label: 'Dias na lixeira antes de apagar de vez', validate: intRange(1, 365) });
+
 const cache = new Map<string, unknown>();
 
 export async function loadSettings() {
