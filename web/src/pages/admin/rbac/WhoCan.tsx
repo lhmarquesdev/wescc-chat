@@ -360,7 +360,9 @@ function WhoCanResult({ permission, roles }: { permission: string; roles: RbacRo
                 ))}
               </ul>
             )}
-            <Pager offset={offset} count={count} total={data.people.total} onChange={setOffset} onCountChange={(c) => (setCount(c), setOffset(0))} />
+            <div className="rbac-who-pager">
+              <Pager offset={offset} count={count} total={data.people.total} onChange={setOffset} onCountChange={(c) => (setCount(c), setOffset(0))} />
+            </div>
           </>
         )}
       </Section>

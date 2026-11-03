@@ -144,20 +144,22 @@ export async function bulkUserRoles(ctx: Ctx, userIds: string[], add: string[], 
   const root = infos.find((r) => r.root)?.id;
   const ok: (BulkPerson & { next: string[]; roles: string[] })[] = [];
   const unchanged: BulkPerson[] = [];
-  const blocked: (BulkPerson & { reason: BulkBlockReason; roles?: string[] })[] = [];
+  const blocked: (BulkPerson & { reason: BulkBlockReason; roles?: string[]; idle?: boolean })[] = [];
   // Quantos administradores ativos sobram se tirar o papel raiz de todos os escolhidos.
   let activeRoots = root ? Number((await one<{ n: number }>(`SELECT count(*)::int AS n FROM users WHERE $1 = ANY(roles) AND active`, [root]))?.n ?? 0) : 0;
   for (const u of users) {
     const next = [...new Set([...u.roles.filter((r) => !remove.includes(r)), ...add])];
     const person = { _id: u.id, username: u.username };
     const changed = [...next.filter((r) => !u.roles.includes(r)), ...u.roles.filter((r) => !next.includes(r))];
-    if (!changed.length) {
-      unchanged.push(person);
-      continue;
-    }
+    // Pessoa com cadeado fica de fora mesmo quando nada mudaria nela (a prévia mostra o motivo); só a que mudaria
+    // trava o "tudo ou nada".
     const lock = userLock(g, u.id, u.roles, infos);
     if (lock) {
-      blocked.push({ ...person, reason: lock === 'own-role' || lock === 'protected' ? 'superior' : lock });
+      blocked.push({ ...person, reason: lock === 'own-role' || lock === 'protected' ? 'superior' : lock, ...(changed.length ? {} : { idle: true }) });
+      continue;
+    }
+    if (!changed.length) {
+      unchanged.push(person);
       continue;
     }
     const locked = changed.filter((id) => {
@@ -177,10 +179,11 @@ export async function bulkUserRoles(ctx: Ctx, userIds: string[], add: string[], 
     }
     ok.push({ ...person, next, roles: u.roles });
   }
-  if (opts.dryRun) return { ok: ok.map(({ _id, username }) => ({ _id, username })), blocked, unchanged };
-  if (blocked.length && !opts.skipBlocked) {
+  if (opts.dryRun) return { ok: ok.map(({ _id, username }) => ({ _id, username })), blocked: blocked.map(({ idle: _, ...b }) => b), unchanged };
+  const stuck = blocked.filter((b) => !b.idle);
+  if (stuck.length && !opts.skipBlocked) {
     // O mesmo erro de antes (tudo ou nada), na ordem: pessoa travada, papel travado, último administrador.
-    const first = blocked[0];
+    const first = stuck[0];
     const u = users.find((x) => x.id === first._id)!;
     const next = [...new Set([...u.roles.filter((r) => !remove.includes(r)), ...add])];
     if (first.reason === 'last-admin') throw badRequest('error-action-not-allowed', 'Não é possível remover o último administrador.');

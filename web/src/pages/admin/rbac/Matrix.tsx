@@ -7,7 +7,6 @@ import { areaLevel, isSensitive, keyMatches, levelText, RBAC_GROUPS, RBAC_KEYS, 
 import { api } from '../../../lib/api';
 import { plural, roleLabel } from '../../../lib/format';
 import { realtime } from '../../../lib/realtime';
-import { useStore } from '../../../lib/store';
 import { Icon, type IconName } from '../../../components/Icon';
 import { useIsPhone } from '../../../components/overlay';
 import { Empty, Menu, SkeletonTable, Toggle, Tooltip, confirmDialog, useEdgeFade } from '../../../components/ui';
@@ -36,7 +35,6 @@ export function MatrixPage({ roles, grant, error, onSaved }: { roles: RbacRole[]
   const phone = useIsPhone();
   const location = useLocation();
   const navigate = useNavigate();
-  const meId = useStore((s) => s.me?._id);
   const query = parseMatrixQuery(location.search);
   const setQuery = (patch: Partial<MatrixQuery>) => navigate({ search: matrixQuery({ ...query, ...patch }) }, { replace: true });
 
@@ -59,12 +57,14 @@ export function MatrixPage({ roles, grant, error, onSaved }: { roles: RbacRole[]
     });
   }, [roles]);
 
+  // Outra pessoa (ou a mesma em outra aba) salvou papéis enquanto esta matriz tem alterações.
+  const savingRef = useRef(false);
   useEffect(() => {
     const off = realtime.on((ev) => {
-      if (ev.type === 'permissions.changed' && ev.by !== meId && dirtyRef.current) setOtherChanged(true);
+      if (ev.type === 'permissions.changed' && !savingRef.current && dirtyRef.current) setOtherChanged(true);
     });
     return () => void off();
-  }, [meId]);
+  }, []);
 
   useEffect(() => {
     if (!dirty) return;
@@ -128,6 +128,7 @@ export function MatrixPage({ roles, grant, error, onSaved }: { roles: RbacRole[]
 
   const save = async () => {
     setSaving(true);
+    savingRef.current = true;
     try {
       await api.post('rbac.matrix.update', { changes });
       rbacOk(`Matriz salva: ${plural(changes.length, 'papel', 'papéis')}.`);
@@ -141,6 +142,7 @@ export function MatrixPage({ roles, grant, error, onSaved }: { roles: RbacRole[]
       rbacFail(e);
     } finally {
       setSaving(false);
+      setTimeout(() => (savingRef.current = false), 1500);
     }
   };
 
@@ -254,9 +256,18 @@ function MatrixTools({
               <div className="rbac-menu-scroll">
                 {roles.map((r) => {
                   const on = columns.includes(r._id);
-                  const blocked = !on && full;
+                  // Sem nenhum papel a matriz voltaria às colunas padrão; o último fica.
+                  const last = on && columns.length === 1;
+                  const blocked = (!on && full) || last;
                   return (
-                    <button key={r._id} role="menuitemcheckbox" aria-checked={on} aria-disabled={blocked || undefined} title={blocked ? 'Até 12 papéis por vez.' : undefined} onClick={() => !blocked && toggleCol(r._id)}>
+                    <button
+                      key={r._id}
+                      role="menuitemcheckbox"
+                      aria-checked={on}
+                      aria-disabled={blocked || undefined}
+                      title={last ? 'Deixe ao menos um papel.' : blocked ? 'Até 12 papéis por vez.' : undefined}
+                      onClick={() => !blocked && toggleCol(r._id)}
+                    >
                       <Icon name={on ? 'check' : roleIcon(r)} />
                       {roleLabel(r._id)}
                       {r.scope === 'Subscriptions' && <span className="pill tag">De sala</span>}

@@ -400,6 +400,13 @@ describe('matriz, deltas, Quem pode…?, papéis em salas, simulação e lote', 
     expect(again.unchanged).toEqual([{ _id: plain.userId, username: plain.username }]);
     const notAssignable = await api('POST', 'rbac.users.bulkRoles', { userIds: [plain.userId], add: ['bot'], dryRun: true }, sup);
     expect(notAssignable.blocked).toEqual([{ _id: plain.userId, username: plain.username, reason: 'not-assignable', roles: ['bot'] }]);
+    // Quem tem cadeado fica de fora mesmo sem ter o papel; no "tudo ou nada" ele não trava, porque nada mudaria nele.
+    const removeIdle = await api('POST', 'rbac.users.bulkRoles', { userIds: [plain.userId, A.userId], remove: ['leitor-v2'], dryRun: true }, sup);
+    expect(removeIdle.ok).toEqual([{ _id: plain.userId, username: plain.username }]);
+    expect(removeIdle.blocked).toEqual([{ _id: A.userId, username: 'admin', reason: 'root-only' }]);
+    const strict = await api('POST', 'rbac.users.bulkRoles', { userIds: [plain.userId, A.userId], remove: ['leitor-v2'] }, sup);
+    expect(strict).toMatchObject({ status: 200, users: 1, skipped: 1 });
+    expect(await rolesOf(plain.userId)).toEqual(['user']);
   });
 
   it('o último administrador ativo não sai pelo lote', async () => {

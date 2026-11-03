@@ -60,7 +60,6 @@ export const compareUrl = (a: string, b: string) => `/admin/permissions/matrix${
 export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleId: string; roles: RbacRole[] | null; grant: Grant | null; onSaved: () => void; onDeleted: () => void }) {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const meId = useStore((s) => s.me?._id);
   const role = roles?.find((r) => r._id === roleId);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [initial, setInitial] = useState<Draft | null>(null);
@@ -95,10 +94,12 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
-  // Com alterações: avisa quem salvou, e ao salvar só as mudanças desta tela entram.
+  // Com alterações: avisa quem salvou (também a mesma pessoa em outra aba), e ao salvar só as mudanças desta tela
+  // entram. O que esta aba acabou de salvar não conta.
+  const savingRef = useRef(false);
   useEffect(() => {
     const off = realtime.on((ev) => {
-      if (ev.type !== 'permissions.changed' || !ev.roles?.includes(roleId) || ev.by === meId || !dirtyRef.current) return;
+      if (ev.type !== 'permissions.changed' || !ev.roles?.includes(roleId) || savingRef.current || !dirtyRef.current) return;
       if (!ev.by) return setChangedBy('');
       api
         .get('users.info', { userId: ev.by })
@@ -106,7 +107,7 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
         .catch(() => setChangedBy(''));
     });
     return () => void off();
-  }, [roleId, meId]);
+  }, [roleId]);
 
   // Sair da página com alterações: o navegador pergunta.
   useEffect(() => {
@@ -145,6 +146,7 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
 
   const save = async () => {
     setSaving(true);
+    savingRef.current = true;
     try {
       const body: Record<string, unknown> = { roleId: role._id, description: draft.description, purpose: draft.purpose, mandatory2fa: draft.mandatory2fa, restrictDirect: draft.scope === 'Users' && draft.restrictDirect };
       if (!role.protected) body.scope = draft.scope;
@@ -163,6 +165,8 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
       rbacFail(e);
     } finally {
       setSaving(false);
+      // O evento da própria gravação chega logo depois da resposta.
+      setTimeout(() => (savingRef.current = false), 1500);
     }
   };
 

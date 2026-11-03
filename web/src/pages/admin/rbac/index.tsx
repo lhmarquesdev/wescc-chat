@@ -271,7 +271,7 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
                       </div>
                     </td>
                     <td data-label="Identificador">
-                      <code className="mono small rbac-id">{r._id}</code>
+                      <code className="mono small rbac-id" title={r._id}>{r._id}</code>
                     </td>
                     <td data-label="Acesso">
                       <span className="rbac-access-cell">
