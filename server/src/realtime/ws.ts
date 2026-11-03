@@ -5,13 +5,14 @@ import { many, one, query } from '../db/pool';
 import { newId } from '../lib/ids';
 import { parseCookies } from '../api/http';
 import { canAccessRoom, getRoom, getSubscriptionRow, userRoomIds } from '../services/rooms';
+import { presenceEvent } from '../services/mappers';
 import { isTrustedBrowserOrigin } from '../services/origins';
 import { pendingSetup, resolveToken, setStatus } from '../services/users';
 import { bus, type Conn } from './bus';
 
 async function publishPresence(userId: string) {
-  const u = await one('SELECT id, username, status, status_text FROM users WHERE id = $1', [userId]);
-  if (u) bus.publish({ all: true }, { type: 'presence', userId: u.id, username: u.username, status: u.status, statusText: u.status_text });
+  const u = await one('SELECT id, username, status, status_text, status_custom FROM users WHERE id = $1', [userId]);
+  if (u) bus.publish({ all: true }, presenceEvent(u));
 }
 
 async function connectionOpened(conn: Conn) {

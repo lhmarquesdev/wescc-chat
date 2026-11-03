@@ -3,7 +3,8 @@ import { many, one, pool } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
 import { audit } from '../services/audit';
 import { readDeviceId } from '../services/loginDevices';
-import { mapUser } from '../services/mappers';
+import { mapUser, visibleStatusCustom } from '../services/mappers';
+import { createCustomStatus, deleteCustomStatus, getCustomStatus, listCustomStatuses, updateCustomStatus } from '../services/userStatus';
 import { getUserRoles, hasPermission, permissionsForRoles, roleInfos } from '../services/permissions';
 import { getSetting } from '../services/settings';
 import { userLock } from '@shared/rbac';
@@ -208,14 +209,41 @@ export function usersRoutes(app: FastifyInstance) {
     const body = b(req);
     const target = body.userId && body.userId !== ctx.userId ? body.userId : ctx.userId;
     if (target !== ctx.userId && !(await hasPermission(ctx.userId, 'edit-other-user-info'))) throw forbidden();
+    const message = body.message === undefined || body.message === null ? undefined : String(body.message);
+    // Status personalizado: vale o tipo dele e ganha de status. Sem statusId, um status de base limpa o personalizado.
+    if (body.statusId) {
+      const s = await getCustomStatus(String(body.statusId));
+      if (!s) throw badRequest('error-invalid-status', 'Status não encontrado.');
+      await setStatus(target, s.status_type, message, s.id);
+      return {};
+    }
     if (body.status && !['online', 'away', 'busy', 'offline'].includes(body.status)) throw badRequest('error-invalid-status', 'Status inválido.');
-    await setStatus(target, body.status, body.message);
+    await setStatus(target, body.status, message);
     return {};
   });
   route(app, 'GET', 'users.getStatus', {}, async (req, _rep, ctx) => {
     const u = q(req).userId ? await getUserById(q(req).userId) : await getUserById(ctx.userId);
     if (!u) throw notFound('error-invalid-user');
-    return { _id: u.id, status: u.status, message: u.status_text, connectionStatus: u.status === 'offline' ? 'offline' : 'online' };
+    const statusCustom = u.id === ctx.userId ? u.status_custom ?? null : visibleStatusCustom(u);
+    return { _id: u.id, status: u.status, message: u.status_text, statusCustom, connectionStatus: u.status === 'offline' ? 'offline' : 'online' };
+  });
+
+  // ---------- Status personalizados (Administração › Status do usuário) ----------
+  route(app, 'GET', 'custom-user-status.list', {}, async (_req, _rep, ctx) => {
+    const statuses = await listCustomStatuses({ withCounts: await hasPermission(ctx.userId, 'manage-user-status') });
+    return { statuses, count: statuses.length, offset: 0, total: statuses.length };
+  });
+  route(app, 'POST', 'custom-user-status.create', { permissions: ['manage-user-status'] }, async (req, _rep, ctx) => {
+    const body = b(req);
+    return { customUserStatus: await createCustomStatus(ctx, { name: body.name, statusType: body.statusType }) };
+  });
+  route(app, 'POST', 'custom-user-status.update', { permissions: ['manage-user-status'] }, async (req, _rep, ctx) => {
+    const body = b(req);
+    return { customUserStatus: await updateCustomStatus(ctx, str(body._id, '_id'), { name: body.name, statusType: body.statusType }) };
+  });
+  route(app, 'POST', 'custom-user-status.delete', { permissions: ['manage-user-status'] }, async (req, _rep, ctx) => {
+    await deleteCustomStatus(ctx, str(b(req).customUserStatusId, 'customUserStatusId'));
+    return {};
   });
   route(app, 'POST', 'users.deleteOwnAccount', {}, async (req, _rep, ctx) => {
     if (!getSetting('Accounts_AllowDeleteOwnAccount')) throw forbidden('Excluir a própria conta está desativado.');
@@ -317,9 +345,12 @@ export function usersRoutes(app: FastifyInstance) {
   route(app, 'GET', 'users.presence', {}, async (req) => {
     const ids = strArray(q(req).ids);
     const rows = ids.length
-      ? await many('SELECT id, username, name, status, status_text FROM users WHERE id = ANY($1)', [ids])
-      : await many(`SELECT id, username, name, status, status_text FROM users WHERE status <> 'offline'`);
-    return { users: rows.map((r) => ({ _id: r.id, username: r.username, name: r.name, status: r.status, statusText: r.status_text })), full: !ids.length };
+      ? await many('SELECT id, username, name, status, status_text, status_custom FROM users WHERE id = ANY($1)', [ids])
+      : await many(`SELECT id, username, name, status, status_text, status_custom FROM users WHERE status <> 'offline'`);
+    return {
+      users: rows.map((r) => ({ _id: r.id, username: r.username, name: r.name, status: r.status, statusText: r.status_text, statusCustom: visibleStatusCustom(r) })),
+      full: !ids.length,
+    };
   });
 
   // ---------- Administração de usuários ----------

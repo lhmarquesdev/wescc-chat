@@ -276,6 +276,8 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
     criadoEm: t.created_at,
     ultimoUso: t.last_used_at,
   }));
+  // Status personalizado escolhido (Administração › Status do usuário): o nome e o tipo, como a pessoa vê no menu.
+  const custom = user.status_custom ? await one('SELECT name, status_type FROM custom_user_statuses WHERE id = $1', [user.status_custom]) : null;
   // Nunca: hash da senha, chave do 2FA, códigos de backup, hashes de token ou de dispositivo.
   const perfil = {
     id: user.id,
@@ -284,6 +286,7 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
     email: user.email,
     bio: user.bio,
     statusText: user.status_text,
+    statusPersonalizado: custom ? { id: user.status_custom, nome: custom.name, tipo: custom.status_type } : null,
     roles: user.roles,
     authSource: user.auth_source,
     criadoEm: user.created_at,
@@ -488,7 +491,7 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
       ['Usuário', `@${perfil.username}`],
       ['E-mail', perfil.email || '—'],
       ['Sobre', perfil.bio || '—'],
-      ['Status', perfil.statusText || '—'],
+      ['Status', [perfil.statusPersonalizado?.nome, perfil.statusText].filter(Boolean).join(' · ') || '—'],
       ['Papéis', papeis.join(', ') || '—'],
       ['Conta criada em', formatDayTime(perfil.criadoEm)],
       ['Último login', perfil.ultimoLogin ? formatDayTime(perfil.ultimoLogin) : '—'],
