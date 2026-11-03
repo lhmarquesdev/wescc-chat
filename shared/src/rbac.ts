@@ -91,6 +91,12 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
   'delete-p': { label: 'Excluir grupos privados', defaults: [A, O] },
   'delete-d': { label: 'Excluir conversas diretas', defaults: [A] },
   'clean-channel-history': { label: 'Limpar o histórico da sala', defaults: [A] },
+  // Exportar mensagens: só lê (não publica nada na sala); numa DM, só quem tem a permissão por um papel global.
+  'export-room-messages': {
+    label: 'Exportar as mensagens da sala',
+    defaults: [A, O],
+    description: 'Baixar as mensagens de um período em HTML, CSV ou JSON, com ou sem os arquivos; cada exportação fica registrada na auditoria.',
+  },
   'edit-team': { label: 'Editar times', defaults: [A, O] },
   'delete-team': { label: 'Excluir times', defaults: [A, O] },
   'add-team-member': { label: 'Adicionar membros ao time', defaults: [A, O, M] },
@@ -272,7 +278,7 @@ export const RBAC_GROUPS: RbacGroup[] = [
         label: 'Mensagens da sala',
         description: 'Moderar mensagens de outras pessoas e publicar em canais de avisos.',
         levels: [{ label: 'Moderar', keys: ['edit-message', 'delete-message', 'pin-message'] }],
-        extras: ['post-readonly', 'force-delete-message', 'moderate-call'],
+        extras: ['post-readonly', 'force-delete-message', 'moderate-call', 'export-room-messages'],
       },
       {
         id: 'room-lifecycle',

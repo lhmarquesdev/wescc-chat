@@ -8,6 +8,7 @@
 //   727125 integrações: reserva da fila de tarefas (pg_advisory_xact_lock, só na transação curta da reserva)
 //   727130 e 727131 (da sincronização da agenda com Google/Outlook, removida: não reusar) · 727132 lembretes da agenda
 //   727140 arquivos (lixeira vencida, uma vez por dia)
+//   727150 exportações (Meus dados: pedidos na fila, arquivos vencidos e tíquetes antigos, a cada 15 s)
 import cron from 'node-cron';
 import { pool, query } from './db/pool';
 import { recoverInterrupted } from './importer/operations';
@@ -98,6 +99,16 @@ export function startScheduler(log: (m: string) => void) {
     }).catch((e) => log(`lembretes da agenda falharam: ${e.message}`));
   }, 30_000);
 
+  // Meus dados (LGPD): monta os pedidos na fila, um por vez, e apaga os arquivos vencidos. Só a instância com a trava
+  // monta, então um pedido "preparando" de antes da trava é de uma execução interrompida.
+  const dataExports = setInterval(() => {
+    void withLock(727150, async () => {
+      const { runDataExportJobs } = await import('./services/userData');
+      const r = await runDataExportJobs(log);
+      if (r.failed) log(`meus dados: ${r.failed} pedido(s) falharam`);
+    }).catch((e) => log(`meus dados falhou: ${e.message}`));
+  }, 15_000);
+
   let retentionExpr = '';
   let retentionTask: { stop(): void } | null = null;
   let ldapExpr = '';
@@ -132,6 +143,7 @@ export function startScheduler(log: (m: string) => void) {
     clearInterval(calls);
     clearInterval(re);
     clearInterval(calendarReminders);
+    clearInterval(dataExports);
     clearTimeout(stickersBoot);
     for (const t of tasks) t.stop();
     retentionTask?.stop();

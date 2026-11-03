@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '@shared/index';
 import type { MessageSticker } from '@shared/stickers';
+import { csvCell, exportFileName, exportSlug, nextDataRequestAt, safeZipName } from '@shared/dataExport';
+import { systemText as sharedSystemText } from '@shared/messageText';
 import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 import { listSettings } from '../src/services/settings';
+import { systemText as webSystemText } from '../../web/src/lib/format';
 import { authorName, continuesGroup, editableKind, lastOwnEditable } from '../../web/src/lib/messageRules';
 import { ADMIN_MENU_PERMS, ADMIN_SECTIONS, SETTINGS_GROUP, settingsPath } from '../../web/src/pages/admin/sections';
 
@@ -132,5 +135,77 @@ describe('ícones dos grupos do RBAC (tela Papéis e permissões)', () => {
     const { GROUP_ICON, groupIcon } = await import('../../web/src/pages/admin/rbac/groupIcons');
     expect(RBAC_GROUPS.map((g) => g.id).filter((id) => !GROUP_ICON[id])).toEqual([]);
     expect(groupIcon('grupo-que-nao-existe')).toBe('rbac-admin');
+  });
+});
+
+describe('texto das mensagens de sistema (web e exportações)', () => {
+  it('systemText da web é o do shared', () => {
+    const names: Record<string, string> = { 'bruno.lima': 'Bruno Lima' };
+    const nameOf = (u: string) => names[u] ?? u;
+    const cases: Record<string, any>[] = [
+      { t: 'uj', msg: 'ana.souza' },
+      { t: 'au', msg: 'bruno.lima' },
+      { t: 'subscription-role-added', msg: 'bruno.lima', role: 'owner' },
+      { t: 'call_ended', msg: '', call: { kind: 'video', duration: 754 } },
+      { t: 'room-set-notice', msg: '' },
+      { t: 'room_changed_topic', msg: 'Planejamento' },
+    ];
+    const out = cases.map((c) => {
+      const m = msg(c as Partial<Message>);
+      const web = webSystemText(m, nameOf);
+      expect(web).toBe(sharedSystemText(m, nameOf));
+      return web;
+    });
+    expect(out).toEqual([
+      'Ana Souza entrou na sala',
+      'Ana Souza adicionou Bruno Lima',
+      'Ana Souza deu o papel Dono a Bruno Lima',
+      'Chamada de vídeo · 12 min 34 s',
+      'Ana Souza transformou a sala em canal de avisos',
+      'Ana Souza alterou o tópico para: Planejamento',
+    ]);
+  });
+});
+
+describe('regras das exportações', () => {
+  const H = 3600_000;
+  const now = Date.parse('2026-11-03T15:00:00Z');
+  const ago = (h: number) => new Date(now - h * H).toISOString();
+  const after = (h: number) => new Date(now + h * H).toISOString();
+
+  it('nextDataRequestAt: um pedido a cada 24 horas, o que falhou não conta', () => {
+    expect(nextDataRequestAt([], now)).toBeNull();
+    expect(nextDataRequestAt([{ status: 'ready', requestedAt: ago(2) }], now)).toBe(after(22));
+    expect(nextDataRequestAt([{ status: 'failed', requestedAt: ago(2) }], now)).toBeNull();
+    expect(nextDataRequestAt([{ status: 'ready', requestedAt: ago(25) }], now)).toBeNull();
+    expect(nextDataRequestAt([{ status: 'pending', requestedAt: ago(1) }], now)).toBe(after(23));
+    // O mais novo que não falhou é o que manda.
+    expect(nextDataRequestAt([{ status: 'failed', requestedAt: ago(1) }, { status: 'expired', requestedAt: ago(5) }], now)).toBe(after(19));
+  });
+
+  it('nomes de arquivo', () => {
+    expect(exportSlug('Projeto X — Ação #1', 'conversa')).toBe('projeto-x-acao-1');
+    expect(exportSlug('🙂', 'conversa')).toBe('conversa');
+    expect(exportFileName('Conversa com Bruno Lima', '2026-10-01', '2026-10-31', 'html')).toBe('conversa-com-bruno-lima_2026-10-01_a_2026-10-31.html');
+    expect(safeZipName('abc', '../../etc/pass:wd')).toBe('abc-etcpasswd');
+    expect(safeZipName('abc', 'foto ação.png')).toBe('abc-foto ação.png');
+    expect(safeZipName('abc', '.oculto')).toBe('abc-oculto');
+    expect(safeZipName('abc', '...')).toBe('abc-arquivo');
+    const long = safeZipName('abc', `${'x'.repeat(300)}.pdf`);
+    expect(long).toMatch(/^abc-x+\.pdf$/);
+    expect(long).toHaveLength(4 + 120);
+  });
+
+  it('células do CSV', () => {
+    expect(csvCell('=SOMA(A1)')).toBe(`'=SOMA(A1)`);
+    expect(csvCell('+5')).toBe(`'+5`);
+    expect(csvCell('-2')).toBe(`'-2`);
+    expect(csvCell('@user')).toBe(`'@user`);
+    expect(csvCell('a;b')).toBe(`"a;b"`);
+    expect(csvCell('diz "oi"')).toBe(`"diz ""oi"""`);
+    expect(csvCell('linha 1\nlinha 2')).toBe(`"linha 1\nlinha 2"`);
+    expect(csvCell('normal')).toBe('normal');
+    expect(csvCell(null)).toBe('');
+    expect(csvCell(12)).toBe('12');
   });
 });
