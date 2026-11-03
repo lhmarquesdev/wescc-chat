@@ -2412,3 +2412,331 @@ a.att-title {
     animation: none;
   }
 }
+
+/* ---------- Mensagens: encaminhada, enquete, mensagem de vídeo, agendar ---------- */
+
+/* Encaminhada: o original num cartão como o da citação (de onde veio, quem escreveu, quando). */
+.fwd-card {
+  max-width: 640px;
+  margin-top: 4px;
+  padding: 6px 12px;
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--bg-subtle);
+  min-width: 0;
+}
+.fwd-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  margin-bottom: 2px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.fwd-head > .icon {
+  flex-shrink: 0;
+}
+.fwd-head a {
+  color: inherit;
+  font-weight: var(--fw-medium);
+}
+.fwd-head a:hover {
+  color: var(--fg);
+}
+.fwd-author {
+  font-weight: var(--fw-medium);
+  color: var(--fg-2);
+}
+.fwd-card > .att-video,
+.fwd-card > .video-msg {
+  margin-top: 4px;
+}
+
+/* Enquete: no lugar do texto da mensagem. */
+.poll-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 480px;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  --ring-offset: var(--bg-surface);
+}
+.poll-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
+.poll-head > .icon {
+  color: var(--accent-text);
+}
+.poll-q {
+  font-size: var(--fs-15);
+  line-height: var(--lh-15);
+  font-weight: var(--fw-semibold);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.poll-q p {
+  margin: 0;
+}
+.poll-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.poll-opt {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-1) linear;
+}
+.poll-opt:where(:hover:not(:disabled, [aria-disabled='true'])) {
+  border-color: var(--border-hover);
+}
+.poll-opt:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+}
+.poll-opt[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+.poll-opt:disabled {
+  cursor: default;
+  color: var(--fg);
+}
+.poll-opt.on {
+  border-color: var(--accent);
+}
+.poll-opt.top {
+  font-weight: var(--fw-semibold);
+}
+.poll-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: -1;
+  background: var(--accent-soft);
+  transition: width var(--dur-4) var(--ease-out);
+}
+.poll-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--control-border);
+  border-radius: var(--radius-full);
+  color: var(--fg-on-accent);
+}
+.poll-opts[role='group'] .poll-check {
+  border-radius: var(--radius-xs);
+}
+.poll-opt.on .poll-check {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.poll-card.closed .poll-check {
+  border-color: var(--border-strong);
+}
+.poll-card.closed .poll-opt.on .poll-check {
+  border-color: var(--fg-muted);
+  background: var(--fg-muted);
+}
+.poll-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.poll-count {
+  flex-shrink: 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-regular);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.poll-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--space-2);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+.poll-foot > .muted {
+  margin-right: auto;
+}
+@media (pointer: coarse) {
+  .poll-opt {
+    min-height: var(--touch);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .poll-bar {
+    transition: none;
+  }
+}
+
+/* Mensagem de vídeo: retângulo arredondado, toque para tocar com som. */
+.video-msg {
+  position: relative;
+  width: min(320px, 100%);
+  max-height: 480px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  background: var(--bg-muted);
+}
+.video-msg video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: pointer;
+}
+.video-msg-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin: -24px 0 0 -24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--scrim);
+  color: var(--fg-on-accent);
+  cursor: pointer;
+  transition: opacity var(--dur-2) linear;
+}
+.video-msg-play:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus);
+}
+.video-msg.playing .video-msg-play {
+  opacity: 0;
+}
+.video-msg.playing:hover .video-msg-play,
+.video-msg.playing .video-msg-play:focus-visible {
+  opacity: 1;
+}
+.video-msg-time {
+  position: absolute;
+  left: 8px;
+  bottom: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--scrim);
+  color: var(--fg-on-accent);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.icon-btn.video-msg-full {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border-radius: var(--radius-full);
+  background: var(--scrim);
+  color: var(--fg-on-accent);
+}
+.icon-btn.video-msg-full:hover {
+  background: var(--scrim);
+  color: var(--fg-on-accent);
+}
+.video-msg-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: color-mix(in srgb, var(--fg-on-accent) 25%, transparent);
+  pointer-events: none;
+}
+.video-msg-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+@media (max-width: 760px) {
+  .video-msg {
+    width: min(260px, 75vw);
+  }
+}
+
+/* Enviar + seta "Agendar envio" (desktop), coladas. */
+.send-group {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+.send-group > .btn.primary.send {
+  margin-left: 0;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.send-group.with-more > .btn.primary.send {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.send-group .menu-wrap {
+  display: flex;
+}
+.btn.primary.send-more {
+  width: 24px;
+  height: 36px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--fg-on-accent) 35%, transparent);
+}
+@media (pointer: coarse) {
+  .btn.primary.send-more {
+    width: 32px;
+    height: var(--touch);
+  }
+}
+.composer-bar.scheduled > .icon {
+  color: var(--accent-text);
+}
+.composer-bar.scheduled > .btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+/* Atalhos de horário no menu da seta e na folha do celular: rótulo e, à direita, o horário. */
+.menu .time-preset-item > .muted {
+  margin-left: auto;
+  padding-left: var(--space-4);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}

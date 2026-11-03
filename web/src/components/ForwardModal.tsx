@@ -208,67 +208,71 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
         <strong>{authorName(m)}</strong>
         <span className="fwd-preview-text">{preview}</span>
       </div>
-      <label className="field-label" htmlFor="fwd-to">
-        Para
-      </label>
-      <div className="picker fwd-picker">
-        <div className="chips">
-          {picked.map((p) => (
-            <span key={p.key} className={`chip ${failureOf(p.key) ? 'chip-error' : ''}`} title={failureOf(p.key)?.error}>
-              {p.kind === 'user' ? <Avatar username={p.username} size={20} /> : <Icon name={roomIconName(p.sub)} size={14} />} {p.label}
-              <button type="button" aria-label={`Remover ${p.label}`} onClick={() => setPicked((x) => x.filter((y) => y.key !== p.key))}>
-                <Icon name="close" size={14} />
-              </button>
-            </span>
-          ))}
-          <input
-            id="fwd-to"
-            ref={inputRef}
-            value={term}
-            autoComplete="off"
-            onChange={(e) => (setTerm(e.target.value), setListOpen(true))}
-            onFocus={() => setListOpen(true)}
-            onBlur={() => closeAfterPointer(() => setListOpen(false))}
-            onKeyDown={(e) => {
-              if (e.key === 'Backspace' && !term && picked.length) setPicked((x) => x.slice(0, -1));
-              keys.onKeyDown(e);
-            }}
-            placeholder="Buscar pessoas e conversas"
-            role="combobox"
-            aria-expanded={listOpen && flat.length > 0}
-            aria-autocomplete="list"
-          />
-        </div>
-      </div>
-      {failures.length > 0 && (
-        <div className="fwd-failures" role="alert">
-          <p>{summary}</p>
-          <ul>
-            {failures.map((f) => (
-              <li key={f.key}>
-                <strong>{f.label}</strong>: {f.error}
-              </li>
+      <div className="field">
+        <label className="field-label" htmlFor="fwd-to">
+          Para
+        </label>
+        <div className="picker fwd-picker">
+          <div className="chips">
+            {picked.map((p) => (
+              <span key={p.key} className={`chip ${failureOf(p.key) ? 'chip-error' : ''}`} title={failureOf(p.key)?.error}>
+                {p.kind === 'user' ? <Avatar username={p.username} size={20} /> : <Icon name={roomIconName(p.sub)} size={14} />} {p.label}
+                <button type="button" aria-label={`Remover ${p.label}`} onClick={() => setPicked((x) => x.filter((y) => y.key !== p.key))}>
+                  <Icon name="close" size={14} />
+                </button>
+              </span>
             ))}
-          </ul>
+            <input
+              id="fwd-to"
+              ref={inputRef}
+              value={term}
+              autoComplete="off"
+              onChange={(e) => (setTerm(e.target.value), setListOpen(true))}
+              onFocus={() => setListOpen(true)}
+              onBlur={() => closeAfterPointer(() => setListOpen(false))}
+              onKeyDown={(e) => {
+                if (e.key === 'Backspace' && !term && picked.length) setPicked((x) => x.slice(0, -1));
+                keys.onKeyDown(e);
+              }}
+              placeholder="Buscar pessoas e conversas"
+              role="combobox"
+              aria-expanded={listOpen && flat.length > 0}
+              aria-autocomplete="list"
+            />
+          </div>
         </div>
-      )}
-      {listOpen && flat.length > 0 && (
-        <div className="picker-list fwd-list" role="listbox" aria-label="Destinos" data-inline="" data-nav={keys.nav}>
-          {sections.rooms.length > 0 && <div className="fwd-section">{term.trim() ? 'Conversas' : 'Conversas recentes'}</div>}
-          {sections.rooms.map((c, i) => row(c, i))}
-          {sections.users.length > 0 && <div className="fwd-section">Pessoas</div>}
-          {sections.users.map((c, i) => row(c, sections.rooms.length + i))}
-        </div>
-      )}
-      <label className="field-label" htmlFor="fwd-comment">
-        Comentário (opcional)
-      </label>
-      <textarea id="fwd-comment" rows={3} value={comment} maxLength={max} onChange={(e) => setComment(e.target.value)} />
-      {comment.length >= max * 0.8 && (
-        <div className="muted small fwd-count">
-          {comment.length}/{max}
-        </div>
-      )}
+        {failures.length > 0 && (
+          <div className="fwd-failures" role="alert">
+            <p>{summary}</p>
+            <ul>
+              {failures.map((f) => (
+                <li key={f.key}>
+                  <strong>{f.label}</strong>: {f.error}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {listOpen && flat.length > 0 && (
+          <div className="picker-list fwd-list" role="listbox" aria-label="Destinos" data-inline="" data-nav={keys.nav}>
+            {sections.rooms.length > 0 && <div className="fwd-section">{term.trim() ? 'Conversas' : 'Conversas recentes'}</div>}
+            {sections.rooms.map((c, i) => row(c, i))}
+            {sections.users.length > 0 && <div className="fwd-section">Pessoas</div>}
+            {sections.users.map((c, i) => row(c, sections.rooms.length + i))}
+          </div>
+        )}
+      </div>
+      <div className="field">
+        <label className="field-label" htmlFor="fwd-comment">
+          Comentário (opcional)
+        </label>
+        <textarea id="fwd-comment" rows={3} value={comment} maxLength={max} onChange={(e) => setComment(e.target.value)} />
+        {comment.length >= max * 0.8 && (
+          <div className="muted small fwd-count">
+            {comment.length}/{max}
+          </div>
+        )}
+      </div>
     </Modal>
   );
 }

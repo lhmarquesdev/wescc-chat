@@ -190,7 +190,7 @@ export function ScheduledPanel({ room }: { room: Room }) {
               )}
               {s.ackRequired && <span className="pill">Pede “Ciente”</span>}
               {s.status === 'sending' && <span className="pill">Enviando…</span>}
-              {s.status === 'failed' && <span className="pill danger">Não enviada</span>}
+              {s.status === 'failed' && <span className="pill err">Não enviada</span>}
               <span className="spacer" />
               <Menu
                 label="Mais ações"
