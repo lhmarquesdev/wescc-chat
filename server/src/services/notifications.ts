@@ -20,6 +20,12 @@ async function serverBuiltMarkdown(ctx: Ctx, row: any): Promise<boolean> {
   return (await botIds()).includes(ctx.userId);
 }
 
+async function groupDmLabel(uids: string[]) {
+  const rows = await many('SELECT coalesce(nullif(trim(name), \'\'), username) AS n FROM users WHERE id = ANY($1) ORDER BY 1', [uids]);
+  const names = rows.map((r) => r.n as string);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} e ${names[names.length - 1]}` : names.join('');
+}
+
 // Decide quem recebe notificação (desktop/in-app e e-mail) para uma nova mensagem.
 export async function dispatchNotifications(ctx: Ctx, room: any, row: any, mentions: UserRef[], parent: any) {
   const members = await many(
@@ -40,14 +46,18 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
   const isDM = room.t === 'd';
   // Quem a pessoa vê como autor: o apelido da mensagem (webhooks) ou o usuário.
   // O sender do evento continua a conta que publicou.
-  const senderName: string = row.alias ? truncate(String(row.alias), 100) : ctx.username;
-  const roomName = isDM ? senderName : room.fname || room.name || '';
+  // Pessoa aparece pelo nome, como nas telas do chat ("Ana Souza", não "ana"); sem nome, o usuário.
+  const sender = row.alias ? null : (await many('SELECT name FROM users WHERE id = $1', [ctx.userId]))[0];
+  const senderName: string = row.alias ? truncate(String(row.alias), 100) : sender?.name?.trim() || ctx.username;
+  // Conversa em grupo (DM com 3+): "Ana Souza em Ana Souza, Bruno Lima e Carla Dias" (antes saía "ana em ana").
+  const groupDM = isDM && (room.uids?.length ?? 0) > 2;
+  const roomName = groupDM ? await groupDmLabel(room.uids) : isDM ? senderName : room.fname || room.name || '';
   const hidePush = getSetting<boolean>('Push_Privacy_Hide_Content');
   const preview = messagePreviewText({ msg: row.msg, sticker: row.extra?.sticker, files: row.files });
   const text = (await serverBuiltMarkdown(ctx, row)) ? plainIntegrationText(preview) : preview;
   const emailEnabled = getSetting<boolean>('Email_Notifications_Enabled');
   const pushTargets: string[] = [];
-  const title = isDM ? (room.uids.length > 2 ? `${senderName} em ${roomName}` : senderName) : `#${roomName}`;
+  const title = isDM ? (groupDM ? `${senderName} em ${roomName}` : senderName) : `#${roomName}`;
   const body = hidePush ? 'Você tem uma nova mensagem' : `${isDM ? '' : `${senderName}: `}${text}`.slice(0, 300);
 
   for (const m of members) {

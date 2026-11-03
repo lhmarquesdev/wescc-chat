@@ -81,6 +81,21 @@ function useListKeys(count: number, pick: (i: number) => void, closeList: () => 
   return { active, nav, hover, onKeyDown };
 }
 
+// Dentro de um modal a lista empurra o rodapé. Se ela some no mousedown (blur do campo), Cancelar/Criar sobem antes
+// do mouseup e o clique cai em outro lugar: com o botão do mouse apertado, a lista só fecha depois do clique.
+let pointerDown = false;
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointerdown', () => (pointerDown = true), true);
+  window.addEventListener('pointerup', () => (pointerDown = false), true);
+  window.addEventListener('pointercancel', () => (pointerDown = false), true);
+}
+function closeAfterPointer(close: () => void) {
+  if (!pointerDown) return close();
+  const done = () => setTimeout(close, 0);
+  window.addEventListener('pointerup', done, { once: true, capture: true });
+  window.addEventListener('pointercancel', done, { once: true, capture: true });
+}
+
 // Na sugestão vai só a primeira oração do motivo, numa linha; o texto inteiro fica no title do item.
 const briefReason = (reason: string) => reason.split(/[:.]\s/)[0].replace(/\.$/, '');
 
@@ -141,7 +156,7 @@ export function UserPicker({
             value={term}
             onChange={(e) => (setTerm(e.target.value), setListOpen(true))}
             onFocus={() => setListOpen(true)}
-            onBlur={() => setListOpen(false)}
+            onBlur={() => closeAfterPointer(() => setListOpen(false))}
             onKeyDown={(e) => {
               if (e.key === 'Backspace' && !term && value.length && !single) onChange(value.slice(0, -1));
               keys.onKeyDown(e);
@@ -243,7 +258,7 @@ export function RoomPicker({ value, onChange, placeholder = 'Buscar sala' }: { v
         value={term}
         onChange={(e) => (setTerm(e.target.value), setListOpen(true))}
         onFocus={() => setListOpen(true)}
-        onBlur={() => setListOpen(false)}
+        onBlur={() => closeAfterPointer(() => setListOpen(false))}
         onKeyDown={keys.onKeyDown}
         placeholder={placeholder}
         role="combobox"

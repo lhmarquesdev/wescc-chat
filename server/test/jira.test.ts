@@ -538,8 +538,8 @@ describe('Jira: avisos de ponta a ponta', () => {
       const [post] = await posts(room._id);
       expect(post.msg).toBe(`**Ana Teste** moveu [${i.key}](${urlOfIssue(i.key)}) de **Aberta** para **Em andamento**`);
       const n = await ws.waitFor((e) => e.type === 'notification' && e.messageId === post.id);
-      const bot = await one('SELECT username FROM users WHERE id = $1', [await botId()]);
-      expect(n).toMatchObject({ title: `#${room.name}`, text: `${bot.username}: Ana Teste moveu ${i.key} de Aberta para Em andamento` });
+      const bot = await one("SELECT coalesce(nullif(trim(name), ''), username) AS shown FROM users WHERE id = $1", [await botId()]);
+      expect(n).toMatchObject({ title: `#${room.name}`, text: `${bot.shown}: Ana Teste moveu ${i.key} de Aberta para Em andamento` });
     } finally {
       ws.close();
     }

@@ -70,7 +70,6 @@ const SECTION_LABEL: Record<string, string> = {
   Provider: 'Provedor',
   CORS: 'CORS',
   'Device Management': 'Gestão de dispositivos',
-  E2E: 'Criptografia de ponta a ponta',
   Push: 'Notificações push',
   'Rate Limiter': 'Limite de requisições',
   Calls: 'Chamadas',

@@ -108,7 +108,7 @@ describe('Web Push', () => {
     expect(p.headers['content-encoding']).toBe('aes128gcm');
     expect(Number(p.headers.ttl)).toBeGreaterThan(0);
     verifyVapid(String(p.headers.authorization), endpoint, info.publicKey);
-    expect(decrypt(p.body, k)).toEqual({ title: 'admin', body: 'Reunião às 15h', url: `/direct/${dm.room._id}`, tag: dm.room._id });
+    expect(decrypt(p.body, k)).toEqual({ title: 'Administrador', body: 'Reunião às 15h', url: `/direct/${dm.room._id}`, tag: dm.room._id });
 
     // Com conteúdo oculto, só o aviso genérico.
     await api('POST', 'settings', { settings: { Push_Privacy_Hide_Content: true } }, A);

@@ -250,9 +250,7 @@ add('Security', 'Rate Limiter', 'API_Enable_Rate_Limiter', 'boolean', true, { la
 add('Security', 'CORS', 'API_Enable_CORS', 'boolean', false, { label: 'Permitir chamadas à API de outros sites (CORS)' });
 add('Security', 'CORS', 'API_CORS_Origin', 'string', '', { label: 'Origens permitidas, separadas por vírgula (ex.: https://intranet.empresa.com.br; * libera todas)' });
 add('Security', 'Rate Limiter', 'API_Enable_Rate_Limiter_Limit_Calls_Default', 'int', 300, { label: 'Chamadas por minuto' });
-add('Security', 'Device Management', 'Device_Management_Enable_Login_Emails', 'boolean', false, { label: 'Enviar e-mail em login de novo dispositivo' });
 add('Security', 'Device Management', 'Device_Management_Allow_Logout_All', 'boolean', true, { public: true, label: 'Permitir encerrar todas as sessões' });
-add('Security', 'E2E', 'E2E_Enable', 'boolean', false, { public: true, label: 'Criptografia ponta a ponta' });
 add('Security', 'Push', 'Push_enable', 'boolean', true, { public: true, label: 'Notificações push no navegador e no app instalado' });
 add('Security', 'Push', 'Push_Privacy_Hide_Content', 'boolean', false, { public: true, label: 'Ocultar conteúdo nas notificações push' });
 add('Security', 'Push', 'Push_VAPID_Public_Key', 'string', '', { public: true, label: 'Chave pública VAPID (gerada automaticamente)' });

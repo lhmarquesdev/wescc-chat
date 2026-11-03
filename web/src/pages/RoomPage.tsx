@@ -228,7 +228,8 @@ export function RoomPage() {
   // já reserva voz e vídeo antes da resposta do servidor.
   const callHeader = useRoomCallHeader(rid || null, room);
   // Quem está offline não vem no mapa de presença: o texto de status (que continua valendo) vem de users.info.
-  const dmName = room?.t === 'd' && sub && !sub.name.includes(',') ? sub.name : null;
+  // room ainda é o da sala anterior logo depois de trocar de sala (sub já é o da nova): só vale o par certo.
+  const dmName = room?._id === rid && room.t === 'd' && sub && !sub.name.includes(',') ? sub.name : null;
   const [dmStatusText, setDmStatusText] = useState('');
   useEffect(() => {
     setDmStatusText('');
