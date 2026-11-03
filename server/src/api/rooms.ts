@@ -403,9 +403,15 @@ export function roomsRoutes(app: FastifyInstance) {
     if (!room) throw notFound('error-room-not-found');
     return mapRoom(room);
   });
+  // Ver a administração de salas não basta para pôr gente nelas: canal pede add-user-to-any-c-room e grupo privado
+  // add-user-to-any-p-room, como no resto do chat. A regra da Operação vale dentro de addUserToRoom (assertCanBringIn).
   route(app, 'POST', 'rooms.adminRooms.addUser', { permissions: ['view-room-administration'] }, async (req, _rep, ctx) => {
     const body = b(req);
-    await addUserToRoom(str(body.roomId, 'roomId'), (await resolveUserParam(body)).id, { inviter: { id: ctx.userId, username: ctx.username } });
+    const room = await getRoom(str(body.roomId, 'roomId'));
+    if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
+    if (room.t === 'd') throw badRequest('error-not-allowed', 'Não é possível adicionar pessoas a uma DM existente.');
+    if (!(await hasPermission(ctx.userId, room.t === 'p' ? 'add-user-to-any-p-room' : 'add-user-to-any-c-room'))) throw forbidden('Sem permissão para adicionar pessoas a esta sala.');
+    await addUserToRoom(room.id, (await resolveUserParam(body)).id, { inviter: { id: ctx.userId, username: ctx.username } });
     await audit(actorOf(ctx), 'admin.room.user.added', { rid: body.roomId, userId: body.userId });
     return {};
   });

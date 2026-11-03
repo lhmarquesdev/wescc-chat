@@ -120,7 +120,7 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
   'assign-admin-role': { label: 'Dar o papel de Administrador', defaults: [A] },
   'view-room-administration': { label: 'Ver a administração de salas e convites', defaults: [A] },
   'add-user-to-any-c-room': { label: 'Adicionar pessoas a qualquer canal', defaults: [A] },
-  'add-user-to-any-p-room': { label: 'Adicionar pessoas a qualquer grupo privado', defaults: [] },
+  'add-user-to-any-p-room': { label: 'Adicionar pessoas a qualquer grupo privado', defaults: [A] },
   'view-permissions': { label: 'Ver papéis, permissões e o histórico', defaults: [A], inheritsFrom: ['access-permissions', 'manage-roles'] },
   'access-permissions': { label: 'Alterar as permissões dos papéis', defaults: [A] },
   'manage-roles': { label: 'Criar, editar e excluir papéis e dar papéis a pessoas', defaults: [A] },
