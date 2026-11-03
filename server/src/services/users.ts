@@ -1,5 +1,5 @@
 import type { UserPreferences, UserStatus } from '@shared/index';
-import { many, one, query, tx } from '../db/pool';
+import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound, unauthorized } from '../lib/errors';
 import { newId, randomToken, sha256 } from '../lib/ids';
 import { hashPassword, verifyPassword } from '../lib/password';
@@ -539,6 +539,29 @@ async function propagateUsername(userId: string, oldU: string, newU: string) {
     `UPDATE rooms SET usernames = array_replace(usernames, $1, $2), fname = NULL WHERE t = 'd' AND $3 = ANY(uids)`,
     [oldU, newU, userId],
   );
+  await renameInReactions(oldU, newU);
+}
+
+// As reações guardam o @usuário, não o id da conta (messages.reactions = { ":x:": { usernames: [...] } }). Troca o nome
+// antigo pelo novo (conta renomeada) ou tira o nome (newU null, conta excluída): um @usuário reaproveitado nunca herda
+// as reações de outra pessoa, nem no chat nem em "Meus dados". Uma passada pelas mensagens com reação (é raro).
+async function renameInReactions(oldU: string, newU: string | null, db?: Queryable) {
+  await query(
+    `UPDATE messages m SET updated_at = now(), reactions = COALESCE(
+       (SELECT jsonb_object_agg(e.key, e.value || jsonb_build_object('usernames', s.us))
+          FROM jsonb_each(m.reactions) e
+          CROSS JOIN LATERAL (
+            SELECT jsonb_agg(d.v ORDER BY d.o) AS us FROM (
+              SELECT DISTINCT ON (r.v) r.v, r.o FROM (
+                SELECT CASE WHEN a.x = to_jsonb($1::text) THEN to_jsonb($2::text) ELSE a.x END AS v, a.o
+                  FROM jsonb_array_elements(COALESCE(e.value->'usernames', '[]'::jsonb)) WITH ORDINALITY a(x, o)) r
+               WHERE r.v IS NOT NULL ORDER BY r.v, r.o) d) s
+         WHERE s.us IS NOT NULL),
+       '{}'::jsonb)
+     WHERE m.reactions <> '{}'::jsonb AND jsonb_path_exists(m.reactions, '$.*.usernames[*] ? (@ == $u)', jsonb_build_object('u', $1::text))`,
+    [oldU, newU],
+    db,
+  );
 }
 
 export async function setPreferences(ctx: Ctx, prefs: UserPreferences) {
@@ -582,6 +605,8 @@ export async function deleteUser(actor: Ctx, userId: string, opts: { confirmReli
     await c.query(`DELETE FROM rooms WHERE t = 'd' AND $1 = ANY(uids)`, [userId]);
     const subs = await c.query('DELETE FROM subscriptions WHERE user_id = $1 RETURNING room_id', [userId]);
     for (const { room_id } of subs.rows) await c.query('UPDATE rooms SET users_count = GREATEST(users_count - 1, 0) WHERE id = $1', [room_id]);
+    // Na mesma transação: ninguém pega o @usuário e reage antes de as reações da conta saírem.
+    await renameInReactions(u.username, null, c);
     await c.query('DELETE FROM users WHERE id = $1', [userId]);
   });
   bus.forceLogout({ userId });

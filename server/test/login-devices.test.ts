@@ -154,6 +154,26 @@ describe('login em dispositivo novo', () => {
     expect(await devices(u.id)).toHaveLength(3);
   });
 
+  it('programa que guarda cookie: o segundo login, já com o cookie, não é dispositivo novo', async () => {
+    const u = await account();
+    const UA = 'python-requests/2.32.3';
+    // Primeiro dispositivo da conta: anotado pelo programa e pela rede, sem e-mail.
+    const first = await browserLogin(u.username, { ua: UA });
+    expect(first.device).toBeTruthy();
+    // requests.Session, cookie jar do Java/Node, app nativo: devolvem o cookie que o servidor mandou.
+    const second = await browserLogin(u.username, { ua: UA, cookie: first.device });
+    expect(second.auth).toBeTruthy();
+    const third = await browserLogin(u.username, { ua: UA, cookie: second.device });
+    expect(third.auth).toBeTruthy();
+    await settle();
+    expect(outbox).toHaveLength(0);
+    expect(await auditsOf(u.id)).toHaveLength(0);
+    // Outro programa com um cookie que a conta nunca viu continua sendo novo.
+    await browserLogin(u.username, { ua: 'Java/17.0.2', cookie: 'c'.repeat(32) });
+    await announced(u.id, 1);
+    expect(outbox).toHaveLength(1);
+  });
+
   it('a sessão nova fica marcada', async () => {
     const u = await account();
     const a = await browserLogin(u.username);

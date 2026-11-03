@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { config } from '../src/config';
 import { pool } from '../src/db/pool';
 import { runDataExportJobs } from '../src/services/userData';
-import { admin, api, connectWs, enable2fa, newUser, raw, startServer, stopServer, type Auth } from './helpers';
+import { admin, api, connectWs, enable2fa, login, newUser, raw, startServer, stopServer, type Auth } from './helpers';
 import { unzip } from './zip-read';
 
 // Meus dados (LGPD): pedido, tarefa em segundo plano, aviso, conteúdo do .zip, regra das 24 horas, prazo e limpeza.
@@ -137,7 +137,10 @@ describe('meus dados', () => {
     expect(html).toContain('<h1>Meus dados</h1>');
     expect(html).toContain('oi bruno');
     expect(html).toContain(`href="arquivos/${up.files[0]._id}-relat%C3%B3rio.txt"`);
-    expect(html).toContain(':tada: 1');
+    // Reação como no chat (🎉), não o shortcode; os papéis pelo nome.
+    expect(html).toContain('🎉 1');
+    expect(html).not.toContain('>:tada: 1');
+    expect(html).toContain('<dt>Papéis</dt><dd>Usuário</dd>');
     expect(html).toContain('Convite aceito · Bruno Lima');
     expect(html).toContain('Para corrigir ou excluir dados, fale com o administrador do');
 
@@ -313,6 +316,71 @@ describe('meus dados', () => {
     expect(got).toHaveLength(1);
     expect(got[0].target).toEqual({ userId: lia.userId, requestId: r._id });
     expect(got[0].data.size).toBe(Number((await row(r._id)).size));
+  });
+
+  it('@usuário reaproveitado não herda as reações nem as salas da conta excluída', async () => {
+    const dir = await newUser(A, { name: 'Diretor' });
+    const old = await newUser(A, { name: 'Pessoa Antiga' });
+    const secretName = `segredo-diretoria-${Date.now()}`;
+    const g = (await api('POST', 'groups.create', { name: secretName, members: [old.username] }, dir)).group._id;
+    const pub = (await api('POST', 'channels.create', { name: `geral-reuso-${Date.now()}`, members: [old.username] }, dir)).channel._id;
+    const inGroup = (await api('POST', 'chat.sendMessage', { message: { rid: g, msg: 'pauta' } }, dir)).message;
+    const inPublic = (await api('POST', 'chat.sendMessage', { message: { rid: pub, msg: 'bom dia' } }, dir)).message;
+    expect((await api('POST', 'chat.react', { messageId: inGroup._id, emoji: ':tada:' }, old)).success).toBe(true);
+    expect((await api('POST', 'chat.react', { messageId: inPublic._id, emoji: ':tada:' }, dir)).success).toBe(true);
+    expect((await api('POST', 'chat.react', { messageId: inPublic._id, emoji: ':tada:' }, old)).success).toBe(true);
+    expect((await api('POST', 'users.delete', { userId: old.userId }, A)).success).toBe(true);
+    // As reações da conta excluída saem com ela; as dos outros ficam.
+    const reactionsOf = async (id: string) => (await pool.query('SELECT reactions FROM messages WHERE id = $1', [id])).rows[0].reactions;
+    expect(await reactionsOf(inGroup._id)).toEqual({});
+    expect(await reactionsOf(inPublic._id)).toEqual({ ':tada:': { usernames: [dir.username] } });
+
+    // Outra pessoa ganha o mesmo @usuário (comum no AD) e pede os dados.
+    expect((await api('POST', 'users.create', { username: old.username, name: 'Pessoa Nova', email: `nova-${old.username}@test.local`, password: 'senha-forte-1' }, A)).success).toBe(true);
+    const novo = await login(old.username, 'senha-forte-1');
+    expect((await api('GET', 'groups.info', { roomId: g }, novo)).success).toBe(false);
+    const { json, byName } = await readyZip(novo);
+    expect(json('reacoes.json')).toEqual([]);
+    const html = byName.get('meus-dados.html')!.toString('utf8');
+    expect(html).not.toContain(secretName);
+    expect(html).toContain('<h3>Reações (0)</h3>');
+  });
+
+  it('reações guardadas com um @usuário antigo: só entram as salas que a pessoa abre hoje', async () => {
+    // Dados de antes desta versão: a conta excluída deixou o @usuário nas reações, e outra pessoa pegou o nome.
+    const dir = await newUser(A, { name: 'Diretor' });
+    const bea = await newUser(A, { name: 'Bea' });
+    const novo = await newUser(A, { name: 'Pessoa Nova' });
+    const secretName = `segredo-${Date.now()}`;
+    const g = (await api('POST', 'groups.create', { name: secretName, members: [bea.username] }, dir)).group._id;
+    const dm = (await api('POST', 'im.create', { username: bea.username }, dir)).room._id;
+    const pub = (await api('POST', 'channels.create', { name: `aberto-${Date.now()}` }, dir)).channel._id;
+    const ids: string[] = [];
+    for (const rid of [g, dm, pub]) ids.push((await api('POST', 'chat.sendMessage', { message: { rid, msg: 'oi' } }, dir)).message._id);
+    await pool.query(`UPDATE messages SET reactions = jsonb_build_object(':tada:', jsonb_build_object('usernames', jsonb_build_array($2::text))) WHERE id = ANY($1)`, [ids, novo.username]);
+    const { json, byName } = await readyZip(novo);
+    // O canal público ela abre (sem ser membro); o grupo privado e a conversa dos outros, não.
+    expect(json('reacoes.json')).toEqual([{ mensagemId: ids[2], sala: expect.stringMatching(/^aberto-/), dataMensagem: expect.any(String), emoji: ':tada:' }]);
+    const all = [...byName.values()].map((b) => b.toString('utf8')).join('\n');
+    expect(all).not.toContain(secretName);
+    expect(all).not.toContain('Conversa com Bea');
+  });
+
+  it('@usuário renomeado leva as reações junto', async () => {
+    const dir = await newUser(A);
+    const rui = await newUser(A, { name: 'Rui' });
+    const rid = (await api('POST', 'channels.create', { name: `renome-${Date.now()}`, members: [rui.username] }, dir)).channel._id;
+    const m = (await api('POST', 'chat.sendMessage', { message: { rid, msg: 'oi' } }, dir)).message;
+    await api('POST', 'chat.react', { messageId: m._id, emoji: ':thumbsup:' }, dir);
+    await api('POST', 'chat.react', { messageId: m._id, emoji: ':thumbsup:' }, rui);
+    await api('POST', 'chat.react', { messageId: m._id, emoji: ':tada:' }, rui);
+    const renamed = `${rui.username}x`;
+    expect((await api('POST', 'users.update', { userId: rui.userId, data: { username: renamed } }, A)).success).toBe(true);
+    const r = (await pool.query('SELECT reactions FROM messages WHERE id = $1', [m._id])).rows[0].reactions;
+    // A ordem de quem reagiu fica.
+    expect(r).toEqual({ ':thumbsup:': { usernames: [dir.username, renamed] }, ':tada:': { usernames: [renamed] } });
+    const { json } = await readyZip({ ...rui, username: renamed });
+    expect(json('reacoes.json').map((x: any) => x.emoji).sort()).toEqual([':tada:', ':thumbsup:']);
   });
 
   it('troca de senha pendente bloqueia o pedido e o download', async () => {

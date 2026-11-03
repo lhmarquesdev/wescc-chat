@@ -35,22 +35,17 @@ function RequestStatus({ r }: { r: UserDataRequest }) {
       );
     case 'ready':
       return (
-        <div className="my-data-ready">
-          <p className="my-data-status">
-            <Icon name="success" size={16} />
-            Pronto · {formatBytes(r.size ?? 0)} · disponível até {formatDateTime(r.expiresAt)}
-          </p>
-          <a className="btn" href={`/api/v1/users.dataDownloads.file?id=${encodeURIComponent(r._id)}`} download>
-            <Icon name="download" />
-            Baixar
-          </a>
-        </div>
+        <p className="my-data-status">
+          <Icon name="success" size={16} />
+          Pronto · {formatBytes(r.size ?? 0)} · disponível até {formatDateTime(r.expiresAt)}
+        </p>
       );
     case 'failed':
+      // O motivo (r.error) fica no log do servidor: aqui, uma frase só.
       return (
         <p className="field-error my-data-status">
           <Icon name="error" size={14} />
-          Não foi possível preparar seus dados: {r.error ?? 'erro desconhecido.'} Peça de novo.
+          Não foi possível preparar seus dados. Peça de novo.
         </p>
       );
     case 'expired':
@@ -101,6 +96,11 @@ export function MyDataSection() {
 
   const latest = data?.requests[0];
   const hours = data?.expirationHours ?? 72;
+  const ready = latest?.status === 'ready';
+  // Na fila ou preparando: o estado já diz tudo, não há o que fazer além de esperar.
+  const working = latest?.status === 'pending' || latest?.status === 'running';
+  // Dentro das 24 horas o botão de pedir some e fica só a data em que dá para pedir de novo.
+  const canAsk = !next && !working;
   return (
     <>
       <PageHead title="Meus dados" />
@@ -125,13 +125,23 @@ export function MyDataSection() {
               ) : (
                 <>
                   {latest && <RequestStatus r={latest} />}
-                  <div className="my-data-actions">
-                    <button type="button" className={latest?.status === 'ready' ? 'btn' : 'btn primary'} disabled={busy || !!next || !data?.enabled} onClick={ask}>
-                      <Icon name="my-data" />
-                      Pedir meus dados
-                    </button>
-                    {next && <p className="muted small">Você poderá pedir de novo em {formatDateTime(next)}.</p>}
-                  </div>
+                  {(ready || canAsk) && (
+                    <div className="my-data-actions">
+                      {ready && latest && (
+                        <a className="btn primary" href={`/api/v1/users.dataDownloads.file?id=${encodeURIComponent(latest._id)}`} download>
+                          <Icon name="download" />
+                          Baixar
+                        </a>
+                      )}
+                      {canAsk && (
+                        <button type="button" className={ready ? 'btn' : 'btn primary'} disabled={busy || !data?.enabled} onClick={ask}>
+                          <Icon name="my-data" />
+                          {ready ? 'Pedir de novo' : 'Pedir meus dados'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {next && !working && <p className="muted small my-data-next">Você poderá pedir de novo em {formatDateTime(next)}.</p>}
                 </>
               )}
             </div>

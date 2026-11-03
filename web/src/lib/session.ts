@@ -121,10 +121,10 @@ export async function startSession() {
           },
         });
       }
-      // Meus dados (LGPD): o .zip ficou pronto (ou falhou) em segundo plano.
-      if (ev.type === 'userdata.changed' && (ev.request.status === 'ready' || ev.request.status === 'failed')) {
+      // Meus dados (LGPD): o .zip ficou pronto (ou falhou) em segundo plano. Quem já está em Minha conta › Meus dados
+      // vê o cartão mudar: sem aviso repetido.
+      if (ev.type === 'userdata.changed' && (ev.request.status === 'ready' || ev.request.status === 'failed') && location.pathname !== '/account/data') {
         const open = () => {
-          if (location.pathname === '/account/data') return;
           history.pushState({}, '', '/account/data');
           dispatchEvent(new PopStateEvent('popstate'));
         };

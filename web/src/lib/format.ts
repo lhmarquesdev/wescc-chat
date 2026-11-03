@@ -1,5 +1,5 @@
 import type { CallCard, Message, Room, Subscription } from '@shared/index';
-import { ROLE_LABEL, systemText as sharedSystemText } from '@shared/messageText';
+import { ROLE_LABEL, roleDisplayName, systemText as sharedSystemText } from '@shared/messageText';
 import type { IconName } from '../components/icons';
 
 export function roomPath(r: { _id?: string; rid?: string; t: string }) {
@@ -164,15 +164,14 @@ export function systemIcon(m: Message & Record<string, any>): IconName | null {
   }
 }
 
-// Papéis criados pelo admin (operador, supervisor…): a descrição curta vira o nome; sem ela, o id com inicial
-// maiúscula. Preenchido por roles.list (session.ts e as telas de admin que recarregam os papéis).
+// Papéis criados pelo admin (operador, supervisor…): roleDisplayName (shared/messageText.ts, o mesmo de Meus dados).
+// Preenchido por roles.list (session.ts e as telas de admin que recarregam os papéis).
 const customRoleLabel = new Map<string, string>();
 export function setRoleDescriptions(roles: { _id: string; description?: string | null }[]) {
   customRoleLabel.clear();
   for (const r of roles) {
     if (ROLE_LABEL[r._id]) continue;
-    const d = r.description?.trim();
-    customRoleLabel.set(r._id, d && d.length <= 32 && !/[.!?]$/.test(d) ? d : r._id.charAt(0).toUpperCase() + r._id.slice(1));
+    customRoleLabel.set(r._id, roleDisplayName(r._id, r.description));
   }
 }
 

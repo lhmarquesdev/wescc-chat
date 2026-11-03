@@ -10,7 +10,7 @@ import { useMedia } from '../components/overlay';
 import { Icon } from '../components/Icon';
 import { SideFoot, TakeoverBack, TakeoverHead } from '../components/Sidebar';
 import { QrCode } from '../components/QrCode';
-import { DeviceCell, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
+import { DeviceCell, NewDevicePill, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
 // Figurinhas: o item some com a função desligada.
 import { useStickerCaps } from '../lib/stickers';
 
@@ -574,7 +574,9 @@ function Devices() {
   return (
     <>
       <PageHead title="Dispositivos" />
-      <p className="page-lead">Cada login cria uma sessão. Encerre as que você não reconhece.</p>
+      <p className="page-lead">
+        Cada login cria uma sessão. Encerre as que você não reconhece. “Dispositivo novo” marca o primeiro acesso da conta por um navegador ou programa.
+      </p>
       {/* Abaixo do texto, não no cabeçalho: a barra de 56px fica igual à das outras páginas da conta. */}
       {allowAll && others > 0 && (
         <div className="row-actions page-lead-actions">
@@ -608,7 +610,7 @@ function Devices() {
                       tag={
                         <>
                           {s.current && <span className="pill accent tag">Esta sessão</span>}
-                          {s.device?.newDevice && <span className="pill warn tag">Dispositivo novo</span>}
+                          {s.device?.newDevice && <NewDevicePill current={s.current} />}
                         </>
                       }
                     />

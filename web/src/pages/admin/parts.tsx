@@ -129,19 +129,31 @@ export function DeviceIcon({ device }: { device: Device }) {
   );
 }
 
-// Dispositivo numa célula (Minha conta e Administração): ícone, "Chrome em Linux" e o IP embaixo.
+// Dispositivo numa célula (Minha conta e Administração): ícone, "Chrome em Linux" e o IP embaixo. As etiquetas ("Esta
+// sessão", "Dispositivo novo") ficam juntas ao lado do nome; no celular descem alinhadas com ele (admin.css).
 export function DeviceCell({ device, tag }: { device: Device & { ip?: string }; tag?: ReactNode }) {
   return (
-    <div className="cell-entity">
+    <div className="cell-entity device-entity">
       <DeviceIcon device={device} />
       <div>
         <span className="cell-name">
           {deviceLabel(device)}
-          {tag}
+          {tag && <span className="cell-tags">{tag}</span>}
         </span>
         {device.ip && <span className="cell-sub mono">{device.ip}</span>}
       </div>
     </div>
+  );
+}
+
+// "Dispositivo novo": a sessão veio de um navegador ou programa que a conta nunca tinha usado (o e-mail de aviso sai
+// nesse login). Na sessão atual o tom é neutro: é a própria pessoa, não um alerta sobre ela.
+export const NEW_DEVICE_HINT = 'Primeiro acesso da conta por este navegador ou programa.';
+export function NewDevicePill({ current = false }: { current?: boolean }) {
+  return (
+    <span className={current ? 'pill tag' : 'pill warn tag'} title={NEW_DEVICE_HINT}>
+      Dispositivo novo
+    </span>
   );
 }
 

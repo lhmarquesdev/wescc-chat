@@ -77,9 +77,18 @@ export function registerWebsocket(app: FastifyInstance) {
       return true;
     };
 
+    // Uma autenticação de cada vez: o navegador manda "auth" logo ao abrir, muitas vezes antes de a do cookie terminar,
+    // e a mesma conexão entrava duas vezes no bus (cada evento chegava em dobro, e o toast aparecia duas vezes).
+    let authing: Promise<unknown> = Promise.resolve();
+    const authOnce = (token: string | undefined, userId?: string) => {
+      const next = authing.then(() => (conn ? true : authenticate(token, userId)));
+      authing = next.catch(() => false);
+      return next;
+    };
+
     // Autentica pelo cookie, se houver e se a página for do próprio chat (senão outro site usaria a sessão); senão espera a mensagem "auth".
     const cookies = parseCookies(req.headers.cookie);
-    if (cookies.rc_token && isTrustedBrowserOrigin(req.headers.origin, req.headers.host)) void authenticate(cookies.rc_token, cookies.rc_uid).catch(() => {});
+    if (cookies.rc_token && isTrustedBrowserOrigin(req.headers.origin, req.headers.host)) void authOnce(cookies.rc_token, cookies.rc_uid).catch(() => {});
 
     socket.on('message', async (raw) => {
       let ev: ClientEvent;
@@ -90,8 +99,7 @@ export function registerWebsocket(app: FastifyInstance) {
       }
       try {
         if (ev.type === 'auth') {
-          if (conn) return;
-          if (!(await authenticate(ev.token))) socket.close(4001, 'unauthorized');
+          if (!(await authOnce(ev.token))) socket.close(4001, 'unauthorized');
           return;
         }
         if (ev.type === 'ping') return send({ type: 'pong' });

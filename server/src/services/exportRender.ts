@@ -2,6 +2,7 @@
 // datas no fuso do servidor, nome da conversa e o cabeçalho de download.
 import type { Attachment } from '@shared/index';
 import { csvRow, ENCRYPTED_PLACEHOLDER, isEncryptedMessage } from '@shared/dataExport';
+import { emojiText } from '@shared/emoji';
 import { formatBytes, systemText } from '@shared/messageText';
 import { messagePreviewText } from '@shared/stickers';
 import { many, one } from '../db/pool';
@@ -127,16 +128,22 @@ export async function encryptedSql(alias = 'm'): Promise<string> {
   return col ? `${alias}.e2e IS NOT NULL` : 'false';
 }
 
-// ---------- Nomes das pessoas citadas em mensagens de sistema ----------
+// ---------- Nomes das pessoas citadas em mensagens de sistema e nas reações ----------
 
 const NAMED_SYSTEM = new Set(['au', 'ru', 'user-muted', 'user-unmuted', 'subscription-role-added', 'subscription-role-removed']);
 
 export function nameResolver() {
   const cache = new Map<string, string>();
   return {
-    // Uma consulta por página de mensagens, só com os @usuários ainda desconhecidos.
-    async prime(rows: { t?: string | null; msg?: string | null }[]) {
-      const want = [...new Set(rows.filter((r) => r.t && NAMED_SYSTEM.has(r.t) && r.msg && !cache.has(r.msg)).map((r) => r.msg as string))];
+    // Uma consulta por página de mensagens, só com os @usuários ainda desconhecidos. reactions: também quem reagiu
+    // (o HTML mostra os nomes ao passar o mouse na reação).
+    async prime(rows: { t?: string | null; msg?: string | null; reactions?: Record<string, { usernames?: string[] }> | null }[], reactions = false) {
+      const all = new Set<string>();
+      for (const r of rows) {
+        if (r.t && NAMED_SYSTEM.has(r.t) && r.msg) all.add(r.msg);
+        if (reactions) for (const v of Object.values(r.reactions ?? {})) for (const u of v?.usernames ?? []) all.add(u);
+      }
+      const want = [...all].filter((u) => !cache.has(u));
       if (!want.length) return;
       for (const u of await many('SELECT username, name FROM users WHERE username = ANY($1)', [want])) cache.set(u.username, u.name || u.username);
       for (const w of want) if (!cache.has(w)) cache.set(w, w);
@@ -252,7 +259,10 @@ function fileHtml(f: ExportFile) {
   return `<li><a href="${escapeHtml(href)}">${label}</a>${size}</li>`;
 }
 
-export function messageHtml(em: ExportMessage): string {
+// Reações como no chat: 👍 2 (emoji personalizado como :nome:). O JSON guarda o shortcode.
+const reactionList = (em: ExportMessage) => Object.entries(em.reactions).filter(([, us]) => us.length);
+
+export function messageHtml(em: ExportMessage, nameOf: (username: string) => string = (u) => u): string {
   const sys = em.kind === 'system';
   const parts: string[] = [`<article id="m-${escapeHtml(em.id)}" class="${kindClass[em.kind]}">`, `<div class="time">${escapeHtml(timeFmt.format(new Date(em.ts)))}</div><div>`];
   if (!sys) {
@@ -269,8 +279,13 @@ export function messageHtml(em: ExportMessage): string {
   if (em.files.length) parts.push(`<ul class="files">${em.files.map(fileHtml).join('')}</ul>`);
   const tags = [em.editedAt && '(editada)', em.pinned && 'Fixada', em.ackRequired && `Ciente: ${em.ackCount.toLocaleString('pt-BR')}`].filter(Boolean);
   if (tags.length) parts.push(`<div class="tags">${tags.map((t) => escapeHtml(t)).join(' · ')}</div>`);
-  const reactions = Object.entries(em.reactions).filter(([, us]) => us.length);
-  if (reactions.length) parts.push(`<div class="reactions">${reactions.map(([k, us]) => `<span title="${escapeHtml(us.join(', '))}">${escapeHtml(k)} ${us.length}</span>`).join('')}</div>`);
+  const reactions = reactionList(em);
+  if (reactions.length) {
+    // O título é o do chat: "Ana e Bruno reagiram com :thumbsup:".
+    const title = (k: string, us: string[]) => `${andList.format(us.map(nameOf))} ${us.length === 1 ? 'reagiu' : 'reagiram'} com ${k}`;
+    const pill = ([k, us]: [string, string[]]) => `<span title="${escapeHtml(title(k, us))}">${escapeHtml(emojiText(k))} ${us.length}</span>`;
+    parts.push(`<div class="reactions">${reactions.map(pill).join('')}</div>`);
+  }
   parts.push('</div></article>');
   return parts.join('');
 }
@@ -284,9 +299,8 @@ export const CSV_HEADER = csvRow(['Data e hora', 'Autor', 'Usuário', 'Tipo', 'M
 
 export function messageCsv(em: ExportMessage): string {
   const files = em.files.map((f) => `${f.name}${f.encrypted ? ' (criptografado)' : f.missing ? ' (indisponível)' : ''}`).join(' | ');
-  const reactions = Object.entries(em.reactions)
-    .filter(([, us]) => us.length)
-    .map(([k, us]) => `${k} ${us.length}`)
+  const reactions = reactionList(em)
+    .map(([k, us]) => `${emojiText(k)} ${us.length}`)
     .join('; ');
   return csvRow([
     formatCsvDate(em.ts),

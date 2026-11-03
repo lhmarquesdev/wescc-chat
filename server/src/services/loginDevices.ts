@@ -1,9 +1,10 @@
 // E-mail de login em dispositivo novo (Device_Management_Enable_Login_Emails).
 //
 // Cada navegador recebe um cookie HttpOnly (wescc_device, só no caminho do login, 400 dias) com um id aleatório; a conta
-// guarda o hash dele em user_devices. Programas que não são navegador (scripts, curl) não guardam cookie: valem o
-// programa e a rede (o hash do User-Agent com o prefixo do IP), para um script que entra toda hora não mandar um
-// e-mail a cada vez. As sessões não servem para isso: somem no logout e ao vencer.
+// guarda o hash dele em user_devices. Programas que não são navegador (scripts, curl) quase nunca guardam cookie: valem
+// o programa e a rede (o hash do User-Agent com o prefixo do IP), para um script que entra toda hora não mandar um
+// e-mail a cada vez; o que guarda cookie passa a valer pelo cookie sem contar como novo. As sessões não servem para
+// isso: somem no logout e ao vencer.
 //
 // Nunca no primeiro dispositivo da conta: se ela não tinha nenhum, o dispositivo é anotado e nada sai. Isso também vale
 // para quem já usava o chat antes desta versão (nenhuma conta recebe uma leva de e-mails). Os dispositivos são anotados
@@ -62,15 +63,21 @@ const SCRIPT_BROWSERS = new Set(['API', 'Outro']);
 export async function rememberLoginDevice(userId: string, info: { deviceId?: string; userAgent?: string; ip?: string }, parsed: ParsedDevice): Promise<{ deviceId: string; isNew: boolean }> {
   const known = info.deviceId && DEVICE_RE.test(info.deviceId) ? info.deviceId : undefined;
   const deviceId = known ?? randomToken(24);
-  const hash = known || !SCRIPT_BROWSERS.has(parsed.browser) ? sha256(`d:${deviceId}`) : sha256(`u:${info.userAgent ?? ''}|${ipPrefix(info.ip)}`);
-  const r = await one<{ inserted: boolean; n: number }>(
-    `WITH prior AS (SELECT count(*)::int AS n FROM user_devices WHERE user_id = $1),
+  const script = SCRIPT_BROWSERS.has(parsed.browser);
+  const programHash = sha256(`u:${info.userAgent ?? ''}|${ipPrefix(info.ip)}`);
+  const hash = known || !script ? sha256(`d:${deviceId}`) : programHash;
+  // Programa que guarda cookie (requests.Session, app nativo): o primeiro login veio sem cookie e ficou anotado pelo
+  // programa e pela rede; o segundo traz o cookie e vale como conhecido se qualquer um dos dois já estava anotado. Daí
+  // em diante o cookie basta, mesmo se a rede mudar.
+  const alias = known && script ? programHash : null;
+  const r = await one<{ inserted: boolean; n: number; alias: boolean }>(
+    `WITH prior AS (SELECT count(*)::int AS n, COALESCE(bool_or(device_hash = $5::text), false) AS alias FROM user_devices WHERE user_id = $1),
      up AS (
        INSERT INTO user_devices (user_id, device_hash, device, last_ip) VALUES ($1, $2, $3, $4)
        ON CONFLICT (user_id, device_hash) DO UPDATE SET last_seen = now(), last_ip = EXCLUDED.last_ip, device = EXCLUDED.device
        RETURNING (xmax = 0) AS inserted)
-     SELECT up.inserted, prior.n FROM up, prior`,
-    [userId, hash, JSON.stringify({ browser: parsed.browser, os: parsed.os, name: parsed.name }), info.ip ?? null],
+     SELECT up.inserted, prior.n, prior.alias FROM up, prior`,
+    [userId, hash, JSON.stringify({ browser: parsed.browser, os: parsed.os, name: parsed.name }), info.ip ?? null, alias],
   );
   const inserted = !!r?.inserted;
   if (inserted) {
@@ -81,7 +88,7 @@ export async function rememberLoginDevice(userId: string, info: { deviceId?: str
       [userId, KEEP_PER_USER],
     );
   }
-  return { deviceId, isNew: inserted && (r?.n ?? 0) > 0 };
+  return { deviceId, isNew: inserted && (r?.n ?? 0) > 0 && !r?.alias };
 }
 
 const escapeHtml = (v: string) => v.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);

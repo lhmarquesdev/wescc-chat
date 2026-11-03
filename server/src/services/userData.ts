@@ -8,7 +8,8 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { UserDataRequest } from '@shared/index';
 import { ENCRYPTED_PLACEHOLDER, EXPORT_MAX_FILES, exportSlug, isEncryptedMessage, nextDataRequestAt, safeZipName } from '@shared/dataExport';
-import { formatBytes } from '@shared/messageText';
+import { emojiText } from '@shared/emoji';
+import { formatBytes, roleDisplayName } from '@shared/messageText';
 import { messagePreviewText } from '@shared/stickers';
 import { config } from '../config';
 import { many, one, query } from '../db/pool';
@@ -18,6 +19,7 @@ import { zipStore, type ZipEntry } from '../lib/zip';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
 import { dayKey, encryptedSql, escapeHtml, EXPORT_TZ, formatDayTime, formatLong, htmlEnd, htmlStart, plural, roomKindLabel, roomLabel } from './exportRender';
+import { canAccessRoom } from './rooms';
 import { getSetting } from './settings';
 import { siteUrl } from './sso';
 import { actorOf, type Ctx } from './users';
@@ -290,6 +292,9 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
     doisFatores: !!user.totp_enabled,
   };
   yield { name: 'perfil.json', data: json({ format: 'wescc-user-data', version: 1, geradoEm: now.toISOString(), perfil, salas, sessoes, dispositivos, tokens }), mtime: now };
+  // O HTML mostra os papéis pelo nome, como o chat (perfil.json fica com os ids).
+  const roleDesc = new Map((await many('SELECT id, description FROM roles WHERE id = ANY($1)', [user.roles ?? []])).map((r) => [r.id, r.description]));
+  const papeis = ((user.roles ?? []) as string[]).map((id) => roleDisplayName(id, roleDesc.get(id)));
 
   // agenda.json
   const owned = await many(`SELECT * FROM calendar_events WHERE owner_id = $1 ORDER BY starts_at, id`, [user.id]);
@@ -317,21 +322,35 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
   ).map((c) => ({ titulo: c.title, organizador: c.owner_name || c.owner_username || null, inicio: c.starts_at, fim: c.ends_at, diaInteiro: c.all_day, status: c.status, resposta: c.response }));
   yield { name: 'agenda.json', data: json({ eventos, convites }), mtime: now };
 
-  // reacoes.json: as reações ficam guardadas pelo @usuário; uma passada pela chave primária (tarefa de fundo).
+  // reacoes.json: as reações ficam guardadas pelo @usuário, não pelo id da conta. O mesmo @usuário pode ter sido de
+  // outra pessoa (conta excluída antes desta versão, nome reaproveitado no AD), então só entram as salas que a pessoa
+  // pode abrir hoje: nunca o nome de um grupo privado ou de uma conversa dos outros. Uma passada pela chave primária
+  // (tarefa de fundo).
+  const readable = new Map<string, boolean>();
+  async function canRead(ids: string[]) {
+    const want = [...new Set(ids)].filter((id) => !readable.has(id));
+    if (want.length) {
+      for (const id of want) readable.set(id, false);
+      for (const room of await many('SELECT * FROM rooms WHERE id = ANY($1)', [want])) readable.set(room.id, await canAccessRoom(user.id, room));
+    }
+    return (id: string) => readable.get(id) === true;
+  }
   const reactionCount = new Map<string, number>();
   async function* reactions() {
     yield '[';
     let cursor = '';
     let first = true;
     for (;;) {
-      const rows = await many(
+      const page = await many(
         `SELECT id, room_id, created_at, reactions FROM messages
           WHERE id > $1 AND reactions <> '{}'::jsonb
             AND jsonb_path_exists(reactions, '$.*.usernames[*] ? (@ == $u)', jsonb_build_object('u', $2::text))
           ORDER BY id LIMIT 2000`,
         [cursor, user.username],
       );
-      if (!rows.length) break;
+      if (!page.length) break;
+      const ok = await canRead(page.map((r) => r.room_id));
+      const rows = page.filter((r) => ok(r.room_id));
       const lab = await rooms(rows.map((r) => r.room_id));
       let chunk = '';
       for (const r of rows) {
@@ -343,8 +362,8 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
         }
       }
       if (chunk) yield chunk;
-      cursor = rows[rows.length - 1].id;
-      if (rows.length < 2000) break;
+      cursor = page[page.length - 1].id;
+      if (page.length < 2000) break;
     }
     yield '\n]\n';
   }
@@ -470,7 +489,7 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
       ['E-mail', perfil.email || '—'],
       ['Sobre', perfil.bio || '—'],
       ['Status', perfil.statusText || '—'],
-      ['Papéis', (perfil.roles ?? []).join(', ')],
+      ['Papéis', papeis.join(', ') || '—'],
       ['Conta criada em', formatDayTime(perfil.criadoEm)],
       ['Último login', perfil.ultimoLogin ? formatDayTime(perfil.ultimoLogin) : '—'],
       ['Autenticação em dois fatores', perfil.doisFatores ? 'Ativada' : 'Desativada'],
@@ -504,7 +523,9 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
     } else yield '<p class="meta">Nenhum.</p>';
     const reacts = [...reactionCount].sort((a, b) => b[1] - a[1]);
     let r = `<h3>Reações (${reacts.reduce((n, [, c]) => n + c, 0).toLocaleString('pt-BR')})</h3>`;
-    r += reacts.length ? `<div class="reactions">${reacts.map(([e, c]) => `<span>${escapeHtml(e)} ${c.toLocaleString('pt-BR')}</span>`).join('')}</div>` : '<p class="meta">Nenhuma.</p>';
+    // Como no chat (👍; emoji personalizado como :nome:); reacoes.json guarda o shortcode.
+    const pill = ([e, c]: [string, number]) => `<span title="${escapeHtml(e)}">${escapeHtml(emojiText(e))} ${c.toLocaleString('pt-BR')}</span>`;
+    r += reacts.length ? `<div class="reactions">${reacts.map(pill).join('')}</div>` : '<p class="meta">Nenhuma.</p>';
     r += `<h3>Mensagens que você escreveu (${messageCount.toLocaleString('pt-BR')})</h3>`;
     yield r;
     if (messageCount) {

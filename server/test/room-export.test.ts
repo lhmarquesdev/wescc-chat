@@ -167,12 +167,17 @@ describe('exportar mensagens', () => {
     const ts = doc.messages.map((m: any) => m.ts);
     expect([...ts].sort()).toEqual(ts);
     const bomDia = doc.messages.find((m: any) => m.id === m1._id);
-    expect(bomDia).toMatchObject({ msg: 'bom dia', text: 'bom dia', pinned: true, reactions: { ':tada:': [bruno.username, carla.username] }, u: { id: ana.userId } });
+    // A reação da conta excluída sai com ela (um @usuário reaproveitado não a herda).
+    expect(bomDia).toMatchObject({ msg: 'bom dia', text: 'bom dia', pinned: true, reactions: { ':tada:': [bruno.username] }, u: { id: ana.userId } });
     const gone = doc.messages.find((m: any) => m.msg === 'mensagem da carla');
     expect(gone.u).toMatchObject({ id: null, name: 'Carla <b>Dias</b>', deleted: true });
     const html = await text(ana, rid);
     expect(html).toContain('<b>Carla &#60;b&#62;Dias&#60;/b&#62;</b>');
     expect(html).toContain('(conta excluída)');
+    // Reações como no chat: o emoji, e o nome de quem reagiu ao passar o mouse.
+    expect(html).toContain('<span title="Bruno Lima reagiu com :tada:">🎉 1</span>');
+    const csv = parse(await text(ana, rid, { format: 'csv' }), { delimiter: ';', bom: true }) as string[][];
+    expect(csv.find((r) => r[11] === m1._id)?.[8]).toBe('🎉 1');
 
     // Canal de avisos com "Ciente".
     const notice = (await api('POST', 'channels.create', { name: name('avisos'), members: [bruno.username], extraData: { notice: true, noticeAck: true } }, ana)).channel;
@@ -387,6 +392,10 @@ describe('exportar mensagens', () => {
     const r = await post();
     expect(r.status).toBe(429);
     expect(r.error).toBe('Aguarde um minuto antes de exportar de novo.');
+    // A tela segura o botão até a mais antiga sair do último minuto.
+    const retryAt = Date.parse(r.details.retryAt);
+    expect(retryAt).toBeGreaterThan(Date.now());
+    expect(retryAt).toBeLessThanOrEqual(Date.now() + 60_000);
     await freeLimiter();
   });
 

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { Room, RoomExportFormat } from '@shared/index';
-import { api, errorMessage } from '../lib/api';
+import { api, ApiError, errorMessage } from '../lib/api';
 import { formatBytes, plural } from '../lib/format';
 import { useStore } from '../lib/store';
 import { Icon } from './Icon';
-import { Field, Segmented, Toggle } from './ui';
+import { Empty, Field, Segmented, Toggle } from './ui';
 
 // Exportar mensagens (painel da sala): período, formato, tópicos e arquivos. A prévia conta o que vai sair; o botão
 // pede um tíquete de uso único (2 minutos) e o navegador baixa pelo link, com o cookie da sessão.
@@ -46,8 +46,18 @@ export function ExportPanel({ room }: { room: Room & Record<string, any> }) {
   const [files, setFiles] = useState(false);
   const [info, setInfo] = useState<ExportInfo | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
+  // O servidor recusou (sem a permissão, ou ela saiu com o painel aberto): no lugar do formulário, só o aviso.
+  const [denied, setDenied] = useState<string | null>(null);
   const [counting, setCounting] = useState(true);
   const [busy, setBusy] = useState(false);
+  // Passou das 3 exportações por minuto: o botão espera até o servidor aceitar de novo, com o motivo embaixo.
+  const [wait, setWait] = useState<{ until: number; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!wait) return;
+    const t = setTimeout(() => setWait(null), Math.max(0, wait.until - Date.now()));
+    return () => clearTimeout(t);
+  }, [wait]);
 
   const validDates = !!from && !!to;
   const inverted = validDates && from > to;
@@ -76,7 +86,8 @@ export function ExportPanel({ room }: { room: Room & Record<string, any> }) {
         .catch((e) => {
           if (!alive) return;
           setInfo(null);
-          setInfoError(errorMessage(e));
+          if (e instanceof ApiError && e.status === 403) setDenied(errorMessage(e));
+          else setInfoError(errorMessage(e));
           setCounting(false);
         });
     }, 300);
@@ -101,14 +112,20 @@ export function ExportPanel({ room }: { room: Room & Record<string, any> }) {
       a.remove();
       toast('Download iniciado.', 'success');
     } catch (e) {
-      toast(errorMessage(e), 'error');
+      if (e instanceof ApiError && e.status === 429) {
+        const at = Date.parse(e.details?.retryAt ?? '');
+        setWait({ until: Number.isFinite(at) ? at : Date.now() + 60_000, text: errorMessage(e) });
+      } else if (e instanceof ApiError && e.status === 403) setDenied(errorMessage(e));
+      else toast(errorMessage(e), 'error');
     } finally {
       setBusy(false);
     }
   };
 
   let summary: { text: string; danger?: boolean } | null = null;
-  if (!valid) summary = null;
+  // Campo de data apagado (o controle nativo deixa): diz o que falta em vez de só travar o botão.
+  if (!validDates) summary = { text: 'Escolha as duas datas.' };
+  else if (inverted) summary = null;
   else if (counting && !info) summary = { text: 'Contando…' };
   else if (infoError) summary = { text: infoError, danger: true };
   else if (info) {
@@ -119,7 +136,15 @@ export function ExportPanel({ room }: { room: Room & Record<string, any> }) {
       summary = { text: files && info.files ? `${msgs} e ${plural(info.files, 'arquivo', 'arquivos')} (${formatBytes(info.filesSize)})` : msgs };
     }
   }
-  const disabled = busy || !valid || counting || !info || !info.messages || info.tooLarge;
+  const disabled = busy || !!wait || !valid || counting || !info || !info.messages || info.tooLarge;
+
+  if (denied) {
+    return (
+      <Empty icon="panel-export" title="Sem acesso à exportação">
+        {denied}
+      </Empty>
+    );
+  }
 
   return (
     <div className="form export-panel">
@@ -153,7 +178,9 @@ export function ExportPanel({ room }: { room: Room & Record<string, any> }) {
           <Icon name="download" />
           {busy ? 'Preparando…' : 'Exportar'}
         </button>
-        <p className="muted small">Se o download não começar, toque em Exportar de novo.</p>
+        <p className="muted small" aria-live="polite">
+          {wait ? wait.text : 'Se o download não começar, use Exportar de novo.'}
+        </p>
       </div>
     </div>
   );

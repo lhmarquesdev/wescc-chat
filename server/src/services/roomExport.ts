@@ -135,8 +135,12 @@ async function fileNameFor(ctx: Ctx, room: any, p: RoomExportParams) {
 export async function createExportTicket(ctx: Ctx, p: RoomExportParams) {
   const room = await assertCanExport(ctx, p.rid);
   // Antes das contagens (a parte cara): no máximo 3 exportações por minuto para cada pessoa.
-  const recent = await one(`SELECT count(*)::int AS n FROM data_exports WHERE kind = 'room' AND user_id = $1 AND created_at > now() - interval '1 minute'`, [ctx.userId]);
-  if (recent.n >= TICKETS_PER_MINUTE) throw new ApiError(429, 'error-too-many-requests', 'Aguarde um minuto antes de exportar de novo.');
+  // retryAt: quando a mais antiga do último minuto sai da conta (a tela segura o botão até lá).
+  const recent = await one(
+    `SELECT count(*)::int AS n, min(created_at) + interval '1 minute' AS retry_at FROM data_exports WHERE kind = 'room' AND user_id = $1 AND created_at > now() - interval '1 minute'`,
+    [ctx.userId],
+  );
+  if (recent.n >= TICKETS_PER_MINUTE) throw new ApiError(429, 'error-too-many-requests', 'Aguarde um minuto antes de exportar de novo.', { retryAt: recent.retry_at });
   const c = await counts(p);
   if (!c.messages) throw badRequest('error-export-empty', 'Não há mensagens nesse período.');
   if (p.files) {
@@ -252,7 +256,7 @@ async function* documentChunks(d: DocInfo, place: FilePlacement): AsyncGenerator
   let n = 0;
   let day = '';
   for await (const rows of pages(p)) {
-    await names.prime(rows);
+    await names.prime(rows, p.format === 'html');
     let out = '';
     for (const row of rows) {
       // mapMessage não leva a coluna e2e: ela vai junto da linha crua, para isEncryptedMessage enxergar.
@@ -263,7 +267,7 @@ async function* documentChunks(d: DocInfo, place: FilePlacement): AsyncGenerator
           day = k;
           out += dayHeading(em.ts);
         }
-        out += messageHtml(em);
+        out += messageHtml(em, names.nameOf);
       } else if (p.format === 'csv') out += messageCsv(em);
       else out += (n ? ',' : '') + messageJson(em);
       n++;

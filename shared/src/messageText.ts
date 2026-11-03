@@ -42,6 +42,14 @@ export const ROLE_LABEL: Record<string, string> = {
 
 const defaultRoleLabel = (role?: string) => ROLE_LABEL[role ?? ''] ?? role ?? '';
 
+// Nome de um papel para mostrar: o de ROLE_LABEL; num papel criado pelo administrador (operador, supervisor…), a
+// descrição curta vira o nome; sem ela, o id com inicial maiúscula.
+export function roleDisplayName(id: string, description?: string | null) {
+  if (ROLE_LABEL[id]) return ROLE_LABEL[id];
+  const d = description?.trim();
+  return d && d.length <= 32 && !/[.!?]$/.test(d) ? d : id.charAt(0).toUpperCase() + id.slice(1);
+}
+
 // Texto das mensagens de sistema, sem ícone: o ícone vem de systemIcon() (web). Usa o nome de exibição de quem fez
 // (m.u.name); quem recebeu a ação vem só como @usuário em m.msg, e nameOf troca pelo nome. roleLabelOf dá o nome do
 // papel (a web passa o que também conhece os papéis criados pelo administrador).

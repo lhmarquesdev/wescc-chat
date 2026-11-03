@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { Message } from '@shared/index';
 import type { MessageSticker } from '@shared/stickers';
 import { csvCell, exportFileName, exportSlug, nextDataRequestAt, safeZipName } from '@shared/dataExport';
-import { systemText as sharedSystemText } from '@shared/messageText';
+import { EMOJI, emojiText } from '@shared/emoji';
+import { roleDisplayName, systemText as sharedSystemText } from '@shared/messageText';
 import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 import { listSettings } from '../src/services/settings';
+import { EMOJI as WEB_EMOJI } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
 import { authorName, continuesGroup, editableKind, lastOwnEditable } from '../../web/src/lib/messageRules';
 import { ADMIN_MENU_PERMS, ADMIN_SECTIONS, SETTINGS_GROUP, settingsPath } from '../../web/src/pages/admin/sections';
@@ -194,6 +196,23 @@ describe('regras das exportações', () => {
     const long = safeZipName('abc', `${'x'.repeat(300)}.pdf`);
     expect(long).toMatch(/^abc-x+\.pdf$/);
     expect(long).toHaveLength(4 + 120);
+  });
+
+  it('reações como no chat: emoji pelo shortcode, personalizado como :nome:', () => {
+    expect(emojiText(':thumbsup:')).toBe('👍');
+    expect(emojiText('+1')).toBe('👍');
+    expect(emojiText(':100:')).toBe('💯');
+    expect(emojiText(':logo_wescc:')).toBe(':logo_wescc:');
+    expect(emojiText(':constructor:')).toBe(':constructor:');
+    // A web usa o mesmo mapa.
+    expect(WEB_EMOJI).toBe(EMOJI);
+  });
+
+  it('nome dos papéis: ROLE_LABEL, a descrição curta do papel criado, ou o id com maiúscula', () => {
+    expect(roleDisplayName('user')).toBe('Usuário');
+    expect(roleDisplayName('operacao', 'Operação')).toBe('Operação');
+    expect(roleDisplayName('supervisor', 'Supervisiona a operação de campo e os turnos da noite.')).toBe('Supervisor');
+    expect(roleDisplayName('suporte')).toBe('Suporte');
   });
 
   it('células do CSV', () => {

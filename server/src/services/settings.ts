@@ -150,10 +150,11 @@ add('Message', 'Stickers', 'Stickers_Removed_Keep_Days', 'int', 30, {
   validate: intRange(0, 365),
 });
 
-// ---------- Exportação de conversas e "Baixar meus dados" (LGPD) ----------
+// ---------- Exportar mensagens e Meus dados (LGPD) ----------
 // Teto de 3.500 MB: os arquivos e os documentos ficam abaixo dos 4 GiB de um .zip sem ZIP64 (server/src/lib/zip.ts).
 add('Message', 'Export', 'DataExport_Max_Files_MB', 'int', 2048, {
-  label: 'Exportações: tamanho máximo dos arquivos incluídos (MB; vale para Exportar mensagens e Baixar meus dados)',
+  label: 'Tamanho máximo dos arquivos nas exportações (MB)',
+  description: 'Vale para Exportar mensagens e para Meus dados.',
   validate: intRange(1, 3500),
 });
 add('Accounts', 'Privacy', 'UserData_EnableDownload', 'boolean', true, { public: true, label: 'Permitir que cada pessoa baixe uma cópia dos próprios dados (LGPD)' });
