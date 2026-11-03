@@ -10,6 +10,7 @@ import { bus } from '../realtime/bus';
 import { audit } from './audit';
 import { assertCanSendDirect, partyOf } from './direct';
 import { mapMessage } from './mappers';
+import { highlightedMembers } from './highlights';
 import { dispatchNotifications } from './notifications';
 import { getUserRoles, hasPermission, restrictedRoleIds, rolesHavePermission } from './permissions';
 import { canAccessRoom, getRoom, getSubscriptionRow, loadRoomForUser, notifyRoomUpdated } from './rooms';
@@ -247,7 +248,9 @@ export async function sendMessage(
   }
 
   msg = filterBadWords(msg);
-  let { mentions, channels } = await parseMentions(msg, room);
+  // O texto em que se procuram menções e palavras destacadas: as duas saem sempre do mesmo texto.
+  const mentionText = msg;
+  let { mentions, channels } = await parseMentions(mentionText, room);
   // Integrações (Jira): texto de fora não menciona ninguém; só o responsável escolhido pelo servidor. Nunca @all, @here, times ou #sala.
   if (opts.integration) {
     const allowed = new Set((input.mentionsAllowed ?? []).map((u) => u.toLowerCase()));
@@ -327,10 +330,13 @@ export async function sendMessage(
   const message = withExtra(row);
   bus.publish({ room: room.id }, { type: 'message', action: 'inserted', message });
 
-  await updateSubscriptionsOnMessage(ctx, room, row, mentions, parent);
+  // Palavras destacadas contam e avisam como menção. Texto de integração (Jira) vem de fora e não menciona ninguém:
+  // também não destaca. Figurinha não tem texto.
+  const highlights = opts.integration || sticker ? new Map<string, string>() : await highlightedMembers(room.id, ctx.userId, mentionText);
+  await updateSubscriptionsOnMessage(ctx, room, row, mentions, parent, highlights);
   if (room.prid) await bumpDiscussionCounter(room);
   void recordActivity(ctx.userId, 'message');
-  void dispatchNotifications(ctx, room, row, mentions, parent).catch(() => {});
+  void dispatchNotifications(ctx, room, row, mentions, parent, highlights).catch(() => {});
   // A própria leitura do remetente
   const { markReadInternal } = await import('./reads');
   await markReadInternal(ctx.userId, room.id);
@@ -341,8 +347,10 @@ export async function sendMessage(
   return message;
 }
 
-async function updateSubscriptionsOnMessage(ctx: Ctx, room: any, row: any, mentions: UserRef[], parent: any) {
+async function updateSubscriptionsOnMessage(ctx: Ctx, room: any, row: any, mentions: UserRef[], parent: any, highlights: Map<string, string> = new Map()) {
   const userMentionIds = mentions.filter((m) => m._id !== 'all' && m._id !== 'here' && (m as any).type !== 'team').map((m) => m._id);
+  // Palavra destacada: conta como menção (selo, "Para você" e o tópico em não lidas), como no Rocket.Chat.
+  userMentionIds.push(...highlights.keys());
   const teamIds = mentions.filter((m) => (m as any).type === 'team').map((m) => m._id);
   if (teamIds.length) {
     const tm = await many('SELECT DISTINCT user_id FROM team_members WHERE team_id = ANY($1)', [teamIds]);
