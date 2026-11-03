@@ -4,7 +4,7 @@ import { AREA_GROUP, diffPermissions, levelText, RBAC_AREAS, RBAC_GROUPS, rbacLa
 import { nameList, roleLabel } from '../../../lib/format';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/ui';
-import { GROUP_ICON } from './reach';
+import { groupIcon } from './groupIcons';
 import { people, type Grant, type RbacRole } from './data';
 
 export interface Draft {
@@ -110,7 +110,7 @@ export function ReviewDialog({
           return (
             <section key={g.id} className="rbac-review-group">
               <h3>
-                <Icon name={GROUP_ICON[g.id]} size={14} />
+                <Icon name={groupIcon(g.id)} size={14} />
                 {g.label}
               </h3>
               <ul>

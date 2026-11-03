@@ -11,7 +11,8 @@ import { Icon } from '../../../components/Icon';
 import { Empty, Field, Menu, SkeletonTable, Toggle, Tooltip, confirmDialog, useAsync } from '../../../components/ui';
 import { UserCell } from '../parts';
 import { RbacHistory } from './History';
-import { GROUP_ICON, ReachBar, groupReach } from './reach';
+import { groupIcon } from './groupIcons';
+import { ReachBar, groupReach } from './reach';
 import { ReviewDialog, type Draft } from './Review';
 import { Chips, EditorShell, Notice, Section, type EditorTab } from './shell';
 import { lockText, people, rbacFail, rbacOk, type Grant, type RbacRole } from './data';
@@ -310,7 +311,7 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
                   return (
                     <button key={g.id} type="button" className="rbac-summary-card" onClick={() => setTab(g.id as Tab)}>
                       <span className="rbac-summary-head">
-                        <Icon name={GROUP_ICON[g.id]} size={16} />
+                        <Icon name={groupIcon(g.id)} size={16} />
                         {g.label}
                       </span>
                       <strong>
@@ -405,7 +406,7 @@ function GroupPanel({ group, count, onGroup, ...p }: GroupProps & { group: RbacG
   const hasView = group.areas.some((a) => a.levels.length);
   return (
     <Section
-      icon={GROUP_ICON[group.id]}
+      icon={groupIcon(group.id)}
       title={group.label}
       hint={group.description}
       count={count}
@@ -626,7 +627,7 @@ function PowerMap({ perms }: { perms: Set<string> }) {
             return (
               <div key={g.id} className="rbac-power-group">
                 <span className="rbac-group-label">
-                  <Icon name={GROUP_ICON[g.id]} size={14} />
+                  <Icon name={groupIcon(g.id)} size={14} />
                   {g.label}
                 </span>
                 {list.length ? (

@@ -1,9 +1,10 @@
 // Alcance de um papel: por grupo (Conversas, Moderação, Administração, Atendimento), quantas áreas têm algum acesso.
 import { areaLevel, RBAC_GROUPS, type RbacGroup } from '@shared/rbac';
-import { Icon, type IconName } from '../../../components/Icon';
+import { Icon } from '../../../components/Icon';
+import { groupIcon } from './groupIcons';
 import { Tooltip } from '../../../components/ui';
 
-export const GROUP_ICON: Record<string, IconName> = { chat: 'rbac-chat', room: 'rbac-room', admin: 'rbac-admin', technical: 'rbac-technical' };
+export { GROUP_ICON, groupIcon } from './groupIcons';
 
 // Alcance de um papel por grupo: quantas áreas têm algum acesso e quantas estão completas (último nível).
 export function groupReach(g: RbacGroup, perms: string[]) {
@@ -28,7 +29,7 @@ export function ReachBar({ perms, compact }: { perms: string[]; compact?: boolea
         return (
           <Tooltip key={g.id} label={`${g.label}: ${r.any} de ${r.total} áreas${r.full ? `, ${r.full} completas` : ''}`}>
             <span className="rbac-reach-group" data-empty={r.any === 0 || undefined} aria-label={`${g.label}: ${r.any} de ${r.total} áreas`}>
-              <Icon name={GROUP_ICON[g.id]} size={14} />
+              <Icon name={groupIcon(g.id)} size={14} />
               <span className="rbac-reach-cells" aria-hidden="true">
                 {g.areas.map((a, i) => (
                   <i key={a.id} data-state={i < r.full ? 'full' : i < r.any ? 'some' : 'none'} />
@@ -54,7 +55,7 @@ export function ReachLegend() {
     <span className="rbac-legend" aria-hidden="true">
       {RBAC_GROUPS.filter((g) => g.id !== 'technical').map((g) => (
         <span key={g.id}>
-          <Icon name={GROUP_ICON[g.id]} size={12} />
+          <Icon name={groupIcon(g.id)} size={12} />
           {g.label}
         </span>
       ))}

@@ -7,7 +7,7 @@ import { nameList, roleLabel } from '../../../lib/format';
 import { usePermission } from '../../../lib/store';
 import { Icon } from '../../../components/Icon';
 import { SkeletonTable, useAsync } from '../../../components/ui';
-import { GROUP_ICON } from './reach';
+import { groupIcon } from './groupIcons';
 import { Section } from './shell';
 
 export function EffectiveAccess({ userId }: { userId: string }) {
@@ -30,7 +30,7 @@ export function EffectiveAccess({ userId }: { userId: string }) {
           return (
             <div key={g.id} className="rbac-eff-group">
               <span className="rbac-eff-group-name">
-                <Icon name={GROUP_ICON[g.id]} size={14} />
+                <Icon name={groupIcon(g.id)} size={14} />
                 {g.label}
               </span>
               <ul>

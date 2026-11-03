@@ -125,3 +125,12 @@ describe('botões "Configurações" das seções', () => {
     expect(groupOf('Calls_')).toEqual([SETTINGS_GROUP.calls]);
   });
 });
+
+describe('ícones dos grupos do RBAC (tela Papéis e permissões)', () => {
+  it('todo grupo do catálogo tem ícone próprio: grupo sem ícone derrubava a tela inteira', async () => {
+    const { RBAC_GROUPS } = await import('@shared/rbac');
+    const { GROUP_ICON, groupIcon } = await import('../../web/src/pages/admin/rbac/groupIcons');
+    expect(RBAC_GROUPS.map((g) => g.id).filter((id) => !GROUP_ICON[id])).toEqual([]);
+    expect(groupIcon('grupo-que-nao-existe')).toBe('rbac-admin');
+  });
+});
