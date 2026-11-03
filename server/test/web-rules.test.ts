@@ -10,6 +10,13 @@ import { EMOJI as WEB_EMOJI } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
 import { authorName, continuesGroup, editableKind, lastOwnEditable } from '../../web/src/lib/messageRules';
 import { ADMIN_MENU_PERMS, ADMIN_SECTIONS, SETTINGS_GROUP, settingsPath } from '../../web/src/pages/admin/sections';
+// Busca da barra lateral, status personalizados e palavras destacadas.
+import type { SpotlightUser, Subscription } from '@shared/index';
+import { foldText, parseSpotlightQuery, spotlightReady } from '@shared/search';
+import { compileHighlights, findHighlight, normalizeHighlights, splitHighlights } from '@shared/highlights';
+import { normalizeStatusName, presenceLabel, silencesNotifications, sortStatuses, type CustomUserStatus } from '@shared/status';
+import { RBAC_AREAS } from '@shared/rbac';
+import { dedupePeople, dedupeRooms, matchesLocal, orderPeople, resultCountText } from '../../web/src/lib/spotlightRules';
 
 // Regras puras do chat web que mais de uma tela usa (seta para cima, agrupamento, nome do autor, menu da
 // Administração): os casos que já divergiram entre as telas depois de juntar figurinhas, chamadas e Jira.
@@ -311,5 +318,168 @@ describe('regras das exportações', () => {
     expect(csvCell('normal')).toBe('normal');
     expect(csvCell(null)).toBe('');
     expect(csvCell(12)).toBe('12');
+  });
+});
+
+describe('busca da barra lateral', () => {
+  it('foldText e parseSpotlightQuery: prefixo, espaços e o corte em 64', () => {
+    expect(foldText('Conceição ÁRVORE')).toBe('conceicao arvore');
+    expect(parseSpotlightQuery('@ Ana ')).toEqual({ text: 'Ana', scope: 'users' });
+    expect(parseSpotlightQuery('#sup')).toEqual({ text: 'sup', scope: 'rooms' });
+    expect(parseSpotlightQuery('  suporte  ')).toEqual({ text: 'suporte', scope: 'all' });
+    // Só um prefixo: "@#x" busca pessoas por "#x".
+    expect(parseSpotlightQuery('@#x')).toEqual({ text: '#x', scope: 'users' });
+    const long = 'á'.repeat(80);
+    expect([...parseSpotlightQuery(long).text].length).toBe(64);
+    expect(spotlightReady(parseSpotlightQuery('@a'))).toBe(false);
+    expect(spotlightReady(parseSpotlightQuery('@an'))).toBe(true);
+  });
+
+  const sub = (over: Partial<Subscription>): Subscription => ({
+    _id: `s-${over.rid ?? 'x'}`,
+    rid: 'x',
+    u: ME,
+    t: 'c',
+    name: 'geral',
+    fname: 'geral',
+    roles: [],
+    open: true,
+    alert: false,
+    unread: 0,
+    userMentions: 0,
+    groupMentions: 0,
+    tunread: [],
+    f: false,
+    ls: null,
+    ts: at(9, 0),
+    notifications: {} as Subscription['notifications'],
+    _updatedAt: at(9, 0),
+    ...over,
+  });
+  const person = (username: string, name = username): SpotlightUser => ({ _id: `u-${username}`, username, name, status: 'online', roles: ['user'] });
+
+  it('matchesLocal: conversa oculta, DM pelo usuário, escopo de @ e #', () => {
+    const hidden = sub({ rid: 'r-sup', name: 'suporte-ti', fname: 'Suporte TI', open: false });
+    const dm = sub({ rid: 'r-dm', t: 'd', name: 'joao.conceicao', fname: 'João Conceição' });
+    expect(matchesLocal(hidden, parseSpotlightQuery('suporte'))).toBe(true);
+    expect(matchesLocal(hidden, parseSpotlightQuery('#sup'))).toBe(true);
+    expect(matchesLocal(hidden, parseSpotlightQuery('@sup'))).toBe(false);
+    expect(matchesLocal(dm, parseSpotlightQuery('conceicao'))).toBe(true);
+    expect(matchesLocal(dm, parseSpotlightQuery('joao.con'))).toBe(true);
+    expect(matchesLocal(dm, parseSpotlightQuery('#joao'))).toBe(false);
+    // Só o prefixo: tudo do escopo.
+    expect(matchesLocal(dm, parseSpotlightQuery('@'))).toBe(true);
+    expect(matchesLocal(hidden, parseSpotlightQuery('@'))).toBe(false);
+  });
+
+  it('dedupePeople, dedupeRooms e orderPeople (estável)', () => {
+    const subs = [sub({ rid: 'r1', t: 'd', name: 'Bia.Lima' }), sub({ rid: 'r2', t: 'd', name: 'ana,bia', fname: 'Ana e Bia' })];
+    const out = dedupePeople([person('bia.lima'), person('ana'), person('carla')], subs);
+    // A DM em grupo (ana,bia) não esconde a Ana.
+    expect(out.map((u) => u.username)).toEqual(['ana', 'carla']);
+    const rooms = [
+      { _id: 'r-a', name: 'a' },
+      { _id: 'r-b', name: 'b' },
+    ] as never[];
+    expect(dedupeRooms(rooms, { 'r-a': sub({ rid: 'r-a' }) }).map((r: { _id: string }) => r._id)).toEqual(['r-b']);
+    const order = orderPeople(['a1', 'b1', 'a2', 'b2', 'a3'], (x) => x.startsWith('b'));
+    expect(order).toEqual(['a1', 'a2', 'a3', 'b1', 'b2']);
+    expect(resultCountText(0)).toBe('Nenhum resultado');
+    expect(resultCountText(1)).toBe('1 resultado');
+    expect(resultCountText(7)).toBe('7 resultados');
+  });
+});
+
+describe('palavras destacadas', () => {
+  it('normalizeHighlights: limpa, deduplica sem acento e recusa o que não serve', () => {
+    expect(normalizeHighlights(['  Plantão ', 'plantao', 'servidor   fora', ''])).toEqual({ ok: true, words: ['Plantão', 'servidor fora'] });
+    expect(normalizeHighlights('plantão')).toMatchObject({ ok: false, error: 'Palavras destacadas: envie uma lista de textos.' });
+    expect(normalizeHighlights([1])).toMatchObject({ ok: false });
+    expect(normalizeHighlights(['a'])).toMatchObject({ ok: false, error: '“a”: cada palavra destacada precisa ter de 2 a 40 caracteres.' });
+    expect(normalizeHighlights(['!!!'])).toMatchObject({ ok: false, error: '“!!!”: use letras ou números.' });
+    expect(normalizeHighlights(Array.from({ length: 21 }, (_, i) => `palavra${i}`))).toMatchObject({ ok: false, error: 'Use no máximo 20 palavras destacadas.' });
+    expect(normalizeHighlights([])).toEqual({ ok: true, words: [] });
+  });
+
+  it('acentos e maiúsculas não importam; a palavra precisa estar inteira', () => {
+    const m = compileHighlights(['plantão', 'Servidor fora']);
+    expect(findHighlight('Quem está de PLANTAO hoje?', m)).toBe('plantão');
+    expect(findHighlight('o plantão começou', m)).toBe('plantão');
+    // Sem acento e com o acento separado (NFD) também casa.
+    expect(findHighlight('plantao ok', m)).toBe('plantão');
+    expect(findHighlight('plantão agora', m)).toBe('plantão');
+    expect(findHighlight('o servidor   FORA do ar', m)).toBe('Servidor fora');
+    // Limites de palavra (letras acentuadas, números e _ contam como parte da palavra).
+    expect(findHighlight('plantões', m)).toBeNull();
+    expect(findHighlight('replantão', m)).toBeNull();
+    expect(findHighlight('plantão2', m)).toBeNull();
+    expect(findHighlight('_plantão', m)).toBeNull();
+    expect(findHighlight('(plantão)', m)).toBe('plantão');
+    expect(findHighlight('plantão!', m)).toBe('plantão');
+    expect(findHighlight('', m)).toBeNull();
+    expect(findHighlight('plantão', null)).toBeNull();
+    expect(compileHighlights([])).toBeNull();
+  });
+
+  it('caracteres especiais compilam e casam como texto', () => {
+    const m = compileHighlights(['c++', 'n-2', '(urgente)', 'a.b']);
+    expect(m).not.toBeNull();
+    expect(findHighlight('vaga de C++ aberta', m)).toBe('c++');
+    expect(findHighlight('nível n-2 hoje', m)).toBe('n-2');
+    expect(findHighlight('chamado (URGENTE) aberto', m)).toBe('(urgente)');
+    expect(findHighlight('veja a.b', m)).toBe('a.b');
+    // O ponto não vira "qualquer letra".
+    expect(findHighlight('veja axb', m)).toBeNull();
+  });
+
+  it('splitHighlights devolve o texto original e marca os trechos (a expressão mais longa ganha)', () => {
+    const m = compileHighlights(['servidor', 'servidor fora']);
+    const text = 'O Servidor fora do ar; o servidor voltou. Servidores ok.';
+    const parts = splitHighlights(text, m);
+    expect(parts.map((p) => p.text).join('')).toBe(text);
+    expect(parts.filter((p) => p.hit).map((p) => p.text)).toEqual(['Servidor fora', 'servidor']);
+    expect(splitHighlights('nada aqui', m)).toEqual([{ text: 'nada aqui', hit: false }]);
+    expect(splitHighlights('', m)).toEqual([]);
+    expect(splitHighlights('sem lista', null)).toEqual([{ text: 'sem lista', hit: false }]);
+  });
+});
+
+describe('status personalizados', () => {
+  const list: CustomUserStatus[] = [
+    { _id: 'st-reuniao', name: 'Em reunião', statusType: 'busy' },
+    { _id: 'st-almoco', name: 'Almoço', statusType: 'away' },
+  ];
+
+  it('presenceLabel: o nome só enquanto o status real é o tipo dele', () => {
+    expect(presenceLabel({ status: 'busy', statusCustom: 'st-reuniao' }, list)).toBe('Em reunião');
+    // Ficou offline (fechou o chat) ou ausente automático: volta ao rótulo de base.
+    expect(presenceLabel({ status: 'offline', statusCustom: 'st-reuniao' }, list)).toBe('Offline');
+    expect(presenceLabel({ status: 'away', statusCustom: 'st-reuniao' }, list)).toBe('Ausente');
+    expect(presenceLabel({ status: 'busy', statusCustom: 'st-sumiu' }, list)).toBe('Ocupado');
+    expect(presenceLabel({ status: 'online' }, list)).toBe('Disponível');
+  });
+
+  it('normalizeStatusName: espaços, tamanho e nomes reservados sem acento', () => {
+    expect(normalizeStatusName('  Em   pausa ')).toEqual({ ok: true, name: 'Em pausa' });
+    expect(normalizeStatusName('ocupádo')).toMatchObject({ ok: false, code: 'error-status-name-reserved', error: 'Esse nome já é de um status padrão.' });
+    expect(normalizeStatusName('INVISIVEL')).toMatchObject({ ok: false, code: 'error-status-name-reserved' });
+    expect(normalizeStatusName('   ')).toMatchObject({ ok: false, code: 'error-invalid-name' });
+    expect(normalizeStatusName('x'.repeat(41))).toMatchObject({ ok: false, code: 'error-invalid-name' });
+    expect(normalizeStatusName('x'.repeat(40))).toMatchObject({ ok: true });
+  });
+
+  it('silencesNotifications vale para o escolhido ocupado; a lista ordena por tipo e nome', () => {
+    expect(silencesNotifications('busy')).toBe(true);
+    expect(silencesNotifications('away')).toBe(false);
+    expect(silencesNotifications(undefined)).toBe(false);
+    const sorted = sortStatuses([...list, { _id: 'st-pausa', name: 'Em pausa', statusType: 'away' }]);
+    expect(sorted.map((s) => s.name)).toEqual(['Almoço', 'Em pausa', 'Em reunião']);
+  });
+
+  it('a seção da Administração existe e toda área do RBAC aponta para uma seção que existe', () => {
+    expect(ADMIN_SECTIONS.find((s) => s.id === 'user-status')?.perm).toEqual(['manage-user-status']);
+    expect(ADMIN_MENU_PERMS).toContain('manage-user-status');
+    const ids = new Set(ADMIN_SECTIONS.map((s) => s.id));
+    for (const a of RBAC_AREAS) if (a.adminSection) expect(ids.has(a.adminSection), a.id).toBe(true);
   });
 });
