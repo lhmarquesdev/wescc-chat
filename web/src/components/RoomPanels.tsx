@@ -4,7 +4,8 @@ import type { Message, Room, Subscription } from '@shared/index';
 import { stickerPreviewText } from '@shared/stickers';
 import { api, errorMessage } from '../lib/api';
 import { partyOf, useDirect } from '../lib/direct';
-import { formatBytes, formatDateTime, formatRelative, formatWhen, plural, roleLabel, roomDisplayName, roomIconName, roomPath, STATUS_LABEL } from '../lib/format';
+import { formatBytes, formatDateTime, formatRelative, formatWhen, plural, roleLabel, roomDisplayName, roomIconName, roomPath } from '../lib/format';
+import { useUserPresence } from '../lib/presence';
 import { renderMarkdown } from '../lib/markdown';
 import { authorName } from '../lib/messageRules';
 import { useNames } from '../lib/names';
@@ -703,10 +704,12 @@ const ROLE_ORDER = ['owner', 'moderator', 'leader', 'publisher'];
 
 function MemberRow({ m, muted, onClick }: { m: any; muted: boolean; onClick: () => void }) {
   const roles = [...(m.roles as string[])].sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b));
-  const statusText = m.statusText || (m.status && m.status !== 'offline' ? STATUS_LABEL[m.status] : '');
+  // A presença ao vivo vale por cima da lista; o rótulo diz o status personalizado ("Em reunião").
+  const pres = useUserPresence(m.username, { status: m.status, statusCustom: m.statusCustom });
+  const statusText = m.statusText || (pres.status !== 'offline' ? pres.label : '');
   return (
     <button type="button" className="member" onClick={onClick}>
-      <UserAvatar username={m.username} size={32} status={m.status} />
+      <UserAvatar username={m.username} size={32} status={pres.status} statusCustom={pres.statusCustom} />
       <span className="member-who">
         <span className="member-name">
           {/* Chamadas em grupo: o nome encurta com reticências e o "Em chamada" fica sempre à vista. */}

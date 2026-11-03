@@ -19,6 +19,8 @@ import { AdminImport } from './import';
 import { AdminLdap } from './ldap';
 // Chamadas em grupo: Administração › Chamadas.
 import { AdminCalls } from './calls/AdminCalls';
+// Status personalizados (Em reunião, Almoço).
+import { AdminUserStatus } from './AdminUserStatus';
 import { useActiveNavInView } from './parts';
 import { ADMIN_SECTIONS } from './sections';
 // Figurinhas: Administração → Figurinhas.
@@ -57,6 +59,7 @@ export function AdminPage() {
         {section === 'integrations' && <IntegrationsAdmin />}
         {section === 'oauth' && <AdminOAuth />}
         {section === 'emoji' && <AdminEmoji />}
+        {section === 'user-status' && <AdminUserStatus />}
         {/* Figurinhas */}
         {section === 'stickers' && <AdminStickers />}
         {section === 'invites' && <AdminInvites />}

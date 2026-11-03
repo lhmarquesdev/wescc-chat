@@ -703,6 +703,10 @@ button.side-item {
 .user-menu {
   min-width: 260px;
 }
+/* O aviso de silêncio quebra na largura do menu, sem alargá-lo (o menu não muda de tamanho ao ficar ocupado). */
+.user-menu .menu-note {
+  contain: inline-size;
+}
 .menu-theme {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1672,4 +1676,125 @@ button.side-item {
   .auth-form input {
     font-size: var(--fs-16);
   }
+}
+
+/* ---------- Busca da barra lateral (pessoas e canais do servidor) ---------- */
+/* Texto curto à direita da linha: @usuário, "Oculta", "N membros". */
+.side-hint {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--side-fg-muted);
+}
+/* Resultado do servidor: o nome fica inteiro enquanto couber; o texto à direita é que encolhe (com reticências). */
+.spot-item .side-name {
+  flex: 0 1 auto;
+}
+.spot-item .side-hint {
+  flex: 1 1 0;
+  max-width: none;
+  text-align: right;
+}
+/* Título de grupo que não recolhe (Pessoas, Canais e times). */
+.side-group-title.static {
+  cursor: default;
+}
+@media (hover: hover) {
+  .side-group-title.static:hover {
+    color: var(--side-fg-muted);
+  }
+}
+/* Pessoa sem conversa direta: a pílula explica, o @usuário sai para caber. */
+.side-item.blocked {
+  --item-name: var(--side-fg-muted);
+}
+.side-item.blocked .side-hint {
+  display: none;
+}
+.side-item .pill.blocked {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+/* Na barra estreita do computador o nome tem prioridade: a pílula fica só com o ícone (o texto continua para
+   leitores de tela e no title da linha), como as pílulas do cabeçalho estreito da sala. */
+.sidebar[data-mode='side'] .side-item .pill.blocked {
+  padding: 0 6px;
+}
+.sidebar[data-mode='side'] .side-item .pill.blocked .pill-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* Canal: a linha abre a prévia; "Entrar" (ou a chave do código de acesso) fica ao lado. */
+.spot-room {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.spot-room > .side-item {
+  flex: 1;
+  min-width: 0;
+}
+.side-join {
+  flex-shrink: 0;
+  color: var(--side-fg);
+}
+.spot-code {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  color: var(--side-fg-muted);
+}
+/* "Buscando…" e o erro com "Tentar de novo". */
+.spot-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  margin-top: var(--space-3);
+  padding: 0 10px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--side-fg-muted);
+}
+.spot-status .link {
+  color: var(--side-fg-strong);
+}
+/* No toque, "Entrar" tem a altura da linha (44px), não os 36px do botão pequeno. */
+@media (pointer: coarse) {
+  .spot-room > .btn.side-join {
+    min-height: var(--touch);
+  }
+  .spot-code {
+    width: var(--touch);
+    height: var(--touch);
+  }
+}
+
+/* Rodapé: o status (com o sino cortado quando silencia) corta com reticências antes do ícone. */
+.me-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.me-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.me-silenced {
+  flex-shrink: 0;
+  color: var(--side-fg-muted);
 }

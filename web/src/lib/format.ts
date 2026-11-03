@@ -1,5 +1,6 @@
 import type { CallCard, Message, Room, Subscription } from '@shared/index';
 import { ROLE_LABEL, roleDisplayName, systemText as sharedSystemText } from '@shared/messageText';
+import { BASE_STATUS_LABEL, STATUS_TYPE_LABEL } from '@shared/status';
 import type { IconName } from '../components/icons';
 
 export function roomPath(r: { _id?: string; rid?: string; t: string }) {
@@ -179,6 +180,7 @@ export function roleLabel(role?: string) {
   return ROLE_LABEL[role ?? ''] ?? customRoleLabel.get(role ?? '') ?? role ?? '';
 }
 
-export const STATUS_LABEL: Record<string, string> = { online: 'Disponível', away: 'Ausente', busy: 'Ocupado', offline: 'Offline' };
+// Os rótulos de base saem de shared/status.ts (os status personalizados usam presenceLabel, em lib/presence.ts).
+export const STATUS_LABEL: Record<string, string> = BASE_STATUS_LABEL;
 // No menu do próprio usuário "offline" é ficar invisível.
-export const MY_STATUS_LABEL: Record<string, string> = { ...STATUS_LABEL, offline: 'Invisível' };
+export const MY_STATUS_LABEL: Record<string, string> = STATUS_TYPE_LABEL;

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
 import { api, ApiError, errorMessage } from '../lib/api';
-import { nameList, roomDisplayName, roomIconName, roomPath, STATUS_LABEL } from '../lib/format';
+import { nameList, roomDisplayName, roomIconName, roomPath } from '../lib/format';
+import { useUserPresence } from '../lib/presence';
 import { namesIn } from '../lib/names';
 import { realtime } from '../lib/realtime';
 import { renderMarkdown } from '../lib/markdown';
@@ -223,6 +224,8 @@ export function RoomPage() {
   const [roomRoles, setRoomRoles] = useState<string[]>([]);
   const panel = params.get('tab') as PanelId | null;
   const presence = useStore((s) => (room?.t === 'd' && sub && !sub.name.includes(',') ? s.presence[sub.name] : undefined));
+  // Rótulo da presença na DM, com o status personalizado ("Em reunião").
+  const dmPresence = useUserPresence(room?.t === 'd' && sub && !sub.name.includes(',') ? sub.name : undefined);
   const threadsOn = useSetting<boolean>('Threads_enabled');
   const [setHeader, headerWidth] = useWidth();
   const phone = useIsPhone();
@@ -472,7 +475,6 @@ export function RoomPage() {
     const ok = await confirmDialog({ title: `Sair de ${hashName}?`, body: 'Você deixa de receber as mensagens desta sala.', confirmLabel: 'Sair da sala', danger: true });
     if (ok) api.post('rooms.leave', { roomId: rid }).then(() => navigate('/home')).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
   };
-  const status = presence?.status ?? 'offline';
   const statusText = presence?.statusText || dmStatusText;
   // No toque não há title: o botão desativado e a pílula de bloqueio explicam o motivo num aviso.
   const explain = (text?: string) => text && useStore.getState().toast(namesIn(text), 'info');
@@ -547,7 +549,7 @@ export function RoomPage() {
                 className={hasInfo ? 'room-topic clickable' : 'room-topic'}
                 onClick={hasInfo ? (e) => !(e.target as HTMLElement).closest('a, .mention') && setPanel('info') : undefined}
               >
-                {dmUser ? `${STATUS_LABEL[status] ?? status}${statusText ? ` · ${statusText}` : ''}` : room.topic ? renderMarkdown(room.topic) : null}
+                {dmUser ? `${dmPresence.label}${statusText ? ` · ${statusText}` : ''}` : room.topic ? renderMarkdown(room.topic) : null}
               </div>
             </div>
             <div className="room-actions">
