@@ -623,11 +623,13 @@ function copyText(text: string, done: string) {
   );
 }
 
-// Tradução: a linha abaixo do corpo ("Traduzida do inglês · Ver original"). Em modo automático, o que não precisa de
-// tradução (mesmo idioma, idioma não identificado) não mostra nada.
+// Tradução pedida pelo menu da mensagem: a linha abaixo do corpo ("Traduzida do inglês · Ver original"). Com a
+// tradução pronta, a linha fica também com o original na tela ("Original em inglês · Ver tradução"): o foco continua
+// no mesmo botão e dá para voltar ali mesmo. Todos os estados começam pelo mesmo ícone (ou o spinner, do mesmo
+// tamanho), então o texto não pula quando o estado muda.
 function TranslationLine({ tr }: { tr: MessageTranslationView }) {
-  if (!tr.can) return null;
-  if (tr.shown === 'translation' || (tr.auto && tr.ready)) {
+  if (!tr.can || !tr.manual) return null;
+  if (tr.ready) {
     const translated = tr.shown === 'translation';
     const from = tr.source ? languageLabel(tr.source) : null;
     return (
@@ -642,14 +644,21 @@ function TranslationLine({ tr }: { tr: MessageTranslationView }) {
     );
   }
   if (!tr.wanted) return null;
-  if (tr.state === 'pending') return tr.manual ? <div className="msg-translated" role="status">Traduzindo…</div> : null;
+  if (tr.state === 'pending')
+    return (
+      <div className="msg-translated" role="status">
+        <span className="spinner" aria-hidden="true" />
+        <span>Traduzindo…</span>
+      </div>
+    );
   if (tr.state !== 'failed' || tr.reason === 'changed') return null;
   // Longa demais não melhora tentando de novo.
-  if (tr.reason === 'too-long') return <div className="msg-translated">Esta mensagem é longa demais para o servidor de tradução.</div>;
+  const tooLong = tr.reason === 'too-long';
   return (
     <div className="msg-translated">
-      <span>Tradução indisponível agora.</span>
-      {tr.manual && (
+      <Icon name="translate" size={12} />
+      <span>{tooLong ? 'Esta mensagem é longa demais para o servidor de tradução.' : 'Tradução indisponível agora.'}</span>
+      {!tooLong && (
         <>
           <span aria-hidden="true">·</span>
           <button type="button" className="msg-tr-btn" onClick={tr.retry}>
@@ -658,6 +667,34 @@ function TranslationLine({ tr }: { tr: MessageTranslationView }) {
         </>
       )}
     </div>
+  );
+}
+
+// Tradução automática da sala: uma marca curta junto da hora (nas mensagens agrupadas, no fim do corpo), como
+// "editada", em vez de uma linha a mais por mensagem. Clicar troca entre a tradução e o original; o menu da mensagem
+// também tem "Ver original". Enquanto traduz, nada (a mensagem não pula); sem tradução, a marca diz e o chat tenta de
+// novo sozinho.
+function TranslationMark({ tr }: { tr: MessageTranslationView }) {
+  if (!tr.can || !tr.auto || tr.manual) return null;
+  const from = tr.source ? languageLabel(tr.source) : null;
+  if (tr.ready) {
+    const translated = tr.shown === 'translation';
+    const label = translated ? `${from ? `Traduzida do ${from}` : 'Traduzida'}. Ver original` : `${from ? `Original em ${from}` : 'Original'}. Ver tradução`;
+    return (
+      <button type="button" className="msg-tr-mark" onClick={tr.toggle} title={label} aria-label={label}>
+        <Icon name="translate" size={12} />
+        <span>{translated ? 'traduzida' : 'original'}</span>
+      </button>
+    );
+  }
+  if (!tr.wanted || tr.state !== 'failed' || tr.reason === 'changed') return null;
+  const why = tr.reason === 'too-long' ? 'Esta mensagem é longa demais para o servidor de tradução.' : 'Tradução indisponível agora. O chat tenta de novo sozinho.';
+  return (
+    <span className="msg-tr-mark off" title={why}>
+      <Icon name="translate" size={12} />
+      <span>sem tradução</span>
+      <span className="visually-hidden">{`: ${why}`}</span>
+    </span>
   );
 }
 
@@ -1063,6 +1100,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
           <div className={`msg-body ${isEmojiOnly(text) ? 'big-emoji' : ''}`}>
             {body}
             {grouped && edited}
+            {grouped && <TranslationMark tr={tr} />}
           </div>
         ))}
       {!stickerView && !call && <TranslationLine tr={tr} />}
@@ -1138,6 +1176,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
               {formatTime(m.ts)}
             </time>
             {edited}
+            <TranslationMark tr={tr} />
             {m.pinned && (
               <span className="msg-flag pin" title="Fixada" role="img" aria-label="Fixada">
                 <Icon name="pin" size={12} />

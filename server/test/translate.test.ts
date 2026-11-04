@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import dns from 'node:dns';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { config } from '../src/config';
 import { pool } from '../src/db/pool';
@@ -138,6 +139,29 @@ describe('configuração e teste de conexão', () => {
     expect(ext.status).toBe(400);
     expect(ext.error).toContain('precisa estar na rede da empresa');
     expect(F.calls.length).toBe(before);
+    // Fora da lista também: o aviso é o da rede da empresa (liberar na lista não adiantaria), no teste e ao salvar.
+    process.env.INTEGRATIONS_ALLOWED_HOSTS = F.host;
+    const notListed = await api('POST', 'autoTranslate.testConnection', { url: 'http://8.8.8.8:5000' }, A);
+    expect(notListed.error).toBe(
+      'Falha na conexão: O servidor de tradução precisa estar na rede da empresa: 8.8.8.8 é um endereço da internet. O texto das mensagens não pode sair da empresa.',
+    );
+    const saved = await settings({ AutoTranslate_LibreTranslate_Url: 'http://8.8.8.8:5000' });
+    expect(saved.status).toBe(400);
+    expect(saved.error).toContain('precisa estar na rede da empresa');
+    expect(saved.error).not.toContain('INTEGRATIONS_ALLOWED_HOSTS');
+    // Um nome da internet fora da lista: o mesmo aviso; um nome interno fora da lista: o aviso da lista.
+    const realLookup = dns.promises.lookup;
+    (dns.promises as any).lookup = async (host: string, o?: any) =>
+      host === 'lt-publico.example' ? [{ address: '8.8.4.4', family: 4 }] : host === 'lt-interno.example' ? [{ address: '10.4.4.4', family: 4 }] : realLookup(host, o);
+    try {
+      expect((await api('POST', 'autoTranslate.testConnection', { url: 'http://lt-publico.example:5000' }, A)).error).toContain('lt-publico.example é um endereço da internet');
+      expect((await api('POST', 'autoTranslate.testConnection', { url: 'http://lt-interno.example:5000' }, A)).error).toBe(
+        'Falha na conexão: Libere "lt-interno.example:5000" em INTEGRATIONS_ALLOWED_HOSTS no servidor do chat e reinicie o serviço.',
+      );
+    } finally {
+      (dns.promises as any).lookup = realLookup;
+    }
+    expect(F.calls.length).toBe(before);
 
     const user = await api('POST', 'autoTranslate.testConnection', {}, ana);
     expect(user.status).toBe(403);
@@ -165,9 +189,57 @@ describe('configuração e teste de conexão', () => {
         'O idioma padrão da empresa (pt-BR) não está instalado no servidor de tradução.',
       ]);
       const empty = await api('POST', 'autoTranslate.testConnection', { url: '' }, A);
-      expect(empty.error).toBe('Falha na conexão: Informe o endereço do LibreTranslate em Configurações › Tradução automática.');
+      expect(empty.error).toBe('Falha na conexão: Preencha o endereço do LibreTranslate para testar.');
     } finally {
       await F2.close();
+    }
+  });
+});
+
+describe('só a rede da empresa, na própria conexão', () => {
+  // Revisão: a conferência usava um DNS (dns.promises.lookup, guardado 60 s) e a conexão outro (dns.lookup). Um nome
+  // que passa a resolver para a internet (TTL curto, rebinding) levaria o texto das mensagens para fora.
+  it('o endereço em que a conexão é feita também precisa ser interno', async () => {
+    const port = new URL(F.url).port;
+    const name = 'lt-dns.example';
+    process.env.INTEGRATIONS_ALLOWED_HOSTS = `${F.host},${name}:${port}`;
+    expect((await settings({ AutoTranslate_LibreTranslate_Url: `http://${name}:${port}` })).status).toBe(200);
+    let connectTo = '127.0.0.1';
+    const connected: string[] = [];
+    const realLookup = dns.lookup;
+    const realPromises = dns.promises.lookup;
+    (dns as any).lookup = (host: string, o: any, cb?: any) => {
+      if (typeof o === 'function') [cb, o] = [o, {}];
+      if (host !== name) return (realLookup as any)(host, o, cb);
+      connected.push(connectTo);
+      if (o?.all) cb(null, [{ address: connectTo, family: 4 }]);
+      else cb(null, connectTo, 4);
+    };
+    // A conferência de antes sempre vê um endereço interno.
+    (dns.promises as any).lookup = async (host: string, o?: any) => (host === name ? [{ address: '10.1.2.3', family: 4 }] : realPromises(host, o));
+    try {
+      const ok = await send(bruno, ch._id, 'Bom dia, texto da empresa');
+      expect((await tr(ana, ch._id, [ok._id])).translations[0].status).toBe('translated');
+      expect(connected.length).toBeGreaterThan(0);
+
+      connectTo = '203.0.113.9';
+      __resetLibreForTests();
+      __resetTranslateForTests();
+      F.calls.length = 0;
+      const secret = await send(bruno, ch._id, 'Bom dia, texto confidencial da empresa');
+      const started = Date.now();
+      const r = await tr(ana, ch._id, [secret._id]);
+      expect(r.translations[0]).toMatchObject({ status: 'failed', reason: 'config' });
+      expect(Date.now() - started).toBeLessThan(2000); // recusado no DNS, sem tentar conectar
+      expect(F.calls).toHaveLength(0);
+      expect(connected).toContain('203.0.113.9');
+      // O teste de conexão diz o motivo.
+      const t = await api('POST', 'autoTranslate.testConnection', {}, A);
+      expect(t.error).toContain('precisa estar na rede da empresa');
+      expect(F.calls).toHaveLength(0);
+    } finally {
+      (dns as any).lookup = realLookup;
+      (dns.promises as any).lookup = realPromises;
     }
   });
 });
@@ -435,6 +507,27 @@ describe('limites e falhas do servidor de tradução', () => {
     const calls = F.calls.length;
     const again = await tr(ana, room._id, done);
     expect(again.translations.every((t: any) => t.status === 'translated')).toBe(true);
+    expect(F.calls.length).toBe(calls);
+  });
+
+  // Revisão: com o balde vazio, cada pedido cortava de novo as 50 mensagens em trechos (e o corte era quadrático numa
+  // sequência longa de '*'): ~1,3 s do servidor parado por pedido, sem chamar o LibreTranslate.
+  it('balde vazio com 50 mensagens longas: o pedido volta logo e nada vai ao tradutor', async () => {
+    await settings({ AutoTranslate_User_Limit_Per_Minute: 10 });
+    const own = await group(ana);
+    const ids: string[] = [];
+    for (let i = 0; i < 50; i++) ids.push((await send(ana, own._id, `Bom dia equipe ${i} ${'*'.repeat(4980)}x`))._id);
+    const first = await tr(ana, own._id, ids, 'es');
+    expect(first.translations.filter((t: any) => t.status === 'translated')).toHaveLength(10);
+    expect(first.translations.filter((t: any) => t.reason === 'rate')).toHaveLength(40);
+    const calls = F.calls.length;
+    for (let i = 0; i < 3; i++) {
+      const started = Date.now();
+      const again = await tr(ana, own._id, ids, 'es');
+      expect(Date.now() - started).toBeLessThan(500);
+      expect(again.translations.filter((t: any) => t.reason === 'rate')).toHaveLength(40);
+      expect(again.retryAfterMs).toBeGreaterThan(0);
+    }
     expect(F.calls.length).toBe(calls);
   });
 

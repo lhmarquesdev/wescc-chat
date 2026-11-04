@@ -1068,27 +1068,43 @@ function TranslatePanel({ room, sub }: Props) {
   const { lang } = useRoomTranslate(room._id);
   const roomError = useTranslations((s) => s.roomError[room._id]);
   const [busy, setBusy] = useState(false);
+  // Os envios vão um de cada vez, na ordem: as setas no select fechado trocam (e salvam) a cada toque, e o select nunca
+  // fica desabilitado (o foco sairia dele). Enquanto há envio, o select mostra o último escolhido.
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  const sending = useRef(0);
+  const [chosen, setChosen] = useState<string | null>(null);
   if (!sub)
     return (
       <Empty icon="panel-translate" title="Você não participa desta sala">
         Entre na sala para ligar a tradução automática. Uma mensagem você ainda pode traduzir pelo menu dela.
       </Empty>
     );
-  // Muda na hora; o evento da inscrição confirma (e desfaz se o servidor recusar).
+  // Muda na hora; o evento da inscrição confirma. Se o servidor recusar, volta ao de antes (se nada mudou depois).
   const save = (field: 'autoTranslate' | 'autoTranslateLanguage', value: boolean | string | null) => {
-    const before = sub;
+    const before = sub[field] ?? null;
     useStore.getState().upsertSubscription({ ...sub, [field]: value });
+    if (field === 'autoTranslateLanguage') setChosen(value ? String(value) : '');
+    sending.current += 1;
     setBusy(true);
-    api
-      .post('autoTranslate.saveSettings', { roomId: room._id, field, value })
-      .then(() => clearRoomError(room._id))
-      .catch((e) => {
-        useStore.getState().upsertSubscription(before);
+    chain.current = chain.current.then(async () => {
+      try {
+        await api.post('autoTranslate.saveSettings', { roomId: room._id, field, value });
+        clearRoomError(room._id);
+      } catch (e) {
+        const now = useStore.getState().subscriptions[room._id];
+        if (now && (now[field] ?? null) === value) useStore.getState().upsertSubscription({ ...now, [field]: before });
         fail(e);
-      })
-      .finally(() => setBusy(false));
+      } finally {
+        sending.current -= 1;
+        if (!sending.current) {
+          setBusy(false);
+          setChosen(null);
+        }
+      }
+    });
   };
-  const current = sub.autoTranslateLanguage ? normalizeLang(sub.autoTranslateLanguage) : '';
+  const saved = sub.autoTranslateLanguage ? normalizeLang(sub.autoTranslateLanguage) : '';
+  const current = chosen !== null ? (chosen ? normalizeLang(chosen) : '') : saved;
   const options = languageOptions(list ?? []);
   // O idioma salvo continua visível mesmo quando a lista não veio.
   if (current && !options.some((o) => o.value === current)) options.unshift({ value: current, label: capitalize(languageLabel(current)) });
@@ -1104,8 +1120,8 @@ function TranslatePanel({ room, sub }: Props) {
         description="Mensagens de outras pessoas em outros idiomas aparecem traduzidas. Só para você."
       />
       <Field label="Idioma">
-        <select value={current} disabled={busy || unavailable || !list} onChange={(e) => save('autoTranslateLanguage', e.target.value || null)}>
-          <option value="">{`Meu idioma (${capitalize(languageLabel(mine))})`}</option>
+        <select value={current} disabled={unavailable || !list} aria-busy={busy || undefined} onChange={(e) => save('autoTranslateLanguage', e.target.value || null)}>
+          <option value="">{`Meu idioma: ${capitalize(languageLabel(mine))}`}</option>
           {options.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}

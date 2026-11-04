@@ -5,6 +5,7 @@ import {
   joinTranslation,
   LANG_RE,
   letterCount,
+  MIN_LETTERS,
   normalizeLang,
   pickLanguage,
   runsOf,
@@ -25,6 +26,7 @@ import type { Ctx } from '../services/users';
 import {
   cachedLanguages,
   libreConfig,
+  libreConfigForTest,
   libreDetect,
   LibreError,
   libreFrontendSettings,
@@ -115,19 +117,23 @@ async function slot<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 // Balde por pessoa: capacidade e reposição de AutoTranslate_User_Limit_Per_Minute por minuto. Cada mensagem que precisa
-// do LibreTranslate gasta 1; o que vem do banco não gasta. Devolve quantas couberam e quando cabe o resto.
-function takeTokens(userId: string, want: number): { got: number; retryAfterMs: number } {
+// do LibreTranslate gasta 1 (take); o que vem do banco não gasta. wait: quando cabem as que ficaram de fora.
+function bucketOf(userId: string) {
   const per = Math.max(1, Number(getSetting<number>('AutoTranslate_User_Limit_Per_Minute')) || 120);
   const now = Date.now();
   const b = buckets.get(userId) ?? { tokens: per, at: now };
   b.tokens = Math.min(per, b.tokens + ((now - b.at) / 60_000) * per);
   b.at = now;
-  const got = Math.max(0, Math.min(want, Math.floor(b.tokens)));
-  b.tokens -= got;
   if (buckets.size > 10_000) buckets.clear();
   buckets.set(userId, b);
-  const missing = want - got;
-  return { got, retryAfterMs: missing ? Math.max(1000, Math.ceil(((missing - b.tokens) / per) * 60_000)) : 0 };
+  return {
+    take(): boolean {
+      if (b.tokens < 1) return false;
+      b.tokens -= 1;
+      return true;
+    },
+    wait: (missing: number) => Math.max(1000, Math.ceil(((missing - b.tokens) / per) * 60_000)),
+  };
 }
 
 // Erros de configuração (endereço, rede da empresa, chave) não são "servidor fora": não abrem o disjuntor.
@@ -424,7 +430,7 @@ export async function translateMessages(ctx: Ctx, rid: string, ids: unknown, req
   const results = new Map<string, MessageTranslation>();
   const done = (id: string, r: Result) => results.set(id, { _id: id, language: target, ...r });
   const order: string[] = [];
-  const pending: { row: Row; pieces: Piece[]; det: string | null }[] = [];
+  const pending: { row: Row; det: string | null }[] = [];
 
   for (const id of list) {
     const row = byId.get(id);
@@ -447,21 +453,12 @@ export async function translateMessages(ctx: Ctx, rid: string, ids: unknown, req
       }
       det = row.det;
     }
-    const pieces = splitForTranslation(row.msg);
-    if (!pieces) {
-      done(id, { status: 'failed', reason: 'too-long' });
-      continue;
-    }
-    if (!det && letterCount(pieces) < 3) {
-      // Só emoji, menção, link ou código: nem vale perguntar ao LibreTranslate.
-      await saveDetection(id, row.h, 'und', 0);
-      done(id, { status: 'unknown' });
-      continue;
-    }
-    pending.push({ row, pieces, det });
+    pending.push({ row, det });
   }
 
-  // Quem precisa do LibreTranslate. O que outro leitor já está pedindo agora espera a mesma chamada (sem gastar balde).
+  // Quem precisa do LibreTranslate. Servidor fora, disjuntor aberto e balde vazio vêm antes de cortar a mensagem em
+  // trechos: o que não vai ao tradutor agora não custa nada (pedidos repetidos com 50 mensagens longas não seguram o
+  // servidor). O que outro leitor já está pedindo agora espera a mesma chamada (sem gastar balde).
   let retryAfterMs = 0;
   const own: Work[] = [];
   const joined: Promise<unknown>[] = [];
@@ -470,23 +467,44 @@ export async function translateMessages(ctx: Ctx, rid: string, ids: unknown, req
   } else if (pending.length && breakerOpen()) {
     for (const p of pending) done(p.row.id, { status: 'failed', reason: 'unavailable' });
   } else if (pending.length) {
-    const fresh: typeof pending = [];
+    const bucket = bucketOf(ctx.userId);
+    let limited = 0;
     for (const p of pending) {
-      const other = inflight.get(`${p.row.id}|${target}|${p.row.h}`);
-      if (other) joined.push(other.then((r) => results.set(p.row.id, r)));
-      else fresh.push(p);
-    }
-    const { got, retryAfterMs: wait } = takeTokens(ctx.userId, fresh.length);
-    if (got < fresh.length) retryAfterMs = wait;
-    fresh.forEach((p, i) => {
-      if (i >= got) return void done(p.row.id, { status: 'failed', reason: 'rate' });
       const key = `${p.row.id}|${target}|${p.row.h}`;
+      const other = inflight.get(key);
+      if (other) {
+        joined.push(other.then((r) => results.set(p.row.id, r)));
+        continue;
+      }
+      // Sem balde, nem corta: volta depois (a web tenta de novo sozinha).
+      if (limited) {
+        limited++;
+        done(p.row.id, { status: 'failed', reason: 'rate' });
+        continue;
+      }
+      const pieces = splitForTranslation(p.row.msg);
+      if (!pieces) {
+        done(p.row.id, { status: 'failed', reason: 'too-long' });
+        continue;
+      }
+      if (!p.det && letterCount(pieces) < MIN_LETTERS) {
+        // Só emoji, menção, link ou código: nem vale perguntar ao LibreTranslate.
+        await saveDetection(p.row.id, p.row.h, 'und', 0);
+        done(p.row.id, { status: 'unknown' });
+        continue;
+      }
+      if (!bucket.take()) {
+        limited++;
+        done(p.row.id, { status: 'failed', reason: 'rate' });
+        continue;
+      }
       let resolve!: (r: MessageTranslation) => void;
       const promise = new Promise<MessageTranslation>((r) => (resolve = r));
       inflight.set(key, promise);
       void promise.then(() => inflight.get(key) === promise && inflight.delete(key));
-      own.push({ row: p.row, pieces: p.pieces, det: p.det, resolve });
-    });
+      own.push({ row: p.row, pieces, det: p.det, resolve });
+    }
+    if (limited) retryAfterMs = bucket.wait(limited);
   }
 
   if (own.length || joined.length) {
@@ -559,7 +577,7 @@ export async function saveRoomTranslate(ctx: Ctx, rid: string, field: unknown, v
 
 // Ignora o disjuntor; sucesso o fecha. Os erros saem como LibreError (a rota põe "Falha na conexão: " na frente).
 export async function testConnection(o: { url?: string; apiKey?: string }): Promise<{ message: string; languages: number; warnings: string[] }> {
-  const c = libreConfig({ url: o.url, apiKey: o.apiKey });
+  const c = await libreConfigForTest({ url: o.url, apiKey: o.apiKey });
   const langs = await libreLanguages(c, { fresh: true });
   if (!langs.length) throw new LibreError('unsupported', 'O LibreTranslate não tem nenhum idioma instalado.');
   const codes = langs.map((l) => l.code);

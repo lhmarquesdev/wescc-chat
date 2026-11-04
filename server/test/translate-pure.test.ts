@@ -3,6 +3,7 @@ import { CHANNEL_SRC, CODE_SRC, EMOJI_SRC, MD_LINK_SRC, MENTION_SRC, URL_SRC } f
 import {
   baseLang,
   cleanRun,
+  hasTextToTranslate,
   joinTranslation,
   letterCount,
   normalizeLang,
@@ -96,6 +97,36 @@ describe('trechos (splitForTranslation, joinTranslation)', () => {
     expect(letterCount(splitForTranslation('ok')!)).toBe(2);
     expect(letterCount(splitForTranslation('Bom dia')!)).toBe(6);
   });
+
+  it('hasTextToTranslate: só emoji, menção, link ou código não tem o que traduzir', () => {
+    for (const msg of [':smile: :tada:', '👍👍', '@ana @bruno', 'https://x.example/a', '`npm test`', '```\nconst a = 1;\n```', 'ok', '#geral', '12:30']) {
+      expect(hasTextToTranslate(msg), msg).toBe(false);
+    }
+    for (const msg of ['Bom dia', ':smile: Good morning', '@ana veja isto', '# Aviso\nA reunião mudou.']) expect(hasTextToTranslate(msg), msg).toBe(true);
+    // Trechos demais: o servidor responde que é longa demais (a pessoa vê o motivo).
+    expect(hasTextToTranslate(Array.from({ length: TRANSLATE_MAX_RUNS + 1 }, (_, i) => `palavra${i}`).join(' @x '))).toBe(true);
+  });
+
+  // Revisão: /[\s*_~]+$/ recomeçava de cada posição de uma sequência longa (5.000 '*' → ~50 ms por mensagem; 50 por
+  // pedido seguravam o servidor mais de 1 s). O corte agora é linear.
+  it('sequências longas de marcas e espaços: linear (50 mensagens de 5.000 caracteres em dezenas de ms)', () => {
+    const fill = ['*', '_', '~', ' ', ' *_~', '\t', '[', '`', ':', '@', '#', '>', '`a', '[a](', 'www.', '- '];
+    const msgs = Array.from({ length: 50 }, (_, i) => {
+      const f = fill[i % fill.length];
+      const head = 'hello the good ';
+      return head + f.repeat(Math.ceil(5000 / f.length)).slice(0, 5000 - head.length - 1) + 'x';
+    });
+    splitForTranslation(msgs[0]); // aquece o JIT
+    const t = performance.now();
+    for (const m of msgs) splitForTranslation(m);
+    expect(performance.now() - t).toBeLessThan(150);
+    // E o corte continua o mesmo: as marcas das pontas ficam fora do trecho, a ida e volta é exata.
+    const p = splitForTranslation(`**hello ${'*'.repeat(3000)}x  ***`)!;
+    expect(runsOf(p)).toEqual([`hello ${'*'.repeat(3000)}x`]);
+    expect(p[p.length - 1]).toEqual({ k: '  ***' });
+    expect(joinTranslation(p, runsOf(p))).toBe(`**hello ${'*'.repeat(3000)}x  ***`);
+    expect(runsOf(splitForTranslation(`_~ Bom dia ~_ ${' '.repeat(4000)}`)!)).toEqual(['Bom dia']);
+  });
 });
 
 describe('saída do tradutor (cleanRun)', () => {
@@ -167,6 +198,18 @@ describe('endereço do LibreTranslate (translateUrlCheck)', () => {
     expect('problem' in translateUrlCheck('http://lt.empresa', ['lt.empresa'])).toBe(true);
     expect(translateUrlCheck('http://lt.empresa', ['lt.empresa:80'])).toEqual({ base: 'http://lt.empresa', hostPort: 'lt.empresa:80' });
     expect('problem' in translateUrlCheck('https://lt.empresa:8443', ['lt.empresa'])).toBe(true);
+  });
+
+  it('IP da internet: o aviso é o da rede da empresa, antes do de INTEGRATIONS_ALLOWED_HOSTS', () => {
+    const isExternal = (h: string) => h === '8.8.8.8' || h === '2001:4860:4860::8888';
+    expect(translateUrlCheck('http://8.8.8.8:5000', [], isExternal)).toEqual({
+      problem: 'O servidor de tradução precisa estar na rede da empresa: 8.8.8.8 é um endereço da internet. O texto das mensagens não pode sair da empresa.',
+      external: true,
+    });
+    expect(translateUrlCheck('http://8.8.8.8:5000', ['8.8.8.8:5000'], isExternal)).toMatchObject({ external: true });
+    expect(translateUrlCheck('http://[2001:4860:4860::8888]:5000', [], isExternal)).toMatchObject({ external: true });
+    expect(translateUrlCheck('http://10.0.0.20:5000', ['10.0.0.20:5000'], isExternal)).toEqual({ base: 'http://10.0.0.20:5000', hostPort: '10.0.0.20:5000' });
+    expect(translateUrlCheck('http://10.0.0.20:5000', [], isExternal)).toEqual({ problem: 'Libere "10.0.0.20:5000" em INTEGRATIONS_ALLOWED_HOSTS no servidor do chat e reinicie o serviço.' });
   });
 
   it('recusa usuário, senha, parâmetros e outros protocolos; o caminho vira base sem a barra', () => {

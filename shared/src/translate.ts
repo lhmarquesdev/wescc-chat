@@ -105,8 +105,18 @@ export function targetFor(o: {
 
 // ---------- Endereço do servidor ----------
 
-// Mesma regra do safeFetch (allowlisted): "host:porta" exato, ou "host" sozinho só para https na 443.
-export function translateUrlCheck(raw: string, allowed: string[]): { base: string; hostPort: string } | { problem: string } {
+// O texto das mensagens não sai da empresa: o servidor de tradução precisa ser da rede interna.
+export const translateExternalText = (host: string) =>
+  `O servidor de tradução precisa estar na rede da empresa: ${host} é um endereço da internet. O texto das mensagens não pode sair da empresa.`;
+
+// Mesma regra do safeFetch (allowlisted): "host:porta" exato, ou "host" sozinho só para https na 443. isExternal (o
+// servidor passa a regra dele para IP literal) vem antes: liberar um endereço da internet em INTEGRATIONS_ALLOWED_HOSTS
+// não adiantaria, então o aviso é o da rede da empresa.
+export function translateUrlCheck(
+  raw: string,
+  allowed: string[],
+  isExternal?: (host: string) => boolean,
+): { base: string; hostPort: string } | { problem: string; external?: true } {
   let u: URL;
   try {
     u = new URL(String(raw ?? '').trim());
@@ -118,6 +128,8 @@ export function translateUrlCheck(raw: string, allowed: string[]): { base: strin
     return { problem: 'Informe só o endereço do servidor, sem usuário, senha ou parâmetros.' };
   }
   const host = u.hostname.toLowerCase();
+  const bare = host.replace(/^\[|\]$/g, '');
+  if (isExternal?.(bare)) return { problem: translateExternalText(bare), external: true };
   const port = u.port || (u.protocol === 'https:' ? '443' : '80');
   const hostPort = `${host}:${port}`;
   if (!allowed.includes(hostPort) && !(u.protocol === 'https:' && !u.port && allowed.includes(host))) {
@@ -139,7 +151,7 @@ const QUOTES = /^(?:[ \t]*>[ \t]?)*/;
 const HEADING = /^#{1,4}\s+(?=\S)/;
 const LIST_ITEM = /^\s*[-*•]\s+(?=\S)/;
 const EDGE_START = /^[\s*_~]+/;
-const EDGE_END = /[\s*_~]+$/;
+const EDGE = /[\s*_~]/;
 const LETTER = /\p{L}/u;
 
 // Corta a mensagem nos pedaços que o tradutor nunca vê. null = mais de TRANSLATE_MAX_RUNS trechos de texto.
@@ -157,14 +169,17 @@ export function splitForTranslation(msg: string): Piece[] | null {
     if (!s) return;
     const lead = EDGE_START.exec(s)?.[0] ?? '';
     if (lead.length === s.length) return keep(s);
-    const tail = EDGE_END.exec(s)?.[0] ?? '';
-    const mid = s.slice(lead.length, s.length - tail.length);
+    // O fim é cortado à mão: /[\s*_~]+$/ recomeça de cada posição de uma sequência longa de '*', '_', '~' ou espaços
+    // (5.000 caracteres, ~50 ms por mensagem) e travaria o servidor a cada pedido de tradução.
+    let end = s.length;
+    while (end > lead.length && EDGE.test(s[end - 1])) end--;
+    const mid = s.slice(lead.length, end);
     keep(lead);
     if (LETTER.test(mid)) {
       out.push({ t: mid });
       runs++;
     } else keep(mid);
-    keep(tail);
+    keep(s.slice(end));
   };
   const line = (l: string) => {
     let rest = l;
@@ -222,5 +237,12 @@ export function cleanRun(source: string, out: string): string | null {
   return s;
 }
 
-// Letras somadas nos trechos (menos de 3: só emoji, menção, link ou código; nem vale perguntar o idioma).
+// Letras somadas nos trechos (menos de MIN_LETTERS: só emoji, menção, link ou código; nem vale perguntar o idioma).
 export const letterCount = (pieces: Piece[]) => runsOf(pieces).reduce((n, r) => n + (r.match(/\p{L}/gu)?.length ?? 0), 0);
+export const MIN_LETTERS = 3;
+
+// Há texto para o tradutor? Mais de TRANSLATE_MAX_RUNS trechos conta como sim: o servidor responde que é longa demais.
+export function hasTextToTranslate(msg: string): boolean {
+  const p = splitForTranslation(msg);
+  return !p || letterCount(p) >= MIN_LETTERS;
+}

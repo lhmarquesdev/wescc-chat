@@ -4,6 +4,7 @@ import { jiraSiteAllowed, parseAllowedHosts } from '@shared/integrations';
 import { translateUrlCheck } from '@shared/translate';
 import { config } from '../config';
 import { many, query } from '../db/pool';
+import { externalIp } from '../lib/internalAddress';
 import { bus } from '../realtime/bus';
 import { roleScope } from './permissions';
 
@@ -395,11 +396,12 @@ add('Jira', 'Chat', 'Jira_Projects_Create', 'string', '', { label: 'Projetos em 
 add('Jira', 'Chat', 'Jira_Default_Project', 'string', '', { label: 'Projeto sugerido ao criar issues', validate: validateProjectKeys });
 
 // Tradução de mensagens: só pelo LibreTranslate da empresa (server/src/translate). O endereço precisa estar em
-// INTEGRATIONS_ALLOWED_HOSTS e ser da rede interna (conferido a cada chamada); a chave pode vir de arquivo.
+// INTEGRATIONS_ALLOWED_HOSTS e ser da rede interna (IP da internet recusado aqui; o nome, a cada conexão); a chave pode
+// vir de arquivo.
 const translateUrlRule = (v: unknown) => {
   const s = String(v ?? '').trim();
   if (!s) return null;
-  const r = translateUrlCheck(s, parseAllowedHosts(process.env.INTEGRATIONS_ALLOWED_HOSTS));
+  const r = translateUrlCheck(s, parseAllowedHosts(process.env.INTEGRATIONS_ALLOWED_HOSTS), externalIp);
   return 'problem' in r ? r.problem : null;
 };
 add('AutoTranslate', 'Servidor', 'AutoTranslate_Enabled', 'boolean', false, { public: true, label: 'Tradução de mensagens' });

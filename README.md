@@ -775,7 +775,8 @@ Num **canal de avisos** (📢) só algumas pessoas publicam e todos os membros l
 ## Tradução de mensagens (LibreTranslate)
 
 Opcional e desligada por padrão. Quem lê traduz uma mensagem pelo menu dela (**Traduzir** / **Ver original**) ou liga
-a tradução automática de uma sala inteira, só para si, em menu da sala › **Tradução automática**. O destino é o idioma
+a tradução automática de uma sala inteira, só para si, em menu da sala › **Tradução automática** (cada mensagem
+traduzida ganha a marca “traduzida” ao lado da hora; um clique nela mostra o original). O destino é o idioma
 da pessoa (Minha conta › Preferências › Tradução) ou, sem ele, o idioma padrão da empresa (Configurações › Geral).
 O único tradutor é um **LibreTranslate instalado pela empresa na rede interna**: o texto das mensagens não sai da
 empresa e nenhum serviço da internet (Google, DeepL, Microsoft…) é usado.
@@ -785,7 +786,8 @@ empresa e nenhum serviço da internet (Google, DeepL, Microsoft…) é usado.
    menos memória.
 2. **Libere o endereço** no servidor do chat: `INTEGRATIONS_ALLOWED_HOSTS=10.0.0.20:5000` (`host:porta`, separado por
    vírgula dos outros) e reinicie o serviço. O chat recusa endereço da internet: o nome precisa resolver só para
-   endereços internos (10.x, 172.16-31.x, 192.168.x, loopback, IPv6 local).
+   endereços internos (10.x, 172.16-31.x, 192.168.x, loopback, IPv6 local), conferido também no endereço em que cada
+   conexão é feita (um DNS que muda depois não leva o texto para fora).
 3. **Configure** em Administração › Configurações › **Tradução automática**: ligue “Tradução de mensagens”, informe o
    endereço (por exemplo `http://10.0.0.20:5000`) e, se o LibreTranslate exigir, a chave da API (ou
    `LIBRETRANSLATE_API_KEY_FILE` no serviço, que tem precedência e trava o campo). Use **Testar conexão**: ele testa o
@@ -797,8 +799,8 @@ empresa e nenhum serviço da internet (Google, DeepL, Microsoft…) é usado.
   preciso ligar cache no LibreTranslate. Só o que aparece na tela é traduzido.
 - Se o LibreTranslate usa limite de requisições (`--req-limit`), dê ao chat uma chave de API (`--api-keys`) com limite
   alto: o próprio chat já limita as traduções por pessoa por minuto e as chamadas ao mesmo tempo (Limites).
-- Fora do ar, lento ou recusando: a mensagem fica no original com “Tradução indisponível agora.” e o chat tenta de novo
-  sozinho depois de 30 segundos.
+- Fora do ar, lento ou recusando: a mensagem fica no original (marcada “sem tradução”) e o chat tenta de novo sozinho
+  depois de 30 segundos; a lista de idiomas também volta sozinha.
 - Nunca são traduzidas: salas criptografadas e mensagens cifradas, mensagens de sistema, figurinhas, enquetes e
   encaminhadas. Trechos de código, links, menções, canais e emojis não vão para o tradutor e ficam iguais.
 - Notificações, e-mails, busca, prévia na barra lateral, citações e a auditoria continuam mostrando o original.

@@ -1,3 +1,4 @@
+import dns from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -13,6 +14,7 @@ import { internalAddress, publicLookup } from '../oauth/login';
 export type SafeFetchCode =
   | 'error-url-not-allowed'
   | 'error-url-internal'
+  | 'error-url-external'
   | 'error-network'
   | 'error-timeout'
   | 'error-too-large'
@@ -37,6 +39,10 @@ export interface SafeFetchOptions {
   timeoutMs?: number; // padrão 15000
   maxBytes?: number; // padrão 2 MB
   redirects?: number; // padrão 0: APIs não seguem redirecionamento
+  // Só a rede da empresa (a tradução: o texto das mensagens não sai): host liberado e conexão só a endereço interno,
+  // conferido no DNS da própria conexão e no endereço conectado. Pelo proxy (INTEGRATIONS_PROXY_FOR_ALLOWED=1) quem
+  // conecta é o proxy: aí vale só a conferência de quem chama.
+  internalOnly?: boolean;
 }
 
 export interface SafeResponse {
@@ -53,6 +59,7 @@ const UA = 'Wescc-Chat-Integrations';
 export const SAFE_FETCH_TEXT: Record<SafeFetchCode, string> = {
   'error-url-not-allowed': 'Este endereço não é permitido. O chat só fala com o Jira Cloud, o Microsoft 365 e o Power Automate, ou com servidores liberados em INTEGRATIONS_ALLOWED_HOSTS.',
   'error-url-internal': 'Endereço da rede interna não permitido. Para liberar um servidor interno, inclua "host:porta" em INTEGRATIONS_ALLOWED_HOSTS.',
+  'error-url-external': 'O servidor precisa estar na rede da empresa: o endereço resolvido é da internet.',
   'error-network': 'Não foi possível conectar ao servidor.',
   'error-timeout': 'O servidor demorou demais para responder.',
   'error-too-large': 'A resposta passou do tamanho máximo.',
@@ -189,6 +196,17 @@ const vendorLookup: net.LookupFunction = (hostname, options, cb) =>
 const vendorAgent = new https.Agent({ keepAlive: false, lookup: vendorLookup } as https.AgentOptions);
 const allowedHttps = new https.Agent({ keepAlive: false });
 const allowedHttp = new http.Agent({ keepAlive: false });
+// internalOnly: o nome é resolvido de novo na conexão e todos os endereços precisam ser internos (o inverso do
+// publicLookup). Um DNS que muda entre a conferência e a conexão (TTL curto, rebinding) não leva o texto para fora.
+const internalLookup: net.LookupFunction = (hostname, options, cb) =>
+  dns.lookup(hostname, options, (err, address: any, family?: number) => {
+    if (err) return cb(err, address, family);
+    const list: { address: string }[] = Array.isArray(address) ? address : [{ address }];
+    if (!list.length || list.some((a) => !internalAddress(a.address))) return cb(Object.assign(new Error('endereço da internet'), { code: 'EEXTERNAL' }), address, family);
+    cb(null, address, family);
+  });
+const internalHttps = new https.Agent({ keepAlive: false, lookup: internalLookup } as https.AgentOptions);
+const internalHttp = new http.Agent({ keepAlive: false, lookup: internalLookup } as http.AgentOptions);
 const tunnels = new Map<string, TunnelAgent>();
 
 function tunnelFor(p: ProxyInfo) {
@@ -208,6 +226,7 @@ function networkError(e: any): SafeFetchError {
   if (e instanceof SafeFetchError) return e;
   const code = String(e?.code ?? '');
   if (code === 'EINTERNAL') return fail('error-url-internal');
+  if (code === 'EEXTERNAL') return fail('error-url-external');
   if (code === 'ETESTVENDOR') return fail('error-network', 'Em teste, o chat não chama o Jira de verdade: aponte as URLs base para um servidor falso.');
   if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'EAI_NONAME') return fail('error-network', 'Servidor não encontrado.');
   if (code === 'ECONNREFUSED') return fail('error-network', 'O servidor recusou a conexão.');
@@ -221,7 +240,10 @@ interface Raw {
   body: Buffer;
 }
 
-function requestOnce(u: URL, o: { method: string; headers: Record<string, string>; body?: string | Buffer; maxBytes: number; signal: AbortSignal }): Promise<Raw> {
+function requestOnce(
+  u: URL,
+  o: { method: string; headers: Record<string, string>; body?: string | Buffer; maxBytes: number; signal: AbortSignal; internalOnly?: boolean },
+): Promise<Raw> {
   return new Promise<Raw>((resolve, reject) => {
     const vendor = !allowlisted(u);
     let proxy: ProxyInfo | null = null;
@@ -239,7 +261,17 @@ function requestOnce(u: URL, o: { method: string; headers: Record<string, string
       if (proxy.auth) headers['proxy-authorization'] = proxy.auth;
       opts = { hostname: proxy.host, port: proxy.port, path: u.toString(), agent: allowedHttp };
     } else {
-      const agent = proxy ? tunnelFor(proxy) : vendor ? vendorAgent : isHttps ? allowedHttps : allowedHttp;
+      const agent = proxy
+        ? tunnelFor(proxy)
+        : vendor
+          ? vendorAgent
+          : o.internalOnly
+            ? isHttps
+              ? internalHttps
+              : internalHttp
+            : isHttps
+              ? allowedHttps
+              : allowedHttp;
       opts = { hostname: host, port: u.port || (isHttps ? 443 : 80), path: `${u.pathname}${u.search}`, agent, ...(isHttps ? { servername: net.isIP(host) ? undefined : host } : {}) };
     }
     const lib = isHttps ? https : http;
@@ -275,6 +307,14 @@ function requestOnce(u: URL, o: { method: string; headers: Record<string, string
         }),
       );
     }
+    // Só a rede da empresa: o endereço conectado também (um IP literal não passa pelo lookup).
+    if (o.internalOnly && !proxy) {
+      req.on('socket', (s) =>
+        s.once('connect', () => {
+          if (!s.remoteAddress || !internalAddress(s.remoteAddress)) req.destroy(Object.assign(new Error('endereço da internet'), { code: 'EEXTERNAL' }));
+        }),
+      );
+    }
     req.on('error', (e) => reject(networkError(e)));
     if (o.body !== undefined) req.write(o.body);
     req.end();
@@ -285,6 +325,7 @@ const REDIRECT = new Set([301, 302, 303, 307, 308]);
 
 export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promise<SafeResponse> {
   let u = checkOutboundUrl(url);
+  if (opts.internalOnly && !allowlisted(u)) throw fail('error-url-not-allowed');
   const maxBytes = opts.maxBytes ?? 2 * 1024 * 1024;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 15_000);
@@ -297,7 +338,7 @@ export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promi
     for (let hop = 0; ; hop++) {
       let r: Raw;
       try {
-        r = await requestOnce(u, { method, headers, body, maxBytes, signal: ctl.signal });
+        r = await requestOnce(u, { method, headers, body, maxBytes, signal: ctl.signal, internalOnly: opts.internalOnly });
       } catch (e) {
         if (ctl.signal.aborted) throw fail('error-timeout');
         throw e;
@@ -308,6 +349,7 @@ export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promi
         let next: URL;
         try {
           next = checkOutboundUrl(new URL(location, u).toString());
+          if (opts.internalOnly && !allowlisted(next)) throw fail('error-url-not-allowed');
         } catch (e) {
           throw e instanceof SafeFetchError ? e : fail('error-redirect');
         }

@@ -182,11 +182,12 @@ export function AdminSettings() {
       .catch(fail);
   };
   // Tradução: testa o rascunho da tela (endereço e chave ainda não salvos); a chave mascarada vale como a gravada.
+  const translateUrlSetting = all.find((s) => s._id === 'AutoTranslate_LibreTranslate_Url');
+  const translateUrl = translateUrlSetting ? String(value(translateUrlSetting) ?? '').trim() : '';
   const testTranslate = () => {
-    const url = all.find((s) => s._id === 'AutoTranslate_LibreTranslate_Url');
     setTestingTranslate(true);
     api
-      .post('autoTranslate.testConnection', { url: url ? value(url) : undefined, apiKey: draft.AutoTranslate_LibreTranslate_ApiKey })
+      .post('autoTranslate.testConnection', { url: translateUrlSetting ? translateUrl : undefined, apiKey: draft.AutoTranslate_LibreTranslate_ApiKey })
       .then((r) => {
         ok(r.message);
         for (const w of r.warnings ?? []) useStore.getState().toast(w, 'warning');
@@ -352,10 +353,22 @@ export function AdminSettings() {
           )}
           {group === 'AutoTranslate' && !q && (
             <div className="settings-extra row-actions wrap">
-              <button className="btn" onClick={testTranslate} disabled={testingTranslate} aria-busy={testingTranslate || undefined}>
+              {/* Sem endereço não há o que testar: o botão espera o campo (e diz por quê). */}
+              <button
+                className="btn"
+                onClick={testTranslate}
+                disabled={testingTranslate || !translateUrl}
+                aria-busy={testingTranslate || undefined}
+                aria-describedby={!translateUrl ? 'translate-test-hint' : undefined}
+              >
                 <Icon name="translate" />
                 Testar conexão
               </button>
+              {!translateUrl && (
+                <span id="translate-test-hint" className="muted small">
+                  Preencha o endereço do LibreTranslate para testar.
+                </span>
+              )}
             </div>
           )}
           {group === 'RetentionPolicy' && !q && (

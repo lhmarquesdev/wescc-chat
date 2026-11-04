@@ -86,14 +86,16 @@ export async function startFakeLibre(port = 0): Promise<FakeLibre> {
     return undefined;
   };
 
-  s.on('GET', '/languages', () => takeFailure('/languages') ?? { body: state.languages });
-  s.on('GET', '/frontend/settings', () => ({ body: { charLimit: state.charLimit, keyRequired: !!state.requireKey } }));
-  s.on('POST', '/detect', (req) => {
+  // Qualquer prefixo de caminho também serve (um LibreTranslate atrás de um proxy em /tradutor; o roteiro do navegador usa
+  // um prefixo novo a cada execução para o chat não reaproveitar a lista guardada).
+  s.on('GET', /\/languages$/, () => takeFailure('/languages') ?? { body: state.languages });
+  s.on('GET', /\/frontend\/settings$/, () => ({ body: { charLimit: state.charLimit, keyRequired: !!state.requireKey } }));
+  s.on('POST', /\/detect$/, (req) => {
     const failed = takeFailure('/detect') ?? keyProblem(req.json);
     if (failed) return { delayMs: state.delayMs, ...failed };
     return { delayMs: state.delayMs, body: [detect(req.json?.q)] };
   });
-  s.on('POST', '/translate', (req) => {
+  s.on('POST', /\/translate$/, (req) => {
     const body = req.json ?? {};
     const failed = takeFailure('/translate') ?? keyProblem(body);
     if (failed) return { delayMs: state.delayMs, ...failed };

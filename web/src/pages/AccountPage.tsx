@@ -387,10 +387,14 @@ function TranslationCard({ value, onSave }: { value: unknown; onSave: (v: string
       <div className="form">
         <Field
           label="Traduzir mensagens para"
-          hint={unavailable ? 'O servidor de tradução não respondeu. Tente de novo mais tarde.' : 'Para traduzir uma sala inteira, abra Tradução automática no menu da sala.'}
+          hint={
+            unavailable
+              ? 'O servidor de tradução não respondeu. A lista de idiomas volta sozinha quando ele responder.'
+              : 'Para traduzir uma sala inteira, abra Tradução automática no menu da sala.'
+          }
         >
           <select value={current} disabled={unavailable || !list} onChange={(e) => onSave(e.target.value)}>
-            <option value="">{`Padrão da empresa (${capitalize(languageLabel(site))})`}</option>
+            <option value="">{`Padrão da empresa: ${capitalize(languageLabel(site))}`}</option>
             {options.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}

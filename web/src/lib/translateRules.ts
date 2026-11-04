@@ -1,12 +1,13 @@
 // Tradução de mensagens: regras puras da web (sem store nem React; os testes do servidor importam direto,
 // server/test/web-rules.test.ts). O que nunca é traduzido é a regra única do shared (translatableMessage).
 import type { Message } from '@shared/index';
-import { normalizeLang, translatableMessage } from '@shared/translate';
+import { hasTextToTranslate, normalizeLang, translatableMessage } from '@shared/translate';
 
-// A web oferece e pede a tradução só do texto de outra pessoa (a API aceita a própria, para scripts). Mensagem de autor
-// excluído (u._id nulo) continua traduzível.
+// A web oferece e pede a tradução só do texto de outra pessoa (a API aceita a própria, para scripts) e só quando há
+// texto para o tradutor: só emoji, menção, link ou código não tem "Traduzir" (o servidor responderia "idioma não
+// identificado" sem nem perguntar ao LibreTranslate). Mensagem de autor excluído (u._id nulo) continua traduzível.
 export const isTranslatable = (m: Message, meId: string, room?: { encrypted?: boolean | null } | null) =>
-  translatableMessage(room, m) && (m.u?._id ?? null) !== meId;
+  translatableMessage(room, m) && (m.u?._id ?? null) !== meId && hasTextToTranslate(m.msg);
 
 // Chave da tradução no navegador: muda quando a mensagem é editada (a tradução antiga deixa de valer).
 export const translationKey = (m: Pick<Message, '_id' | 'editedAt'>, lang: string) => `${m._id}|${lang}|${m.editedAt ?? ''}`;

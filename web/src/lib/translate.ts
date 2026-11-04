@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { create } from 'zustand';
 import type { Message } from '@shared/index';
 import { normalizeLang, targetFor, TRANSLATE_MAX_IDS, type MessageTranslation, type TranslateFailReason, type TranslateLanguage, type TranslateResponse } from '@shared/translate';
@@ -308,12 +308,18 @@ export function useTranslateAllowed(): boolean {
   return !!enabled && allowed;
 }
 
-// Lista do servidor de tradução (guardada 10 minutos; 30 s quando ele não respondeu).
+// Lista do servidor de tradução (guardada 10 minutos; 30 s quando ele não respondeu). Sem resposta, quem mostra a
+// lista pede de novo a cada 30 s enquanto está aberto: o painel e as Preferências voltam sozinhos.
 export function useLanguages(): { list: TranslateLanguage[] | null; unavailable: boolean; myDefault: string | null } {
   const allowed = useTranslateAllowed();
   const languages = useTranslations((s) => s.languages);
   useEffect(() => {
-    if (allowed) loadLanguages();
+    if (!allowed) return;
+    loadLanguages();
+    if (!languages?.unavailable) return;
+    // Cada resposta troca languages (at novo) e agenda a seguinte.
+    const t = window.setTimeout(loadLanguages, Math.max(1000, languages.at + LANG_TTL_FAILED - Date.now() + 50));
+    return () => clearTimeout(t);
   }, [allowed, languages]);
   return { list: languages ? languages.list : null, unavailable: !!languages?.unavailable, myDefault: languages?.myDefault ?? null };
 }
@@ -358,7 +364,8 @@ export function useMessageTranslation(m: Message): MessageTranslationView {
   const meId = useStore((s) => s.me?._id ?? '');
   const encrypted = useStore((s) => !!s.rooms[m.rid]?.encrypted);
   const rt = useRoomTranslate(m.rid);
-  const can = rt.on && isTranslatable(m, meId, { encrypted });
+  // isTranslatable corta o texto em trechos (há letras para traduzir?): só de novo quando a mensagem muda.
+  const can = useMemo(() => rt.on && isTranslatable(m, meId, { encrypted }), [rt.on, m, meId, encrypted]);
   const key = translationKey(m, rt.lang);
   const entry = useTranslations((s) => (can ? s.byKey[key] : undefined));
   const choice = useTranslations((s) => (can ? s.view[key] : undefined));
@@ -429,7 +436,9 @@ export function useMessageTranslation(m: Message): MessageTranslationView {
     }
     setView(key, 'translation');
     if (!e || e.status === 'failed') request(m.rid, rt.lang, m._id, key, true);
-    else markManual(key);
+    // Na automática, com a tradução pronta, só troca o que está na tela (a marca "traduzida" mostra); fora dela, a
+    // linha "Traduzida do…" aparece como num pedido pelo menu.
+    else if (!rt.auto || e.status !== 'translated') markManual(key);
   };
 
   const retry = () => {

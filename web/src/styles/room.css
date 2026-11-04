@@ -407,7 +407,7 @@
   font-size: var(--fs-12);
   color: var(--fg-muted);
 }
-/* Tradução: "Traduzida do inglês · Ver original" abaixo do corpo */
+/* Tradução pedida pelo menu: "Traduzida do inglês · Ver original" abaixo do corpo */
 .msg-translated {
   display: flex;
   flex-wrap: wrap;
@@ -430,11 +430,57 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+/* "Traduzindo…": o spinner no lugar do ícone, do mesmo tamanho (o texto não pula quando chega a tradução) */
+.msg-translated .spinner {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  border-width: 1.5px;
+}
+/* Tradução automática: a marca "traduzida" junto da hora (ou no fim do corpo, nas agrupadas), como "editada" */
+.msg-tr-mark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  font: inherit;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.msg-tr-mark > svg {
+  align-self: center;
+}
+button.msg-tr-mark {
+  cursor: pointer;
+}
+button.msg-tr-mark:hover {
+  color: var(--accent-text);
+}
+.msg-body .msg-tr-mark {
+  margin-left: 6px;
+}
 /* No toque o alvo cresce para 44 px (16 da linha + 2 × 14) sem empurrar a linha */
 @media (pointer: coarse) {
   .msg-translated .msg-tr-btn {
     padding: 14px 8px;
     margin: -14px -8px;
+  }
+  button.msg-tr-mark {
+    position: relative;
+  }
+  button.msg-tr-mark::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--touch));
+    height: max(100%, var(--touch));
+    transform: translate(-50%, -50%);
   }
 }
 .msg-body {
@@ -1199,6 +1245,13 @@ a.att-title {
 }
 .notice-card > .msg-body {
   padding: 10px 16px 12px;
+}
+/* A linha da tradução alinha com o texto do aviso e fica longe do rodapé "Ciente" */
+.notice-card > .msg-translated {
+  margin: 10px 16px 12px;
+}
+.notice-card > .msg-body + .msg-translated {
+  margin-top: -6px;
 }
 .notice-card > .att,
 .notice-card > .att-rich-wrap,

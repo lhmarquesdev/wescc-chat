@@ -1,14 +1,15 @@
 import dns from 'node:dns';
 import net from 'node:net';
 import { parseAllowedHosts } from '@shared/integrations';
-import { translateUrlCheck } from '@shared/translate';
+import { translateExternalText, translateUrlCheck } from '@shared/translate';
 import { config } from '../config';
+import { externalIp, internalAddress } from '../lib/internalAddress';
 import { safeFetch, SafeFetchError, SAFE_FETCH_TEXT, type SafeResponse } from '../lib/safeFetch';
-import { internalAddress } from '../oauth/login';
 import { getSetting } from '../services/settings';
 
 // Cliente do LibreTranslate instalado pela empresa. Saída HTTP só pelo safeFetch (host liberado em
-// INTEGRATIONS_ALLOWED_HOSTS) e, além disso, só para um endereço da rede da empresa: o texto das mensagens não sai.
+// INTEGRATIONS_ALLOWED_HOSTS) e, além disso, só para um endereço da rede da empresa: o texto das mensagens não sai
+// (conferido no endereço da própria conexão: safeFetch internalOnly).
 // A chave da API vai no corpo JSON (o LibreTranslate lê json.api_key), nunca na URL nem no log. Nenhum texto de
 // mensagem vai para o log.
 
@@ -38,6 +39,7 @@ export interface LibreConn {
 }
 
 const NOT_CONFIGURED = 'Informe o endereço do LibreTranslate em Configurações › Tradução automática.';
+const NO_URL_TO_TEST = 'Preencha o endereço do LibreTranslate para testar.';
 const MASK = '********';
 
 const allowed = () => parseAllowedHosts(process.env.INTEGRATIONS_ALLOWED_HOSTS);
@@ -46,8 +48,8 @@ const allowed = () => parseAllowedHosts(process.env.INTEGRATIONS_ALLOWED_HOSTS);
 export function libreConfig(o: { url?: string; apiKey?: string | null } = {}): LibreConn {
   const url = String(o.url ?? getSetting<string>('AutoTranslate_LibreTranslate_Url') ?? '').trim();
   if (!url) throw new LibreError('not-configured', NOT_CONFIGURED);
-  const r = translateUrlCheck(url, allowed());
-  if ('problem' in r) throw new LibreError('not-configured', r.problem);
+  const r = translateUrlCheck(url, allowed(), externalIp);
+  if ('problem' in r) throw new LibreError(r.external ? 'external' : 'not-configured', r.problem);
   const draft = o.apiKey !== undefined && o.apiKey !== null && o.apiKey !== MASK ? String(o.apiKey) : null;
   const apiKey = config.translate.apiKey || (draft ?? String(getSetting<string>('AutoTranslate_LibreTranslate_ApiKey') ?? '')) || null;
   const seconds = Number(getSetting<number>('AutoTranslate_Timeout_Seconds')) || 15;
@@ -59,10 +61,12 @@ export function libreConfig(o: { url?: string; apiKey?: string | null } = {}): L
 const NET_TTL = 60_000;
 const netCache = new Map<string, { ok: boolean; at: number }>();
 
-const externalError = (host: string) =>
-  new LibreError('external', `O servidor de tradução precisa estar na rede da empresa: ${host} é um endereço da internet. O texto das mensagens não pode sair da empresa.`);
+const externalError = (host: string) => new LibreError('external', translateExternalText(host));
 
 // IP literal: precisa ser interno. Nome: todos os endereços resolvidos precisam ser internos (guardado 60 s por host).
+// É o aviso claro antes de conectar e a única conferência pelo proxy (INTEGRATIONS_PROXY_FOR_ALLOWED=1); na conexão
+// direta, o safeFetch confere de novo o endereço em que conectou (internalOnly), então um DNS que muda depois daqui
+// não leva o texto para fora.
 export async function assertCompanyNetwork(host: string): Promise<void> {
   if (net.isIP(host)) {
     if (!internalAddress(host)) throw externalError(host);
@@ -83,6 +87,28 @@ export async function assertCompanyNetwork(host: string): Promise<void> {
   if (netCache.size > 100) netCache.clear();
   netCache.set(host, { ok, at: Date.now() });
   if (!ok) throw externalError(host);
+}
+
+// Teste de conexão (Administração): endereço vazio e endereço da internet têm o aviso deles antes do de
+// INTEGRATIONS_ALLOWED_HOSTS (liberar um endereço da internet não adiantaria). Um nome que não resolve segue para o
+// aviso da lista, se for o caso.
+export async function libreConfigForTest(o: { url?: string; apiKey?: string | null }): Promise<LibreConn> {
+  const url = String(o.url ?? getSetting<string>('AutoTranslate_LibreTranslate_Url') ?? '').trim();
+  if (!url) throw new LibreError('not-configured', NO_URL_TO_TEST);
+  let host = '';
+  try {
+    host = new URL(url).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  } catch {
+    // inválido: o libreConfig diz o que corrigir
+  }
+  if (host && !net.isIP(host)) {
+    try {
+      await assertCompanyNetwork(host);
+    } catch (e) {
+      if (e instanceof LibreError && e.code === 'external') throw e;
+    }
+  }
+  return libreConfig({ url, apiKey: o.apiKey });
 }
 
 export function __resetLibreForTests() {
@@ -141,6 +167,7 @@ function networkError(e: unknown, c: LibreConn): LibreError {
   if (e instanceof LibreError) return e;
   if (e instanceof SafeFetchError) {
     if (e.code === 'error-timeout') return new LibreError('timeout', 'O servidor de tradução demorou demais para responder.');
+    if (e.code === 'error-url-external') return externalError(c.host);
     if (e.code === 'error-url-not-allowed' || e.code === 'error-url-internal') {
       // O texto do safeFetch fala do Jira: o da tradução diz o que liberar.
       const r = translateUrlCheck(c.base, allowed());
@@ -161,6 +188,7 @@ async function call(c: LibreConn, method: 'GET' | 'POST', path: string, body?: R
       body: body ? JSON.stringify(body) : undefined,
       timeoutMs: c.timeoutMs,
       maxBytes: 4 * 1024 * 1024,
+      internalOnly: true,
     });
   } catch (e) {
     throw networkError(e, c);

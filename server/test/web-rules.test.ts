@@ -752,6 +752,11 @@ describe('tradução de mensagens (regras da web)', () => {
     expect(isTranslatable(msg({ u: OTHER, msg: 'Hello' }), ME._id, { encrypted: false })).toBe(true);
     // Autor excluído (u._id nulo): continua traduzível.
     expect(isTranslatable(msg({ u: { _id: null as unknown as string, username: 'removido' }, msg: 'Hello' }), ME._id)).toBe(true);
+    // Revisão: sem texto para o tradutor (só emoji, menção, link ou código), sem "Traduzir".
+    for (const text of [':smile: :tada:', '👍👍', '@ana @bruno', 'https://x.example/a', '`npm test`', 'ok']) {
+      expect(isTranslatable(msg({ u: OTHER, msg: text }), ME._id), text).toBe(false);
+    }
+    expect(isTranslatable(msg({ u: OTHER, msg: ':smile: Good morning, team' }), ME._id)).toBe(true);
   });
   it('translationKey muda com a edição e com o idioma', () => {
     const m = msg({ _id: 'x1' });
