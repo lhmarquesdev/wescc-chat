@@ -137,7 +137,7 @@ export function roomsRoutes(app: FastifyInstance) {
     const body = b(req);
     // Booleanos normalizados só quando enviados: a auditoria registra os campos que vieram.
     const settings: Record<string, any> = { ...body };
-    for (const k of ['readOnly', 'reactWhenReadOnly', 'notice', 'noticeAck', 'broadcast']) if (k in body) settings[k] = bool(body[k]);
+    for (const k of ['readOnly', 'reactWhenReadOnly', 'notice', 'noticeAck', 'broadcast', 'encrypted']) if (k in body) settings[k] = bool(body[k]);
     const room = await saveRoomSettings(ctx, str(body.rid, 'rid'), settings);
     return { rid: room.id, room: mapRoom(room) };
   });

@@ -56,7 +56,9 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
   const roomName = groupDM ? await groupDmLabel(room.uids) : isDM ? senderName : room.fname || room.name || '';
   const hidePush = getSetting<boolean>('Push_Privacy_Hide_Content');
   const preview = messagePreviewText({ msg: row.msg, sticker: row.extra?.sticker, files: row.files, forward: row.extra?.forward, poll: row.extra?.poll, e2e: row.e2e });
-  const text = (await serverBuiltMarkdown(ctx, row)) ? plainIntegrationText(preview) : preview;
+  // Cifrada: "Mensagem criptografada" no push e no e-mail; quem está com o chat aberto decifra no navegador (e2e).
+  const text = !row.e2e && (await serverBuiltMarkdown(ctx, row)) ? plainIntegrationText(preview) : preview;
+  const e2e = row.e2e && !hidePush ? { envelope: row.e2e, prefix: isDM ? '' : `${senderName}: ` } : undefined;
   const emailEnabled = getSetting<boolean>('Email_Notifications_Enabled');
   const pushTargets: string[] = [];
   const title = isDM ? (groupDM ? `${senderName} em ${roomName}` : senderName) : `#${roomName}`;
@@ -84,7 +86,7 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
     if (notify) {
       bus.publish(
         { user: m.user_id },
-        { type: 'notification', rid: room.id, title, text: body, messageId: row.id, sender: { _id: ctx.userId, username: ctx.username }, tmid: row.tmid },
+        { type: 'notification', rid: room.id, title, text: body, messageId: row.id, sender: { _id: ctx.userId, username: ctx.username }, tmid: row.tmid, e2e },
       );
       pushTargets.push(m.user_id);
     }

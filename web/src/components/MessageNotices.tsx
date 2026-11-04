@@ -8,10 +8,14 @@ import { authorName, messageLink } from '../lib/messageRules';
 import { realtime } from '../lib/realtime';
 import { systemNotify } from '../lib/session';
 import { scheduledFailKey, useStore } from '../lib/store';
+import { contentOf } from '../lib/e2e/client';
 
-// Prévia de uma mensagem numa linha (cifrada: "Mensagem criptografada").
-export const messagePreview = (m: Message) =>
-  messagePreviewText({ msg: m.msg, sticker: m.sticker, files: m.files, forward: m.forward, poll: m.poll, e2e: (m as { e2e?: unknown }).e2e }, { withName: false });
+// Prévia de uma mensagem numa linha. Cifrada: o texto já decifrado neste navegador, senão "Mensagem criptografada".
+export const messagePreview = (m: Message) => {
+  const c = m.e2e ? contentOf(m) : null;
+  if (c) return c.msg ? c.msg.replace(/\s+/g, ' ').trim() : c.file ? `📎 ${c.file.name}` : messagePreviewText({ e2e: m.e2e });
+  return messagePreviewText({ msg: m.msg, sticker: m.sticker, files: m.files, forward: m.forward, poll: m.poll, e2e: m.e2e }, { withName: false });
+};
 
 // Texto do lembrete: "Ana: prévia" (até 120 caracteres); sem a mensagem (sem acesso), só o aviso.
 export function reminderText(m: Message | null) {

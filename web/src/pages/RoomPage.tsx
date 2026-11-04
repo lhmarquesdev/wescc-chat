@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
 import { encryptedContent } from '@shared/messages';
+import { e2eToggleVerdict } from '@shared/e2e';
 import { api, ApiError, errorMessage } from '../lib/api';
 import { nameList, roomDisplayName, roomIconName, roomPath } from '../lib/format';
 import { useUserPresence } from '../lib/presence';
@@ -28,6 +29,10 @@ import { useIsPhone } from '../components/overlay';
 import { Empty, GroupAvatar, Menu, Skeleton, SkeletonMessages, UserAvatar, confirmDialog, useDelay } from '../components/ui';
 // Integrações (Jira)
 import { IntegrationModals } from '../components/integrations/IntegrationModals';
+// Criptografia de ponta a ponta
+import { contentOf, ensureRoom, rotateNow, useE2e } from '../lib/e2e/client';
+import { E2eBanner, useE2eBlock } from '../components/e2e/E2eBanner';
+import { openE2eDialog, requireE2eReady } from '../components/e2e/E2eDialogs';
 
 // perm: só aparece para quem tem a permissão (global ou da sala), como o servidor exige.
 const PANELS: { id: PanelId; icon: IconName; label: string; when?: (r: Room) => boolean; perm?: string | string[] }[] = [
@@ -313,6 +318,17 @@ export function RoomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomLive]);
 
+  // Criptografia: a chave da conversa (criar, pedir ou trocar) ao abrir, quando a sala muda e ao desbloquear.
+  const e2eStatus = useE2e((s) => s.status);
+  // Só quem participa: removido com a conversa aberta, nada de pedir chaves (o servidor recusaria).
+  const e2eRoom = room && room._id === rid && sub && (room.encrypted || room.e2eKeyId) ? room : null;
+  useEffect(() => {
+    if (e2eRoom) void ensureRoom(e2eRoom);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [e2eRoom?._id, e2eRoom?.encrypted, e2eRoom?.e2eKeyId, e2eRoom?.e2eRotate, e2eRoom?.archived, e2eStatus]);
+  const e2eBlock = useE2eBlock(room && room._id === rid ? room : null);
+  const e2eSetting = !!useSetting<boolean>('E2E_Enable');
+
   // Assiste salas públicas sem ser membro (pré-visualização).
   useEffect(() => {
     if (!sub && room?.t === 'c') {
@@ -353,7 +369,8 @@ export function RoomPage() {
             ? room.notice
               ? 'Este é um canal de avisos: só os publicadores enviam mensagens.'
               : 'Esta sala é somente leitura.'
-            : undefined;
+            : // Criptografia: sem a senha ou sem a chave da conversa não dá para escrever.
+              e2eBlock?.text;
   // As mesmas recusas do servidor: reagir não exige poder escrever (canal de avisos com reações), mas sala arquivada,
   // silêncio e DM bloqueada também barram a reação. Discussão e edição seguem as regras de envio.
   const canReact = !!room && !room.archived && !muted && room.direct?.canSend !== false && (!room.ro || room.reactWhenReadOnly || canPostRO);
@@ -404,7 +421,11 @@ export function RoomPage() {
   const editLast = () => {
     const { messages, settings } = useStore.getState();
     const mine = lastOwnEditable(messages[rid]?.list ?? [], me._id, !!settings.Message_AllowEditing);
-    if (mine) setEditing(mine);
+    // Mensagem cifrada: edita o texto decifrado (sem ele, nada a editar).
+    if (mine && mine.e2e) {
+      const c = contentOf(mine);
+      if (c) setEditing({ ...mine, msg: c.msg });
+    } else if (mine) setEditing(mine);
   };
 
   const knownName = sub ? roomDisplayName(sub, roomLive) : roomLive?.fname || roomLive?.name;
@@ -511,6 +532,61 @@ export function RoomPage() {
   // No toque não há title: o botão desativado e a pílula de bloqueio explicam o motivo num aviso.
   const explain = (text?: string) => text && useStore.getState().toast(namesIn(text), 'info');
 
+  // Criptografia de ponta a ponta no Mais: as mesmas regras do servidor (tipo, arquivada, configuração, quem pode).
+  // A conversa direta bloqueada pela regra da Operação não liga nem troca chave.
+  const e2eVerdict = (on: boolean) =>
+    e2eToggleVerdict({
+      t: room.t,
+      archived: room.archived,
+      on,
+      settingOn: e2eSetting,
+      isDm: room.t === 'd',
+      isParticipant: room.t === 'd' && (room.uids ?? []).includes(me._id),
+      canToggle: canWithRoles('toggle-room-e2e-encryption', roles),
+      hasKeys: true, // sem a senha, requireE2eReady configura antes
+    }).ok && room.direct?.canSend !== false;
+  const toggleE2e = async (on: boolean) => {
+    if (on && !(await requireE2eReady())) return;
+    const ok = on
+      ? await confirmDialog({
+          title: 'Ligar a criptografia de ponta a ponta?',
+          body: 'As próximas mensagens e arquivos ficam cifrados: só quem participa consegue ler. Busca, prévias do Jira, figurinhas, bots e integrações deixam de funcionar aqui. As mensagens antigas continuam como estão.',
+          confirmLabel: 'Ligar criptografia',
+        })
+      : await confirmDialog({
+          title: 'Desligar a criptografia?',
+          body: 'As próximas mensagens ficam legíveis no servidor. As mensagens criptografadas continuam cifradas.',
+          confirmLabel: 'Desligar',
+          danger: true,
+        });
+    if (!ok) return;
+    try {
+      await api.post('rooms.saveRoomSettings', { rid, encrypted: on });
+      await loadRoom();
+    } catch (e) {
+      useStore.getState().toast(errorMessage(e), 'error');
+    }
+  };
+  const rotateE2e = async () => {
+    if (!(await requireE2eReady())) return;
+    const ok = await confirmDialog({
+      title: 'Gerar uma chave nova?',
+      body: 'As próximas mensagens usam uma chave nova, que quem participa recebe sozinho. Use se achar que a chave desta conversa vazou (um aparelho perdido, por exemplo). Quem sai da conversa já perde o acesso automaticamente.',
+      confirmLabel: 'Gerar chave nova',
+    });
+    if (!ok) return;
+    try {
+      await rotateNow(room);
+      useStore.getState().toast('Chave nova gerada.', 'success');
+    } catch (e) {
+      useStore.getState().toast(errorMessage(e), 'error');
+    }
+  };
+  const e2eItems: { key: string; icon: IconName; label: string; danger?: boolean; run: () => Promise<void> }[] = [];
+  if (!room.encrypted && e2eVerdict(true)) e2eItems.push({ key: 'e2e-on', icon: 'encrypted', label: 'Ligar criptografia de ponta a ponta', run: () => toggleE2e(true) });
+  if (room.encrypted && e2eVerdict(false)) e2eItems.push({ key: 'e2e-off', icon: 'e2e-open', label: 'Desligar criptografia', run: () => toggleE2e(false) });
+  if (room.encrypted && e2eVerdict(true)) e2eItems.push({ key: 'e2e-rotate', icon: 'e2e-rotate', label: 'Gerar chave nova', run: rotateE2e });
+
   return (
     <MessageGateContext.Provider value={gate}>
       <div className={`room ${openPanel || tmid ? 'with-panel' : ''}`}>
@@ -535,9 +611,15 @@ export function RoomPage() {
                   </button>
                 )}
                 {room.encrypted && (
-                  <span className="room-mark" title="Criptografada">
-                    <Icon name="encrypted" size={14} label="Criptografada" />
-                  </span>
+                  <button
+                    type="button"
+                    className="room-mark e2e-mark"
+                    title="Criptografada de ponta a ponta"
+                    aria-label="Conversa criptografada de ponta a ponta. Saiba mais"
+                    onClick={() => void openE2eDialog('info')}
+                  >
+                    <Icon name="e2e-mark" size={14} />
+                  </button>
                 )}
                 {/* Canal de avisos: o ícone da sala e a faixa logo abaixo já dizem isso, sem pílula. */}
                 {room.ro && !room.notice && (
@@ -625,6 +707,17 @@ export function RoomPage() {
                     {sub && (
                       <>
                         {menuPanels.length > 0 && <hr />}
+                        {e2eItems.length > 0 && (
+                          <>
+                            {e2eItems.map((it) => (
+                              <button key={it.key} className={it.danger ? 'danger' : undefined} onClick={() => (close(), void it.run())}>
+                                <Icon name={it.icon} />
+                                {it.label}
+                              </button>
+                            ))}
+                            <hr />
+                          </>
+                        )}
                         <button onClick={() => (favorite(), close())}>
                           <Icon name={sub.f ? 'unfavorite' : 'favorite'} />
                           {sub.f ? 'Remover dos favoritos' : 'Favoritar'}
@@ -654,6 +747,7 @@ export function RoomPage() {
             </div>
           </header>
           {room.notice && <NoticeBar room={room} canPost={canPostRO} />}
+          {room.encrypted && sub && <E2eBanner room={room} />}
           {/* Chamadas em grupo: a faixa da chamada viva, depois da faixa de avisos e antes do anúncio. */}
           <CallBanner room={room} />
           {room.announcement && <Announcement text={room.announcement} />}
@@ -664,6 +758,7 @@ export function RoomPage() {
               rid={rid}
               disabled={!!disabledReason}
               disabledReason={disabledReason}
+              disabledIcon={e2eBlock && disabledReason === e2eBlock.text ? e2eBlock.icon : undefined}
               placeholder={placeholder}
               editing={editing}
               setEditing={setEditing}

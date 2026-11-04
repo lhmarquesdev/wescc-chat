@@ -3,6 +3,7 @@ import { EMOJI } from '@shared/emoji';
 import type { MessageJira, MessageMeeting } from '@shared/integrations';
 import type { MessageForward, MessagePoll } from '@shared/messages';
 import { messagePreviewText, type MessageSticker } from '@shared/stickers';
+import { E2E_PREVIEW } from '@shared/e2e';
 import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
@@ -16,12 +17,14 @@ import { dispatchNotifications } from './notifications';
 import { getUserRoles, hasPermission, restrictedRoleIds, rolesHavePermission } from './permissions';
 import { canAccessRoom, getRoom, getSubscriptionRow, loadRoomForUser, notifyRoomUpdated } from './rooms';
 import { getSetting } from './settings';
+import { checkE2eInput, cleanMentionNames, E2E_ERR, e2eOn } from './e2e';
 import { recordActivity } from './stats';
 import { actorOf, type Ctx } from './users';
 import { emit } from './hooks';
 import { forgetMessageTranslations } from '../translate/forget';
 
-export const MENTION_RE = /(?:^|[\s(>"'])@([0-9a-zA-Z._-]+)/g;
+import { MENTION_RE } from '@shared/messages';
+export { MENTION_RE };
 export const CHANNEL_RE = /(?:^|[\s(])#([0-9a-zA-ZÀ-ſ._-]+)/g;
 
 export async function getMessageRow(id: string) {
@@ -112,6 +115,10 @@ export interface SendInput {
   sticker?: MessageSticker; // figurinha (só chat.sendSticker preenche, com opts.sticker)
   forward?: MessageForward; // só com opts.forward (chat.forwardMessage)
   poll?: MessagePoll; // só com opts.poll (polls.create)
+  // Criptografia de ponta a ponta: só com sala criptografada. O texto vai cifrado em e2e (msg vazio) e as menções vêm
+  // da web (o servidor não lê o texto); @all e @here seguem as mesmas permissões.
+  e2e?: unknown;
+  e2eMentions?: string[];
 }
 
 export async function canPostInRoom(ctx: Ctx, room: any, opts: WriteOpts = {}) {
@@ -236,6 +243,21 @@ export async function sendMessage(
   const room = await getRoom(input.rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   const roles = (await canPostInRoom(ctx, room, { ignoreReadOnly: opts.ignoreReadOnly === true })) ?? (await getUserRoles(ctx.userId, room.id));
+  // Criptografia: depois das regras da sala (arquivada, somente leitura, avisos, silêncio, conversa direta), que
+  // mantêm os próprios erros. Em sala criptografada, toda mensagem que não é de sistema vem cifrada.
+  const e2e = await checkE2eInput(ctx, room, {
+    _id: input._id,
+    e2e: input.e2e,
+    msg: input.msg,
+    attachments: opts.internalAttachments ? undefined : input.attachments,
+    alias: input.alias,
+    emoji: input.emoji,
+    avatar: input.avatar,
+    sticker,
+    jira: opts.integration ? input.jira : undefined,
+    meeting: opts.integration ? input.meeting : undefined,
+  });
+  if (e2e && (opts.forward || opts.poll)) throw E2E_ERR.required();
   let msg = (input.msg ?? '').trim();
   const max = getSetting<number>('Message_MaxAllowedSize');
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
@@ -243,13 +265,13 @@ export async function sendMessage(
   const rich = opts.integration && (input.jira || input.meeting);
   const forward = opts.forward ? input.forward : undefined;
   const poll = opts.poll ? input.poll : undefined;
-  if (!msg && !attachments.length && !input.files?.length && !sticker && !rich && !forward && !poll) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  if (!msg && !attachments.length && !input.files?.length && !sticker && !rich && !forward && !poll && !e2e) throw badRequest('error-invalid-message', 'Mensagem vazia.');
   if (sticker && (msg || input.ackRequired)) throw badRequest('error-invalid-message', 'Figurinha não leva texto nem pede “Ciente”.');
   if (input.ackRequired && (!room.notice || !room.notice_ack || input.tmid)) {
     throw badRequest('error-ack-not-allowed', 'Só avisos de um canal de avisos com “Ciente” ativado podem pedir confirmação.');
   }
 
-  if (!opts.skipCommands && msg.startsWith('/') && !input.files?.length) {
+  if (!opts.skipCommands && !e2e && msg.startsWith('/') && !input.files?.length) {
     const { runSlashCommand } = await import('./commands');
     const handled = await runSlashCommand(ctx, room, msg, input.tmid ?? null);
     if (handled !== false) return handled;
@@ -270,12 +292,12 @@ export async function sendMessage(
     }
   }
 
-  msg = filterBadWords(msg);
+  if (!e2e) msg = filterBadWords(msg);
   // O texto em que se procuram menções e palavras destacadas: as duas saem sempre do mesmo texto.
   // Encaminhada: o texto levado nunca menciona nem destaca ninguém de novo; só o comentário de quem encaminhou (com as
-  // mesmas regras de @all e @here).
-  const mentionText = opts.forward ? (forward?.comment ?? '') : msg;
-  let { mentions, channels } = await parseMentions(mentionText, room);
+  // mesmas regras de @all e @here). Cifrada: as menções vêm da web e nada é destacado (o servidor não lê o texto).
+  const mentionText = e2e ? '' : opts.forward ? (forward?.comment ?? '') : msg;
+  let { mentions, channels } = await parseMentions(e2e ? e2eMentionText(input.e2eMentions) : mentionText, room);
   // Integrações (Jira): texto de fora não menciona ninguém; só o responsável escolhido pelo servidor. Nunca @all, @here, times ou #sala.
   if (opts.integration) {
     const allowed = new Set((input.mentionsAllowed ?? []).map((u) => u.toLowerCase()));
@@ -289,9 +311,17 @@ export async function sendMessage(
   const maxAll = getSetting<number>('Message_MaxAll');
   if (mentionAll && maxAll > 0 && room.users_count > maxAll) throw forbidden(`@all não é permitido em salas com mais de ${maxAll} membros.`);
 
+  if (e2e) channels = [];
+
   const me = await one('SELECT name FROM users WHERE id = $1', [ctx.userId]);
+  // Cifrada: o _id está no AAD da cifra, então nunca muda. A mesma mensagem enviada de novo (a rede caiu) volta a
+  // existente; outro conteúdo com o mesmo _id é recusado.
+  if (e2e) {
+    const existing = await getMessageRow(input._id!);
+    if (existing) return sameE2eMessage(ctx, room, existing, e2e);
+  }
   // Figurinha: sendSticker já conferiu o _id; um conflito volta como erro de chave para o envio idempotente, nunca como cópia.
-  const id = input._id && /^[A-Za-z0-9]{10,24}$/.test(input._id) && (sticker || !(await getMessageRow(input._id))) ? input._id : newId();
+  const id = e2e ? input._id! : input._id && /^[A-Za-z0-9]{10,24}$/.test(input._id) && (sticker || !(await getMessageRow(input._id))) ? input._id : newId();
   const receipts = getSetting<boolean>('Message_Read_Receipt_Enabled');
   const extra: Record<string, unknown> = {};
   if (input.tshow && tmid) extra.tshow = true;
@@ -304,9 +334,10 @@ export async function sendMessage(
   if (sticker) extra.sticker = sticker;
   if (forward) extra.forward = forward;
   if (poll) extra.poll = poll;
-  const row = await one(
-    `INSERT INTO messages (id, room_id, user_id, username, user_name, msg, tmid, mentions, channels, attachments, files, alias, emoji, avatar, extra, unread, ack_required, sticker_file_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+  const insert = () =>
+    one(
+    `INSERT INTO messages (id, room_id, user_id, username, user_name, msg, tmid, mentions, channels, attachments, files, alias, emoji, avatar, extra, unread, ack_required, sticker_file_id, e2e)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
     [
       id,
       room.id,
@@ -326,8 +357,18 @@ export async function sendMessage(
       receipts && room.users_count > 1,
       !!input.ackRequired,
       sticker?.fileId ?? null,
+      e2e ? JSON.stringify(e2e) : null,
     ],
   );
+  let row: any;
+  try {
+    row = await insert();
+  } catch (e) {
+    // Duas cópias da mesma mensagem cifrada ao mesmo tempo: a segunda vê a primeira.
+    const existing = e2e && (e as { code?: string })?.code === '23505' ? await getMessageRow(id) : null;
+    if (existing) return sameE2eMessage(ctx, room, existing, e2e!);
+    throw e;
+  }
   if (opts.onInserted) {
     try {
       await opts.onInserted(row);
@@ -366,8 +407,8 @@ export async function sendMessage(
   bus.publish({ room: room.id }, { type: 'message', action: 'inserted', message });
 
   // Palavras destacadas contam e avisam como menção. Texto de integração (Jira) vem de fora e não menciona ninguém:
-  // também não destaca. Figurinha não tem texto.
-  const highlights = opts.integration || sticker ? new Map<string, string>() : await highlightedMembers(room.id, ctx.userId, mentionText);
+  // também não destaca. Figurinha não tem texto; a cifrada, o servidor não lê (a web destaca depois de decifrar).
+  const highlights = opts.integration || sticker || e2e ? new Map<string, string>() : await highlightedMembers(room.id, ctx.userId, mentionText);
   await updateSubscriptionsOnMessage(ctx, room, row, mentions, parent, highlights);
   if (room.prid) await bumpDiscussionCounter(room);
   void recordActivity(ctx.userId, 'message');
@@ -377,10 +418,25 @@ export async function sendMessage(
   await markReadInternal(ctx.userId, room.id);
   if (room.t === 'c' || room.t === 'p') await notifyRoomUpdated(room.id);
   else bus.publish({ room: room.id }, { type: 'room', action: 'updated', room: (await import('./mappers')).mapRoom(await getRoom(room.id)) });
+  // Integrações (webhooks de saída, bots, Jira) não leem mensagens criptografadas.
+  if (e2e) return message;
   emit('message.sent', { room, message, user: { _id: ctx.userId, username: ctx.username, name: me?.name } });
   // Encaminhar não é upload: o arquivo já estava no chat.
   if (input.files?.length && !opts.forward) emit('file.uploaded', { room, message, file: input.files[0], user: { _id: ctx.userId, username: ctx.username } });
   return message;
+}
+
+// Menções de uma mensagem cifrada: os @usuário que a web leu no texto (no máximo 50), pelas mesmas regras do texto.
+function e2eMentionText(list: unknown) {
+  return cleanMentionNames(list)
+    .map((u) => `@${u}`)
+    .join(' ');
+}
+
+// Reenvio da mesma mensagem cifrada (mesmo _id, mesma pessoa, mesma sala, mesmo conteúdo): devolve a que já existe.
+function sameE2eMessage(ctx: Ctx, room: any, existing: any, e2e: { ct: string }) {
+  if (existing.user_id === ctx.userId && existing.room_id === room.id && existing.e2e?.ct === e2e.ct) return withExtra(existing);
+  throw E2E_ERR.id();
 }
 
 async function updateSubscriptionsOnMessage(ctx: Ctx, room: any, row: any, mentions: UserRef[], parent: any, highlights: Map<string, string> = new Map()) {
@@ -433,7 +489,8 @@ function minutesSince(ts: string) {
   return (Date.now() - new Date(ts).getTime()) / 60000;
 }
 
-export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?: string) {
+// e2e: edição de mensagem cifrada (o texto novo vai cifrado; as menções vêm da web, como no envio).
+export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?: string, e2eEdit?: { envelope: unknown; mentions?: unknown }) {
   const m = await getMessageRow(msgId);
   if (!m || (rid && m.room_id !== rid)) throw notFound('error-message-not-found', 'Mensagem não encontrada.');
   if (m.t) throw badRequest('error-action-not-allowed', 'Mensagens de sistema não podem ser editadas.');
@@ -450,27 +507,44 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
       throw forbidden('O tempo para editar esta mensagem expirou.');
   }
   const max = getSetting<number>('Message_MaxAllowedSize');
-  const msg = filterBadWords(text.trim());
-  if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
   const room = await getRoom(m.room_id);
   await assertCanWrite(ctx, room, roles);
+  // Criptografia: depois das regras de edição e de escrita. Em sala criptografada, o texto novo vem cifrado (e o texto
+  // aberto, vazio). Uma mensagem cifrada numa sala que deixou de ser criptografada não é mais editada.
+  if (m.e2e && !room.encrypted) throw E2E_ERR.notEncrypted();
+  const e2e = room.encrypted || e2eEdit ? await checkE2eInput(ctx, room, { _id: m.id, e2e: e2eEdit?.envelope, msg: text }) : null;
+  const msg = e2e ? '' : filterBadWords(text.trim());
+  if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
   if (getSetting('Message_KeepHistory')) {
-    await query('INSERT INTO message_history (message_id, room_id, msg, edited_by) VALUES ($1,$2,$3,$4)', [m.id, m.room_id, m.msg, ctx.userId]);
+    await query('INSERT INTO message_history (message_id, room_id, msg, edited_by, e2e) VALUES ($1,$2,$3,$4,$5)', [
+      m.id,
+      m.room_id,
+      m.msg,
+      ctx.userId,
+      m.e2e ? JSON.stringify(m.e2e) : null,
+    ]);
   }
-  const { mentions, channels } = await parseMentions(msg, room);
+  const { mentions, channels } = await parseMentions(e2e ? e2eMentionText(e2eEdit?.mentions) : msg, room);
   const row = await one(
-    `UPDATE messages SET msg = $2, mentions = $3, channels = $4, edited_at = now(), edited_by = $5, updated_at = now() WHERE id = $1 RETURNING *`,
-    [m.id, msg, JSON.stringify(mentions), JSON.stringify(channels), JSON.stringify({ _id: ctx.userId, username: ctx.username })],
+    `UPDATE messages SET msg = $2, mentions = $3, channels = $4, edited_at = now(), edited_by = $5, e2e = $6, updated_at = now() WHERE id = $1 RETURNING *`,
+    [m.id, msg, JSON.stringify(mentions), JSON.stringify(e2e ? [] : channels), JSON.stringify({ _id: ctx.userId, username: ctx.username }), e2e ? JSON.stringify(e2e) : null],
   );
   // Tradução: a do texto antigo não vale mais (quem está com a mensagem na tela pede de novo pelo editedAt).
   await forgetMessageTranslations(m.id);
+  // Prévia da sala: o texto novo. Editada cifrada, "Mensagem criptografada", também quando a mensagem era aberta (de
+  // antes de ligar a criptografia): o texto antigo não fica na lista de conversas.
   if (room.last_message?._id === m.id) {
-    await query(`UPDATE rooms SET last_message = jsonb_set(last_message, '{msg}', to_jsonb($2::text)) WHERE id = $1`, [room.id, truncate(msg, 200)]);
+    const preview = e2e ? E2E_PREVIEW : truncate(msg, 200);
+    if (preview !== room.last_message.msg) {
+      await query(`UPDATE rooms SET last_message = jsonb_set(last_message, '{msg}', to_jsonb($2::text)) WHERE id = $1`, [room.id, preview]);
+      if (e2e) await notifyRoomUpdated(room.id);
+    }
   }
   if (!own) await audit(actorOf(ctx), 'message.edited', { rid: m.room_id, msgId: m.id, author: m.username });
   const message = withExtra(row);
   bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message });
-  emit('message.updated', { room, message });
+  // Integrações não leem mensagens criptografadas.
+  if (!e2e) emit('message.updated', { room, message });
   return message;
 }
 
@@ -499,7 +573,7 @@ export async function removeMessageRow(m: any) {
   if (m.tcount > 0) {
     // Raiz de thread com respostas: mantém o lugar como "mensagem removida", sem o pedido de "Ciente" nem as confirmações.
     const row = await one(
-      `UPDATE messages SET msg = '', t = 'rm', attachments = '[]', files = '[]', reactions = '{}', ack_required = false, ack_count = 0,
+      `UPDATE messages SET msg = '', t = 'rm', e2e = NULL, attachments = '[]', files = '[]', reactions = '{}', ack_required = false, ack_count = 0,
          -- Integrações (Jira): mensagem removida não guarda cartão; nem enquete nem origem de encaminhada
          extra = extra - 'sticker' - 'jira' - 'meeting' - 'bridge' - 'poll' - 'forward', sticker_file_id = NULL, updated_at = now()
        WHERE id = $1 RETURNING *`,
@@ -599,7 +673,8 @@ export async function setPinned(ctx: Ctx, msgId: string, pinned: boolean) {
   bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
   if (pinned) {
     await sendSystemMessage(m.room_id, 'message_pinned', { id: ctx.userId, username: ctx.username }, '', {
-      attachments: [{ text: rowPreview(m, { withName: false }), author_name: m.username, ...aliasOf(m), ts: m.created_at, message_link: `/msg/${m.id}` }],
+      // Cifrada: o texto fica vazio e a web decifra a original (pinnedMessageId).
+      attachments: [{ text: m.e2e ? '' : rowPreview(m, { withName: false }), author_name: m.username, ...aliasOf(m), ts: m.created_at, message_link: `/msg/${m.id}` }],
       pinnedMessageId: m.id,
     });
   }
@@ -806,7 +881,7 @@ export async function messageHistory(ctx: Ctx, msgId: string) {
   const m = await getMessageRow(msgId);
   if (!m) throw notFound('error-message-not-found', 'Mensagem não encontrada.');
   await loadRoomForUser(ctx, m.room_id);
-  return many('SELECT msg, edited_by, created_at FROM message_history WHERE message_id = $1 ORDER BY id', [msgId]);
+  return many('SELECT msg, e2e, edited_by, created_at FROM message_history WHERE message_id = $1 ORDER BY id', [msgId]);
 }
 
 // ---------- Discussões ----------
@@ -827,6 +902,13 @@ export async function createDiscussion(ctx: Ctx, input: { prid: string; pmid?: s
   }
   const name = input.t_name.trim();
   if (!name) throw badRequest('error-invalid-name', 'Informe o nome da discussão.');
+  // Discussão de sala criptografada nasce criptografada; a primeira mensagem é enviada (cifrada) depois de criar.
+  const encrypted = !!parent.encrypted || !!input.encrypted;
+  if (encrypted) {
+    if (parent.t === 'c') throw E2E_ERR.roomType();
+    if (input.encrypted && !parent.encrypted && !e2eOn()) throw E2E_ERR.disabled(400);
+    if (input.reply) throw E2E_ERR.reply();
+  }
   const { createRoom, addUserToRoom } = await import('./rooms');
   const type = parent.t === 'c' ? 'c' : 'p';
   const room = await createRoom(ctx, {
@@ -836,7 +918,7 @@ export async function createDiscussion(ctx: Ctx, input: { prid: string; pmid?: s
     prid: parent.id,
     pmid: input.pmid ?? null,
     members: input.users,
-    encrypted: input.encrypted,
+    encrypted,
     // Sem tópico próprio: o nome da sala de origem já aparece no cabeçalho, como o chip da sala-mãe.
     topic: input.topic ?? '',
     skipPermission: true,

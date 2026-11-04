@@ -92,9 +92,9 @@ export function systemText(
     case 'room-unarchived':
       return `${u} desarquivou a sala`;
     case 'room_e2e_enabled':
-      return `${u} ativou a criptografia ponta a ponta`;
+      return `${u} ligou a criptografia de ponta a ponta`;
     case 'room_e2e_disabled':
-      return `${u} desativou a criptografia ponta a ponta`;
+      return `${u} desligou a criptografia de ponta a ponta`;
     case 'user-muted':
       return `${u} silenciou ${who()}`;
     case 'user-unmuted':

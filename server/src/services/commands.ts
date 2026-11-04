@@ -1,4 +1,5 @@
 import { callScopeOf, isTransmissionRoom } from '@shared/calls';
+import { localCommandText } from '@shared/e2e';
 import { sfuConfig } from '../calls/livekit';
 import { ERR, startCheck } from '../calls/policy';
 import { one } from '../db/pool';
@@ -63,8 +64,9 @@ async function roomArg(args: string, fallback: any) {
 
 const ok = (command: string) => ({ ok: true, command });
 
-const say = (text: string) => async (ctx: Ctx, room: any, args: string, tmid: string | null) =>
-  sendMessage(ctx, { rid: room.id, msg: args ? `${args} ${text}` : text, tmid }, { skipCommands: true });
+// Comandos que só publicam texto: os textos moram em @shared/e2e (a sala criptografada monta o mesmo no navegador).
+const say = (command: string) => async (ctx: Ctx, room: any, args: string, tmid: string | null) =>
+  sendMessage(ctx, { rid: room.id, msg: localCommandText(command, args) ?? '', tmid }, { skipCommands: true });
 
 reg('join', '#canal', 'Entrar em um canal', async (ctx, room, args) => {
   const r = await roomArg(args, null);
@@ -154,16 +156,12 @@ reg('online', '', 'Ficar online', async (ctx) => {
   await setStatus(ctx.userId, 'online');
   return ok('online');
 });
-reg('me', 'ação', 'Mensagem em terceira pessoa', async (ctx, room, args, tmid) =>
-  sendMessage(ctx, { rid: room.id, msg: `_${args}_`, tmid }, { skipCommands: true }),
-);
-reg('shrug', '[mensagem]', '¯\\_(ツ)_/¯', say('¯\\\\_(ツ)_/¯'));
-reg('tableflip', '[mensagem]', '(╯°□°）╯︵ ┻━┻', say('(╯°□°）╯︵ ┻━┻'));
-reg('unflip', '[mensagem]', '┬─┬ ノ( ゜-゜ノ)', say('┬─┬ ノ( ゜-゜ノ)'));
-reg('lennyface', '[mensagem]', '( ͡° ͜ʖ ͡°)', say('( ͡° ͜ʖ ͡°)'));
-reg('gimme', '[mensagem]', '༼ つ ◕_◕ ༽つ', async (ctx, room, args, tmid) =>
-  sendMessage(ctx, { rid: room.id, msg: `༼ つ ◕_◕ ༽つ ${args}`.trim(), tmid }, { skipCommands: true }),
-);
+reg('me', 'ação', 'Mensagem em terceira pessoa', say('me'));
+reg('shrug', '[mensagem]', '¯\\_(ツ)_/¯', say('shrug'));
+reg('tableflip', '[mensagem]', '(╯°□°）╯︵ ┻━┻', say('tableflip'));
+reg('unflip', '[mensagem]', '┬─┬ ノ( ゜-゜ノ)', say('unflip'));
+reg('lennyface', '[mensagem]', '( ͡° ͜ʖ ͡°)', say('lennyface'));
+reg('gimme', '[mensagem]', '༼ つ ◕_◕ ༽つ', say('gimme'));
 // Link do Jitsi (serviço externo), como antes; só com VideoConf_Enabled.
 const jitsiLink = (ctx: Ctx, room: any, tmid: string | null) => {
   const url = `https://${getSetting('VideoConf_Jitsi_Domain')}/${getSetting('VideoConf_Jitsi_Prefix')}-${room.id}`;

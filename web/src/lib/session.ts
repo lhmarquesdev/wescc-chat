@@ -1,4 +1,4 @@
-import type { CustomUserStatus, Role, UserStatus } from '@shared/index';
+import type { CustomUserStatus, Role, ServerEvent, UserStatus } from '@shared/index';
 import { silencesNotifications } from '@shared/status';
 import { api, getCredentials, setCredentials, setSignedOutElsewhereHandler, setUnauthorizedHandler } from './api';
 import { setCustomEmoji } from './emoji';
@@ -12,6 +12,7 @@ import { clearEphemeral, pushEphemeral } from './ephemeral';
 import { loadIntegrationsMe, resetIntegrations } from './integrations';
 import { invalidateSlashCommands } from './commands';
 import { checkBuild } from './call/build';
+import { decryptNotification, handleE2eEvent, initE2e, resetE2e } from './e2e/client';
 
 export async function loadPublicSettings() {
   const r = await api.get('settings.public');
@@ -69,6 +70,8 @@ export async function startSession() {
   useStore.getState().setMe(me);
   // Com troca de senha ou 2FA pendente o servidor só aceita as rotas para resolver isso: o resto fica para depois.
   if (me.requirePasswordChange || me.require2faSetup) return me;
+  // Criptografia de ponta a ponta: sem chaves no servidor, nem abre o IndexedDB.
+  void initE2e(me);
   // Figurinhas: só o cache local deste usuário; a rede espera o seletor abrir.
   initStickers(me._id);
   await Promise.all([loadSubscriptions(), loadCustomEmoji(), loadPermissionMap()]);
@@ -92,7 +95,11 @@ export async function startSession() {
       void loadUserStatuses();
       void loadReminders();
       void loadScheduled();
-      void api.get('me').then((m) => useStore.getState().setMe(m));
+      void api.get('me').then((m) => {
+        useStore.getState().setMe(m);
+        // Redefinida em outro aparelho durante a queda: a impressão da chave mudou.
+        void initE2e(m);
+      });
       // Eventos de figurinha podem ter se perdido na queda.
       invalidateStickers('org');
       invalidateStickers('mine');
@@ -104,6 +111,7 @@ export async function startSession() {
     });
     realtime.on((ev) => {
       if (ev.type === 'notification') showNotification(ev);
+      if (ev.type.startsWith('e2e.')) handleE2eEvent(ev);
       if (ev.type === 'stickers.changed' || ev.type === 'sticker.removed') handleStickerEvent(ev);
       if (ev.type === 'permissions.changed') {
         void api.get('me').then((m) => useStore.getState().setMe(m));
@@ -184,10 +192,11 @@ export async function logout() {
   clearDrafts();
   resetStickers();
   await api.post('logout').catch(() => {});
-  endSession();
+  await endSession();
 }
 
-export function endSession() {
+// Devolve a limpeza que leva tempo (a chave da criptografia no IndexedDB): espere antes de trocar de página.
+export function endSession(): Promise<void> {
   void unsubscribeOnLogout();
   setCredentials(null);
   realtime.stop();
@@ -199,6 +208,8 @@ export function endSession() {
   invalidateSlashCommands();
   clearDrafts();
   resetStickers();
+  // Criptografia: a chave guardada neste navegador e tudo o que foi decifrado saem junto com a conta.
+  return resetE2e();
 }
 
 // Rascunhos ficam no navegador: ao sair, não podem ficar para o próximo usuário do computador.
@@ -212,8 +223,9 @@ function clearDrafts() {
 
 setUnauthorizedHandler(() => {
   if (getCredentials()) {
-    endSession();
-    if (!location.pathname.startsWith('/login')) location.href = '/login';
+    void endSession().finally(() => {
+      if (!location.pathname.startsWith('/login')) location.href = '/login';
+    });
   }
 });
 
@@ -221,8 +233,9 @@ setUnauthorizedHandler(() => {
 // Outra pessoa entrou lá: a aba abre de novo com a conta dela (limpar aqui a tiraria da conta na outra aba).
 export function signedOutElsewhere(why: 'gone' | 'other') {
   if (why === 'other') return location.reload();
-  endSession();
-  if (!location.pathname.startsWith('/login')) location.href = '/login';
+  void endSession().finally(() => {
+    if (!location.pathname.startsWith('/login')) location.href = '/login';
+  });
 }
 setSignedOutElsewhereHandler(signedOutElsewhere);
 
@@ -263,7 +276,15 @@ export function systemNotify(title: string, body: string, tag: string, path: str
   return true;
 }
 
-function showNotification(ev: { rid: string; title: string; text: string; messageId: string; tmid?: string | null }) {
+type NotificationEvent = Extract<ServerEvent, { type: 'notification' }>;
+
+// Mensagem cifrada: o texto real quando este navegador tem a chave (senão fica o "Mensagem criptografada" do servidor).
+function showNotification(ev: NotificationEvent) {
+  if (!ev.e2e) return presentNotification(ev);
+  void decryptNotification(ev).then((text) => presentNotification(text ? { ...ev, text } : ev));
+}
+
+function presentNotification(ev: NotificationEvent) {
   const st = useStore.getState();
   if (!ev.rid) {
     st.toast(ev.text);

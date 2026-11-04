@@ -21,9 +21,11 @@ export function IncomingCall({ call, queued }: { call: Call; queued: number }) {
   const video = call.kind === 'video';
   const statusText = useStore((s) => s.presence[who.username]?.statusText);
   const last = useStore((s) => s.rooms[call.rid]?.lastMessage);
+  // Conversa criptografada: o texto da última mensagem não é mostrado (o servidor só tem "Mensagem criptografada").
+  const encrypted = useStore((s) => !!s.rooms[call.rid]?.encrypted);
   const site = useSetting<string>('Site_Name');
   // A última mensagem de quem liga, se acabou de chegar, costuma dizer o assunto ("vou mostrar a planilha").
-  const quote = !group && last && last.u._id === who._id && last.msg && Date.now() - new Date(last.ts).getTime() < 10 * 60000 ? last.msg : '';
+  const quote = !group && !encrypted && last && last.u._id === who._id && last.msg && Date.now() - new Date(last.ts).getTime() < 10 * 60000 ? last.msg : '';
   const kindIcon: IconName = video ? 'call-video' : 'call-audio';
   const kindText = group ? (video ? 'Chamada de vídeo em grupo' : 'Chamada de voz em grupo') : video ? 'Chamada de vídeo' : 'Chamada de voz';
   const byLine = group ? `@${who.username} está chamando você` : '';

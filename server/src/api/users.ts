@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { many, one, pool } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
 import { audit } from '../services/audit';
+import { fingerprintOf, hasUserKeys, resetUserKeys } from '../services/e2e';
 import { readDeviceId } from '../services/loginDevices';
 import { mapUser, visibleStatusCustom } from '../services/mappers';
 import { createCustomStatus, deleteCustomStatus, getCustomStatus, listCustomStatuses, updateCustomStatus } from '../services/userStatus';
@@ -46,7 +47,15 @@ async function meResponse(userId: string) {
   const u = await getUserById(userId);
   const roles = await getUserRoles(userId);
   // O servidor também bloqueia o resto da API enquanto a troca de senha ou o 2FA estiverem pendentes (api/http.ts).
-  return { ...mapUser(u, { full: true }), permissions: permissionsForRoles(roles), requirePasswordChange: u.require_password_change, require2faSetup: await needs2faSetup(u) };
+  return {
+    ...mapUser(u, { full: true }),
+    permissions: permissionsForRoles(roles),
+    requirePasswordChange: u.require_password_change,
+    require2faSetup: await needs2faSetup(u),
+    // Criptografia de ponta a ponta: a impressão da chave pública (null sem chaves) e se um administrador redefiniu.
+    e2eKeys: await fingerprintOf(userId),
+    e2eResetByAdmin: !!u.e2e_reset_at || undefined,
+  };
 }
 
 export async function resolveUserParam(params: Record<string, any>) {
@@ -302,6 +311,8 @@ export function usersRoutes(app: FastifyInstance) {
     // o editor abre pelo mesmo critério, em vez de mostrar campos vazios que a lista ao lado preenche.
     const full = u.id === ctx.userId || (await hasPermission(ctx.userId, 'view-full-other-user-info')) || (await hasPermission(ctx.userId, 'view-user-administration'));
     const user: any = mapUser(u, { full });
+    // Se a pessoa configurou a criptografia: o botão Redefinir criptografia fica travado sem chaves, como o do 2FA.
+    if (full || (await hasPermission(ctx.userId, 'edit-other-user-e2ee'))) user.e2eConfigured = await hasUserKeys(u.id);
     if (q(req).includeUserRooms === 'true' && u.id === ctx.userId) {
       user.rooms = await many('SELECT room_id AS rid, roles FROM subscriptions WHERE user_id = $1', [u.id]);
     }
@@ -473,6 +484,19 @@ export function usersRoutes(app: FastifyInstance) {
     const { query } = await import('../db/pool');
     await query("UPDATE users SET totp_enabled = false, totp_secret = NULL, backup_codes = '{}' WHERE id = $1", [userId]);
     await audit(actorOf(ctx), 'user.2fa.reset', { userId });
+    return {};
+  });
+  // Criptografia de ponta a ponta: apaga as chaves da pessoa (ela cria uma senha nova no próximo acesso) e encerra as
+  // sessões dela, como no Rocket.Chat.
+  route(app, 'POST', 'users.resetE2EKey', { permissions: ['edit-other-user-e2ee'] }, async (req, _rep, ctx) => {
+    const userId = str(b(req).userId, 'userId');
+    await assertCanManageUser(ctx, userId);
+    await resetUserKeys(ctx, userId, { self: false });
+    // A própria conta (administrador redefinindo a sua) continua nesta sessão.
+    if (userId !== ctx.userId) {
+      await revokeAllSessions(userId, undefined, 'e2e-reset');
+      bus.forceLogout({ userId, reason: 'e2e-reset' });
+    }
     return {};
   });
   route(app, 'GET', 'users.listPendingApproval', { permissions: ['view-user-administration'] }, async () => {

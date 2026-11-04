@@ -25,6 +25,8 @@ import { useIntegrationsMe } from '../lib/integrations';
 import { ConnectedAccounts } from './account/ConnectedAccounts';
 // Meus dados (LGPD): cópia dos próprios dados num .zip.
 import { MyDataSection } from './account/MyDataSection';
+// Criptografia de ponta a ponta
+import { E2eCard } from '../components/e2e/E2eCard';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -225,7 +227,7 @@ function DeleteAccount({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       await api.post('users.deleteOwnAccount', { password });
-      endSession();
+      await endSession();
       location.href = '/login';
     } catch (e) {
       fail(e);
@@ -615,6 +617,7 @@ function Security() {
           </div>
         )}
         {twoFA && <TwoFactorCard />}
+        <E2eCard />
       </div>
     </>
   );

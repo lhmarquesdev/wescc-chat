@@ -66,6 +66,7 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
     sessions: usePermission('view-device-management'),
     logout: usePermission('logout-other-user'),
     remove: usePermission('delete-user'),
+    e2e: usePermission('edit-other-user-e2ee'),
   };
 
   useEffect(() => {
@@ -302,6 +303,8 @@ function Security({
   const sessions = useAsync(() => (can.sessions ? api.get('sessions.list.all', { userId: id, count: 50 }).then((r) => r.sessions as any[]) : Promise.resolve([] as any[])), [id, can.sessions]);
   const [twoFactor, setTwoFactor] = useState(!!user.twoFactorEnabled);
   const [avatar, setAvatar] = useState(!!user.avatarETag);
+  // Sem chaves da criptografia não há o que redefinir: o botão trava como o do 2FA.
+  const [e2eKeys, setE2eKeys] = useState(user.e2eConfigured !== false);
   const list = sessions.data ?? [];
   const logout = async () => {
     const yes = await confirmDialog({ title: `Encerrar as sessões de @${user.username}?`, body: 'A pessoa sai da conta em todos os dispositivos e precisa entrar de novo.', confirmLabel: 'Encerrar sessões', danger: true });
@@ -346,6 +349,29 @@ function Security({
               <Icon name="image-remove" />
               Remover avatar
             </button>
+            {/* Criptografia de ponta a ponta: a pessoa esqueceu a senha e não consegue redefinir sozinha. */}
+            {can.e2e && !self && (
+              <button
+                className="btn small"
+                disabled={readOnly || !e2eKeys}
+                onClick={async () => {
+                  const ok = await confirmDialog({
+                    title: `Redefinir a criptografia de ${user.name || user.username}?`,
+                    body: 'A pessoa sai de todas as sessões, cria uma senha nova no próximo acesso e deixa de ler as mensagens criptografadas antigas. Ao entrar de novo, ela vê que a redefinição foi feita por um administrador.',
+                    confirmLabel: 'Redefinir',
+                    danger: true,
+                  });
+                  if (ok)
+                    api
+                      .post('users.resetE2EKey', { userId: id })
+                      .then(() => (rbacOk('Criptografia redefinida.'), setE2eKeys(false)))
+                      .catch(fail);
+                }}
+              >
+                <Icon name="e2e-key" />
+                {e2eKeys ? 'Redefinir criptografia' : 'Criptografia não configurada'}
+              </button>
+            )}
           </div>
         </Section>
       </div>

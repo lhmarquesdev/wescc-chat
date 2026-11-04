@@ -4,10 +4,12 @@ import { pipeline } from 'node:stream/promises';
 import type { Readable } from 'node:stream';
 import type { Attachment } from '@shared/index';
 import { VIDEO_MESSAGE_MAX_SECONDS } from '@shared/messages';
+import { E2E_FILE_NAME, E2E_FILE_TYPE } from '@shared/e2e';
 import { config } from '../config';
 import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
+import { E2E_ERR } from './e2e';
 import { canPostInRoom, sendMessage } from './messages';
 import { canAccessRoom, getRoom, loadRoomForUser } from './rooms';
 import { getSetting } from './settings';
@@ -51,6 +53,7 @@ export interface StoredFile {
   type: string;
   size: number;
   rel: string;
+  e2e?: boolean; // cifrado no navegador (sala criptografada)
 }
 
 function tooLarge(max: number) {
@@ -59,9 +62,10 @@ function tooLarge(max: number) {
 }
 
 // Confere o tipo e grava no armazenamento; o tamanho é limitado pelo parser do multipart.
-async function writeFile(file: { file: Readable & { truncated?: boolean }; filename: string; mimetype: string }, max: number): Promise<StoredFile> {
-  const type = safeMimeType(file.mimetype);
-  if (!typeAllowed(type)) {
+// Sala criptografada: o servidor não sabe o tipo; a lista de tipos é conferida no navegador.
+async function writeFile(file: { file: Readable & { truncated?: boolean }; filename: string; mimetype: string }, max: number, opaque = false): Promise<StoredFile> {
+  const type = opaque ? E2E_FILE_TYPE : safeMimeType(file.mimetype);
+  if (!opaque && !typeAllowed(type)) {
     file.file.resume();
     throw badRequest('error-invalid-file-type', 'Tipo de arquivo não permitido.');
   }
@@ -82,13 +86,15 @@ async function writeFile(file: { file: Readable & { truncated?: boolean }; filen
     throw tooLarge(max);
   }
   const { size } = await fs.promises.stat(abs);
+  if (opaque) return { id, name: E2E_FILE_NAME, type, size, rel, e2e: true };
   const name = path.basename(file.filename || 'arquivo').slice(0, 200);
   return { id, name: name && name !== '.' && name !== '..' ? name : 'arquivo', type, size, rel };
 }
 
-const UPLOAD_FIELDS = ['msg', 'description', 'tmid', 'voice', 'duration', 'waveform', 'video'];
+// _id, e2e e e2eMentions: arquivo de conversa criptografada (o _id está na cifra).
+const UPLOAD_FIELDS = ['msg', 'description', 'tmid', 'voice', 'duration', 'waveform', 'video', '_id', 'e2e', 'e2eMentions'];
 // Limites do multipart além do arquivo: sem eles cada campo de texto (até 1 MB, sem limite de quantidade) fica na memória.
-const FIELD_LIMITS = { files: 1, fields: 10, parts: 11, fieldSize: 64 * 1024 };
+const FIELD_LIMITS = { files: 1, fields: 12, parts: 13, fieldSize: 64 * 1024 };
 
 const LIMIT_ERRORS: Record<string, string> = {
   FST_FIELDS_LIMIT: 'Campos demais no envio.',
@@ -97,7 +103,8 @@ const LIMIT_ERRORS: Record<string, string> = {
 };
 
 // Lê um multipart/form-data com um campo "file" e campos de texto (msg, description, tmid), em qualquer ordem.
-export async function readUpload(req: any): Promise<{ file: StoredFile | null; fields: Record<string, string> }> {
+// opaque: sala criptografada (o arquivo chega cifrado; nome e tipo ficam genéricos).
+export async function readUpload(req: any, opts: { opaque?: boolean } = {}): Promise<{ file: StoredFile | null; fields: Record<string, string> }> {
   const max = getSetting<number>('FileUpload_MaxFileSize');
   const fields: Record<string, string> = {};
   let file: StoredFile | null = null;
@@ -107,7 +114,7 @@ export async function readUpload(req: any): Promise<{ file: StoredFile | null; f
         if (part.valueTruncated) throw new ApiError(413, 'error-field-too-large', 'Texto grande demais no envio.');
         if (UPLOAD_FIELDS.includes(part.fieldname)) fields[part.fieldname] = String(part.value ?? '');
       } else if (file) part.file.resume();
-      else file = await writeFile(part, max);
+      else file = await writeFile(part, max, !!opts.opaque);
     }
   } catch (e) {
     if (file) await discardFile(file);
@@ -125,7 +132,7 @@ export async function discardFile(f: StoredFile) {
 }
 
 export async function registerFile(f: StoredFile, rid: string, owner: { userId?: string | null }) {
-  await query('INSERT INTO files (id, room_id, user_id, name, type, size, storage_path) VALUES ($1,$2,$3,$4,$5,$6,$7)', [
+  await query('INSERT INTO files (id, room_id, user_id, name, type, size, storage_path, e2e) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [
     f.id,
     rid,
     owner.userId ?? null,
@@ -133,6 +140,7 @@ export async function registerFile(f: StoredFile, rid: string, owner: { userId?:
     f.type,
     f.size,
     f.rel,
+    !!f.e2e,
   ]);
   return { _id: f.id, name: f.name, type: f.type, size: f.size };
 }
@@ -182,9 +190,12 @@ export async function saveUpload(
   ctx: Ctx,
   rid: string,
   file: StoredFile,
-  fields: { msg?: string; description?: string; tmid?: string; voice?: string; duration?: string; waveform?: string; video?: string },
+  fields: { msg?: string; description?: string; tmid?: string; voice?: string; duration?: string; waveform?: string; video?: string; _id?: string; e2e?: string; e2eMentions?: string },
 ) {
   try {
+    // A sala pode ter mudado enquanto o arquivo subia: vale a criptografia de agora.
+    const room = await getRoom(rid);
+    if (room?.encrypted || file.e2e) return await saveEncryptedUpload(ctx, room, file, fields);
     // voice e video juntos: vale o que bate com o tipo do arquivo.
     const voice = voiceFields(file.type, fields);
     const video = voice ? null : videoFields(file.type, fields);
@@ -198,6 +209,31 @@ export async function saveUpload(
     await discardFile(file);
     throw e;
   }
+}
+
+// Arquivo de conversa criptografada: nome, tipo, legenda, voz e vídeo vão dentro da mensagem cifrada.
+async function saveEncryptedUpload(ctx: Ctx, room: any, file: StoredFile, fields: Record<string, string | undefined>) {
+  if (!room?.encrypted) throw E2E_ERR.notEncrypted();
+  if (['msg', 'description', 'voice', 'video', 'duration', 'waveform'].some((k) => (fields[k] ?? '').trim())) throw E2E_ERR.plainField();
+  if (!file.e2e) throw E2E_ERR.required();
+  let e2e: unknown;
+  try {
+    e2e = fields.e2e ? JSON.parse(fields.e2e) : undefined;
+  } catch {
+    throw E2E_ERR.invalid();
+  }
+  if (e2e === undefined) throw E2E_ERR.required();
+  const e2eMentions = (fields.e2eMentions ?? '').split(',').map((u) => u.trim()).filter(Boolean);
+  const f = await registerFile(file, room.id, { userId: ctx.userId });
+  const message = await sendMessage(
+    ctx,
+    { _id: fields._id, rid: room.id, tmid: fields.tmid || null, e2e, e2eMentions, files: [{ ...f, e2e: true }] },
+    { skipCommands: true, internalAttachments: true },
+  );
+  // Reenvio (a rede caiu depois de gravar): volta a mensagem que já existia, com o arquivo da primeira vez. Esta cópia
+  // não ficaria presa a mensagem nenhuma, então sai.
+  if (!(message.files ?? []).some((x: { _id: string }) => x._id === f._id)) await discardFile(file);
+  return message;
 }
 
 export async function getFileForUser(ctx: Ctx | null, id: string) {
@@ -216,14 +252,29 @@ export async function listRoomFiles(ctx: Ctx, rid: string, opts: { offset?: numb
   if (opts.type) w += ` AND f.type LIKE $${params.push(opts.type.replace('*', '%'))}`;
   if (opts.name) w += ` AND f.name ILIKE $${params.push(`%${opts.name}%`)}`;
   const rows = await many(
-    `SELECT f.*, u.username, count(*) OVER() AS total FROM files f
+    `SELECT f.*, u.username, mm.e2e AS msg_e2e, mm.user_id AS msg_user_id, mm.edited_by AS msg_edited_by, count(*) OVER() AS total FROM files f
      LEFT JOIN users u ON u.id = f.user_id
+     LEFT JOIN messages mm ON f.e2e AND mm.id = f.message_id
      WHERE ${w} ORDER BY f.created_at DESC LIMIT ${Math.min(opts.count ?? 25, 100)} OFFSET ${Number(opts.offset ?? 0)}`,
     params,
   );
   return {
     total: Number(rows[0]?.total ?? 0),
-    files: rows.map((r) => ({ _id: r.id, name: r.name, type: r.type, size: r.size, rid: r.room_id, messageId: r.message_id, user: { _id: r.user_id, username: r.username }, uploadedAt: r.created_at, url: fileUrl(r.id, r.name) })),
+    files: rows.map((r) => ({
+      _id: r.id,
+      name: r.name,
+      type: r.type,
+      size: r.size,
+      rid: r.room_id,
+      messageId: r.message_id,
+      user: { _id: r.user_id, username: r.username },
+      uploadedAt: r.created_at,
+      url: fileUrl(r.id, r.name),
+      e2e: r.e2e || undefined, // cifrado: o nome e o tipo verdadeiros estão na mensagem
+      // Cifrado: o conteúdo cifrado da mensagem (quem participa já o recebe no histórico), para a web decifrar o nome e o
+      // tipo no painel Arquivos.
+      e2eMessage: r.e2e && r.msg_e2e ? { e2e: r.msg_e2e, u: { _id: r.msg_user_id }, editedBy: r.msg_edited_by ?? undefined } : undefined,
+    })),
   };
 }
 

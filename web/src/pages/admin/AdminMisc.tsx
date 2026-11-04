@@ -196,7 +196,13 @@ function UserReports({ user, onClose }: { user: any; onClose: () => void }) {
                   </span>
                 )}
               </div>
-              {r.msg && <blockquote>{r.msg}</blockquote>}
+              {r.e2e ? (
+                <blockquote className="muted">
+                  <em>Mensagem criptografada (a moderação não vê o conteúdo)</em>
+                </blockquote>
+              ) : (
+                r.msg && <blockquote>{r.msg}</blockquote>
+              )}
               {/* Figurinhas */}
               {r.sticker && <ReportSticker sticker={r.sticker} messageId={r.messageId} onDone={() => (setRemoved(true), reload())} />}
               {r.description && <div className="muted small">Motivo: {r.description}</div>}

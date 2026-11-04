@@ -1,6 +1,7 @@
 import type { ClientEvent, ServerEvent } from '@shared/index';
 import { getCredentials } from './api';
 import { applyEvent, useStore } from './store';
+import { rememberLogoutReason } from './logoutReason';
 
 type Listener = (ev: ServerEvent) => void;
 
@@ -49,6 +50,7 @@ class Realtime {
         first = false;
       }
       if (ev.type === 'force_logout') {
+        rememberLogoutReason(ev.reason);
         location.href = '/login';
         return;
       }

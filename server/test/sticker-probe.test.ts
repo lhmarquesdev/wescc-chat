@@ -668,6 +668,8 @@ describe('figurinhas: onde e o que dá para enviar', () => {
     expect(stickersAllowedIn({ t: 'c', notice: true }, { noticeRooms: false })).toBe(false);
     expect(stickersAllowedIn({ t: 'p', notice: true }, { noticeRooms: true })).toBe(true);
     for (const t of ['c', 'p', 'd']) expect(stickersAllowedIn({ t }, { noticeRooms: false })).toBe(true);
+    // Conversa criptografada: sem figurinhas (a aba some), mesmo onde seriam permitidas.
+    for (const t of ['p', 'd']) expect(stickersAllowedIn({ t, encrypted: true }, { noticeRooms: true })).toBe(false);
   });
 
   it('rolesBlockedFromSending ignora maiúsculas e espaços', () => {

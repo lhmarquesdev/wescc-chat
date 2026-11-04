@@ -101,7 +101,7 @@ function where(p: Pick<RoomExportParams, 'rid' | 'from' | 'to' | 'threads'>, par
 }
 
 async function counts(p: RoomExportParams) {
-  const enc = await encryptedSql('m');
+  const enc = encryptedSql('m');
   const mp: unknown[] = [];
   const m = await one(`SELECT count(*)::int AS n, count(*) FILTER (WHERE ${enc})::int AS enc FROM messages m WHERE ${where(p, mp)}`, mp);
   const fp: unknown[] = [];
@@ -283,7 +283,7 @@ async function* documentChunks(d: DocInfo, place: FilePlacement): AsyncGenerator
 // nunca entram.
 async function* zipEntries(d: DocInfo): AsyncGenerator<ZipEntry> {
   const zipped = new Map<string, string>();
-  const enc = await encryptedSql('m');
+  const enc = encryptedSql('m');
   for await (const rows of pages(d.p, ` AND m.files <> '[]'::jsonb AND NOT (${enc})`)) {
     const byMessage = new Map<string, any[]>();
     for (const f of await many('SELECT id, name, size, storage_path, message_id, created_at FROM files WHERE message_id = ANY($1)', [rows.map((r) => r.id)])) {

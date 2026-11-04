@@ -294,35 +294,29 @@ describe('exportar mensagens', () => {
   });
 
   it('criptografadas saem como marcador', async () => {
-    // A coluna messages.e2e é da criptografia ponta a ponta (outra parte do projeto). Aqui ela é criada só no banco do
-    // teste, se ainda não existir, para conferir o contrato: msg vazio e o conteúdo cifrado em e2e.
-    const had = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_name = 'messages' AND column_name = 'e2e' AND table_schema = current_schema()`)).rowCount;
-    if (!had) await pool.query('ALTER TABLE messages ADD COLUMN e2e jsonb');
-    try {
-      const g = (await api('POST', 'groups.create', { name: name('cifrado') }, ana)).group;
-      await send(ana, g._id, 'mensagem antes da criptografia');
-      expect((await info(ana, g._id)).encrypted).toBe(false);
-      await pool.query('UPDATE rooms SET encrypted = true WHERE id = $1', [g._id]);
-      const up = await upload(ana, g._id, 'segredo.bin', 'CIFRADO-ARQUIVO');
-      await pool.query(`UPDATE messages SET msg = '', e2e = '{"algorithm":"teste","ciphertext":"CIFRADO-XYZ"}' WHERE id = $1`, [up._id]);
-      expect((await info(ana, g._id)).encrypted).toBe(true);
-      expect((await info(ana, g._id, { includeFiles: 'true' })).files).toBe(0);
-      const html = await text(ana, g._id);
-      const csv = await text(ana, g._id, { format: 'csv' });
-      const json = await text(ana, g._id, { format: 'json' });
-      for (const out of [html, csv, json]) expect(out).not.toContain('CIFRADO');
-      expect(html).toContain('Mensagem criptografada');
-      expect(html).toContain('Arquivo criptografado');
-      expect(html).toContain('mensagem antes da criptografia');
-      expect(csv).toContain(';criptografada;Mensagem criptografada;');
-      const doc = JSON.parse(json);
-      expect(doc.messages.find((m: any) => m.id === up._id)).toMatchObject({ encrypted: true, msg: null, text: 'Mensagem criptografada', attachments: [] });
-      const zip = await unzip((await download(ana, g._id, { includeFiles: true })).body);
-      expect(zip.map((e) => e.name)).toEqual(['mensagens.html']);
-      expect(zip[0].data.toString()).not.toContain('CIFRADO');
-    } finally {
-      if (!had) await pool.query('ALTER TABLE messages DROP COLUMN e2e');
-    }
+    // Contrato da criptografia ponta a ponta: msg vazio e o conteúdo cifrado em messages.e2e. O arquivo sobe antes de
+    // a sala virar criptografada (depois, só cifrado) e a linha ganha o conteúdo cifrado direto no banco.
+    const g = (await api('POST', 'groups.create', { name: name('cifrado') }, ana)).group;
+    await send(ana, g._id, 'mensagem antes da criptografia');
+    expect((await info(ana, g._id)).encrypted).toBe(false);
+    const up = await upload(ana, g._id, 'segredo.bin', 'CIFRADO-ARQUIVO');
+    await pool.query('UPDATE rooms SET encrypted = true WHERE id = $1', [g._id]);
+    await pool.query(`UPDATE messages SET msg = '', attachments = '[]', e2e = '{"v":1,"kid":"AAAAAAAAAAAAAAAA","iv":"AAAAAAAAAAAAAAAA","ct":"CIFRADO-XYZ","by":"x"}' WHERE id = $1`, [up._id]);
+    expect((await info(ana, g._id)).encrypted).toBe(true);
+    expect((await info(ana, g._id, { includeFiles: 'true' })).files).toBe(0);
+    const html = await text(ana, g._id);
+    const csv = await text(ana, g._id, { format: 'csv' });
+    const json = await text(ana, g._id, { format: 'json' });
+    for (const out of [html, csv, json]) expect(out).not.toContain('CIFRADO');
+    expect(html).toContain('Mensagem criptografada');
+    expect(html).toContain('Arquivo criptografado');
+    expect(html).toContain('mensagem antes da criptografia');
+    expect(csv).toContain(';criptografada;Mensagem criptografada;');
+    const doc = JSON.parse(json);
+    expect(doc.messages.find((m: any) => m.id === up._id)).toMatchObject({ encrypted: true, msg: null, text: 'Mensagem criptografada', attachments: [] });
+    const zip = await unzip((await download(ana, g._id, { includeFiles: true })).body);
+    expect(zip.map((e) => e.name)).toEqual(['mensagens.html']);
+    expect(zip[0].data.toString()).not.toContain('CIFRADO');
   });
 
   it('sala grande: páginas sem repetir nem pular', async () => {

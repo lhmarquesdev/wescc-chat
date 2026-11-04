@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatVoiceDuration } from '@shared/stickers';
 import { claimPlayback } from '../lib/voice';
 import { Icon } from './Icon';
 
 // Mensagem de vídeo gravada no chat: retângulo arredondado, toque para tocar com som, um tocando por vez.
-export function VideoMessage({ src, duration }: { src: string; duration?: number }) {
+// autoPlay: começa ao aparecer (vídeo criptografado: o toque que decifrou já foi o "assistir").
+export function VideoMessage({ src, duration, autoPlay }: { src: string; duration?: number; autoPlay?: boolean }) {
   const el = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -20,6 +21,15 @@ export function VideoMessage({ src, duration }: { src: string; duration?: number
       v.play().catch(() => setFailed(true));
     } else v.pause();
   };
+  useEffect(() => {
+    // Sem permissão para tocar sozinho: fica no botão de reproduzir, como antes.
+    const v = el.current;
+    if (!autoPlay || !v) return;
+    claimPlayback(v);
+    v.muted = false;
+    v.play().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const fullscreen = () => {
     const v = el.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
     if (!v) return;

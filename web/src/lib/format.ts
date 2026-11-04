@@ -135,8 +135,9 @@ export function systemIcon(m: Message & Record<string, any>): IconName | null {
     case 'room-unarchived':
       return 'unarchive';
     case 'room_e2e_enabled':
-    case 'room_e2e_disabled':
       return 'sys-encrypted';
+    case 'room_e2e_disabled':
+      return 'e2e-open';
     case 'user-muted':
       return 'sys-muted';
     case 'user-unmuted':

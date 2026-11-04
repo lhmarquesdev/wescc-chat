@@ -52,6 +52,9 @@ export function mapRoom(r: any): Room {
     default: r.is_default,
     featured: r.featured,
     encrypted: r.encrypted,
+    // Criptografia: a geração atual da chave e o pedido de chave nova (só em sala que já foi criptografada).
+    e2eKeyId: r.encrypted || r.e2e_key_id ? (r.e2e_key_id ?? null) : undefined,
+    e2eRotate: r.e2e_rotate || undefined,
     broadcast: r.broadcast,
     reactWhenReadOnly: r.react_when_ro,
     notice: !!r.notice,
@@ -141,6 +144,7 @@ export function mapMessage(r: any): Message {
     unread: r.unread ?? undefined,
     ackRequired: r.ack_required || undefined,
     ackCount: r.ack_required ? r.ack_count : undefined,
+    e2e: r.e2e ?? undefined, // cifrada: o texto aberto fica vazio
   };
 }
 

@@ -274,6 +274,16 @@ import { BellOff as StatusBellOff, CircleDotDashed as StatusCircleDotDashed, Hig
 // Tradução de mensagens
 import { Languages as TranslateLanguages, Undo2 as TranslateUndo } from 'lucide-react';
 
+// Criptografia de ponta a ponta
+import {
+  Hourglass as E2eHourglass,
+  KeyRound as E2eKeyRound,
+  LockKeyholeOpen as E2eLockOpen,
+  RefreshCw as E2eRefresh,
+  ShieldAlert as E2eShieldAlert,
+  ShieldLock as E2eShieldLock,
+} from 'lucide-react';
+
 export const ICONS = {
   // ---------- Dono 1: comuns ----------
   close: X,
@@ -678,6 +688,13 @@ export const ICONS = {
   translate: TranslateLanguages, // "Traduzir" e a linha "Traduzida do inglês"
   'panel-translate': TranslateLanguages, // painel "Tradução automática"
   'translate-original': TranslateUndo, // "Ver original"
+  // ---------- Criptografia de ponta a ponta ----------
+  'e2e-key': E2eKeyRound, // senha da criptografia, "Redefinir criptografia"
+  'e2e-open': E2eLockOpen, // "Desligar criptografia"
+  'e2e-rotate': E2eRefresh, // "Gerar chave nova"
+  'e2e-waiting': E2eHourglass, // esperando a chave da conversa
+  'e2e-warning': E2eShieldAlert, // não deu para decifrar
+  'e2e-mark': E2eShieldLock, // marca da conversa criptografada (o cadeado do grupo privado é outro)
 } as const;
 
 export type IconName = keyof typeof ICONS;

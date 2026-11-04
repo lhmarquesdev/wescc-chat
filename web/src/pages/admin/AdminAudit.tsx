@@ -146,6 +146,8 @@ function MessagesAudit() {
                       </em>
                     ) : /* Figurinhas */ m.sticker ? (
                       <StickerView sticker={m.sticker} size="small" />
+                    ) : /* Criptografia de ponta a ponta: a auditoria não lê o conteúdo */ m.e2e ? (
+                      <em className="muted">Mensagem criptografada</em>
                     ) : (
                       renderMarkdown(m.msg)
                     )}
