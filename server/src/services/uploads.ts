@@ -252,8 +252,9 @@ export async function listRoomFiles(ctx: Ctx, rid: string, opts: { offset?: numb
   if (opts.type) w += ` AND f.type LIKE $${params.push(opts.type.replace('*', '%'))}`;
   if (opts.name) w += ` AND f.name ILIKE $${params.push(`%${opts.name}%`)}`;
   const rows = await many(
-    `SELECT f.*, u.username, count(*) OVER() AS total FROM files f
+    `SELECT f.*, u.username, mm.e2e AS msg_e2e, mm.user_id AS msg_user_id, mm.edited_by AS msg_edited_by, count(*) OVER() AS total FROM files f
      LEFT JOIN users u ON u.id = f.user_id
+     LEFT JOIN messages mm ON f.e2e AND mm.id = f.message_id
      WHERE ${w} ORDER BY f.created_at DESC LIMIT ${Math.min(opts.count ?? 25, 100)} OFFSET ${Number(opts.offset ?? 0)}`,
     params,
   );
@@ -270,6 +271,9 @@ export async function listRoomFiles(ctx: Ctx, rid: string, opts: { offset?: numb
       uploadedAt: r.created_at,
       url: fileUrl(r.id, r.name),
       e2e: r.e2e || undefined, // cifrado: o nome e o tipo verdadeiros estão na mensagem
+      // Cifrado: o conteúdo cifrado da mensagem (quem participa já o recebe no histórico), para a web decifrar o nome e o
+      // tipo no painel Arquivos.
+      e2eMessage: r.e2e && r.msg_e2e ? { e2e: r.msg_e2e, u: { _id: r.msg_user_id }, editedBy: r.msg_edited_by ?? undefined } : undefined,
     })),
   };
 }

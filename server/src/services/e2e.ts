@@ -187,6 +187,27 @@ export async function requestKeys(ctx: Ctx, rid?: string): Promise<{ requested: 
   return { requested };
 }
 
+// Conversas em que a pessoa tem a chave atual e há trabalho para ela: alguém que pode receber ainda não tem a chave, ou
+// a sala pediu chave nova. A web confere ao ficar pronta (desbloquear, configurar) e ao reconectar: quem esperava pediu
+// enquanto ninguém com a chave estava com o chat aberto, e o pedido não se repete sozinho.
+export async function roomsToProvide(ctx: Ctx): Promise<{ rooms: { rid: string; keyID: string; rotate: boolean }[] }> {
+  if (!(await hasUserKeys(ctx.userId))) return { rooms: [] };
+  const rows = await many(
+    `SELECT r.id, r.e2e_key_id, (r.e2e_rotate AND r.encrypted AND NOT r.archived) AS rotate
+       FROM e2e_room_keys mine
+       JOIN rooms r ON r.id = mine.room_id AND r.e2e_key_id = mine.key_id
+       JOIN subscriptions ms ON ms.room_id = r.id AND ms.user_id = mine.user_id
+      WHERE mine.user_id = $1
+        AND ((r.e2e_rotate AND r.encrypted AND NOT r.archived)
+          OR (NOT r.e2e_rotate AND EXISTS (
+            ${RECIPIENTS.replace('$1', 'r.id')} AND u.id <> $1
+              AND NOT EXISTS (SELECT 1 FROM e2e_room_keys x WHERE x.room_id = r.id AND x.user_id = u.id AND x.key_id = r.e2e_key_id))))
+      ORDER BY r.lm DESC NULLS LAST LIMIT 50`,
+    [ctx.userId],
+  );
+  return { rooms: rows.map((r) => ({ rid: r.id as string, keyID: r.e2e_key_id as string, rotate: !!r.rotate })) };
+}
+
 // ---------- Chaves das salas ----------
 
 // Sala em que a pessoa participa: em DM e grupo privado "acesso" é ter a inscrição, então quem administra e não está

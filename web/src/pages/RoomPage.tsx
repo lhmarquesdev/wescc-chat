@@ -566,7 +566,7 @@ export function RoomPage() {
     if (!(await requireE2eReady())) return;
     const ok = await confirmDialog({
       title: 'Gerar uma chave nova?',
-      body: 'As próximas mensagens usam uma chave nova. Quem participa recebe a chave sozinho. Use se alguém saiu ou se um aparelho foi perdido.',
+      body: 'As próximas mensagens usam uma chave nova, que quem participa recebe sozinho. Use se achar que a chave desta conversa vazou (um aparelho perdido, por exemplo). Quem sai da conversa já perde o acesso automaticamente.',
       confirmLabel: 'Gerar chave nova',
     });
     if (!ok) return;
@@ -613,7 +613,7 @@ export function RoomPage() {
                     aria-label="Conversa criptografada de ponta a ponta. Saiba mais"
                     onClick={() => void openE2eDialog('info')}
                   >
-                    <Icon name="encrypted" size={14} />
+                    <Icon name="e2e-mark" size={14} />
                   </button>
                 )}
                 {/* Canal de avisos: o ícone da sala e a faixa logo abaixo já dizem isso, sem pílula. */}

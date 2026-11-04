@@ -2,15 +2,16 @@
 import { useEffect, useState } from 'react';
 import type { Room } from '@shared/index';
 import { askAgain, E2E_UI, ensureRoom, useE2e, type E2eRoomState, type E2eStatus } from '../../lib/e2e/client';
+import { useStore } from '../../lib/store';
 import { Icon, type IconName } from '../Icon';
 import { openE2eDialog } from './E2eDialogs';
 import './e2e.css';
 
 type Block = { key: 'none' | 'locked' | 'waiting' | 'preparing' | 'unsupported' | 'error'; text: string; icon: IconName };
 
-function blockOf(status: E2eStatus, roomState: E2eRoomState | undefined): Block | null {
+function blockOf(status: E2eStatus, roomState: E2eRoomState | undefined, resetByAdmin = false): Block | null {
   if (status === 'unsupported') return { key: 'unsupported', text: E2E_UI.unsupported, icon: 'e2e-warning' };
-  if (status === 'none') return { key: 'none', text: E2E_UI.none, icon: 'e2e-key' };
+  if (status === 'none') return { key: 'none', text: resetByAdmin ? E2E_UI.resetByAdmin : E2E_UI.none, icon: 'e2e-key' };
   if (status === 'locked') return { key: 'locked', text: E2E_UI.locked, icon: 'e2e-key' };
   if (status === 'loading' || !roomState || roomState === 'creating' || roomState === 'rotating') return { key: 'preparing', text: E2E_UI.preparing, icon: 'e2e-waiting' };
   if (roomState === 'waiting') return { key: 'waiting', text: E2E_UI.waiting, icon: 'e2e-waiting' };
@@ -22,9 +23,14 @@ function blockOf(status: E2eStatus, roomState: E2eRoomState | undefined): Block 
 export function useE2eBlock(room: Room | null | undefined): Block | null {
   const status = useE2e((s) => s.status);
   const roomState = useE2e((s) => (room ? s.rooms[room._id] : undefined));
+  const resetByAdmin = useStore((s) => !!s.me?.e2eResetByAdmin);
   if (!room?.encrypted) return null;
-  return blockOf(status, roomState);
+  return blockOf(status, roomState, resetByAdmin);
 }
+
+// Esperando a chave com a conversa aberta: pede de novo a cada 2 minutos (com a aba à vista). Quem tem a chave entrega
+// sozinho ao desbloquear; isto cobre o pedido que se perdeu.
+const ASK_EVERY_MS = 120_000;
 
 const dismissKey = (rid: string) => `wescc.e2e.banner.${rid}`;
 const readDismissed = (rid: string) => {
@@ -45,6 +51,14 @@ export function E2eBanner({ room }: { room: Room }) {
     const t = setTimeout(() => setCooldown(0), cooldown - Date.now());
     return () => clearTimeout(t);
   }, [cooldown]);
+  const waiting = block?.key === 'waiting';
+  useEffect(() => {
+    if (!waiting) return;
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') void askAgain(room._id, { force: false });
+    }, ASK_EVERY_MS);
+    return () => clearInterval(t);
+  }, [waiting, room._id]);
   if (!room.encrypted) return null;
   if (!block) {
     if (dismissed) return null;
@@ -58,11 +72,11 @@ export function E2eBanner({ room }: { room: Room }) {
     };
     return (
       <div className="e2e-banner" role="note">
-        <Icon name="encrypted" size={16} />
+        <Icon name="e2e-mark" size={16} />
         <span className="e2e-banner-text" title={E2E_UI.ready}>
           {E2E_UI.ready}
         </span>
-        <button type="button" className="link" onClick={() => void openE2eDialog('info')}>
+        <button type="button" className="link e2e-banner-more" onClick={() => void openE2eDialog('info')}>
           Saiba mais
         </button>
         <button type="button" className="icon-btn e2e-banner-close" onClick={dismiss} aria-label="Fechar aviso" title="Fechar">
@@ -81,16 +95,25 @@ export function E2eBanner({ room }: { room: Room }) {
         Desbloquear
       </button>
     ) : block.key === 'waiting' ? (
+      // Depois do toque, o próprio botão confirma o pedido (e volta em 30 s, a espera do servidor).
       <button
         type="button"
         className="btn small"
         disabled={cooldown > Date.now()}
+        aria-live="polite"
         onClick={() => {
           setCooldown(Date.now() + 30_000);
           void askAgain(room._id);
         }}
       >
-        Pedir de novo
+        {cooldown > Date.now() ? (
+          <>
+            <Icon name="success" size={14} />
+            {E2E_UI.asked}
+          </>
+        ) : (
+          'Pedir de novo'
+        )}
       </button>
     ) : block.key === 'error' ? (
       <button type="button" className="btn small" onClick={() => void ensureRoom(room, { refresh: true })}>

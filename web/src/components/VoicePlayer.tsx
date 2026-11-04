@@ -27,7 +27,22 @@ function savedSpeed() {
   }
 }
 
-export function VoicePlayer({ src, duration, waveform, title, voice }: { src: string; duration?: number; waveform?: number[]; title?: string; voice?: boolean }) {
+// autoPlay: começa a tocar ao aparecer (áudio criptografado: o toque que decifrou já foi o "ouvir").
+export function VoicePlayer({
+  src,
+  duration,
+  waveform,
+  title,
+  voice,
+  autoPlay,
+}: {
+  src: string;
+  duration?: number;
+  waveform?: number[];
+  title?: string;
+  voice?: boolean;
+  autoPlay?: boolean;
+}) {
   const audio = useRef<HTMLAudioElement>(null);
   const wave = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -41,6 +56,16 @@ export function VoicePlayer({ src, duration, waveform, title, voice }: { src: st
   useEffect(() => {
     if (audio.current) audio.current.playbackRate = speed;
   }, [speed]);
+
+  useEffect(() => {
+    const el = audio.current;
+    if (!autoPlay || !el) return;
+    claimPlayback(el);
+    el.playbackRate = speed;
+    // Sem permissão para tocar sozinho (o navegador perdeu o gesto): fica no botão de ouvir, como antes.
+    el.play().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // WebM gravado pelo navegador não traz a duração no cabeçalho (vem Infinity): vale a da mensagem.
   const onMeta = () => {

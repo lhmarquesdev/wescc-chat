@@ -272,7 +272,14 @@ import { FileDown as ExportFileDown, FolderDown as ExportFolderDown } from 'luci
 import { BellOff as StatusBellOff, CircleDotDashed as StatusCircleDotDashed, Highlighter as StatusHighlighter, KeyRound as SearchKeyRound } from 'lucide-react';
 
 // Criptografia de ponta a ponta
-import { Hourglass as E2eHourglass, KeyRound as E2eKeyRound, LockKeyholeOpen as E2eLockOpen, RefreshCw as E2eRefresh, ShieldAlert as E2eShieldAlert } from 'lucide-react';
+import {
+  Hourglass as E2eHourglass,
+  KeyRound as E2eKeyRound,
+  LockKeyholeOpen as E2eLockOpen,
+  RefreshCw as E2eRefresh,
+  ShieldAlert as E2eShieldAlert,
+  ShieldLock as E2eShieldLock,
+} from 'lucide-react';
 
 export const ICONS = {
   // ---------- Dono 1: comuns ----------
@@ -680,6 +687,7 @@ export const ICONS = {
   'e2e-rotate': E2eRefresh, // "Gerar chave nova"
   'e2e-waiting': E2eHourglass, // esperando a chave da conversa
   'e2e-warning': E2eShieldAlert, // não deu para decifrar
+  'e2e-mark': E2eShieldLock, // marca da conversa criptografada (o cadeado do grupo privado é outro)
 } as const;
 
 export type IconName = keyof typeof ICONS;

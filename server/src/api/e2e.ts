@@ -7,6 +7,7 @@ import {
   resetRoomKey,
   resetUserKeys,
   roomKeys,
+  roomsToProvide,
   setMyKeys,
   setRoomKeyId,
   updateGroupKey,
@@ -46,6 +47,8 @@ export function e2eRoutes(app: FastifyInstance) {
     return {};
   });
   route(app, 'POST', 'e2e.requestSubscriptionKeys', {}, async (req, _rep, ctx) => requestKeys(ctx, b(req).rid || undefined));
+  // Próprio do Wescc: onde quem acabou de desbloquear tem chave para entregar (ou para trocar).
+  route(app, 'GET', 'e2e.fetchRoomsToProvide', {}, async (_req, _rep, ctx) => roomsToProvide(ctx));
   // Esqueci a senha da criptografia: confirma a senha de entrar (contas com senha) e o 2FA (quando ligado).
   route(app, 'POST', 'e2e.resetOwnE2EKey', {}, async (req, _rep, ctx) => {
     const body = b(req);

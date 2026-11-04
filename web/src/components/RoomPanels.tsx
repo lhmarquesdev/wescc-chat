@@ -21,7 +21,7 @@ import { Avatar, Empty, Field, GroupAvatar, Menu, Segmented, SearchInput, Skelet
 import { InCallBadge } from './call/LiveIndicators';
 // Criptografia de ponta a ponta
 import { foldText } from '@shared/search';
-import { E2E_PLACEHOLDER, plainOf, useE2e } from '../lib/e2e/client';
+import { contentOf, E2E_PLACEHOLDER, plainOf, useE2e } from '../lib/e2e/client';
 import { useE2eMessage } from '../lib/e2e/hooks';
 import { openE2eDialog, requireE2eReady } from './e2e/E2eDialogs';
 // Permissões do canal: quem fala e o que cada pessoa pode fazer nele.
@@ -292,7 +292,14 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
         </Field>
         {room.t !== 'd' && (
           <>
-            <Toggle checked={f.roomType === 'p'} onChange={(v) => setF({ ...f, roomType: v ? 'p' : 'c' })} label="Privada" />
+            {/* Grupo criptografado não vira público: a criptografia sai antes (o controle dela fica logo abaixo). */}
+            <Toggle
+              checked={f.roomType === 'p'}
+              disabled={f.roomType === 'p' && !!f.encrypted}
+              onChange={(v) => setF({ ...f, roomType: v ? 'p' : 'c' })}
+              label="Privada"
+              description={f.roomType === 'p' && f.encrypted ? 'Desligue a criptografia para tornar o grupo público.' : undefined}
+            />
             {canSetRO && (room.t === 'c' || room.t === 'p') && (
               <>
                 {/* Desligar um canal de avisos libera a escrita e mostra os membros (dá para religar abaixo); numa sala que não
@@ -1040,11 +1047,53 @@ function fileType(f: { name?: string; type?: string }) {
   return (ext ?? f.type?.split('/')[1] ?? 'arquivo').toUpperCase();
 }
 
+interface RoomFile {
+  _id: string;
+  name: string;
+  type: string;
+  size: number;
+  messageId: string | null;
+  user?: { _id: string; username?: string; name?: string };
+  uploadedAt?: string;
+  url: string;
+  e2e?: boolean;
+  e2eMessage?: { e2e: NonNullable<Message['e2e']>; u: { _id: string }; editedBy?: { _id: string } };
+}
+
+// Arquivo cifrado: nome, tipo e tamanho decifrados da mensagem, como nas bolhas (null enquanto não dá para ler).
+function e2eFileMeta(f: RoomFile, rid: string): { name: string; type: string; size: number } | null {
+  if (!f.e2eMessage || !f.messageId) return null;
+  const m = { _id: f.messageId, rid, e2e: f.e2eMessage.e2e, u: f.e2eMessage.u, editedBy: f.e2eMessage.editedBy } as unknown as Message;
+  const file = contentOf(m)?.file;
+  return file ? { name: file.name, type: file.type, size: file.size } : null;
+}
+
 function FilesPanel({ room }: Props) {
   const nameOf = useNames();
   const [name, setName] = useState('');
   const [type, setType] = useState('');
-  const { data, loading } = useAsync(() => api.get('rooms.files', { roomId: room._id, name, typeGroup: type, count: 100 }), [room._id, name, type]);
+  // Conversa criptografada (ou que já foi): o servidor só conhece o nome e o tipo genéricos, então o filtro roda aqui,
+  // nos arquivos decifrados.
+  const e2eRoom = !!room.encrypted || !!room.e2eKeyId;
+  const version = useE2e((s) => (e2eRoom ? s.version : 0));
+  const status = useE2e((s) => s.status);
+  const { data, loading } = useAsync(
+    () => api.get('rooms.files', { roomId: room._id, ...(e2eRoom ? {} : { name, typeGroup: type }), count: 100 }),
+    [room._id, e2eRoom ? '' : name, e2eRoom ? '' : type],
+  );
+  const rows = useMemo(
+    () => ((data?.files ?? []) as RoomFile[]).map((f) => ({ f, meta: f.e2e ? e2eFileMeta(f, room._id) : { name: f.name, type: f.type, size: f.size } })),
+    // version: arquivos decifrados depois entram no nome e no filtro
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data, version, status, room._id],
+  );
+  const q = foldText(name.trim());
+  const shown =
+    e2eRoom && (q || type)
+      ? rows.filter(({ meta }) => meta && (!q || foldText(meta.name).includes(q)) && (!type || meta.type.startsWith(type.replace('*', ''))))
+      : rows;
+  const where = (f: RoomFile) => `${location.pathname.split('/thread/')[0]}?msg=${f.messageId}`;
+  const who = (f: RoomFile) => f.user?.name || (f.user?.username ? nameOf(f.user.username) : '');
   return (
     <>
       <div className="panel-filters">
@@ -1057,10 +1106,20 @@ function FilesPanel({ room }: Props) {
           <option value="application/*">Documentos</option>
           <option value="text/*">Texto</option>
         </select>
+        {e2eRoom && (
+          <p className="muted small e2e-search-hint">
+            <Icon name="encrypted" size={14} />
+            <span>
+              {status === 'ready'
+                ? 'A conversa é criptografada: o filtro procura só nos 100 arquivos mais recentes.'
+                : 'A conversa é criptografada: os nomes dos arquivos aparecem depois de desbloquear a criptografia.'}
+            </span>
+          </p>
+        )}
       </div>
       {loading && !data ? (
         <SkeletonList />
-      ) : !data?.files.length ? (
+      ) : !shown.length ? (
         name || type ? (
           <Empty icon="panel-files" title={name ? `Nada encontrado para "${name}"` : 'Nenhum arquivo deste tipo'}>
             Confira o nome ou escolha outro tipo.
@@ -1071,19 +1130,20 @@ function FilesPanel({ room }: Props) {
           </Empty>
         )
       ) : (
-        data.files.map((f: any) =>
+        shown.map(({ f, meta }) =>
           f.e2e ? (
+            // Cifrado: abre na conversa, onde o arquivo é decifrado e baixado com o nome real.
             <div key={f._id} className="file-row">
-              <a className="file-row-main" href={`${location.pathname.split('/thread/')[0]}?msg=${f.messageId}`}>
-                <FileTile name="" mime="application/octet-stream" />
+              <a className="file-row-main" href={where(f)}>
+                <FileTile name={meta?.name ?? ''} mime={meta?.type ?? 'application/octet-stream'} />
                 <span className="file-row-text">
-                  <span className="file-row-name">Arquivo criptografado</span>
+                  <span className="file-row-name">{meta?.name ?? 'Arquivo criptografado'}</span>
                   <span className="file-row-meta">
-                    {[f.user?.name || (f.user?.username ? nameOf(f.user.username) : ''), f.uploadedAt ? formatWhen(f.uploadedAt) : ''].filter(Boolean).join(' · ')}
+                    {[meta ? fileType(meta) : '', meta ? formatBytes(meta.size) : '', who(f), f.uploadedAt ? formatWhen(f.uploadedAt) : ''].filter(Boolean).join(' · ')}
                   </span>
                 </span>
               </a>
-              <a className="btn small ghost" href={`${location.pathname.split('/thread/')[0]}?msg=${f.messageId}`}>
+              <a className="btn small ghost" href={where(f)}>
                 Ver na conversa
               </a>
             </div>
@@ -1094,7 +1154,7 @@ function FilesPanel({ room }: Props) {
               <span className="file-row-text">
                 <span className="file-row-name">{f.name}</span>
                 <span className="file-row-meta">
-                  {[fileType(f), formatBytes(f.size), f.user?.name || (f.user?.username ? nameOf(f.user.username) : ''), f.uploadedAt ? formatWhen(f.uploadedAt) : ''].filter(Boolean).join(' · ')}
+                  {[fileType(f), formatBytes(f.size), who(f), f.uploadedAt ? formatWhen(f.uploadedAt) : ''].filter(Boolean).join(' · ')}
                 </span>
               </span>
             </a>

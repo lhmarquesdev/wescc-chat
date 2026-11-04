@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { E2E_MIN_OWN_PASSWORD } from '@shared/e2e';
 import { ApiError, errorMessage } from '../../lib/api';
-import { changePassword, E2E_UI, generatePassphrase, resetOwnKeys, setupKeys, unlock, useE2e } from '../../lib/e2e/client';
+import { changePassword, E2E_UI, generatePassphrase, resetOwnKeys, setupKeys, tooManyIn, unlock, useE2e } from '../../lib/e2e/client';
 import { useSetting, useStore } from '../../lib/store';
 import { Icon } from '../Icon';
 import { useIsPhone } from '../overlay';
@@ -92,6 +92,26 @@ interface DialogProps {
 
 const fieldProps = { autoComplete: 'off', spellCheck: false, autoCapitalize: 'off', autoCorrect: 'off' } as const;
 
+// Senha escolhida pela pessoa: os erros aparecem ao sair do campo (ou ao tentar concluir), não a cada tecla; depois
+// disso acompanham o que ela digita.
+function useOwnPassword(p1: string, p2: string) {
+  const [left1, setLeft1] = useState(false);
+  const [left2, setLeft2] = useState(false);
+  const [tried, setTried] = useState(false);
+  const short = p1.length < E2E_MIN_OWN_PASSWORD;
+  return {
+    valid: !short && p1 === p2,
+    shortErr: (left1 || tried) && short ? 'A senha precisa ter pelo menos 12 caracteres.' : undefined,
+    matchErr: (left2 || tried) && !short && p1 !== p2 ? 'As senhas não conferem.' : undefined,
+    blur1: () => p1 && setLeft1(true),
+    blur2: () => p2 && setLeft2(true),
+    tried: () => setTried(true),
+  };
+}
+
+// O que não se recupera: a mesma frase na senha gerada e na escolhida.
+const NO_RECOVERY = 'O chat não mostra de novo nem recupera esta senha. Guarde em lugar seguro: sem ela, as mensagens criptografadas antigas ficam ilegíveis.';
+
 // ---------- Configurar ----------
 
 function SetupModal({ onDone, go }: DialogProps) {
@@ -101,11 +121,11 @@ function SetupModal({ onDone, go }: DialogProps) {
   const [saved, setSaved] = useState(false);
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
-  const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
-  const shortErr = own && (tried || p1) && p1.length > 0 && p1.length < E2E_MIN_OWN_PASSWORD ? 'A senha precisa ter pelo menos 12 caracteres.' : undefined;
-  const matchErr = own && p2 && p1 !== p2 ? 'As senhas não conferem.' : undefined;
-  const valid = own ? p1.length >= E2E_MIN_OWN_PASSWORD && p1 === p2 : saved;
+  const check = useOwnPassword(p1, p2);
+  const valid = own ? check.valid : saved;
+  // Um administrador redefiniu: o motivo, antes de pedir a senha nova.
+  const resetByAdmin = useStore((s) => !!s.me?.e2eResetByAdmin);
 
   const copy = async () => {
     try {
@@ -116,7 +136,7 @@ function SetupModal({ onDone, go }: DialogProps) {
     }
   };
   const finish = async () => {
-    setTried(true);
+    if (own) check.tried();
     if (!valid || busy) return;
     setBusy(true);
     try {
@@ -147,6 +167,12 @@ function SetupModal({ onDone, go }: DialogProps) {
         </>
       }
     >
+      {resetByAdmin && (
+        <div className="callout warn e2e-reset-note">
+          <Icon name="e2e-warning" />
+          <span>{E2E_UI.resetByAdmin}</span>
+        </div>
+      )}
       {!own ? (
         <div className="e2e-setup">
           <p className="e2e-lead">
@@ -180,11 +206,15 @@ function SetupModal({ onDone, go }: DialogProps) {
             void finish();
           }}
         >
-          <Field label="Sua senha" hint="Pelo menos 12 caracteres. Não use a senha de entrar no chat." error={shortErr}>
-            <input type="password" value={p1} onChange={(e) => setP1(e.target.value)} {...fieldProps} autoFocus />
+          <div className="callout warn">
+            <Icon name="e2e-key" />
+            <span>{NO_RECOVERY}</span>
+          </div>
+          <Field label="Sua senha" hint="Pelo menos 12 caracteres. Não use a senha de entrar no chat." error={check.shortErr}>
+            <input type="password" value={p1} onChange={(e) => setP1(e.target.value)} onBlur={check.blur1} {...fieldProps} autoFocus />
           </Field>
-          <Field label="Repita a senha" error={matchErr}>
-            <input type="password" value={p2} onChange={(e) => setP2(e.target.value)} {...fieldProps} />
+          <Field label="Repita a senha" error={check.matchErr}>
+            <input type="password" value={p2} onChange={(e) => setP2(e.target.value)} onBlur={check.blur2} {...fieldProps} />
           </Field>
           <button type="button" className="link e2e-switch" onClick={() => setOwn(false)}>
             Usar a senha gerada
@@ -205,16 +235,25 @@ function UnlockModal({ onDone, go }: DialogProps) {
   const waitUntil = useE2e((s) => s.waitUntil);
   const [now, setNow] = useState(Date.now());
   const input = useRef<HTMLInputElement>(null);
-  const waiting = waitUntil > now;
+  // Muitas senhas erradas: contagem regressiva no lugar do erro; ao acabar, o erro some e o botão volta.
+  const left = Math.max(0, Math.ceil((waitUntil - now) / 1000));
+  const waiting = left > 0;
   useEffect(() => {
     if (!waiting) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(t);
+  }, [waiting]);
+  const wasWaiting = useRef(false);
+  useEffect(() => {
+    if (wasWaiting.current && !waiting) {
+      setErr('');
+      input.current?.focus();
+    }
+    wasWaiting.current = waiting;
   }, [waiting]);
   useEffect(() => input.current?.focus(), []);
   const submit = async () => {
-    if (!pass || busy) return;
-    if (waiting) return setErr(E2E_UI.tooMany);
+    if (!pass || busy || waiting) return;
     setBusy(true);
     setErr('');
     try {
@@ -238,7 +277,7 @@ function UnlockModal({ onDone, go }: DialogProps) {
           <button type="button" className="link e2e-forgot" onClick={() => go('reset')}>
             Esqueci a senha
           </button>
-          <button type="button" className="btn primary" disabled={!pass || busy} onClick={submit}>
+          <button type="button" className="btn primary" disabled={!pass || busy || waiting} onClick={submit}>
             {busy ? 'Desbloqueando…' : 'Desbloquear'}
           </button>
         </>
@@ -252,8 +291,17 @@ function UnlockModal({ onDone, go }: DialogProps) {
         }}
       >
         <p className="e2e-lead">Digite a senha da criptografia para ler e escrever nas conversas criptografadas neste navegador.</p>
-        <Field label="Senha da criptografia" error={err || (waiting ? E2E_UI.tooMany : undefined)}>
-          <input ref={input} type="password" value={pass} onChange={(e) => setPass(e.target.value)} {...fieldProps} />
+        <Field label="Senha da criptografia" error={waiting ? tooManyIn(left) : err || undefined}>
+          <input
+            ref={input}
+            type="password"
+            value={pass}
+            onChange={(e) => {
+              setPass(e.target.value);
+              if (err) setErr('');
+            }}
+            {...fieldProps}
+          />
         </Field>
         <button type="submit" hidden />
       </form>
@@ -352,10 +400,10 @@ function PasswordModal({ onDone }: DialogProps) {
   const [p2, setP2] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const shortErr = p1 && p1.length < E2E_MIN_OWN_PASSWORD ? 'A senha precisa ter pelo menos 12 caracteres.' : undefined;
-  const matchErr = p2 && p1 !== p2 ? 'As senhas não conferem.' : undefined;
-  const ready = !!cur && p1.length >= E2E_MIN_OWN_PASSWORD && p1 === p2;
+  const check = useOwnPassword(p1, p2);
+  const ready = !!cur && check.valid;
   const submit = async () => {
+    check.tried();
     if (!ready || busy) return;
     setBusy(true);
     setErr('');
@@ -394,11 +442,11 @@ function PasswordModal({ onDone }: DialogProps) {
         <Field label="Senha atual da criptografia" error={err}>
           <input type="password" value={cur} onChange={(e) => setCur(e.target.value)} {...fieldProps} autoFocus />
         </Field>
-        <Field label="Nova senha" hint="Pelo menos 12 caracteres. Não use a senha de entrar no chat." error={shortErr}>
-          <input type="password" value={p1} onChange={(e) => setP1(e.target.value)} {...fieldProps} />
+        <Field label="Nova senha" hint="Pelo menos 12 caracteres. Não use a senha de entrar no chat." error={check.shortErr}>
+          <input type="password" value={p1} onChange={(e) => setP1(e.target.value)} onBlur={check.blur1} {...fieldProps} />
         </Field>
-        <Field label="Confirmar nova senha" error={matchErr}>
-          <input type="password" value={p2} onChange={(e) => setP2(e.target.value)} {...fieldProps} />
+        <Field label="Confirmar nova senha" error={check.matchErr}>
+          <input type="password" value={p2} onChange={(e) => setP2(e.target.value)} onBlur={check.blur2} {...fieldProps} />
         </Field>
         <button type="submit" hidden />
       </form>

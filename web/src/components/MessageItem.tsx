@@ -6,6 +6,7 @@ import {
   memo,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -46,7 +47,7 @@ import { jiraApi, jiraCreateAvailable, openIntegrationModal, useIntegrations } f
 import { JiraCard } from './integrations/JiraCard';
 import { MeetingCard } from './integrations/MeetingCard';
 // Criptografia de ponta a ponta
-import { E2E_PLACEHOLDER, type E2eViewState } from '../lib/e2e/client';
+import { contentPreview, E2E_PLACEHOLDER, type E2eViewState } from '../lib/e2e/client';
 import { useE2eMessage } from '../lib/e2e/hooks';
 import { E2eFile } from './e2e/E2eFile';
 
@@ -615,15 +616,34 @@ function SystemMessage({ m }: { m: Message & Record<string, any> }) {
 function PinnedNote({ m }: { m: Message & Record<string, any> }) {
   const nameOf = useNames();
   const text = systemText(m, nameOf);
-  // Criptografia: o servidor guarda a citação vazia; o texto sai da mensagem fixada, se ela estiver carregada.
+  // Criptografia: o servidor guarda a citação vazia; o texto sai da mensagem fixada (pinnedMessageId; o link /msg/<id>
+  // nas mais antigas), da lista carregada ou buscada uma vez.
   const encrypted = useStore((s) => !!s.rooms[m.rid]?.encrypted || !!s.rooms[m.rid]?.e2eKeyId);
-  const pinnedId = m.attachments?.[0]?.message_link?.match(/[?&]msg=([^&]+)/)?.[1];
-  const pinned = useStore((s) => (encrypted && pinnedId ? s.messages[m.rid]?.list.find((x) => x._id === pinnedId) : undefined));
-  const pinnedView = useE2eMessage(pinned ?? m);
-  const attachments =
-    encrypted && m.attachments?.length && !m.attachments[0].text
-      ? [{ ...m.attachments[0], text: pinned?.e2e ? pinnedView.msg || E2E_PLACEHOLDER.pending : pinned ? pinned.msg : E2E_PLACEHOLDER.pending }, ...m.attachments.slice(1)]
-      : m.attachments;
+  const needsText = encrypted && !!m.attachments?.length && !m.attachments[0].text;
+  const pinnedId: string | undefined = m.pinnedMessageId ?? m.attachments?.[0]?.message_link?.match(/(?:\/msg\/|[?&]msg=)([^/?#&]+)/)?.[1];
+  const inList = useStore((s) => (needsText && pinnedId ? s.messages[m.rid]?.list.find((x) => x._id === pinnedId) : undefined));
+  const [fetched, setFetched] = useState<Message | null>(null);
+  useEffect(() => {
+    if (!needsText || !pinnedId || inList) return;
+    let alive = true;
+    api
+      .get('chat.getMessage', { msgId: pinnedId })
+      .then((r) => alive && setFetched(r.message))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [needsText, pinnedId, !!inList]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pinned = inList ?? fetched ?? undefined;
+  const pinnedView = useE2eMessage(pinned ?? m).e2eView;
+  const pinnedText = !pinned
+    ? E2E_PLACEHOLDER.pending
+    : !pinned.e2e
+      ? pinned.msg
+      : pinnedView?.state === 'ok'
+        ? contentPreview(pinnedView.content!) || E2E_PLACEHOLDER.pending
+        : E2E_PLACEHOLDER[pinnedView?.state ?? 'pending'];
+  const attachments = needsText ? [{ ...m.attachments![0], text: pinnedText }, ...m.attachments!.slice(1)] : m.attachments;
   return (
     <div className="msg system pinned-note" id={`msg-${m._id}`}>
       <div className="msg-left">
@@ -645,7 +665,15 @@ function PinnedNote({ m }: { m: Message & Record<string, any> }) {
 }
 
 // Corpo da mensagem cifrada que ainda não dá para ler (cinza, itálico, com o cadeado).
-const E2E_ICON: Record<Exclude<E2eViewState, 'ok'>, IconName> = { pending: 'encrypted', waiting: 'e2e-waiting', locked: 'encrypted', 'old-key': 'encrypted', failed: 'e2e-warning' };
+const E2E_ICON: Record<Exclude<E2eViewState, 'ok'>, IconName> = {
+  pending: 'encrypted',
+  waiting: 'e2e-waiting',
+  none: 'e2e-key',
+  unsupported: 'e2e-warning',
+  locked: 'encrypted',
+  'old-key': 'encrypted',
+  failed: 'e2e-warning',
+};
 function E2ePlaceholder({ state }: { state: Exclude<E2eViewState, 'ok'> }) {
   return (
     <span className={`msg-e2e ${state}`}>

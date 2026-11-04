@@ -33,7 +33,7 @@ const lib = await import('../visual/lib.mjs');
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
 
 const OUT = lib.outDir();
-const STEPS = new Set((process.env.STEPS ?? '1,2,3,4,5,6,7,8,9,10,11').split(',').map((s) => Number(s.trim())));
+const STEPS = new Set((process.env.STEPS ?? '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16').split(',').map((s) => Number(s.trim())));
 const PASSWORD = `Cr1pto-${crypto.randomBytes(6).toString('hex')}!`;
 const RUN = Date.now().toString(36);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -47,7 +47,11 @@ const T = {
   wrong: 'Senha incorreta.',
   oldKey: 'Mensagem criptografada com uma chave que você não tem.',
   lockedMsg: 'Mensagem criptografada. Desbloqueie para ler.',
+  noneMsg: 'Mensagem criptografada. Configure a criptografia para ler.',
+  waitingMsg: 'Mensagem criptografada. Esperando a chave.',
   on: 'ligou a criptografia de ponta a ponta',
+  noRecovery: 'O chat não mostra de novo nem recupera esta senha.',
+  resetByAdmin: 'Um administrador redefiniu sua criptografia.',
 };
 
 // ---------- API ----------
@@ -73,8 +77,6 @@ async function ensurePerson(p) {
   const info = await admin.call('GET', 'users.info', { username: p.username });
   if (info.success && info.user?._id) {
     p.id = info.user._id;
-    // Sem chaves de uma execução anterior (400 quando não tem: tudo bem).
-    await admin.call('POST', 'users.resetE2EKey', { userId: p.id });
     ok(`users.update ${p.username}`, await admin.call('POST', 'users.update', { userId: p.id, data: { password: PASSWORD, roles: p.roles, name: p.name, active: true } }));
   } else {
     ok(
@@ -85,6 +87,9 @@ async function ensurePerson(p) {
   p.auth = await lib.login(p.username, PASSWORD);
   p.id = p.auth.userId;
   p.api = lib.client(p.auth);
+  // Sem chaves de uma execução anterior. A própria pessoa redefine: pelo administrador, a faixa e a configuração
+  // mostrariam o aviso de que um administrador redefiniu, e não o texto de quem nunca configurou.
+  ok(`e2e.resetOwnE2EKey ${p.username}`, await p.api.call('POST', 'e2e.resetOwnE2EKey', { password: PASSWORD }));
 }
 
 const RATE = 'API_Enable_Rate_Limiter';
@@ -255,10 +260,19 @@ async function setupOwn(page, pass, shotName) {
   const m = e2eModal(page, 'Configurar a criptografia');
   await expectVisible(m, 'Configurar a criptografia');
   await m.getByRole('button', { name: 'Prefiro escolher a minha senha' }).click();
-  await m.getByLabel('Sua senha').fill('curta');
-  await m.getByLabel('Repita a senha').fill('outra');
-  await expectVisible(m.getByText('A senha precisa ter pelo menos 12 caracteres.'), 'erro de senha curta');
-  await expectVisible(m.getByText('As senhas não conferem.'), 'erro de senhas diferentes');
+  // O aviso de que a senha não se recupera também vale para a senha escolhida.
+  await expectVisible(m.getByText(T.noRecovery), 'aviso de que a senha não se recupera');
+  // Enquanto a pessoa digita, nada de erro; ao sair do campo, sim.
+  await m.getByLabel('Sua senha').pressSequentially('curta');
+  await sleep(300);
+  assert(!(await m.getByText('A senha precisa ter pelo menos 12 caracteres.').count()), 'erro de senha curta durante a digitação');
+  await m.getByLabel('Repita a senha').click();
+  await expectVisible(m.getByText('A senha precisa ter pelo menos 12 caracteres.'), 'erro de senha curta ao sair do campo');
+  await m.getByLabel('Sua senha').fill('uma senha comprida o bastante');
+  await m.getByLabel('Repita a senha').pressSequentially('outra');
+  assert(!(await m.getByText('As senhas não conferem.').count()), 'erro de senhas diferentes durante a digitação');
+  await m.getByLabel('Sua senha').click();
+  await expectVisible(m.getByText('As senhas não conferem.'), 'erro de senhas diferentes ao sair do campo');
   if (shotName) await shot(page, shotName);
   await m.getByLabel('Sua senha').fill(pass);
   await m.getByLabel('Repita a senha').fill(pass);
@@ -301,6 +315,9 @@ let keyBefore = '';
 let anaPage = null;
 let brunoPage = null;
 let carlaPage = null;
+let daviPass = '';
+let group2 = '';
+let daviDesk = null;
 
 // ---------- 1. Ana liga a criptografia na conversa direta ----------
 await step(1, 'Conversa direta: Ana liga a criptografia, configura a senha gerada e escreve', async () => {
@@ -332,7 +349,8 @@ await step(2, 'Bruno configura com senha própria, recebe a chave da Ana, lê e 
   brunoPage = await open(bruno);
   await openRoom(brunoPage, dmRid, 'd');
   await expectVisible(banner(brunoPage).getByText(T.none), `faixa "${T.none}"`);
-  await expectVisible(placeholders(brunoPage, T.lockedMsg), 'mensagem cifrada como aviso');
+  // Sem configurar: a mensagem pede para configurar, como a faixa (não para desbloquear).
+  await expectVisible(placeholders(brunoPage, T.noneMsg), 'mensagem cifrada como aviso');
   const disabled = brunoPage.locator('.room-main .composer.disabled', { hasText: T.none });
   await expectVisible(disabled, 'compositor desativado com o motivo');
   await shot(brunoPage, 'bruno-sem-senha');
@@ -427,10 +445,14 @@ await step(5, 'Ana envia imagem e mensagem de voz; Bruno vê a imagem e toca o �
   await expectVisible(bodyWith(brunoPage, 'Logo cifrado'), 'legenda decifrada');
   const voice = brunoPage.locator('.room-main .att-file', { hasText: 'Mensagem de voz' }).last();
   await expectVisible(voice, 'mensagem de voz no Bruno', 20000);
+  assert((await voice.innerText()).includes('Clique para ouvir'), `cartão da voz sem "Clique para ouvir": ${await voice.innerText()}`);
   await shot(brunoPage, 'arquivos-cifrados-bruno');
   await voice.click();
   const player = brunoPage.locator('.room-main .att-voice').last();
   await expectVisible(player, 'player de voz depois de decifrar', 20000);
+  // Um toque só: decifra e já toca.
+  await waitFor('áudio tocando depois de um toque', async () => (await player.locator('audio').first().evaluate((a) => !a.paused)) || null, 10000);
+  await shot(brunoPage, 'voz-tocando');
   const src = await player.locator('audio').first().getAttribute('src').catch(() => null);
   assert(!src || src.startsWith('blob:'), `áudio fora de blob: ${src}`);
   // O arquivo no servidor é opaco: nome e tipo genéricos.
@@ -441,8 +463,14 @@ await step(5, 'Ana envia imagem e mensagem de voz; Bruno vê a imagem e toca o �
     await brunoPage.keyboard.press('Escape');
     await brunoPage.locator('.room-actions button[title="Arquivos"]').click();
   });
-  await expectVisible(brunoPage.locator('.panel-files .file-row-name', { hasText: 'Arquivo criptografado' }), 'painel Arquivos com "Arquivo criptografado"');
+  // O painel decifra o nome e o tipo (o servidor só tem os genéricos) e filtra por eles.
+  await expectVisible(brunoPage.locator('.panel-files .file-row-name', { hasText: 'icon-192.png' }), 'painel Arquivos com o nome decifrado', 20000);
   await shot(brunoPage, 'painel-arquivos');
+  await brunoPage.locator('.panel-files .panel-filters select').selectOption('image/*');
+  await waitFor('filtro Imagens', async () => ((await brunoPage.locator('.panel-files .file-row').count()) === 1 ? true : null));
+  await expectVisible(brunoPage.locator('.panel-files .file-row-name', { hasText: 'icon-192.png' }), 'imagem no filtro Imagens');
+  await shotDark(brunoPage, 'painel-arquivos-filtro-escuro');
+  await brunoPage.locator('.panel-files .panel-filters select').selectOption('');
   await brunoPage.goto(`${CHAT_URL}/direct/${dmRid}`);
 });
 
@@ -535,7 +563,7 @@ await step(7, 'Carla sai do grupo: chave nova; Davi chega depois e não lê o qu
   const vw = daviPage.viewportSize().width;
   assert(passBox && passBox.x >= 0 && passBox.x + passBox.width <= vw + 1, 'senha gerada saiu da tela');
   await shot(daviPage, 'celular-configurar-tela-cheia');
-  await setupGenerated(daviPage);
+  daviPass = await setupGenerated(daviPage);
   await expectVisible(bodyWith(daviPage, 'Depois da troca de chave.'), 'Davi lê a mensagem depois da troca', 40000);
   await expectVisible(placeholders(daviPage, T.oldKey), `"${T.oldKey}" nas mensagens de antes`);
   await shot(daviPage, 'celular-davi-chave-antiga');
@@ -635,6 +663,9 @@ await step(10, 'Celular: faixa numa linha, desbloquear em folha e o Saiba mais e
   await shot(p, 'celular-desbloquear-folha');
   await unlock(p, anaPass);
   await expectVisible(bodyWith(p, 'Depois da redefinição do Bruno.'), 'mensagens decifradas no celular', 20000);
+  // "Saiba mais" da faixa com 44 px de toque.
+  const more = await b.getByRole('button', { name: 'Saiba mais' }).boundingBox();
+  assert(more && more.height >= 44, `"Saiba mais" com ${more?.height}px de toque no celular`);
   await shot(p, 'celular-conversa');
   await p.locator('.room-header button.e2e-mark').click();
   const info = p.locator('.e2e-modal', { hasText: 'Nem os administradores leem.' });
@@ -681,6 +712,224 @@ await step(11, 'Edição cifrada, /shrug no navegador, desligar a criptografia e
   assert(plain && !plain.e2e, 'mensagem depois de desligar não ficou aberta');
   await expectVisible(bodyWith(brunoPage, 'tudo certo, editado'), 'as cifradas continuam legíveis depois de desligar');
   await shot(anaPage, 'desligada');
+});
+
+// ---------- 12. Quem tem a chave volta depois: a entrega acontece sozinha ----------
+await step(12, 'Davi espera a chave com a Ana fora; a Ana volta, desbloqueia em Minha conta e a chave chega sem "Pedir de novo"', async () => {
+  // Grupo novo criado pela API; a chave nasce no navegador da Ana, que está aberto e desbloqueado (passo 8).
+  group2 = ok('groups.create', await ana.api.call('POST', 'groups.create', { name: `e2e-cripto-${RUN}-volta`, extraData: { encrypted: true } })).group._id;
+  await openRoom(anaPage, group2, 'p');
+  await expectVisible(banner(anaPage).getByText(T.ready), 'faixa pronta no grupo novo', 20000);
+  await send(anaPage, 'Mensagem da Ana antes de sair.');
+  // Ana fecha o navegador antes de o Davi chegar: ninguém com a chave fica com o chat aberto.
+  await anaPage.context().close();
+  anaPage = null;
+  ok('convidar Davi', await ana.api.call('POST', 'groups.invite', { roomId: group2, userId: davi.id }));
+  daviDesk = await open(davi);
+  await openRoom(daviDesk, group2, 'p');
+  await banner(daviDesk).getByRole('button', { name: 'Desbloquear' }).click();
+  await unlock(daviDesk, daviPass);
+  await expectVisible(banner(daviDesk).getByText(T.waiting), 'Davi esperando a chave', 20000);
+  await expectVisible(placeholders(daviDesk, T.waitingMsg), 'mensagem esperando a chave');
+  await banner(daviDesk).getByRole('button', { name: 'Pedir de novo' }).click();
+  await expectVisible(banner(daviDesk).getByRole('button', { name: 'Pedido enviado' }), '"Pedido enviado" depois do toque');
+  await shot(daviDesk, 'davi-esperando-pedido-enviado');
+  // Ana volta e desbloqueia em Minha conta, sem abrir o grupo.
+  anaPage = await open(ana, { url: '/account/security' });
+  const card = anaPage.locator('.e2e-card');
+  await expectVisible(card, 'cartão da criptografia', 15000);
+  await card.getByRole('button', { name: 'Desbloquear' }).click();
+  await unlock(anaPage, anaPass);
+  await expectVisible(card.getByText('Configurada e desbloqueada neste navegador.'), 'cartão pronto');
+  assert(!(await card.locator('.pill').count()), 'pílula "Desbloqueada" repetindo o aviso do cartão');
+  await shot(anaPage, 'minha-conta-desbloqueada');
+  const t0 = Date.now();
+  await expectVisible(bodyWith(daviDesk, 'Mensagem da Ana antes de sair.'), 'Davi recebe a chave sem pedir de novo', 30000);
+  console.log(`     chave entregue ${((Date.now() - t0) / 1000).toFixed(1)} s depois de a Ana desbloquear`);
+  await shot(daviDesk, 'davi-recebeu-sozinho');
+});
+
+// ---------- 13. Fixar, o topo, trocar a chave e editar o grupo ----------
+await step(13, 'Fixada decifrada (também depois de recarregar), marca própria no topo, texto da troca de chave e "Privada" travada', async () => {
+  await openRoom(anaPage, group2, 'p');
+  await expectVisible(bodyWith(anaPage, 'Mensagem da Ana antes de sair.'), 'Ana lê o grupo', 20000);
+  const m = (await history(ana, group2)).find((x) => x.e2e && !x.t);
+  ok('fixar', await ana.api.call('POST', 'chat.pinMessage', { messageId: m._id }));
+  const pin = (page) => page.locator('.room-main .pinned-note', { hasText: 'Mensagem da Ana antes de sair.' });
+  await expectVisible(pin(anaPage), 'citação decifrada na fixada (Ana)', 20000);
+  await expectVisible(pin(daviDesk), 'citação decifrada na fixada (Davi)', 20000);
+  await daviDesk.reload();
+  await expectVisible(pin(daviDesk), 'citação decifrada depois de recarregar', 30000);
+  await shot(daviDesk, 'fixada-decifrada');
+  await shotDark(daviDesk, 'fixada-decifrada-escuro');
+  // A marca da criptografia não é o cadeado do grupo privado.
+  const mark = await anaPage.locator('.room-header button.e2e-mark svg').getAttribute('class');
+  const roomIcon = await anaPage.locator('.room-header .room-icon svg').getAttribute('class');
+  assert(mark && roomIcon && mark !== roomIcon && /shield/.test(mark), `marca igual ao ícone da sala: ${mark} / ${roomIcon}`);
+  await anaPage.locator('.room-header').screenshot({ path: path.join(OUT, `${String(++shotN).padStart(2, '0')}-topo-grupo-criptografado.png`) });
+  // "Gerar chave nova": o uso real, sem mandar trocar quando alguém sai.
+  await roomMenu(anaPage, 'Gerar chave nova');
+  const dlg = anaPage.locator('.modal.confirm', { hasText: 'Gerar uma chave nova?' });
+  await expectVisible(dlg, 'confirmação de chave nova');
+  const text = await dlg.innerText();
+  assert(text.includes('Quem sai da conversa já perde o acesso automaticamente.') && !text.includes('Use se alguém saiu'), `texto da troca manual: ${text}`);
+  await shot(anaPage, 'confirmar-chave-nova');
+  await dlg.getByRole('button', { name: 'Cancelar', exact: true }).click();
+  // Editar o grupo: "Privada" travada enquanto a criptografia está ligada.
+  await anaPage.locator('.room-actions').getByRole('button', { name: 'Informações' }).click();
+  await anaPage.getByRole('button', { name: 'Editar', exact: true }).click();
+  const priv = anaPage.locator('label.toggle', { hasText: 'Privada' });
+  await expectVisible(priv, 'opção Privada');
+  assert(await priv.getByRole('switch').isDisabled(), '"Privada" habilitada num grupo criptografado');
+  await expectVisible(priv.getByText('Desligue a criptografia para tornar o grupo público.'), 'dica da opção Privada');
+  await shot(anaPage, 'editar-grupo-privada-travada');
+  await anaPage.locator('label.toggle', { hasText: 'Criptografia de ponta a ponta' }).click();
+  assert(!(await priv.getByRole('switch').isDisabled()), '"Privada" continua travada depois de desligar a criptografia (sem salvar)');
+  await openRoom(anaPage, group2, 'p');
+});
+
+// ---------- 14. Arquivo e voz no grupo; o painel Arquivos filtra pelo nome decifrado ----------
+await step(14, 'Arquivo e voz no grupo: o painel Arquivos mostra e filtra pelo nome decifrado; a voz toca com um toque', async () => {
+  await anaPage.locator('.room-main .composer input[type="file"]').setInputFiles({ name: 'relatorio-trimestral.txt', mimeType: 'text/plain', buffer: Buffer.from('Relatório do trimestre.\n') });
+  const dlg = anaPage.locator('.modal', { hasText: 'Enviar arquivo' });
+  await expectVisible(dlg, 'confirmação do arquivo');
+  await dlg.getByRole('button', { name: 'Enviar', exact: true }).click();
+  await expectVisible(anaPage.locator('.room-main .att-file', { hasText: 'relatorio-trimestral.txt' }), 'arquivo na Ana', 20000);
+  await anaPage.getByRole('button', { name: 'Gravar mensagem de voz' }).click();
+  await expectVisible(anaPage.getByRole('button', { name: 'Enviar áudio' }), 'gravação travada');
+  await sleep(2000);
+  await anaPage.getByRole('button', { name: 'Enviar áudio' }).click();
+  const voice = daviDesk.locator('.room-main .att-file', { hasText: 'Mensagem de voz' }).last();
+  await expectVisible(voice, 'mensagem de voz no Davi', 20000);
+  await shotDark(daviDesk, 'voz-cartao-escuro');
+  await voice.click();
+  const player = daviDesk.locator('.room-main .att-voice').last();
+  await expectVisible(player, 'player de voz', 20000);
+  await waitFor('voz tocando com um toque', async () => (await player.locator('audio').first().evaluate((a) => !a.paused)) || null, 10000);
+  await shotDark(daviDesk, 'voz-tocando-escuro');
+  await daviDesk.locator('.room-actions button[aria-label="Mais"]').click();
+  await daviDesk.getByRole('menuitem', { name: 'Arquivos' }).click().catch(async () => {
+    await daviDesk.keyboard.press('Escape');
+    await daviDesk.locator('.room-actions button[title="Arquivos"]').click();
+  });
+  const rows = daviDesk.locator('.panel-files .file-row');
+  await expectVisible(daviDesk.locator('.panel-files .file-row-name', { hasText: 'relatorio-trimestral.txt' }), 'nome decifrado no painel', 20000);
+  await expectVisible(daviDesk.getByText('A conversa é criptografada: o filtro procura só nos 100 arquivos mais recentes.'), 'aviso do filtro');
+  await shot(daviDesk, 'painel-arquivos-grupo');
+  await daviDesk.locator('.panel-files input').first().fill('trimestral');
+  await waitFor('filtro por nome', async () => ((await rows.count()) === 1 ? true : null));
+  await expectVisible(daviDesk.locator('.panel-files .file-row-name', { hasText: 'relatorio-trimestral.txt' }), 'filtro por nome');
+  await daviDesk.locator('.panel-files input').first().fill('nada-disso');
+  await expectVisible(daviDesk.locator('.panel-files', { hasText: 'Nada encontrado para "nada-disso"' }), 'filtro sem resultado');
+  await daviDesk.locator('.panel-files input').first().fill('');
+  await daviDesk.locator('.panel-files .panel-filters select').selectOption('audio/*');
+  await waitFor('filtro Áudios', async () => ((await rows.count()) === 1 ? true : null));
+  assert(!(await daviDesk.locator('.panel-files .file-row-name', { hasText: 'relatorio' }).count()), 'o texto apareceu no filtro Áudios');
+  await shotDark(daviDesk, 'painel-arquivos-audios-escuro');
+  await daviDesk.goto(`${CHAT_URL}/group/${group2}`);
+});
+
+// ---------- 15. Sem configurar; senha própria; muitas senhas erradas ----------
+await step(15, 'Quem não configurou vê "Configure" nas mensagens; senha própria valida ao sair do campo; muitas senhas erradas contam o tempo', async () => {
+  ok('convidar op2', await ana.api.call('POST', 'groups.invite', { roomId: group2, userId: op2.id }));
+  const p = await open(op2, { scheme: 'dark' });
+  await openRoom(p, group2, 'p');
+  await expectVisible(banner(p).getByText(T.none), 'faixa "configure"');
+  await expectVisible(placeholders(p, T.noneMsg), `"${T.noneMsg}" nas mensagens`, 20000);
+  assert(!(await placeholders(p, T.lockedMsg).count()), 'mensagem pedindo para desbloquear sem nada configurado');
+  await shot(p, 'sem-configurar-escuro');
+  await banner(p).getByRole('button', { name: 'Configurar' }).click();
+  const m = e2eModal(p, 'Configurar a criptografia');
+  await expectVisible(m, 'Configurar');
+  await m.getByRole('button', { name: 'Prefiro escolher a minha senha' }).click();
+  await expectVisible(m.getByText(T.noRecovery), 'aviso de que a senha não se recupera');
+  await m.getByLabel('Sua senha').pressSequentially('curta');
+  await sleep(300);
+  assert(!(await m.getByText('A senha precisa ter pelo menos 12 caracteres.').count()), 'erro durante a digitação');
+  await shot(p, 'senha-propria-digitando-escuro');
+  await m.getByLabel('Repita a senha').click();
+  await expectVisible(m.getByText('A senha precisa ter pelo menos 12 caracteres.'), 'erro ao sair do campo');
+  await shot(p, 'senha-propria-ao-sair-escuro');
+  await visibleButton(m, 'Cancelar').click();
+  await p.context().close();
+
+  // Davi num navegador novo: cinco senhas erradas.
+  const d = await open(davi);
+  await openRoom(d, group2, 'p');
+  await banner(d).getByRole('button', { name: 'Desbloquear' }).click();
+  const u = e2eModal(d, 'Desbloquear a criptografia');
+  await expectVisible(u, 'Desbloquear');
+  const field = u.getByLabel('Senha da criptografia');
+  const go = visibleButton(u, 'Desbloquear');
+  for (let i = 0; i < 5; i++) {
+    await field.fill(`AAAAA-BBBBB-CCCCC-DDDDD-EEEE${i}`);
+    await go.click();
+    await waitFor('resposta da senha errada', async () => ((await u.getByText(/Senha incorreta\.|Tente de novo em/).count()) ? true : null), 30000);
+  }
+  await expectVisible(u.getByText(/Muitas tentativas\. Tente de novo em \d+ s\./), 'contagem regressiva');
+  const first = await u.getByText(/Tente de novo em/).innerText();
+  await field.fill(daviPass);
+  assert(await go.isDisabled(), '"Desbloquear" habilitado durante a espera');
+  await shot(d, 'muitas-tentativas-contagem');
+  await sleep(2200);
+  const later = await u.getByText(/Tente de novo em/).innerText();
+  assert(first !== later, `a contagem não andou: ${first} / ${later}`);
+  await waitFor('fim da espera', async () => ((await u.getByText(/Tente de novo em|Muitas tentativas/).count()) === 0 ? true : null), 40000);
+  assert(!(await go.isDisabled()), '"Desbloquear" travado depois da espera');
+  await shot(d, 'muitas-tentativas-depois');
+  await go.click();
+  await u.waitFor({ state: 'detached', timeout: 30000 });
+  await expectVisible(bodyWith(d, 'Mensagem da Ana antes de sair.'), 'Davi lê depois da espera', 20000);
+  await d.context().close();
+});
+
+// ---------- 16. Administrador redefine: botão travado sem chaves e o motivo na tela de entrar ----------
+await step(16, 'Administrador: "Criptografia não configurada" travado; redefinir o Davi leva o motivo à tela de entrar e à configuração', async () => {
+  const ctx = await browser.newContext({ ...DESK, colorScheme: 'light', locale: 'pt-BR', timezoneId: 'America/Sao_Paulo' });
+  contexts.push(ctx);
+  const a = await ctx.newPage();
+  a.on('pageerror', (e) => problems.push(`admin pageerror: ${e.message}`));
+  await a.goto(`${CHAT_URL}/login`);
+  await a.fill('form input >> nth=0', lib.ADMIN_USER);
+  await a.fill('input[type="password"]', lib.ADMIN_PASSWORD);
+  await a.click('button[type="submit"]');
+  await a.waitForSelector('.sidebar, .tabbar, .layout', { timeout: 30000 });
+  const security = async (who) => {
+    await a.goto(`${CHAT_URL}/admin/users/edit/${encodeURIComponent(who.id)}`);
+    await a.locator('[role="tab"]', { hasText: 'Segurança' }).first().click();
+  };
+  await security(op2);
+  const none = a.getByRole('button', { name: 'Criptografia não configurada' });
+  await expectVisible(none, 'botão travado para quem não configurou', 15000);
+  assert(await none.isDisabled(), '"Criptografia não configurada" habilitado');
+  await shot(a, 'admin-sem-criptografia');
+  await security(davi);
+  // A aba do Davi perde a sessão: a primeira leitura depois da saída forçada recebe 401.
+  expected.add('401 /api/v1/me');
+  expected.add('401 /api/v1/e2e.fetchRoomKeys'); // a troca de chave pedida pela redefinição chega junto com a saída
+  const reset = a.getByRole('button', { name: 'Redefinir criptografia' });
+  await expectVisible(reset, 'Redefinir criptografia', 15000);
+  await reset.click();
+  await confirm(a, 'Redefinir');
+  await expectVisible(a.getByRole('button', { name: 'Criptografia não configurada' }), 'botão travado depois de redefinir', 15000);
+  // A aba do Davi cai para a tela de entrar, com o motivo.
+  await daviDesk.waitForURL(/\/login/, { timeout: 15000 });
+  await expectVisible(daviDesk.getByText(T.resetByAdmin), 'motivo na tela de entrar', 15000);
+  await shot(daviDesk, 'davi-entrar-motivo');
+  await daviDesk.fill('form input >> nth=0', davi.username);
+  await daviDesk.fill('input[type="password"]', PASSWORD);
+  await daviDesk.click('button[type="submit"]');
+  await daviDesk.waitForSelector('.sidebar, .tabbar, .layout', { timeout: 30000 });
+  await openRoom(daviDesk, group2, 'p');
+  await expectVisible(banner(daviDesk).getByText(T.resetByAdmin), 'motivo na faixa da conversa');
+  await shotDark(daviDesk, 'davi-faixa-redefinido-escuro');
+  await banner(daviDesk).getByRole('button', { name: 'Configurar' }).click();
+  const m = e2eModal(daviDesk, 'Configurar a criptografia');
+  await expectVisible(m.getByText(T.resetByAdmin), 'motivo na configuração');
+  await shot(daviDesk, 'davi-configurar-redefinido');
+  await setupGenerated(daviDesk);
+  await waitFor('aviso some depois de configurar', async () => ((await daviDesk.getByText(T.resetByAdmin).count()) === 0 ? true : null), 15000);
+  await a.close();
 });
 
 // ---------- Fim ----------

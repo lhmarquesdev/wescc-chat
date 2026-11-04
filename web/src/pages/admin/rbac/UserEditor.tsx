@@ -303,6 +303,8 @@ function Security({
   const sessions = useAsync(() => (can.sessions ? api.get('sessions.list.all', { userId: id, count: 50 }).then((r) => r.sessions as any[]) : Promise.resolve([] as any[])), [id, can.sessions]);
   const [twoFactor, setTwoFactor] = useState(!!user.twoFactorEnabled);
   const [avatar, setAvatar] = useState(!!user.avatarETag);
+  // Sem chaves da criptografia não há o que redefinir: o botão trava como o do 2FA.
+  const [e2eKeys, setE2eKeys] = useState(user.e2eConfigured !== false);
   const list = sessions.data ?? [];
   const logout = async () => {
     const yes = await confirmDialog({ title: `Encerrar as sessões de @${user.username}?`, body: 'A pessoa sai da conta em todos os dispositivos e precisa entrar de novo.', confirmLabel: 'Encerrar sessões', danger: true });
@@ -351,19 +353,23 @@ function Security({
             {can.e2e && !self && (
               <button
                 className="btn small"
-                disabled={readOnly}
+                disabled={readOnly || !e2eKeys}
                 onClick={async () => {
                   const ok = await confirmDialog({
                     title: `Redefinir a criptografia de ${user.name || user.username}?`,
-                    body: 'A pessoa sai de todas as sessões, cria uma senha nova no próximo acesso e deixa de ler as mensagens criptografadas antigas.',
+                    body: 'A pessoa sai de todas as sessões, cria uma senha nova no próximo acesso e deixa de ler as mensagens criptografadas antigas. Ao entrar de novo, ela vê que a redefinição foi feita por um administrador.',
                     confirmLabel: 'Redefinir',
                     danger: true,
                   });
-                  if (ok) api.post('users.resetE2EKey', { userId: id }).then(() => rbacOk('Criptografia redefinida.')).catch(fail);
+                  if (ok)
+                    api
+                      .post('users.resetE2EKey', { userId: id })
+                      .then(() => (rbacOk('Criptografia redefinida.'), setE2eKeys(false)))
+                      .catch(fail);
                 }}
               >
                 <Icon name="e2e-key" />
-                Redefinir criptografia
+                {e2eKeys ? 'Redefinir criptografia' : 'Criptografia não configurada'}
               </button>
             )}
           </div>

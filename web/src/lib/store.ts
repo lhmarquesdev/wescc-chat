@@ -13,8 +13,9 @@ export interface ToastItem {
   key?: string; // um aviso por chave: o novo troca o anterior, e dismissToastKey tira (ex.: a falha de uma agendada)
 }
 
-// e2eKeys: impressão da chave pública da criptografia de ponta a ponta (null sem chaves).
-export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean; e2eKeys?: string | null };
+// e2eKeys: impressão da chave pública da criptografia de ponta a ponta (null sem chaves). e2eResetByAdmin: um
+// administrador redefiniu a criptografia e a pessoa ainda não criou a senha nova.
+export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean; e2eKeys?: string | null; e2eResetByAdmin?: boolean };
 
 interface RoomMessages {
   list: Message[];

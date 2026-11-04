@@ -1,5 +1,5 @@
 // Minha conta › Segurança: a senha da criptografia de ponta a ponta neste navegador.
-import { useE2e } from '../../lib/e2e/client';
+import { E2E_UI, useE2e } from '../../lib/e2e/client';
 import { useSetting, useStore } from '../../lib/store';
 import { Icon } from '../Icon';
 import { openE2eDialog } from './E2eDialogs';
@@ -9,6 +9,7 @@ export function E2eCard() {
   const on = useSetting<boolean>('E2E_Enable');
   const hasKeys = useStore((s) => !!s.me?.e2eKeys);
   const status = useE2e((s) => s.status);
+  const resetByAdmin = useStore((s) => !!s.me?.e2eResetByAdmin);
   if (!on && !hasKeys) return null;
   return (
     <div className="card form e2e-card">
@@ -17,7 +18,6 @@ export function E2eCard() {
           <h2>Criptografia de ponta a ponta</h2>
           <p className="card-desc">A senha que abre as conversas criptografadas.</p>
         </div>
-        {status === 'ready' && <span className="pill ok dot">Desbloqueada</span>}
       </div>
       {status === 'unsupported' ? (
         <div className="callout warn">
@@ -54,7 +54,14 @@ export function E2eCard() {
         </>
       ) : (
         <>
-          <p className="muted">Você ainda não configurou. A senha é pedida na primeira conversa criptografada.</p>
+          {resetByAdmin ? (
+            <div className="callout warn">
+              <Icon name="e2e-warning" />
+              <span>{E2E_UI.resetByAdmin}</span>
+            </div>
+          ) : (
+            <p className="muted">Você ainda não configurou. A senha é pedida na primeira conversa criptografada.</p>
+          )}
           <div className="form-actions">
             <button type="button" className="btn primary" onClick={() => void openE2eDialog('setup')}>
               Configurar agora

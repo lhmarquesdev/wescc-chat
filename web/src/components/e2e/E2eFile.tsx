@@ -14,7 +14,8 @@ import { useIsPhone } from '../overlay';
 import { VideoMessage } from '../VideoMessage';
 import { VoicePlayer } from '../VoicePlayer';
 
-type State = { st: 'idle' | 'loading' | 'error' | 'gone' } | { st: 'ready'; url: string };
+// play: decifrado por um toque em áudio ou vídeo, que já começa a tocar.
+type State = { st: 'idle' | 'loading' | 'error' | 'gone' } | { st: 'ready'; url: string; play?: boolean };
 
 async function fetchAndDecrypt(m: Message, fileId: string, ref: E2EFileRef): Promise<Blob> {
   const c = getCredentials();
@@ -47,14 +48,14 @@ export function E2eFile({ m, file }: { m: Message; file: E2EFileRef }) {
   const saveAfter = useRef(false);
   const link = useRef<HTMLAnchorElement>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (play = false) => {
     if (!fileId) return setState({ st: 'gone' });
     setState({ st: 'loading' });
     try {
       const blob = await fetchAndDecrypt(m, fileId, file);
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
       urlRef.current = URL.createObjectURL(blob);
-      setState({ st: 'ready', url: urlRef.current });
+      setState({ st: 'ready', url: urlRef.current, play });
     } catch (e) {
       setState({ st: (e as Error).message === 'gone' ? 'gone' : 'error' });
     }
@@ -93,7 +94,10 @@ export function E2eFile({ m, file }: { m: Message; file: E2EFileRef }) {
   );
 
   const meta = [file.name.includes('.') ? file.name.split('.').pop()!.toUpperCase() : '', formatBytes(file.size)].filter(Boolean).join(' · ');
-  const tapText = phone ? 'Toque para abrir' : 'Clique para abrir';
+  // Áudio e vídeo: o toque que decifra também toca (o mesmo gesto do "ouvir").
+  const tapText =
+    kind === 'audio' ? (phone ? 'Toque para ouvir' : 'Clique para ouvir') : kind === 'video' ? (phone ? 'Toque para assistir' : 'Clique para assistir') : phone ? 'Toque para abrir' : 'Clique para abrir';
+
 
   if (state.st === 'gone')
     return (
@@ -107,7 +111,7 @@ export function E2eFile({ m, file }: { m: Message; file: E2EFileRef }) {
       <div className="att e2e-file-note" ref={box}>
         <Icon name="e2e-warning" size={14} />
         <span>Não foi possível decifrar o arquivo.</span>
-        <button type="button" className="link" onClick={() => void load()}>
+        <button type="button" className="link" onClick={() => void load(kind === 'audio' || kind === 'video')}>
           Tentar de novo
         </button>
       </div>
@@ -138,17 +142,18 @@ export function E2eFile({ m, file }: { m: Message; file: E2EFileRef }) {
     );
   }
 
+  const autoPlay = state.st === 'ready' && !!state.play;
   if (kind === 'audio' && state.st === 'ready')
     return (
       <div className="att att-voice">
-        <VoicePlayer src={state.url} duration={file.duration} waveform={file.waveform} title={file.name} voice={!!file.voice} />
+        <VoicePlayer src={state.url} duration={file.duration} waveform={file.waveform} title={file.name} voice={!!file.voice} autoPlay={autoPlay} />
       </div>
     );
   if (kind === 'video' && state.st === 'ready')
     return file.video ? (
-      <VideoMessage src={state.url} duration={file.duration} />
+      <VideoMessage src={state.url} duration={file.duration} autoPlay={autoPlay} />
     ) : (
-      <video className="att-video" src={state.url} controls preload="metadata" />
+      <video className="att-video" src={state.url} controls preload="metadata" autoPlay={autoPlay} />
     );
 
   const label = file.voice ? 'Mensagem de voz' : file.video ? 'Mensagem de vídeo' : file.name;
@@ -162,16 +167,22 @@ export function E2eFile({ m, file }: { m: Message; file: E2EFileRef }) {
         href={ready ?? '#'}
         download={ready ? file.name : undefined}
         aria-busy={state.st === 'loading' || undefined}
-        title={ready ? `Baixar ${file.name}` : `Abrir ${label}`}
+        title={ready ? `Baixar ${file.name}` : kind === 'audio' ? `Ouvir ${label}` : kind === 'video' ? `Assistir ${label}` : `Abrir ${label}`}
         onClick={(e) => {
           if (ready) return;
           e.preventDefault();
           if (state.st === 'loading') return;
           saveAfter.current = kind === 'file';
-          void load();
+          void load(kind === 'audio' || kind === 'video');
         }}
       >
-        <FileTile name={file.name} mime={file.type} />
+        {file.voice ? (
+          <span className="att-tile" data-kind="audio" aria-hidden="true">
+            <Icon name="mic" size={18} />
+          </span>
+        ) : (
+          <FileTile name={file.name} mime={file.type} />
+        )}
         <span className="att-file-meta">
           <strong className="att-file-name">{label}</strong>
           <span className="att-file-size">
@@ -179,7 +190,7 @@ export function E2eFile({ m, file }: { m: Message; file: E2EFileRef }) {
           </span>
         </span>
         <span className="att-file-dl" aria-hidden="true">
-          <Icon name={kind === 'file' ? 'download' : 'encrypted'} size={16} />
+          <Icon name={kind === 'file' ? 'download' : 'voice-play'} size={16} />
         </span>
       </a>
     </div>

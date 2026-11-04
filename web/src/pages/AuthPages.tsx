@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { OAuthProviderPublic, OAuthProviderType } from '@shared/index';
 import { api, ApiError, errorMessage, getCredentials } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
+import { clearLogoutReason, LOGOUT_REASON_TEXT, peekLogoutReason } from '../lib/logoutReason';
 import { login, loginWithOAuth, loginWithSaml } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
 import { BrandMark, ProviderIcon } from '../components/BrandIcons';
@@ -119,6 +120,9 @@ export function LoginPage() {
   const passwordReset = useSetting<boolean>('Accounts_PasswordReset');
   const [providers, setProviders] = useState<OAuthProviderPublic[]>([]);
   const next = safeNext(params.get('next'));
+  // Saída forçada com motivo (um administrador redefiniu a criptografia): o aviso fica até a pessoa entrar.
+  const [reason] = useState(peekLogoutReason);
+  useEffect(() => clearLogoutReason(), []);
 
   useEffect(() => {
     void api
@@ -172,6 +176,12 @@ export function LoginPage() {
       subtitle={needCode ? 'Digite o código do seu aplicativo autenticador.' : ldap ? 'Use seu usuário de rede ou e-mail corporativo.' : 'Use seu usuário ou e-mail corporativo.'}
     >
       <form onSubmit={submit} className="form auth-form">
+        {reason && !error && (
+          <div className="callout info" role="status">
+            <Icon name="e2e-key" />
+            <span>{LOGOUT_REASON_TEXT[reason]}</span>
+          </div>
+        )}
         {error && <FormError>{error}</FormError>}
         {!needCode ? (
           <>

@@ -28,7 +28,7 @@ import { clearKeystore, deleteKey, loadKey, saveKey } from './keystore';
 
 export type E2eStatus = 'loading' | 'unsupported' | 'none' | 'locked' | 'ready';
 export type E2eRoomState = 'ready' | 'creating' | 'waiting' | 'rotating' | 'error';
-export type E2eViewState = 'ok' | 'pending' | 'waiting' | 'locked' | 'failed' | 'old-key';
+export type E2eViewState = 'ok' | 'pending' | 'waiting' | 'none' | 'unsupported' | 'locked' | 'failed' | 'old-key';
 export interface E2eView {
   state: E2eViewState;
   content?: E2EContent;
@@ -55,11 +55,19 @@ export const E2E_UI = {
   error: 'Não foi possível preparar a criptografia desta conversa. Tente de novo.',
   wrongPassword: 'Senha incorreta.',
   tooMany: 'Muitas tentativas. Espere 30 segundos.',
+  asked: 'Pedido enviado',
+  // Um administrador redefiniu a criptografia da pessoa (me.e2eResetByAdmin, até ela criar a senha nova).
+  resetByAdmin: 'Um administrador redefiniu sua criptografia. Configure uma senha nova; as mensagens criptografadas antigas não podem mais ser lidas.',
 } as const;
+
+// Muitas senhas erradas: quanto falta para tentar de novo.
+export const tooManyIn = (seconds: number) => `Muitas tentativas. Tente de novo em ${seconds} s.`;
 
 export const E2E_PLACEHOLDER: Record<Exclude<E2eViewState, 'ok'>, string> = {
   pending: 'Mensagem criptografada',
   waiting: 'Mensagem criptografada. Esperando a chave.',
+  none: 'Mensagem criptografada. Configure a criptografia para ler.',
+  unsupported: 'Mensagem criptografada. Abra o chat em https para ler.',
   locked: 'Mensagem criptografada. Desbloqueie para ler.',
   'old-key': 'Mensagem criptografada com uma chave que você não tem.',
   failed: 'Não foi possível decifrar esta mensagem.',
@@ -172,7 +180,12 @@ export async function initE2e(me: { _id: string; e2eKeys?: string | null }) {
     if (privateKey) forgetMemory();
     return useE2e.setState({ status: 'none' });
   }
-  if (privateKey && myPublic && (await fingerprint(myPublic.text)) === me.e2eKeys) return useE2e.setState({ status: 'ready' });
+  if (privateKey && myPublic && (await fingerprint(myPublic.text)) === me.e2eKeys) {
+    // Reconectou: o que pediram durante a queda não chegou aqui.
+    useE2e.setState({ status: 'ready' });
+    void handOut();
+    return;
+  }
   await restoreFromStore(me.e2eKeys);
 }
 
@@ -190,6 +203,7 @@ async function restoreFromStore(expected?: string) {
     useE2e.setState({ status: 'ready' });
     bump();
     void requestMissing();
+    void handOut();
     return;
   }
   // Chave de antes de uma redefinição (ou de outra pessoa): sai do navegador.
@@ -216,6 +230,7 @@ async function becomeReady(priv: CryptoKey, pub: string, fp: string) {
   tell('unlocked');
   bump();
   void requestMissing();
+  void handOut();
 }
 
 // ---------- Senha ----------
@@ -418,14 +433,40 @@ async function askForKey(rid: string, force = false) {
   await api.post('e2e.requestSubscriptionKeys', { rid }).catch(() => {});
 }
 
-export async function askAgain(rid: string) {
-  await askForKey(rid, true);
+// "Pedir de novo" (sem a espera de 30 s) e o pedido repetido de quem está esperando com a conversa aberta.
+export async function askAgain(rid: string, opts: { force?: boolean } = {}) {
+  await askForKey(rid, opts.force ?? true);
 }
 
 // Ao desbloquear: as conversas sem a chave atual pedem de novo (o servidor escolhe até 50).
 async function requestMissing() {
   await sleep(1500);
   if (status() === 'ready') await api.post('e2e.requestSubscriptionKeys', {}).catch(() => {});
+}
+
+// Ao ficar pronta (desbloquear, configurar, reconectar): entrega a chave a quem pediu enquanto esta pessoa estava fora
+// e faz as trocas pendentes. Sem isso, quem esperava só recebia depois de pedir de novo. Uma aba por navegador, no
+// máximo uma vez por minuto; a espera de 2 a 5 s evita que todos que voltam juntos entreguem juntos.
+let handOutAt = 0;
+async function handOut() {
+  if (Date.now() - handOutAt < 60_000) return;
+  handOutAt = Date.now();
+  const my = epoch;
+  await sleep(2000 + Math.random() * 3000);
+  if (my !== epoch || status() !== 'ready') return;
+  await exclusive('wescc-e2e-handout', async () => {
+    const r = await api.get<{ rooms: { rid: string; keyID: string; rotate: boolean }[] }>('e2e.fetchRoomsToProvide');
+    for (const x of r.rooms) {
+      if (my !== epoch || status() !== 'ready') return;
+      if (!useStore.getState().subscriptions[x.rid]) continue;
+      await loadRoomKeys(x.rid, current.get(x.rid)?.keyID !== x.keyID || current.get(x.rid)?.rotate !== x.rotate).catch(() => {});
+      if (!keyOf(x.rid, x.keyID)) continue;
+      if (x.rotate) {
+        await rotate(x.rid, { manual: false, wait: false }).catch(() => {});
+        if (useE2e.getState().rooms[x.rid]) setRoom(x.rid, holdsCurrent(x.rid) ? 'ready' : 'waiting');
+      } else await provide(x.rid, x.keyID, { wait: false });
+    }
+  }).catch(() => {});
 }
 
 // Uma aba por navegador faz o trabalho de entregar e trocar chaves.
@@ -571,6 +612,8 @@ export function viewOf(m: Message): E2eView | null {
   if (hit) return hit === 'failed' ? { state: 'failed' } : { state: 'ok', content: hit };
   const st = status();
   if (st === 'loading') return { state: 'pending' };
+  // Sem configurar não há o que desbloquear: o aviso diz o mesmo que a faixa da conversa.
+  if (st === 'none' || st === 'unsupported') return { state: st };
   if (st !== 'ready') return { state: 'locked' };
   if (!signerOk(m, env)) return { state: 'failed' };
   const key = keyOf(m.rid, env.kid);
@@ -611,6 +654,11 @@ export function contentOf(m: Message): E2EContent | null {
   return v?.state === 'ok' ? v.content! : null;
 }
 
+// Uma linha do conteúdo decifrado (aviso, mensagem fixada): o texto ou o arquivo.
+export function contentPreview(c: E2EContent): string {
+  return c.msg || (c.file ? (c.file.voice ? '🎤 Mensagem de voz' : c.file.video ? '🎬 Mensagem de vídeo' : `📎 ${c.file.name}`) : '');
+}
+
 // Aviso com o chat aberto: o texto real quando dá para decifrar (senão fica o do servidor).
 export async function decryptNotification(ev: { rid: string; messageId: string; e2e?: { envelope: E2EEnvelope; prefix: string } }): Promise<string | null> {
   if (!ev.e2e || status() !== 'ready') return null;
@@ -620,8 +668,7 @@ export async function decryptNotification(ev: { rid: string; messageId: string; 
     if (!key) return null;
     const c = await decryptContent(key, ev.e2e.envelope, ev.rid, ev.messageId);
     remember(`${ev.messageId}|${ev.e2e.envelope.iv}`, c);
-    const text = c.msg || (c.file ? (c.file.voice ? '🎤 Mensagem de voz' : c.file.video ? '🎬 Mensagem de vídeo' : `📎 ${c.file.name}`) : '');
-    return ev.e2e.prefix + text.slice(0, 300);
+    return ev.e2e.prefix + contentPreview(c).slice(0, 300);
   } catch {
     return null;
   }

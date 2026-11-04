@@ -433,6 +433,31 @@ describe('criptografia: chave da sala', () => {
     }
   });
 
+  it('12b. quem tem a chave e acabou de desbloquear vê onde entregar ou trocar', async () => {
+    const ana = await person();
+    const bruno = await person();
+    const room = await encryptedGroup(ana, [bruno]);
+    expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, ana)).rooms).toEqual([]);
+    // Carla chega com chaves enquanto ninguém com a chave está com o chat aberto.
+    const carla = await person();
+    await api('POST', 'groups.invite', { roomId: room.rid, userId: carla.userId }, ana);
+    const pending = { rid: room.rid, keyID: room.keyID, rotate: false };
+    expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, ana)).rooms).toEqual([pending]);
+    expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, bruno)).rooms).toEqual([pending]);
+    // Quem não tem a chave (Carla) e quem não participa não veem nada.
+    expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, carla)).rooms).toEqual([]);
+    expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, await person())).rooms).toEqual([]);
+    // Sem chaves da criptografia (ainda não configurou) também não conta.
+    const semChaves = await newUser(A);
+    await api('POST', 'groups.invite', { roomId: room.rid, userId: semChaves.userId }, ana);
+    await giveKey(room, ana, [carla]);
+    expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, ana)).rooms).toEqual([]);
+    // Bruno sai: a sala pede chave nova, e quem ficou com a chave vê a troca.
+    await api('POST', 'rooms.leave', { roomId: room.rid }, bruno);
+    expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, ana)).rooms).toEqual([{ ...pending, rotate: true }]);
+    expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, bruno)).rooms).toEqual([]);
+  });
+
   it('13. recusar uma chave que não confere: apaga, registra e pede de novo', async () => {
     resetKeyRequestWindows();
     const owner = await person();
@@ -707,7 +732,8 @@ describe('criptografia: arquivos', () => {
       expect(res.status).toBe(200);
       expect(Buffer.from(await res.arrayBuffer()).equals(Buffer.from(data))).toBe(true);
       const list = await api('GET', 'groups.files', { roomId: room.rid }, ana);
-      expect(list.files[0]).toMatchObject({ _id: f._id, e2e: true });
+      // O painel Arquivos decifra o nome e o tipo pela mensagem (o mesmo conteúdo cifrado do histórico).
+      expect(list.files[0]).toMatchObject({ _id: f._id, e2e: true, messageId: mid, e2eMessage: { e2e, u: { _id: ana.userId } } });
       expect(hooked.some((h) => h.id === mid)).toBe(false);
       // Reenvio do mesmo arquivo (a rede caiu depois de gravar): a mesma mensagem, e a cópia nova não fica solta.
       const again = await api('POST', `rooms.upload/${room.rid}`, e2eForm({ _id: mid, e2e: JSON.stringify(e2e), e2eMentions: '' }, new Uint8Array(data), 'application/pdf', 'relatório.pdf'), ana);
