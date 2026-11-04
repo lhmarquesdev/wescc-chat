@@ -348,9 +348,14 @@ function CustomStatusItems({ chosen, close }: { chosen: string | null; close: ()
 
 // Status de base ou personalizado. A marca no menu muda já (as outras abas recebem pelo evento "user").
 async function setStatus(choice: { status?: UserStatus; statusId?: string }) {
+  const sent = useStore.getState().me;
+  const before = { statusDefault: sent?.statusDefault, statusCustom: sent?.statusCustom ?? null };
   try {
     await api.post('users.setStatus', choice);
     const st = useStore.getState();
+    // O evento "user" chegou antes da resposta (desta escolha ou de uma mais nova, de outra aba ou da API): ele já diz
+    // o que vale, e a marca local não pode passar por cima de uma escolha mais nova.
+    if (st.me?.statusDefault !== before.statusDefault || (st.me?.statusCustom ?? null) !== before.statusCustom) return;
     const custom = choice.statusId ? st.userStatuses.find((x) => x._id === choice.statusId) : undefined;
     const statusDefault = custom?.statusType ?? choice.status;
     if (st.me && statusDefault) st.setMe({ ...st.me, statusDefault, statusCustom: custom?._id ?? null });
