@@ -1,13 +1,13 @@
 import type { Attachment, Message, MessageFile } from '@shared/index';
-import { encryptedContent, FORWARD_MAX_TARGETS, type MessageForward } from '@shared/messages';
+import { encryptedContent, FORWARD_MAX_TARGETS, FORWARD_PER_MINUTE, type MessageForward } from '@shared/messages';
 import type { MessageSticker } from '@shared/stickers';
-import { many } from '../db/pool';
+import { many, one } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { isPrivateRoom } from './direct';
-import { filterBadWords, getMessageRow, sanitizeAttachments, sendMessage } from './messages';
-import { hasPermission } from './permissions';
-import { canAccessRoom, createDirect, getRoom } from './rooms';
+import { canPostInRoom, filterBadWords, getMessageRow, MENTION_RE, sanitizeAttachments, sendMessage } from './messages';
+import { getUserRoles, hasPermission, rolesHavePermission } from './permissions';
+import { canAccessRoom, createDirect, getRoom, getSubscriptionRow } from './rooms';
 import { getSetting } from './settings';
 import { typeAllowed } from './uploads';
 import type { Ctx } from './users';
@@ -46,6 +46,22 @@ function uniqueTargets(list: unknown): ForwardTarget[] {
   }
   if (!out.length || out.length > FORWARD_MAX_TARGETS) throw badRequest('error-invalid-params', `Escolha de 1 a ${FORWARD_MAX_TARGETS} destinos.`);
   return out;
+}
+
+// Uma chamada publica em até 10 conversas: sem um limite próprio, encaminhar multiplicaria o limite da API. Conta cada
+// destino, por pessoa, em janela deslizante (nesta instância); desligado junto com o limitador da API.
+const forwardHits = new Map<string, number[]>();
+function countForward(userId: string) {
+  if (!getSetting('API_Enable_Rate_Limiter')) return;
+  const now = Date.now();
+  const list = (forwardHits.get(userId) ?? []).filter((t) => now - t < 60_000);
+  if (list.length >= FORWARD_PER_MINUTE) {
+    forwardHits.set(userId, list);
+    throw new ApiError(429, 'error-forward-too-fast', 'Muitos encaminhamentos seguidos. Espere um minuto e tente de novo.');
+  }
+  list.push(now);
+  forwardHits.set(userId, list);
+  if (forwardHits.size > 10_000) for (const [k, v] of forwardHits) if (!v.some((t) => now - t < 60_000)) forwardHits.delete(k);
 }
 
 const fileIdOf = (a: Attachment) => (a.title_link ? FILE_LINK_RE.exec(a.title_link)?.[1] ?? null : null);
@@ -115,6 +131,34 @@ export async function forwardMessage(ctx: Ctx, input: { messageId: string; targe
   }
   if (comment) origin.comment = comment;
 
+  // ---------- Regras do destino que dependem só do tipo da conversa ----------
+  const fileRules = (room: { t: string }) => {
+    if (!usedIds.length) return;
+    if (!getSetting('FileUpload_Enabled')) throw new ApiError(403, 'error-forward-files-disabled', 'O envio de arquivos está desativado.');
+    if (room.t === 'd' && !getSetting('FileUpload_Enabled_Direct')) throw new ApiError(403, 'error-forward-files-direct', 'Arquivos não podem ser enviados em mensagens diretas.');
+    if (types.some((t) => !typeAllowed(t))) throw badRequest('error-invalid-file-type', 'Tipo de arquivo não permitido.');
+  };
+  const stickerRules = async (room: { t: string; notice?: boolean }) => {
+    if (!srcSticker) return;
+    const { assertStickerAllowedIn } = await import('../stickers/send');
+    await assertStickerAllowedIn(ctx, room, srcSticker.fileId, srcSticker.scope);
+  };
+  // Destino @usuário: o que dá para conferir sem a sala roda antes de createDirect, para uma recusa não deixar uma
+  // conversa direta nova e vazia na lista das duas pessoas.
+  const directPrecheck = async (username: string) => {
+    const other = await one('SELECT id, active FROM users WHERE lower(username) = lower($1)', [username]);
+    if (other && other.id !== ctx.userId && !other.active) throw badRequest('error-user-deactivated', 'Este usuário está desativado.');
+    if ((m.msg ?? '').trim().length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
+    const names = new Set([...comment.matchAll(MENTION_RE)].map((x) => x[1].replace(/\.+$/, '')));
+    if (names.has('all') || names.has('here')) {
+      const roles = await getUserRoles(ctx.userId);
+      if (names.has('all') && !rolesHavePermission(roles, 'mention-all')) throw forbidden('Sem permissão para mencionar @all.');
+      if (names.has('here') && !rolesHavePermission(roles, 'mention-here')) throw forbidden('Sem permissão para mencionar @here.');
+    }
+    fileRules({ t: 'd' });
+    await stickerRules({ t: 'd' });
+  };
+
   // ---------- Cada destino, em sequência ----------
   const results: ForwardResult[] = [];
   const sent = new Map<string, Message>();
@@ -124,9 +168,12 @@ export async function forwardMessage(ctx: Ctx, input: { messageId: string; targe
       if (target.rid) {
         room = await getRoom(target.rid);
         if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
+        // Inscrição antes de tudo: quem não é da sala não descobre nada dela (criptografia, tipo) pelas respostas.
+        if (!(await getSubscriptionRow(room.id, ctx.userId))) throw forbidden('Você precisa entrar na sala para enviar mensagens.');
       } else {
         // createDirect recusa sem create-d com o texto padrão (em inglês): o motivo vai em português para a tela.
         if (!(await hasPermission(ctx.userId, 'create-d'))) throw forbidden('Você não pode iniciar conversas diretas.');
+        await directPrecheck(target.username!);
         room = await createDirect(ctx, [target.username!]);
       }
       const done = sent.get(room.id);
@@ -135,18 +182,15 @@ export async function forwardMessage(ctx: Ctx, input: { messageId: string; targe
         continue;
       }
       if (encryptedContent(room)) throw badRequest('error-forward-encrypted-target', 'Não dá para encaminhar para uma sala criptografada.');
-      if (usedIds.length) {
-        if (!getSetting('FileUpload_Enabled')) throw new ApiError(403, 'error-forward-files-disabled', 'O envio de arquivos está desativado.');
-        if (room.t === 'd' && !getSetting('FileUpload_Enabled_Direct')) throw new ApiError(403, 'error-forward-files-direct', 'Arquivos não podem ser enviados em mensagens diretas.');
-        if (types.some((t) => !typeAllowed(t))) throw badRequest('error-invalid-file-type', 'Tipo de arquivo não permitido.');
-      }
+      fileRules(room);
       if (srcSticker) {
         // Os erros de sala vêm antes dos de figurinha, como no envio pelo seletor.
-        const { canPostInRoom } = await import('./messages');
         await canPostInRoom(ctx, room);
-        const { assertStickerAllowedIn } = await import('../stickers/send');
-        await assertStickerAllowedIn(ctx, room, srcSticker.fileId, srcSticker.scope);
+        await stickerRules(room);
       }
+      countForward(ctx.userId);
+      // Figurinha encaminhada conta no mesmo limite do envio pelo seletor (8 a cada 10 s).
+      if (srcSticker) (await import('../stickers/send')).countStickerSend(ctx.userId);
       const idMap = new Map(usedIds.map((id) => [id, newId()]));
       const swap = (url?: string) => {
         if (!url) return url;

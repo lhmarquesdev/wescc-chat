@@ -41,6 +41,7 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
   const [term, setTerm] = useState('');
   const [picked, setPicked] = useState<Target[]>([]);
   const [people, setPeople] = useState<{ _id: string; username: string; name?: string; roles?: string[] }[]>([]);
+  const [peopleFor, setPeopleFor] = useState(''); // termo da última busca de pessoas que voltou
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
   const [failures, setFailures] = useState<Failure[]>([]);
@@ -51,11 +52,14 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
   useEffect(() => {
     if (!term.trim()) {
       setPeople([]);
+      setPeopleFor('');
       return;
     }
     const t = setTimeout(async () => {
-      const r = await api.get('users.autocomplete', { term: term.trim(), exclude: [me.username] }).catch(() => ({ items: [] }));
+      const q = term.trim();
+      const r = await api.get('users.autocomplete', { term: q, exclude: [me.username] }).catch(() => ({ items: [] }));
       setPeople(r.items);
+      setPeopleFor(q);
     }, 150);
     return () => clearTimeout(t);
   }, [term, me.username]);
@@ -77,7 +81,10 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
   const sections = useMemo(() => {
     const all = Object.values(subs).filter((s) => s.open !== false || s.lm);
     const q = foldText(term.trim());
-    const roomCands = (q ? all.filter((s) => foldText(`${s.fname || ''} ${s.name || ''}`).includes(q)) : [...all].sort((a, b) => (b.lm ?? '').localeCompare(a.lm ?? '')))
+    // Sem busca, as recentes não trazem a conversa de onde a mensagem sai (encaminhar para ela mesma quase nunca é o
+    // que se quer); buscando pelo nome, ela aparece.
+    const recent = all.filter((s) => s.rid !== m.rid).sort((a, b) => (b.lm ?? '').localeCompare(a.lm ?? ''));
+    const roomCands = (q ? all.filter((s) => foldText(`${s.fname || ''} ${s.name || ''}`).includes(q)) : recent)
       .filter((s) => !pickedKeys.has(`r:${s.rid}`))
       .slice(0, 8)
       .map<Candidate>((s) => ({ target: { key: `r:${s.rid}`, kind: 'room', rid: s.rid, label: s.fname || s.name, sub: s }, reason: roomReason(s) }));
@@ -146,7 +153,11 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
   };
 
   const failureOf = (key: string) => failures.find((f) => f.key === key);
-  const preview = messagePreviewText({ msg: m.msg, sticker: m.sticker, files: m.files, forward: m.forward, poll: m.poll }, { withName: false });
+  // Prévia do que vai sair: texto, figurinha ou arquivo. Numa encaminhada, o comentário de quem encaminhou antes não
+  // vai junto, e o autor é o da original.
+  const preview = messagePreviewText({ msg: m.msg, sticker: m.sticker, files: m.files }, { withName: false }) || 'Mensagem';
+  const origin = m.forward ? { username: m.forward.u.username, name: m.forward.alias || m.forward.u.name || m.forward.u.username } : { username: m.u.username, name: authorName(m) };
+  const searching = !!term.trim() && peopleFor !== term.trim();
   const done = !!summary;
 
   const row = (c: Candidate, i: number) => {
@@ -204,8 +215,8 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
       }
     >
       <div className="fwd-preview">
-        <Avatar username={m.u.username} size={16} />
-        <strong>{authorName(m)}</strong>
+        <Avatar username={origin.username} size={16} />
+        <strong>{origin.name}</strong>
         <span className="fwd-preview-text">{preview}</span>
       </div>
       <div className="field">
@@ -215,8 +226,9 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
         <div className="picker fwd-picker">
           <div className="chips">
             {picked.map((p) => (
-              <span key={p.key} className={`chip ${failureOf(p.key) ? 'chip-error' : ''}`} title={failureOf(p.key)?.error}>
-                {p.kind === 'user' ? <Avatar username={p.username} size={20} /> : <Icon name={roomIconName(p.sub)} size={14} />} {p.label}
+              <span key={p.key} className={`chip ${failureOf(p.key) ? 'chip-error' : ''}`} title={failureOf(p.key)?.error ?? p.label}>
+                {p.kind === 'user' ? <Avatar username={p.username} size={20} /> : <Icon name={roomIconName(p.sub)} size={14} />}
+                <span className="chip-label">{p.label}</span>
                 <button type="button" aria-label={`Remover ${p.label}`} onClick={() => setPicked((x) => x.filter((y) => y.key !== p.key))}>
                   <Icon name="close" size={14} />
                 </button>
@@ -259,6 +271,11 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
             {sections.rooms.map((c, i) => row(c, i))}
             {sections.users.length > 0 && <div className="fwd-section">Pessoas</div>}
             {sections.users.map((c, i) => row(c, sections.rooms.length + i))}
+          </div>
+        )}
+        {listOpen && !flat.length && !!term.trim() && (
+          <div className="picker-list fwd-list fwd-empty" role="status" data-inline="">
+            {searching ? 'Buscando…' : `Nenhuma pessoa ou conversa encontrada para “${term.trim()}”.`}
           </div>
         )}
       </div>

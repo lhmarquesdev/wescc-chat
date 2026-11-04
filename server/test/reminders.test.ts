@@ -78,6 +78,27 @@ describe('lembretes', () => {
     expect((await set(u, ids[0], inMinutes(10))).status).toBe(200);
   });
 
+  it('limite por pessoa com pedidos em paralelo: nunca passa de 200; trocar o horário continua valendo', async () => {
+    const u = await newUser(A);
+    const rid = (await api('POST', 'channels.create', { name: name('paralelo'), members: [u.username] }, A)).channel._id;
+    const ids = (
+      await pool.query(
+        `INSERT INTO messages (id, room_id, user_id, username, msg)
+         SELECT 'pm' || g || substr(md5($1), 1, 12), $2, $3, 'admin', 'm' || g FROM generate_series(1, 230) g RETURNING id`,
+        [u.userId, rid, A.userId],
+      )
+    ).rows.map((r) => r.id as string);
+    const values = ids.slice(0, 198).map((id, i) => `('q${i}x${u.userId}', '${u.userId}', '${id}', '${rid}', now() + interval '1 day')`);
+    await pool.query(`INSERT INTO message_reminders (id, user_id, message_id, room_id, remind_at) VALUES ${values.join(',')}`);
+    const all = await Promise.all(ids.slice(198, 228).map((id) => set(u, id, inMinutes(10))));
+    expect(all.filter((r) => r.status === 200)).toHaveLength(2);
+    expect(all.filter((r) => r.error === 'Você já tem 200 lembretes. Conclua alguns antes de criar outro.')).toHaveLength(28);
+    expect((await pool.query('SELECT count(*)::int AS n FROM message_reminders WHERE user_id = $1', [u.userId])).rows[0].n).toBe(200);
+    // No limite, trocar o horário de um que já existe (ON CONFLICT) continua valendo, também em paralelo.
+    const again = await Promise.all(ids.slice(0, 5).map((id) => set(u, id, inMinutes(15))));
+    expect(again.every((r) => r.status === 200)).toBe(true);
+  });
+
   it('avisa: evento fired e firedAt na lista', async () => {
     const m = (await send(bruno, geral, 'reunião amanhã')).message;
     const r = (await set(ana, m._id, inMinutes(5))).reminder;
@@ -104,7 +125,14 @@ describe('lembretes', () => {
     const g = (await api('POST', 'groups.create', { name: name('saida'), members: [ana.username] }, bruno)).group._id;
     const m = (await send(bruno, g, 'conteúdo secreto')).message;
     const r = (await set(ana, m._id, inMinutes(5))).reminder;
+    expect(r.roomName).toBeTruthy();
     await api('POST', 'groups.kick', { roomId: g, userId: ana.userId }, bruno);
+    // Renomeado depois que ela saiu: nem a lista nem o evento levam o nome novo.
+    const secreto = name('demissoes-secretas');
+    expect((await api('POST', 'groups.rename', { roomId: g, name: secreto }, bruno)).status).toBe(200);
+    const listed = (await api('GET', 'reminders.list', undefined, ana)).reminders.find((x: any) => x._id === r._id);
+    expect(listed).toMatchObject({ rid: g, t: 'p', message: null });
+    expect(listed.roomName).toBeUndefined();
     await due(r._id);
     const ws = connectWs(ana);
     await ws.ready;
@@ -113,7 +141,9 @@ describe('lembretes', () => {
       const ev = await ws.waitFor((e) => e.type === 'message.reminder' && e.reminder._id === r._id);
       expect(ev.action).toBe('removed');
       expect(ev.reminder.message).toBeNull();
+      expect(ev.reminder.roomName).toBeUndefined();
       expect(JSON.stringify(ws.events)).not.toContain('conteúdo secreto');
+      expect(JSON.stringify(ws.events)).not.toContain(secreto);
       expect((await pool.query('SELECT 1 FROM message_reminders WHERE id = $1', [r._id])).rowCount).toBe(0);
     } finally {
       ws.close();

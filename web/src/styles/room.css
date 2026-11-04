@@ -2525,9 +2525,29 @@ a.att-title {
 .poll-opt[aria-disabled='true'] {
   cursor: not-allowed;
 }
+/* Encerrada: o resultado é o que sobra para ler, então fica com contraste cheio (o button:disabled da base apaga
+   tudo a 0,55). O estado aparece pela borda neutra, sem hover, e pela opção vencedora em destaque. */
 .poll-opt:disabled {
   cursor: default;
   color: var(--fg);
+  opacity: 1;
+}
+.poll-card.closed .poll-opt {
+  border-color: var(--border-subtle, var(--border));
+  background: var(--bg-subtle);
+}
+.poll-card.closed .poll-bar {
+  background: var(--bg-muted);
+}
+.poll-card.closed .poll-opt.top {
+  border-color: var(--accent);
+}
+.poll-card.closed .poll-opt.top .poll-bar {
+  background: var(--accent-soft-hover);
+}
+.poll-card.closed .poll-opt.top .poll-count {
+  color: var(--accent-text);
+  font-weight: var(--fw-semibold);
 }
 .poll-opt.on {
   border-color: var(--accent);

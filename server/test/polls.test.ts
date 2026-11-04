@@ -254,6 +254,11 @@ describe('enquetes', () => {
     const r = await create(ana, g);
     expect(r.status).toBe(400);
     expect(r.errorType).toBe('error-poll-encrypted');
+    // Quem não é do grupo não fica sabendo que ele é criptografado: a resposta é a de quem não entrou.
+    const fora = await newUser(A);
+    const r2 = await create(fora, g);
+    expect(r2.status).toBe(403);
+    expect(r2.error).toBe('Você precisa entrar na sala para enviar mensagens.');
   });
 
   it('não editável; apagar remove polls e poll_votes; raiz com respostas vira rm sem enquete', async () => {

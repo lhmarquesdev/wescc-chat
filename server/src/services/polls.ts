@@ -74,6 +74,8 @@ export interface CreatePollInput {
 export async function createPoll(ctx: Ctx, input: CreatePollInput): Promise<Message> {
   const room = await getRoom(input.rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
+  // Inscrição antes de tudo: quem não é da sala não descobre nada dela (criptografia, avisos) pelas respostas.
+  if (!(await getSubscriptionRow(room.id, ctx.userId))) throw forbidden('Você precisa entrar na sala para enviar mensagens.');
   if (encryptedContent(room)) throw badRequest('error-poll-encrypted', 'Enquetes não estão disponíveis em salas criptografadas.');
   if (!(await hasPermission(ctx.userId, 'create-poll', room.id))) throw forbidden('Você não tem permissão para criar enquetes nesta sala.');
   const question = filterBadWords(typeof input.question === 'string' ? input.question.trim() : '');

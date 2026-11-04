@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Message } from '@shared/index';
-import { AHEAD_MIN_MS } from '@shared/messages';
+import { AHEAD_MIN_MS, aheadError } from '@shared/messages';
 import { api, errorMessage } from '../lib/api';
 import { fromLocalInput, reminderPresets, toLocalInput, whenText } from '../lib/messageTimes';
 import { useStore } from '../lib/store';
@@ -43,6 +43,8 @@ export function ReminderModal({ m, onClose }: { m: Message; onClose: () => void 
     }
   };
   const picked = fromLocalInput(value);
+  // A mesma regra do "Agendar envio": o erro aparece embaixo do campo e Salvar fica desativado.
+  const err = picked ? aheadError(picked.toISOString(), new Date()) : 'Escolha a data e a hora.';
 
   return (
     <Modal
@@ -53,10 +55,11 @@ export function ReminderModal({ m, onClose }: { m: Message; onClose: () => void 
       footer={
         custom ? (
           <>
+            {/* Volta aos atalhos (não fecha). */}
             <button type="button" className="btn" onClick={() => setCustom(false)}>
-              Cancelar
+              Voltar
             </button>
-            <button type="button" className="btn primary" disabled={!picked || busy} onClick={() => picked && void save(picked)}>
+            <button type="button" className="btn primary" disabled={!!err || busy} onClick={() => picked && !err && void save(picked)}>
               Salvar
             </button>
           </>
@@ -66,7 +69,7 @@ export function ReminderModal({ m, onClose }: { m: Message; onClose: () => void 
       {reminder && (
         <div className="reminder-current">
           <span>
-            {reminder.firedAt ? 'Lembrete avisado' : 'Lembrete marcado para'} {whenText(reminder.firedAt ?? reminder.remindAt, now)}.
+            {reminder.firedAt ? 'Você foi lembrado' : 'Lembrete marcado para'} {whenText(reminder.firedAt ?? reminder.remindAt, now)}.
           </span>
           <button type="button" className="btn ghost danger small" disabled={busy} onClick={() => void remove()}>
             Remover lembrete
@@ -74,21 +77,26 @@ export function ReminderModal({ m, onClose }: { m: Message; onClose: () => void 
         </div>
       )}
       {custom ? (
-        <Field label="Data e hora">
+        <Field label="Data e hora" error={picked && err ? err : undefined}>
           <input type="datetime-local" value={value} min={toLocalInput(new Date(Date.now() + AHEAD_MIN_MS))} onChange={(e) => setValue(e.target.value)} autoFocus />
         </Field>
       ) : (
-        <div className="time-presets" role="list">
+        // Lista de botões: o leitor de tela anuncia cada atalho como botão (o papel de item fica no <li>).
+        <ul className="time-presets" aria-label="Quando lembrar">
           {reminderPresets(now).map((p) => (
-            <button key={p.key} type="button" role="listitem" className="time-preset" disabled={busy} onClick={() => void save(p.at)}>
-              <span>{p.label}</span>
-              <span className="muted">{whenText(p.at.toISOString(), now)}</span>
-            </button>
+            <li key={p.key}>
+              <button type="button" className="time-preset" disabled={busy} onClick={() => void save(p.at)}>
+                <span>{p.label}</span>
+                <span className="muted">{whenText(p.at.toISOString(), now)}</span>
+              </button>
+            </li>
           ))}
-          <button type="button" role="listitem" className="time-preset" onClick={() => setCustom(true)}>
-            <span>Escolher data e hora…</span>
-          </button>
-        </div>
+          <li>
+            <button type="button" className="time-preset" onClick={() => setCustom(true)}>
+              <span>Escolher data e hora…</span>
+            </button>
+          </li>
+        </ul>
       )}
     </Modal>
   );

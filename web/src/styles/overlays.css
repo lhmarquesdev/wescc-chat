@@ -868,6 +868,28 @@
 }
 .fwd-picker > .chips .chip {
   max-width: 100%;
+  min-width: 0;
+}
+/* Nome comprido: corta com reticências; o ícone e o × ficam sempre dentro do campo (o nome inteiro vai no title). */
+.fwd-picker > .chips .chip > :not(.chip-label) {
+  flex-shrink: 0;
+}
+.fwd-picker .chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A janela fica presa em cima: a lista que cresce ou some ao buscar não faz o modal pular. */
+.modal-backdrop[data-kind='dialog']:has(> .modal.forward-modal) {
+  align-items: flex-start;
+  padding-top: max(var(--space-8), 8vh);
+}
+.fwd-empty {
+  padding: var(--space-3) 10px;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--fg-muted);
 }
 .chip.chip-error {
   border-color: var(--danger);
@@ -1010,6 +1032,8 @@
   flex-direction: column;
   gap: 2px;
   margin: 0 calc(var(--space-2) * -1);
+  padding: 0;
+  list-style: none;
 }
 .time-preset {
   display: flex;

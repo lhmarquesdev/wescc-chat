@@ -7,7 +7,7 @@ import { roomPath } from '../lib/format';
 import { authorName, messageLink } from '../lib/messageRules';
 import { realtime } from '../lib/realtime';
 import { systemNotify } from '../lib/session';
-import { useStore } from '../lib/store';
+import { scheduledFailKey, useStore } from '../lib/store';
 
 // Prévia de uma mensagem numa linha (cifrada: "Mensagem criptografada").
 export const messagePreview = (m: Message) =>
@@ -36,7 +36,7 @@ export function MessageNotices() {
         const sub = st.subscriptions[s.rid];
         const where = sub ? (sub.t === 'd' ? sub.fname || sub.name : `#${sub.fname || sub.name}`) : 'uma conversa';
         const path = `${roomPath({ rid: s.rid, t: sub?.t ?? 'c' })}?tab=scheduled`;
-        st.toast(`Sua mensagem agendada em ${where} não foi enviada: ${s.error ?? ''}`, 'error', { icon: 'schedule', duration: 15_000, action: { label: 'Ver', onClick: () => navigate(path) } });
+        st.toast(`Sua mensagem agendada em ${where} não foi enviada: ${s.error ?? ''}`, 'error', { icon: 'schedule', duration: 15_000, key: scheduledFailKey(s._id), action: { label: 'Ver', onClick: () => navigate(path) } });
       }
     });
     return () => void off();

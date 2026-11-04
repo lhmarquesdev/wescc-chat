@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pool } from '../src/db/pool';
 import { pruneMessages } from '../src/services/retention';
-import { getSetting } from '../src/services/settings';
+import { getSetting, setSettingCache } from '../src/services/settings';
 import { storedPath } from '../src/services/uploads';
 import { admin, api, connectWs, newUser, raw, startServer, stopServer, type Auth } from './helpers';
 import { png, webp } from './sticker-bytes';
@@ -210,6 +210,74 @@ describe('encaminhar', () => {
     });
   });
 
+  it('@usuário recusado: nenhuma conversa direta nova e vazia fica para trás', async () => {
+    const src = await channel(ana, [bruno]);
+    const up = await upload(ana, src, new Blob(['texto'], { type: 'text/plain' }), 'nota.txt');
+    const text = (await send(ana, src, 'só texto')).message;
+    const dmRows = async (u: Auth) => (await pool.query(`SELECT 1 FROM rooms WHERE t = 'd' AND dm_key = $1`, [[ana.userId, u.userId].sort().join(',')])).rowCount;
+    const fresh = await newUser(A);
+    await withSettings({ FileUpload_Enabled_Direct: false }, async () => {
+      const r = await forward(ana, up._id, [{ username: fresh.username }]);
+      expect(r.results[0]).toMatchObject({ ok: false, error: 'Arquivos não podem ser enviados em mensagens diretas.' });
+    });
+    expect(await dmRows(fresh)).toBe(0);
+    const off = await newUser(A);
+    expect((await api('POST', 'users.setActiveStatus', { userId: off.userId, activeStatus: false }, A)).status).toBe(200);
+    const r2 = await forward(ana, text._id, [{ username: off.username }]);
+    expect(r2.results[0]).toMatchObject({ ok: false, error: 'Este usuário está desativado.' });
+    expect(await dmRows(off)).toBe(0);
+    // O mesmo destino, sem o arquivo, sai normalmente (e aí a conversa existe).
+    expect((await forward(ana, text._id, [{ username: fresh.username }])).results[0]).toMatchObject({ ok: true });
+    expect(await dmRows(fresh)).toBe(1);
+  });
+
+  it('destino de que não é membro: a resposta não conta nada da sala (DM, arquivos)', async () => {
+    const src = await channel(ana, [bruno, carla]);
+    const up = await upload(ana, src, new Blob(['texto'], { type: 'text/plain' }), 'nota.txt');
+    const dm = (await api('POST', 'im.create', { username: bruno.username }, ana)).room._id;
+    await withSettings({ FileUpload_Enabled_Direct: false }, async () => {
+      const r = await forward(carla, up._id, [{ rid: dm }]);
+      expect(r.results[0]).toMatchObject({ ok: false, error: 'Você precisa entrar na sala para enviar mensagens.' });
+    });
+  });
+
+  it('limites: figurinha encaminhada conta no das figurinhas; destinos por minuto com o limitador da API', async () => {
+    const dona = await newUser(A);
+    const quem = await newUser(A);
+    const pack = (await api('POST', 'stickers.packs.create', { scope: 'personal', name: 'limite' }, dona)).pack._id;
+    const fd = new FormData();
+    fd.append('packId', pack);
+    fd.append('file', new Blob([new Uint8Array(webp({ kind: 'vp8l', w: 256, h: 256, seed: 9922 }))], { type: 'application/octet-stream' }), 'f.bin');
+    const st = (await api('POST', 'stickers.create', fd, dona)).sticker;
+    expect(st).toBeTruthy();
+    const src = await channel(dona, [quem]);
+    const sticker = (await api('POST', 'chat.sendSticker', { roomId: src, stickerId: st._id }, dona)).message;
+    const dests: string[] = [];
+    for (let i = 0; i < 10; i++) dests.push(await channel(quem, []));
+    const all = dests.map((rid) => ({ rid }));
+    const r = await forward(quem, sticker._id, all);
+    expect(r.results.slice(0, 8).every((x: any) => x.ok)).toBe(true);
+    expect(r.results.slice(8)).toMatchObject([
+      { ok: false, error: 'Muitas figurinhas seguidas. Espere alguns segundos.' },
+      { ok: false, error: 'Muitas figurinhas seguidas. Espere alguns segundos.' },
+    ]);
+    // Pelo seletor, na mesma janela, também já não vai.
+    expect((await api('POST', 'chat.sendSticker', { roomId: src, fileId: sticker.sticker.fileId }, quem)).status).toBe(429);
+
+    const text = (await send(quem, dests[0], 'várias vezes')).message;
+    const before = getSetting('API_Enable_Rate_Limiter');
+    setSettingCache('API_Enable_Rate_Limiter', true);
+    try {
+      // 60 destinos por minuto: 6 chamadas de 10 saem, a sétima não.
+      for (let i = 0; i < 6; i++) expect((await forward(quem, text._id, all)).results.every((x: any) => x.ok)).toBe(true);
+      const over = await forward(quem, text._id, all);
+      expect(over.status).toBe(200);
+      expect(over.results.every((x: any) => !x.ok && x.error === 'Muitos encaminhamentos seguidos. Espere um minuto e tente de novo.')).toBe(true);
+    } finally {
+      setSettingCache('API_Enable_Rate_Limiter', before);
+    }
+  });
+
   it('voz e vídeo: os campos vão iguais na cópia', async () => {
     const src = await channel(ana, [bruno]);
     const dest = await channel(ana, [bruno]);
@@ -300,6 +368,9 @@ describe('encaminhar', () => {
       const pm = (await send(ana, pub, 'aberto')).message;
       const r2 = await forward(ana, pm._id, [{ rid: g }]);
       expect(r2.results[0]).toMatchObject({ ok: false, errorType: 'error-forward-encrypted-target' });
+      // Quem não é do grupo não fica sabendo que ele é criptografado.
+      const r3 = await forward(carla, pm._id, [{ rid: g }]);
+      expect(r3.results[0]).toMatchObject({ ok: false, error: 'Você precisa entrar na sala para enviar mensagens.' });
     } finally {
       await pool.query('UPDATE rooms SET encrypted = false WHERE id = $1', [g]);
     }

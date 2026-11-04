@@ -1,12 +1,12 @@
 import type { Message } from '@shared/index';
 import { AHEAD_ERROR, aheadError, encryptedContent, SCHEDULE_LATE_MINUTES, SCHEDULED_MAX, type ScheduledMessage } from '@shared/messages';
-import { many, one, query } from '../db/pool';
+import { many, one, query, tx } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { canPostInRoom, getMessageRow, MENTION_RE, sendMessage, withExtra } from './messages';
 import { getUserRoles, hasPermission, rolesHavePermission } from './permissions';
-import { getRoom } from './rooms';
+import { getRoom, getSubscriptionRow } from './rooms';
 import { getSetting } from './settings';
 import type { Ctx } from './users';
 
@@ -82,6 +82,8 @@ export interface ScheduleInput {
 export async function scheduleMessage(ctx: Ctx, input: ScheduleInput, sendAt: unknown): Promise<ScheduledMessage> {
   const room = await getRoom(input.rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
+  // Inscrição antes de tudo: quem não é da sala não descobre nada dela (criptografia, avisos) pelas respostas.
+  if (!(await getSubscriptionRow(room.id, ctx.userId))) throw forbidden('Você precisa entrar na sala para enviar mensagens.');
   if (!(await hasPermission(ctx.userId, 'schedule-message', room.id))) throw forbidden('Você não tem permissão para agendar mensagens nesta sala.');
   if (encryptedContent(room)) throw badRequest('error-schedule-encrypted', ENCRYPTED_TEXT);
   const msg = cleanText(input.msg);
@@ -100,13 +102,18 @@ export async function scheduleMessage(ctx: Ctx, input: ScheduleInput, sendAt: un
     tmid = parent.id;
   }
   checkGroupMentions(msg, roles, room);
-  const count = (await one('SELECT count(*)::int AS n FROM scheduled_messages WHERE user_id = $1', [ctx.userId]))!.n;
-  if (count >= SCHEDULED_MAX) throw badRequest('error-too-many-scheduled', `Você já tem ${SCHEDULED_MAX} mensagens agendadas.`);
-  const row = await one(
-    `INSERT INTO scheduled_messages (id, room_id, user_id, tmid, tshow, msg, ack_required, send_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [newId(), room.id, ctx.userId, tmid, !!(tmid && input.tshow), msg, !!input.ackRequired, at],
-  );
+  // Contar e gravar com a trava curta da pessoa: pedidos em paralelo não passam do limite juntos.
+  const row = await tx(async (c) => {
+    await c.query('SELECT pg_advisory_xact_lock(727160, hashtext($1))', [`agendadas:${ctx.userId}`]);
+    const count = (await one('SELECT count(*)::int AS n FROM scheduled_messages WHERE user_id = $1', [ctx.userId], c))!.n;
+    if (count >= SCHEDULED_MAX) throw badRequest('error-too-many-scheduled', `Você já tem ${SCHEDULED_MAX} mensagens agendadas.`);
+    return one(
+      `INSERT INTO scheduled_messages (id, room_id, user_id, tmid, tshow, msg, ack_required, send_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [newId(), room.id, ctx.userId, tmid, !!(tmid && input.tshow), msg, !!input.ackRequired, at],
+      c,
+    );
+  });
   publish(row, 'upserted');
   return mapScheduled(row);
 }

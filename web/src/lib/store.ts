@@ -9,6 +9,7 @@ export interface ToastItem {
   action?: { label: string; onClick: () => void };
   duration: number;
   icon?: string; // nome de ícone no lugar do ícone do tipo (ex.: fim de chamada)
+  key?: string; // um aviso por chave: o novo troca o anterior, e dismissToastKey tira (ex.: a falha de uma agendada)
 }
 
 export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean };
@@ -62,8 +63,9 @@ interface State {
   upsertScheduled(s: ScheduledMessage): void;
   removeScheduled(id: string): void;
   setPollVotes(votes: Record<string, string[]>): void;
-  toast(text: string, kind?: ToastKind, opts?: { action?: ToastItem['action']; duration?: number; icon?: string }): void;
+  toast(text: string, kind?: ToastKind, opts?: { action?: ToastItem['action']; duration?: number; icon?: string; key?: string }): void;
   dismissToast(id: number): void;
+  dismissToastKey(key: string): void;
   reset(): void;
 }
 
@@ -168,17 +170,28 @@ export const useStore = create<State>((set, get) => ({
   upsertReminder: (r) => set({ reminders: [...get().reminders.filter((x) => x._id !== r._id && x.messageId !== r.messageId), r] }),
   removeReminder: (id) => set({ reminders: get().reminders.filter((x) => x._id !== id) }),
   setScheduled: (scheduled) => set({ scheduled }),
-  upsertScheduled: (s) => set({ scheduled: [...get().scheduled.filter((x) => x._id !== s._id), s].sort((a, b) => a.sendAt.localeCompare(b.sendAt)) }),
-  removeScheduled: (id) => set({ scheduled: get().scheduled.filter((x) => x._id !== id) }),
+  // Enviada, cancelada ou de volta a pendente (editada): o aviso de falha dela não vale mais.
+  upsertScheduled: (s) => {
+    set({ scheduled: [...get().scheduled.filter((x) => x._id !== s._id), s].sort((a, b) => a.sendAt.localeCompare(b.sendAt)) });
+    if (s.status !== 'failed') get().dismissToastKey(scheduledFailKey(s._id));
+  },
+  removeScheduled: (id) => {
+    set({ scheduled: get().scheduled.filter((x) => x._id !== id) });
+    get().dismissToastKey(scheduledFailKey(id));
+  },
   setPollVotes: (votes) => set({ pollVotes: { ...get().pollVotes, ...votes } }),
   // O tempo corre no componente (pausa com o mouse em cima): erro 8 s, os outros 4 s.
   toast: (text, kind = 'info', opts) => {
     const id = ++toastSeq;
     const duration = opts?.duration ?? (kind === 'error' ? 8000 : 4000);
     // No máximo 3: um aviso antigo não reaparece depois que os novos saem.
-    set({ toasts: [...get().toasts, { id, text, kind, action: opts?.action, duration, icon: opts?.icon }].slice(-3) });
+    const rest = opts?.key ? get().toasts.filter((t) => t.key !== opts.key) : get().toasts;
+    set({ toasts: [...rest, { id, text, kind, action: opts?.action, duration, icon: opts?.icon, key: opts?.key }].slice(-3) });
   },
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
+  dismissToastKey: (key) => {
+    if (get().toasts.some((t) => t.key === key)) set({ toasts: get().toasts.filter((t) => t.key !== key) });
+  },
   reset: () => set({ ...initial }),
 }));
 
@@ -280,3 +293,6 @@ export function applyEvent(ev: ServerEvent) {
 }
 
 export const avatarBust: Record<string, string> = {};
+
+// Chave do aviso "Sua mensagem agendada … não foi enviada" (um por agendada).
+export const scheduledFailKey = (id: string) => `scheduled-failed-${id}`;

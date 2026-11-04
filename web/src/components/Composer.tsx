@@ -132,6 +132,8 @@ function ComposerView({
   const [scheduleSheet, setScheduleSheet] = useState(false);
   const [scheduleCustom, setScheduleCustom] = useState(false);
   const sendPress = useRef<{ timer: number; fired: boolean } | null>(null);
+  // Folha "Agendar envio" aberta pelo toque longo: o clique que vem ao soltar o dedo cai em cima dela e é descartado.
+  const swallowSheetClicks = useRef(0);
   const pickerRequest = useStickers((s) => s.pickerRequest);
   const [request, setRequest] = useState<{ packId?: string; seq: number } | null>(null);
   const seenRequest = useRef(useStickers.getState().pickerRequest?.seq ?? 0);
@@ -407,6 +409,7 @@ function ComposerView({
   const pollOn = !encrypted && !editing && canWithRoles('create-poll', roles);
   const canSchedule = !encrypted && canWithRoles('schedule-message', roles);
   const schedulable = canSchedule && !!text.trim() && !editing && !quoting && !pending.length && !text.trim().startsWith('/') && !over;
+  const schedulePlus = phone && canSchedule && !editing;
   const ackLabel = ackOption && !tmid ? (askAck ? 'Pede “Ciente”' : 'Sem “Ciente”') : undefined;
 
   const openVideo = () => {
@@ -439,7 +442,21 @@ function ComposerView({
     }
   };
 
-  // Celular: segurar o Enviar por 450 ms abre "Agendar envio"; o clique que termina o toque longo não envia.
+  // Celular: segurar o Enviar por 450 ms abre "Agendar envio"; o clique que termina o toque longo não envia nem
+  // escolhe a opção da folha que ficou embaixo do dedo (o touchend cancelado não gera clique; a trava de tempo cobre
+  // o navegador que gera assim mesmo).
+  const openScheduleSheetByPress = () => {
+    swallowSheetClicks.current = Number.POSITIVE_INFINITY;
+    const release = () => {
+      swallowSheetClicks.current = Date.now() + 400;
+      window.removeEventListener('pointerup', release, true);
+      window.removeEventListener('pointercancel', release, true);
+    };
+    window.addEventListener('pointerup', release, true);
+    window.addEventListener('pointercancel', release, true);
+    navigator.vibrate?.(10);
+    setScheduleSheet(true);
+  };
   const sendPressProps =
     phone && schedulable
       ? {
@@ -447,14 +464,19 @@ function ComposerView({
             if (sendPress.current) clearTimeout(sendPress.current.timer);
             const timer = window.setTimeout(() => {
               if (sendPress.current) sendPress.current.fired = true;
-              navigator.vibrate?.(10);
-              setScheduleSheet(true);
+              openScheduleSheetByPress();
             }, 450);
             sendPress.current = { timer, fired: false };
           },
           onPointerUp: () => {
             const p = sendPress.current;
             if (p && !p.fired) clearTimeout(p.timer);
+          },
+          onTouchEnd: (e: React.TouchEvent) => {
+            if (sendPress.current?.fired) {
+              e.preventDefault();
+              sendPress.current = null;
+            }
           },
           onPointerLeave: () => {
             const p = sendPress.current;
@@ -707,7 +729,7 @@ function ComposerView({
         {voice.active && <VoiceBar voice={voice} />}
         {/* O input fica fora do menu: continua vivo depois que o menu fecha. */}
         <input ref={fileInput} type="file" multiple hidden onChange={(e) => (e.target.files && setPending([...e.target.files]), (e.target.value = ''))} />
-        {videoOn || pollOn ? (
+        {videoOn || pollOn || schedulePlus ? (
           <Menu
             label="Adicionar"
             sheetTitle="Adicionar"
@@ -736,6 +758,16 @@ function ComposerView({
                   <button type="button" onClick={() => (close(), setCreatingPoll(true))}>
                     <Icon name="poll" size={16} />
                     Criar enquete
+                  </button>
+                )}
+                {schedulePlus && (
+                  // No celular o toque longo no Enviar não se vê: aqui o agendar fica à vista (agenda o texto da caixa).
+                  <button type="button" disabled={!schedulable} onClick={() => (close(), (swallowSheetClicks.current = 0), setScheduleSheet(true))}>
+                    <Icon name="schedule" size={16} />
+                    <span className="menu-text">
+                      Agendar mensagem
+                      {!schedulable && <span className="menu-desc">Escreva a mensagem primeiro</span>}
+                    </span>
                   </button>
                 )}
               </>
@@ -811,7 +843,12 @@ function ComposerView({
       </div>
       {scheduleSheet && (
         <Sheet onClose={() => setScheduleSheet(false)} className="menu schedule-menu" role="menu" label="Agendar envio">
-          <div className="sheet-scroll">
+          <div
+            className="sheet-scroll"
+            onClickCapture={(e) => {
+              if (Date.now() < swallowSheetClicks.current) (e.preventDefault(), e.stopPropagation());
+            }}
+          >
             <div className="menu-title" role="presentation">
               <strong>Agendar envio</strong>
             </div>

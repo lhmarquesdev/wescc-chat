@@ -10,7 +10,8 @@
 //   727140 arquivos (lixeira vencida, uma vez por dia)
 //   727150 exportações (Meus dados: pedidos na fila, arquivos vencidos e tíquetes antigos, a cada 15 s)
 //   727160 mensagens (prazo das enquetes, envios agendados e "Lembrar-me", a cada 15 s; os lembretes da agenda, 727132,
-//   rodam a cada 30 s e não precisam andar juntos)
+//   rodam a cada 30 s e não precisam andar juntos); com hashtext('agendadas:'|'lembretes:' + id da pessoa), a trava
+//   curta que conta o limite de cada pessoa (pg_advisory_xact_lock de duas chaves)
 import cron from 'node-cron';
 import { pool, query } from './db/pool';
 import { recoverInterrupted } from './importer/operations';

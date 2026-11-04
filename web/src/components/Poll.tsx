@@ -46,6 +46,8 @@ export function PollCard({ m, gate }: { m: Message; gate: PollGate }) {
   const mine = useStore((s) => s.pollVotes[m._id]);
   const [busy, setBusy] = useState(false);
   const [voters, setVoters] = useState(false);
+  const [rover, setRover] = useState<number | null>(null); // opção com a parada do Tab (escolha única)
+  const optRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [, tick] = useState(0);
   const qid = useId();
   useEffect(() => askMyVotes(m._id), [m._id]);
@@ -68,6 +70,19 @@ export function PollCard({ m, gate }: { m: Message; gate: PollGate }) {
   const canClose = !closed && (own || !!gate.canClosePolls);
   const canSee = !poll.anonymous && gate.canSeePollVoters !== false && total > 0;
   const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
+  // Escolha única (radiogroup): uma parada de Tab só, e as setas andam entre as opções sem votar (votar continua no
+  // Espaço ou Enter). Várias escolhas: cada caixa é uma parada, como checkboxes.
+  const radio = !poll.multiple;
+  const tabStop = rover ?? Math.max(0, poll.options.findIndex((o) => chosen.has(o.id)));
+  const onOptKey = (e: React.KeyboardEvent, i: number) => {
+    if (!radio) return;
+    const n = poll.options.length;
+    const to = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? (i + 1) % n : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? (i - 1 + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
+    if (to < 0) return;
+    e.preventDefault();
+    setRover(to);
+    optRefs.current[to]?.focus();
+  };
 
   const vote = async (id: string) => {
     if (closed || busy) return;
@@ -115,9 +130,15 @@ export function PollCard({ m, gate }: { m: Message; gate: PollGate }) {
           return (
             <button
               key={o.id}
+              ref={(el) => {
+                optRefs.current[i] = el;
+              }}
               type="button"
               role={poll.multiple ? 'checkbox' : 'radio'}
               aria-checked={on}
+              tabIndex={radio ? (i === tabStop ? 0 : -1) : undefined}
+              onKeyDown={(e) => onOptKey(e, i)}
+              onFocus={() => radio && setRover(i)}
               className={['poll-opt', on && 'on', closed && total > 0 && o.votes === top && 'top'].filter(Boolean).join(' ')}
               disabled={closed}
               aria-disabled={!!blocked || undefined}

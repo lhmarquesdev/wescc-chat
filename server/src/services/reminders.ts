@@ -1,7 +1,7 @@
 import type { Message } from '@shared/index';
 import { ENCRYPTED_PLACEHOLDER } from '@shared/dataExport';
 import { aheadError, encryptedContent, messageLink, REMINDERS_MAX, type MessageReminder } from '@shared/messages';
-import { many, one, query } from '../db/pool';
+import { many, one, query, tx } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { truncate } from '../lib/text';
@@ -16,7 +16,8 @@ import type { Ctx } from './users';
 
 export const REMINDER_HIDDEN_TEXT = 'Você pediu para ser lembrado de uma mensagem.';
 
-function mapReminder(row: any, room: any, message: Message | null): MessageReminder {
+// named: só quando a pessoa ainda acessa a sala. Quem saiu (ou foi tirado) não fica sabendo nem do nome atual dela.
+function mapReminder(row: any, room: any, message: Message | null, named: boolean): MessageReminder {
   const r: MessageReminder = {
     _id: row.id,
     messageId: row.message_id,
@@ -26,7 +27,7 @@ function mapReminder(row: any, room: any, message: Message | null): MessageRemin
     firedAt: row.fired_at ?? null,
     message,
   };
-  if (room && room.t !== 'd') r.roomName = room.fname || room.name;
+  if (named && room && room.t !== 'd') r.roomName = room.fname || room.name;
   return r;
 }
 
@@ -44,15 +45,20 @@ export async function setReminder(ctx: Ctx, messageId: string, remindAt: unknown
   if (!(await canAccessRoom(ctx.userId, room))) throw forbidden('Você não tem acesso a esta mensagem.');
   const err = aheadError(remindAt, new Date());
   if (err) throw badRequest('error-invalid-date', err);
-  const others = (await one('SELECT count(*)::int AS n FROM message_reminders WHERE user_id = $1 AND message_id <> $2', [ctx.userId, m.id]))!.n;
-  if (others >= REMINDERS_MAX) throw badRequest('error-too-many-reminders', `Você já tem ${REMINDERS_MAX} lembretes. Conclua alguns antes de criar outro.`);
-  const row = await one(
-    `INSERT INTO message_reminders (id, user_id, message_id, room_id, remind_at) VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (user_id, message_id) DO UPDATE SET remind_at = EXCLUDED.remind_at, fired_at = NULL, updated_at = now()
-     RETURNING *`,
-    [newId(), ctx.userId, m.id, m.room_id, new Date(String(remindAt)).toISOString()],
-  );
-  const reminder = mapReminder(row, room, withExtra(m));
+  // Contar e gravar com a trava curta da pessoa: pedidos em paralelo não passam do limite juntos.
+  const row = await tx(async (c) => {
+    await c.query('SELECT pg_advisory_xact_lock(727160, hashtext($1))', [`lembretes:${ctx.userId}`]);
+    const others = (await one('SELECT count(*)::int AS n FROM message_reminders WHERE user_id = $1 AND message_id <> $2', [ctx.userId, m.id], c))!.n;
+    if (others >= REMINDERS_MAX) throw badRequest('error-too-many-reminders', `Você já tem ${REMINDERS_MAX} lembretes. Conclua alguns antes de criar outro.`);
+    return one(
+      `INSERT INTO message_reminders (id, user_id, message_id, room_id, remind_at) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_id, message_id) DO UPDATE SET remind_at = EXCLUDED.remind_at, fired_at = NULL, updated_at = now()
+       RETURNING *`,
+      [newId(), ctx.userId, m.id, m.room_id, new Date(String(remindAt)).toISOString()],
+      c,
+    );
+  });
+  const reminder = mapReminder(row, room, withExtra(m), true);
   publish(ctx.userId, 'upserted', reminder); // outras abas e o celular
   return reminder;
 }
@@ -76,7 +82,7 @@ export async function listReminders(ctx: Ctx): Promise<{ reminders: MessageRemin
   );
   const reminders = rows.map((r) => {
     const m = msgs.get(r.message_id);
-    return mapReminder(r, rooms.get(r.room_id), m && m.t !== 'rm' ? withExtra(m) : null);
+    return mapReminder(r, rooms.get(r.room_id), m && m.t !== 'rm' ? withExtra(m) : null, allowed.has(r.room_id));
   });
   return { reminders, fired: rows.filter((r) => r.fired_at).length };
 }
@@ -86,7 +92,7 @@ export async function listReminders(ctx: Ctx): Promise<{ reminders: MessageRemin
 export async function deleteReminder(ctx: Ctx, id: string): Promise<void> {
   const row = await one('DELETE FROM message_reminders WHERE id = $1 AND user_id = $2 RETURNING *', [id, ctx.userId]);
   if (!row) throw notFound('error-reminder-not-found', 'Lembrete não encontrado.');
-  publish(ctx.userId, 'removed', mapReminder(row, await getRoom(row.room_id), null));
+  publish(ctx.userId, 'removed', mapReminder(row, await getRoom(row.room_id), null, false));
 }
 
 // Mensagem apagada (ou que a retenção tirou): os lembretes saem e cada dono fica sabendo.
@@ -96,7 +102,8 @@ export async function removeRemindersOfMessage(messageId: string | string[]): Pr
   const rows = await many('DELETE FROM message_reminders WHERE message_id = ANY($1) RETURNING *', [ids]);
   if (!rows.length) return;
   const rooms = new Map((await many('SELECT * FROM rooms WHERE id = ANY($1)', [[...new Set(rows.map((r) => r.room_id))]])).map((r) => [r.id as string, r]));
-  for (const r of rows) publish(r.user_id, 'removed', mapReminder(r, rooms.get(r.room_id), null));
+  // "removed" leva só o id, a sala e o tipo: a web só tira da lista.
+  for (const r of rows) publish(r.user_id, 'removed', mapReminder(r, rooms.get(r.room_id), null, false));
 }
 
 // ---------- Avisar (agendador) ----------
@@ -128,10 +135,10 @@ export async function fireDueReminders(): Promise<number> {
     if (!room || !m || m.t === 'rm' || !(await canAccessRoom(r.user_id, room))) {
       // Perdeu o acesso (ou a mensagem sumiu): o lembrete sai sem levar nada da mensagem.
       await query('DELETE FROM message_reminders WHERE id = $1', [r.id]);
-      publish(r.user_id, 'removed', mapReminder(r, room, null));
+      publish(r.user_id, 'removed', mapReminder(r, room, null, false));
       continue;
     }
-    publish(r.user_id, 'fired', mapReminder(r, room, withExtra(m)));
+    publish(r.user_id, 'fired', mapReminder(r, room, withExtra(m), true));
     pushes.push({ userId: r.user_id, title: 'Lembrete', body: reminderPushBody(m, room), url: messageLink({ rid: room.id, t: room.t, mid: m.id, tmid: m.tmid }), tag: `reminder-${r.id}` });
   }
   // Push só para quem não está com o chat aberto em nenhum lugar (quem está recebe pelo WebSocket).

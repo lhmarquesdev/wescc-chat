@@ -11,7 +11,7 @@ import { Icon } from './Icon';
 import { useIsPhone } from './overlay';
 import { confirmDialog, Empty, Field, Menu, Modal } from './ui';
 
-// Envio agendado: a seta ao lado de Enviar (desktop), a folha do toque longo (celular), o modal de data e hora, a faixa
+// Envio agendado: a seta ao lado de Enviar (desktop), a folha do toque longo ou do + (celular), o modal de data e hora, a faixa
 // do compositor e o painel "Mensagens agendadas". Só quem agendou vê as suas.
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
@@ -176,7 +176,7 @@ export function ScheduledPanel({ room }: { room: Room }) {
   if (!list.length)
     return (
       <Empty icon="panel-scheduled" title="Nenhuma mensagem agendada">
-        {phone ? 'Escreva a mensagem e segure o botão Enviar.' : 'Escreva a mensagem e use a seta ao lado de Enviar.'}
+        {phone ? 'Escreva a mensagem e toque em + › Agendar mensagem (ou segure o botão Enviar).' : 'Escreva a mensagem e use a seta ao lado de Enviar.'}
       </Empty>
     );
   return (

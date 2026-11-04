@@ -96,6 +96,10 @@ describe('envios agendados', () => {
     const g = (await api('POST', 'groups.create', { name: name('cifra'), members: [bruno.username] }, ana)).group._id;
     await pool.query('UPDATE rooms SET encrypted = true WHERE id = $1', [g]);
     expect((await schedule(ana, { rid: g, msg: 'oi' })).error).toBe('Não dá para agendar mensagens em salas criptografadas.');
+    // Quem não é do grupo recebe a resposta de quem não entrou (nada sobre a criptografia).
+    const fora = await schedule(await newUser(A), { rid: g, msg: 'oi' });
+    expect(fora.status).toBe(403);
+    expect(fora.error).toBe('Você precisa entrar na sala para enviar mensagens.');
     const before = await rolesOf('schedule-message');
     await setPermission('schedule-message', before.filter((r) => r !== 'user'));
     try {
@@ -115,6 +119,17 @@ describe('envios agendados', () => {
     const values = Array.from({ length: 100 }, (_, i) => `('s${i}x${u.userId}', '${r2}', '${u.userId}', 'm${i}', now() + interval '1 day')`);
     await pool.query(`INSERT INTO scheduled_messages (id, room_id, user_id, msg, send_at) VALUES ${values.join(',')}`);
     expect((await schedule(u, { rid: r2, msg: 'mais uma' })).error).toBe('Você já tem 100 mensagens agendadas.');
+  });
+
+  it('limite por pessoa com pedidos em paralelo: nunca passa de 100', async () => {
+    const u = await newUser(A);
+    const rid = await channel(u, []);
+    const values = Array.from({ length: 98 }, (_, i) => `('p${i}x${u.userId}', '${rid}', '${u.userId}', 'm${i}', now() + interval '1 day')`);
+    await pool.query(`INSERT INTO scheduled_messages (id, room_id, user_id, msg, send_at) VALUES ${values.join(',')}`);
+    const all = await Promise.all(Array.from({ length: 20 }, (_, i) => schedule(u, { rid, msg: `paralela ${i}` })));
+    expect(all.filter((r) => r.status === 200)).toHaveLength(2);
+    expect(all.filter((r) => r.error === 'Você já tem 100 mensagens agendadas.')).toHaveLength(18);
+    expect((await pool.query('SELECT count(*)::int AS n FROM scheduled_messages WHERE user_id = $1', [u.userId])).rows[0].n).toBe(100);
   });
 
   describe('reconfere no envio', () => {

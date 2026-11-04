@@ -3,6 +3,7 @@ import { isEncryptedMessage } from './dataExport';
 import type { Message, RoomType, UserRef } from './index';
 
 export const FORWARD_MAX_TARGETS = 10;
+export const FORWARD_PER_MINUTE = 60; // destinos por pessoa (com o limitador da API ligado)
 export const VIDEO_MESSAGE_MAX_SECONDS = 120;
 export const POLL_MIN_OPTIONS = 2;
 export const POLL_MAX_OPTIONS = 10;

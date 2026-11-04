@@ -27,7 +27,8 @@ export function __setStickerSendBurstForTests(burst: number, windowMs: number) {
   sends.clear();
 }
 
-function countSend(userId: string) {
+// Também vale para o encaminhar: cada destino com figurinha conta aqui, como um envio pelo seletor.
+export function countStickerSend(userId: string) {
   const now = Date.now();
   const list = (sends.get(userId) ?? []).filter((t) => now - t < sendWindowMs);
   if (list.length >= sendBurst) {
@@ -176,7 +177,7 @@ async function sendOnce(ctx: Ctx, room: any, input: Parameters<typeof sendSticke
     id = prev ? undefined : clientId; // id de outra mensagem: sendMessage escolhe outro, como hoje
   }
   await assertStickerSenderAllowed(ctx);
-  countSend(ctx.userId);
+  countStickerSend(ctx.userId);
 
   const { roles, flags } = await stickerRoleInfo(ctx.userId);
   const r = await resolveSticker(ctx, roles, flags.manager, input);
