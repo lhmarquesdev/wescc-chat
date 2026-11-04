@@ -10,6 +10,9 @@ import type { CustomUserStatus } from './status';
 export type { CustomUserStatus } from './status';
 // Mensagens: encaminhar, enquetes, lembretes e envios agendados
 import type { MessageForward, MessagePoll, MessageReminder, ScheduledMessage } from './messages';
+// Criptografia de ponta a ponta
+import type { E2EEnvelope } from './e2e';
+export type { E2EContent, E2EEnvelope, E2EFileRef } from './e2e';
 
 export type UserStatus = 'online' | 'away' | 'busy' | 'offline';
 export type RoomType = 'c' | 'p' | 'd';
@@ -101,6 +104,9 @@ export interface Room {
   lastMessage?: LastMessage | null;
   lm?: string | null;
   retention?: RoomRetention | null;
+  // Criptografia de ponta a ponta: geração atual da chave e pedido de chave nova (só em salas com criptografia ou chave)
+  e2eKeyId?: string | null;
+  e2eRotate?: boolean;
   ts: string;
   _updatedAt: string;
 }
@@ -206,6 +212,7 @@ export interface MessageFile {
   voice?: boolean; // mensagem de voz (a prévia vira "🎤 Mensagem de voz")
   video?: boolean; // mensagem de vídeo (duration vale também aqui)
   duration?: number; // segundos, nas mensagens de voz e de vídeo
+  e2e?: boolean; // arquivo cifrado: nome e tipo reais só dentro da mensagem
 }
 
 export interface Message {
@@ -250,6 +257,7 @@ export interface Message {
   // Mensagens: origem de uma encaminhada e a enquete (messages.extra, montadas pelo servidor)
   forward?: MessageForward;
   poll?: MessagePoll;
+  e2e?: E2EEnvelope; // conteúdo cifrado de ponta a ponta (msg vem vazio)
 }
 
 export interface NoticeAcks {
@@ -404,7 +412,8 @@ export type ServerEvent =
   | { type: 'room'; action: 'inserted' | 'updated' | 'removed'; room: Room }
   // statusCustom: o status personalizado; null quando status é offline (um personalizado invisível não se revela)
   | { type: 'presence'; userId: string; username: string; status: UserStatus; statusText?: string; statusCustom?: string | null }
-  | { type: 'notification'; rid: string; title: string; text: string; messageId: string; sender: UserRef; tmid?: string | null }
+  // e2e: mensagem cifrada; a web decifra o texto (prefix + texto) quando tem a chave
+  | { type: 'notification'; rid: string; title: string; text: string; messageId: string; sender: UserRef; tmid?: string | null; e2e?: { envelope: E2EEnvelope; prefix: string } }
   | { type: 'reads'; rid: string; messageIds: string[] }
   | { type: 'user'; action: 'updated'; user: Partial<User> & { _id: string } }
   // roles: papéis alterados; by: quem alterou (vazio quando foi o sistema). Campos opcionais: ouvintes antigos seguem iguais.
@@ -441,6 +450,11 @@ export type ServerEvent =
   | { type: 'poll.myVotes'; rid: string; messageId: string; optionIds: string[] }
   | { type: 'message.reminder'; action: 'upserted' | 'fired' | 'removed'; reminder: MessageReminder }
   | { type: 'message.scheduled'; action: 'upserted' | 'removed'; scheduled: ScheduledMessage; messageId?: string; notify?: boolean }
+  // Criptografia de ponta a ponta
+  | { type: 'e2e.keyRequest'; rid: string; keyID: string } // alguém da sala precisa da chave atual
+  | { type: 'e2e.rotate'; rid: string; keyID: string } // trocar a chave keyID por uma nova
+  | { type: 'e2e.keyAvailable'; rid: string; keyID: string } // chegou uma chave para você
+  | { type: 'e2e.keys'; action: 'created' | 'updated' | 'reset' } // suas chaves mudaram (outras abas e aparelhos)
   | { type: 'pong' };
 
 // ---------- Busca da barra lateral (GET spotlight) ----------

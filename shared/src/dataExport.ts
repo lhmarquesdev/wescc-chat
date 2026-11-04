@@ -8,9 +8,8 @@ export const ROOM_EXPORT_FORMATS: RoomExportFormat[] = ['html', 'csv', 'json'];
 // O que sai no lugar do texto de uma mensagem cifrada: o servidor não tem a chave para lê-la.
 export const ENCRYPTED_PLACEHOLDER = 'Mensagem criptografada';
 
-// Contrato com a criptografia ponta a ponta: a mensagem cifrada fica com msg vazio e o conteúdo em messages.e2e
-// (jsonb). No SQL, o mesmo teste é "m.e2e IS NOT NULL" (server/src/services/exportRender.ts, encryptedSql). Enquanto a
-// coluna não existe, nenhuma linha traz e2e e nenhuma mensagem é cifrada.
+// Criptografia ponta a ponta: a mensagem cifrada fica com msg vazio e o conteúdo em messages.e2e (jsonb). No SQL, o
+// mesmo teste é "m.e2e IS NOT NULL" (server/src/services/exportRender.ts, encryptedSql).
 export const isEncryptedMessage = (m: { e2e?: unknown }) => m.e2e != null;
 
 // ---------- Limites ----------

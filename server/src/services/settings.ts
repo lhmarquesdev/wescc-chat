@@ -267,6 +267,14 @@ add('Security', 'Rate Limiter', 'API_Enable_Rate_Limiter_Limit_Calls_Default', '
 add('Security', 'Device Management', 'Device_Management_Allow_Logout_All', 'boolean', true, { public: true, label: 'Permitir encerrar todas as sessões' });
 // Só sai com o SMTP configurado e nunca no primeiro dispositivo da conta (server/src/services/loginDevices.ts).
 add('Security', 'Device Management', 'Device_Management_Enable_Login_Emails', 'boolean', true, { label: 'Avisar por e-mail quando alguém entrar na conta por um dispositivo novo' });
+// Criptografia de ponta a ponta (server/src/services/e2e.ts): desligar só impede ligar de novo e criar chaves para quem
+// não está em nenhuma conversa criptografada; as conversas já criptografadas continuam funcionando.
+add('Security', 'E2E Encryption', 'E2E_Enable', 'boolean', false, {
+  public: true,
+  label: 'Criptografia de ponta a ponta em conversas diretas e grupos privados',
+  description:
+    'Quem participa pode ligar a criptografia na conversa. Precisa do chat em https. Desligar aqui só impede ligar de novo: as conversas já criptografadas continuam assim.',
+});
 add('Security', 'Push', 'Push_enable', 'boolean', true, { public: true, label: 'Notificações push no navegador e no app instalado' });
 add('Security', 'Push', 'Push_Privacy_Hide_Content', 'boolean', false, { public: true, label: 'Ocultar conteúdo nas notificações push' });
 add('Security', 'Push', 'Push_VAPID_Public_Key', 'string', '', { public: true, label: 'Chave pública VAPID (gerada automaticamente)' });

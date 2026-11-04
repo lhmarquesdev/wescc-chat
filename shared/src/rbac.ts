@@ -92,7 +92,11 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
   'set-readonly': { label: 'Deixar a sala somente leitura', defaults: [A, O], description: 'Tornar a sala somente leitura, canal de avisos (com "Ciente") ou de transmissão.' },
   'set-react-when-readonly': { label: 'Permitir reações em sala somente leitura', defaults: [A, O], description: 'Deixar quem só lê reagir às mensagens.' },
   'edit-room-retention-policy': { label: 'Editar a retenção da sala', defaults: [A], description: 'Definir por quanto tempo a sala guarda mensagens e arquivos.' },
-  'toggle-room-e2e-encryption': { label: 'Ligar e desligar a criptografia da sala', defaults: [O], description: 'Ligar ou desligar a criptografia de ponta a ponta da sala.' },
+  'toggle-room-e2e-encryption': {
+    label: 'Ligar e desligar a criptografia de ponta a ponta',
+    defaults: [O],
+    description: 'Vale em grupos privados. Em conversas diretas, qualquer participante pode ligar.',
+  },
   'add-user-to-joined-room': { label: 'Adicionar pessoas à sala', defaults: [A, O, M], description: 'Colocar pessoas nas salas de que participa.' },
   'remove-user': { label: 'Remover pessoas da sala', defaults: [A, O, M], description: 'Tirar pessoas da sala.' },
   'mute-user': { label: 'Silenciar pessoas', defaults: [A, O, M], description: 'Impedir uma pessoa de escrever na sala.' },
@@ -144,6 +148,12 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
   'edit-other-user-password': { label: 'Trocar a senha de outras pessoas', defaults: [A], description: 'Definir uma senha nova para outra pessoa.', sensitive: 'Quem troca a senha consegue entrar na conta da pessoa.' },
   'edit-other-user-avatar': { label: 'Trocar a foto de outras pessoas', defaults: [A], description: 'Trocar ou tirar a foto de outra pessoa.' },
   'edit-other-user-totp': { label: 'Redefinir o 2FA de outras pessoas', defaults: [A], description: 'Desligar a verificação em duas etapas de quem perdeu o celular.', sensitive: 'Tira uma proteção da conta de outra pessoa.' },
+  'edit-other-user-e2ee': {
+    label: 'Redefinir a criptografia de outras pessoas',
+    defaults: [A],
+    description: 'Apaga as chaves da pessoa e encerra as sessões dela.',
+    sensitive: 'A pessoa perde o acesso às mensagens criptografadas antigas.',
+  },
   'logout-other-user': { label: 'Encerrar sessões de outras pessoas', defaults: [A], description: 'Tirar a pessoa do chat em todos os dispositivos.' },
   'delete-user': { label: 'Excluir usuários', defaults: [A], description: 'Apagar a conta. As mensagens continuam nas conversas.', sensitive: 'Apaga contas, sem volta.' },
   'assign-roles': {
@@ -201,7 +211,6 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
   'snippet-message': { label: 'Criar trechos de mensagem', defaults: [O, M], legacy: true },
   'send-many-messages': { label: 'Enviar muitas mensagens seguidas', defaults: [A, B, 'app'], legacy: true },
   'mention-team': { label: 'Mencionar o time', defaults: [A, U], legacy: true },
-  'edit-other-user-e2ee': { label: 'Redefinir a criptografia de outras pessoas', defaults: [A], legacy: true },
   'bulk-register-user': { label: 'Cadastrar usuários em lote', defaults: [A], legacy: true },
   'access-setting-permissions': { label: 'Alterar permissões de configurações', defaults: [A], legacy: true },
   'manage-selected-settings': { label: 'Alterar configurações escolhidas', defaults: [A], legacy: true },
@@ -343,7 +352,7 @@ export const RBAC_GROUPS: RbacGroup[] = [
           { label: VIEW, keys: ['view-user-administration'] },
           { label: MANAGE, keys: ['create-user', 'edit-other-user-info', 'edit-other-user-active-status'] },
         ],
-        extras: ['assign-roles', 'assign-admin-role', 'view-full-other-user-info', 'edit-other-user-password', 'edit-other-user-avatar', 'edit-other-user-totp', 'logout-other-user', 'delete-user'],
+        extras: ['assign-roles', 'assign-admin-role', 'view-full-other-user-info', 'edit-other-user-password', 'edit-other-user-avatar', 'edit-other-user-totp', 'logout-other-user', 'delete-user', 'edit-other-user-e2ee'],
         adminSection: 'users',
       },
       {

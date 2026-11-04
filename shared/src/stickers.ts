@@ -383,8 +383,10 @@ export function sendBlockedReason(
 }
 
 // Salas onde a aba Figurinhas e as sugestões aparecem. O servidor recusa as mesmas (§3.6).
-export function stickersAllowedIn(room: { t: string; notice?: boolean } | null | undefined, opts: { noticeRooms: boolean }): boolean {
+// Sala criptografada: nunca (o servidor recusa com error-e2e-sticker).
+export function stickersAllowedIn(room: { t: string; notice?: boolean; encrypted?: boolean } | null | undefined, opts: { noticeRooms: boolean }): boolean {
   if (!room) return false;
+  if (room.encrypted) return false;
   if (room.notice && !opts.noticeRooms) return false;
   return true;
 }

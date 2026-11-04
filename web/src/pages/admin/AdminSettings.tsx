@@ -79,6 +79,8 @@ const SECTION_LABEL: Record<string, string> = {
   // Exportar mensagens e Meus dados (LGPD)
   Export: 'Exportação',
   Privacy: 'Privacidade (LGPD)',
+  // Criptografia de ponta a ponta
+  'E2E Encryption': 'Criptografia de ponta a ponta',
 };
 
 const LANGUAGES = [

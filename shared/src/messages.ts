@@ -17,12 +17,15 @@ export const SCHEDULE_LATE_MINUTES = 60; // servidor parado: atraso maior que is
 export const AHEAD_MIN_MS = 60_000; // lembrete e agendamento: pelo menos 1 minuto à frente
 export const AHEAD_MAX_DAYS = 365;
 
+// @usuário no texto (o servidor procura menções com ela; a web, as menções de uma mensagem cifrada).
+export const MENTION_RE = /(?:^|[\s(>"'])@([0-9a-zA-Z._-]+)/g;
+
 // ---------- Criptografia ----------
 
-// Até a criptografia ponta a ponta definir como recifrar no cliente, encaminhar, criar enquete, agendar e gravar vídeo
-// ficam fora das salas criptografadas, e o aviso do lembrete nunca leva o conteúdo. Um lugar só para o E2E ajustar:
-// a sala (rooms.encrypted) ou a própria mensagem cifrada (messages.e2e, isEncryptedMessage).
-// m: qualquer mensagem (linha do banco ou Message da web); o campo e2e chega com o grupo da criptografia.
+// Encaminhar, criar enquete e agendar ficam fora das salas criptografadas (o servidor montaria o texto), e o aviso do
+// lembrete nunca leva o conteúdo. A sala (rooms.encrypted) ou a própria mensagem cifrada (messages.e2e, que continua
+// cifrada numa sala em que a criptografia foi desligada depois).
+// m: qualquer mensagem (linha do banco ou Message da web).
 export function encryptedContent(room: { encrypted?: boolean | null } | null | undefined, m?: object | null): boolean {
   return !!room?.encrypted || (!!m && isEncryptedMessage(m as { e2e?: unknown }));
 }
