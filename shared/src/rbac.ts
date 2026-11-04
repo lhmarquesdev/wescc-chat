@@ -860,7 +860,7 @@ export function roleNameProblem(
   if (opts.isNew) {
     if (!ROLE_NAME_RE.test(id)) return { code: 'error-invalid-role-name', error: 'Use letras, números, espaço, ponto, hífen ou _, começando e terminando com letra ou número.' };
     const f = foldRoleName(id);
-    if (f === 'admin' || f === foldRoleName(builtin.admin ?? 'Administrador')) return { code: 'RBAC_RESERVED_ROLE_NAME', error: 'O nome admin é reservado.' };
+    if (f === 'admin' || f === foldRoleName(builtin.admin ?? 'Administrador')) return { code: 'RBAC_RESERVED_ROLE_NAME', error: 'Esse nome é do papel Administrador. Escolha outro.' };
     const ids = new Set([...Object.keys(builtin), ...others.map((r) => r.id)].map(foldRoleName));
     if (ids.has(f)) return { code: 'error-duplicate-role-names-not-allowed', error: 'Já existe um papel com esse nome.' };
   }

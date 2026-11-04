@@ -2565,7 +2565,18 @@ mark.hl-word {
   display: inline-flex;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
   white-space: nowrap;
+}
+.fwd-meta > * {
+  flex-shrink: 0;
+}
+/* Nome longo do autor corta; a hora fica sempre à vista. */
+.fwd-meta > .fwd-author {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .fwd-head a {
   color: inherit;
@@ -2895,4 +2906,52 @@ mark.hl-word {
   padding-left: var(--space-4);
   font-size: var(--fs-13);
   line-height: var(--lh-13);
+}
+
+/* Pouca altura (zoom de 400%, celular deitado): o compositor encolhe para a lista de mensagens continuar à vista
+   (WCAG 1.4.10). O texto e as ferramentas dividem uma linha; as faixas (agendadas, citação, envio) ficam mais baixas.
+   order mantém as faixas em cima e a formatação e o "Também enviar na sala" embaixo. */
+@media (max-height: 480px) {
+  .composer:not(.disabled) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    margin-bottom: 4px;
+  }
+  .composer:not(.disabled) > * {
+    flex: 1 1 100%;
+    order: 2;
+  }
+  .composer:not(.disabled) > .composer-bar {
+    order: 0;
+  }
+  /* Base maior que zero: com zero, o campo caberia na linha da faixa (com largura zero) em vez de descer. */
+  .composer:not(.disabled) > .composer-row {
+    flex: 1 1 120px;
+    min-width: 0;
+    order: 1;
+  }
+  /* Sem a contenção de largura: com ela, a largura própria das ferramentas seria zero e elas virariam uma coluna. */
+  .composer:not(.disabled) > .composer-tools {
+    container-type: normal;
+    flex: none;
+    flex-wrap: nowrap;
+    order: 1;
+    padding: 4px;
+  }
+  .composer-row textarea {
+    max-height: 35vh;
+    padding-block: 10px;
+  }
+  .composer-bar {
+    height: 28px;
+  }
+  .composer-bar .icon-btn {
+    width: 24px;
+    height: 24px;
+  }
+  .composer-bar .btn.small {
+    min-height: 24px;
+    height: 24px;
+  }
 }

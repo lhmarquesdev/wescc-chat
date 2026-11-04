@@ -38,7 +38,9 @@ export function ForwardCard({ f, children }: { f: MessageForward; children: Reac
         </span>
         {/* Autor e hora não se separam: na tela estreita o par desce inteiro, sem deixar um "·" sozinho na linha. */}
         <span className="fwd-meta">
-          <span className="fwd-author">{author}</span>
+          <span className="fwd-author" title={author}>
+            {author}
+          </span>
           <span aria-hidden="true">·</span>
           <time dateTime={f.ts} title={formatDateTime(f.ts)}>
             {formatWhen(f.ts)}
