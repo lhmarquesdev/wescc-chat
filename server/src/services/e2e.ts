@@ -346,6 +346,9 @@ export async function resetRoomKey(ctx: Ctx, rid: string, prevKeyID: string, key
   const list = checkBatch(keys);
   if (typeof prevKeyID !== 'string' || !E2E_KEY_ID.test(prevKeyID) || typeof keyID !== 'string' || !E2E_KEY_ID.test(keyID) || keyID === prevKeyID) throw E2E_ERR.invalidKey();
   if (!list.some((k) => k.uid === ctx.userId)) throw E2E_ERR.invalidKey();
+  // Outra pessoa já trocou a chave (a corrida de quem atende o pedido de troca): 409, antes da permissão, que já não
+  // vem ao caso (a sala deixou de pedir a troca). A web recarrega as chaves.
+  if (room.e2e_key_id !== prevKeyID) throw E2E_ERR.keyOutdated();
   if (!(await holds(rid, ctx.userId, prevKeyID))) throw E2E_ERR.noKey();
   const reason = room.e2e_rotate ? 'pedido' : 'manual';
   if (!room.e2e_rotate) {

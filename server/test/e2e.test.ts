@@ -821,6 +821,10 @@ describe('criptografia: troca de chave', () => {
     expect(noSelf.status).toBe(400);
     expect((await api('POST', 'e2e.resetRoomKey', { rid: room.rid, prevKeyID: room.keyID, keyID: fresh.keyID, keys }, owner)).success).toBe(true);
     expect((await audits('room.e2e.key.rotated')).find((a) => a.target.rid === room.rid).data.reason).toBe('manual');
+    // Quem perde a corrida (a chave já trocou) recebe 409 de chave desatualizada, não a recusa de permissão.
+    const late = await generateRoomKey();
+    const lost = await api('POST', 'e2e.resetRoomKey', { rid: room.rid, prevKeyID: room.keyID, keyID: late.keyID, keys: [{ uid: member.userId, key: await wrapFor(late.key, member) }] }, member);
+    expect([lost.status, lost.errorType]).toEqual([409, 'error-e2e-key-outdated']);
   });
 
   it('30. quem chega depois da troca só recebe a chave atual', async () => {

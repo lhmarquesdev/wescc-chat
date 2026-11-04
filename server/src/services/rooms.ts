@@ -8,7 +8,7 @@ import { audit } from './audit';
 import { assertCanBringIn, assertCanStartDirect } from './direct';
 import { assertCanToggleE2e, E2E_ERR, e2eOn, forgetRoomKeys, hasUserKeys, requestKeyForNewMember } from './e2e';
 import { mapRoom, mapSubscription, visibleStatusCustom } from './mappers';
-import { sendSystemMessage } from './messages';
+import { sendSystemMessage, withExtra } from './messages';
 import { hasPermission, rolesHavePermission, getUserRoles, roleInfos } from './permissions';
 import { getSetting } from './settings';
 import { actorOf, getUserById, type Ctx } from './users';
@@ -591,6 +591,15 @@ export async function deleteRoom(ctx: Ctx, rid: string) {
   await query('DELETE FROM rooms WHERE id = $1', [rid]);
   if (room.prid && room.pmid) {
     await query('UPDATE messages SET dcount = GREATEST(dcount - 1, 0), drid = NULL WHERE id = $1', [room.pmid]);
+  }
+  // O cartão "Discussão: nome" da sala de origem deixa de apontar para a sala que não existe mais.
+  if (room.prid) {
+    const cards = await many(
+      `UPDATE messages SET drid = NULL, dcount = 0, extra = extra - 'drid', updated_at = now()
+        WHERE room_id = $1 AND t = 'discussion-created' AND (drid = $2 OR extra->>'drid' = $2) RETURNING *`,
+      [room.prid, rid],
+    );
+    for (const row of cards) bus.publish({ room: row.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
   }
   for (const s of subs) {
     bus.leaveRoom(s.user_id, rid);

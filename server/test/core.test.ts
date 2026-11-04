@@ -133,6 +133,23 @@ describe('salas e mensagens', () => {
     expect(list.discussions[0].fname).toBe('Planejamento');
   });
 
+  it('discussão a partir de uma mensagem: o cartão "Discussão: nome" e a mensagem de origem contam igual; excluir tira o cartão', async () => {
+    const ch = await api('POST', 'channels.create', { name: `disc-${Date.now().toString(36)}` }, A);
+    const rid = ch.channel._id;
+    const base = (await api('POST', 'chat.sendMessage', { message: { rid, msg: 'Mensagem base da discussão aberta' } }, A)).message;
+    const d = (await api('POST', 'rooms.createDiscussion', { prid: rid, pmid: base._id, t_name: 'Discussão aberta' }, A)).discussion;
+    await api('POST', 'chat.sendMessage', { message: { rid: d._id, msg: 'primeira' } }, A);
+    await api('POST', 'chat.sendMessage', { message: { rid: d._id, msg: 'segunda' } }, A);
+    const hist = (await api('GET', 'channels.history', { roomId: rid, count: 20 }, A)).messages;
+    const card = hist.find((m: any) => m.t === 'discussion-created');
+    const origin = hist.find((m: any) => m._id === base._id);
+    expect([card.drid, card.dcount]).toEqual([d._id, 2]);
+    expect([origin.drid, origin.dcount]).toEqual([d._id, 2]);
+    expect((await api('POST', 'rooms.delete', { roomId: d._id }, A)).success).toBe(true);
+    const after = (await api('GET', 'channels.history', { roomId: rid, count: 20 }, A)).messages.find((m: any) => m.t === 'discussion-created');
+    expect(after.drid ?? null).toBeNull();
+  });
+
   it('busca com operadores', async () => {
     const ch = await api('POST', 'channels.create', { name: 'busca' }, A);
     const rid = ch.channel._id;
