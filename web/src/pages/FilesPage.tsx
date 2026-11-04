@@ -503,6 +503,18 @@ function Thumb({ file }: { file: DriveFile }) {
   );
 }
 
+// O "…" de um cartão ou linha: o clique (também o dos itens do menu, que vêm do portal e sobem pela árvore do React) e
+// o duplo clique param aqui para não abrir nem baixar o item. O clique precisa chegar ao Menu: parar no próprio botão
+// impedia o menu de abrir. O teclado não para aqui (o Esc do menu escuta no documento): o Enter do cartão só vale
+// quando o foco está no próprio cartão.
+function StopCard({ children }: { children: ReactNode }) {
+  return (
+    <span className="fl-more-wrap" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+      {children}
+    </span>
+  );
+}
+
 interface ItemActions {
   fileItems: (f: DriveFile, level: number, close: () => void) => ReactNode;
   folderItems: (f: DriveFolder, close: () => void) => ReactNode;
@@ -512,10 +524,11 @@ interface ItemActions {
 function FolderCard({ f, selected, onOpen, onSelect, actions, view }: { f: DriveFolder; selected: boolean; onOpen: () => void; onSelect: () => void; actions: ItemActions; view: ViewMode }) {
   const meta = `${plural(f.items ?? 0, 'item', 'itens')}${f.size ? ` · ${formatBytes(f.size)}` : ''}`;
   const more = (
+    <StopCard>
     <Menu
       label={`Ações de ${f.name}`}
       trigger={
-        <button type="button" className="icon-btn fl-more" aria-label={`Ações de ${f.name}`} title="Mais ações" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="icon-btn fl-more" aria-label={`Ações de ${f.name}`} title="Mais ações">
           <Icon name="more" />
         </button>
       }
@@ -530,6 +543,7 @@ function FolderCard({ f, selected, onOpen, onSelect, actions, view }: { f: Drive
         </>
       )}
     </Menu>
+    </StopCard>
   );
   if (view === 'list')
     return (
@@ -547,7 +561,7 @@ function FolderCard({ f, selected, onOpen, onSelect, actions, view }: { f: Drive
       </div>
     );
   return (
-    <div className={selected ? `fl-folder-card c-${f.color ?? 'blue'} selected` : `fl-folder-card c-${f.color ?? 'blue'}`} onClick={onOpen} onKeyDown={(e) => e.key === 'Enter' && onOpen()} role="button" tabIndex={0} aria-label={`Abrir ${f.name}`}>
+    <div className={selected ? `fl-folder-card c-${f.color ?? 'blue'} selected` : `fl-folder-card c-${f.color ?? 'blue'}`} onClick={onOpen} onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && onOpen()} role="button" tabIndex={0} aria-label={`Abrir ${f.name}`}>
       <FolderGlyph color={f.color} size={32} />
       <span className="fl-card-text">
         <strong className="ellipsis" title={f.name}>
@@ -578,16 +592,18 @@ function FolderCard({ f, selected, onOpen, onSelect, actions, view }: { f: Drive
 function FileItem({ f, level, selected, onSelect, actions, view, showPath }: { f: DriveFile; level: number; selected: boolean; onSelect: () => void; actions: ItemActions; view: ViewMode; showPath?: boolean }) {
   const who = f.uploadedBy ? f.uploadedBy.name || f.uploadedBy.username : '—';
   const more = (
+    <StopCard>
     <Menu
       label={`Ações de ${f.name}`}
       trigger={
-        <button type="button" className="icon-btn fl-more" aria-label={`Ações de ${f.name}`} title="Mais ações" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="icon-btn fl-more" aria-label={`Ações de ${f.name}`} title="Mais ações">
           <Icon name="more" />
         </button>
       }
     >
       {(close) => actions.fileItems(f, level, close)}
     </Menu>
+    </StopCard>
   );
   if (view === 'list')
     return (
@@ -606,7 +622,7 @@ function FileItem({ f, level, selected, onSelect, actions, view, showPath }: { f
       </div>
     );
   return (
-    <div className={selected ? 'fl-file-card selected' : 'fl-file-card'} onClick={onSelect} onDoubleClick={() => actions.download(f)} onKeyDown={(e) => e.key === 'Enter' && onSelect()} role="button" tabIndex={0} aria-label={f.name}>
+    <div className={selected ? 'fl-file-card selected' : 'fl-file-card'} onClick={onSelect} onDoubleClick={() => actions.download(f)} onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && onSelect()} role="button" tabIndex={0} aria-label={f.name}>
       <Thumb file={f} />
       <span className="fl-card-text">
         <strong className="ellipsis" title={f.name}>

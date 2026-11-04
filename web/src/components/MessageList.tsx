@@ -5,7 +5,7 @@ import { watchAcks } from '../lib/acks';
 import { api } from '../lib/api';
 import { formatDateTime, formatDay, formatTime, nameList, plural, roomDisplayName, roomIconName } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
-import { continuesGroup } from '../lib/messageRules';
+import { continuesGroup, joinsText } from '../lib/messageRules';
 import { rememberName, useNames } from '../lib/names';
 import { useSetting, useStore } from '../lib/store';
 import { AckBar } from './AckBar';
@@ -28,27 +28,6 @@ type Row = { kind: 'msg'; m: Message; i: number; grouped: boolean; unread?: bool
 type Day = { key: string; ts: string; rows: Row[] };
 
 const time = (m: Message) => new Date(m.ts).getTime();
-const actor = (m: Message) => m.u.name || m.u.username;
-const uniq = (xs: string[]) => [...new Set(xs)];
-
-// "Alice Souza, Bruno Lima e mais 3 entraram na sala", "Administrador adicionou Renata Alves, Diego Martins e mais 8";
-// com mais de um tipo, as partes separadas por ponto e vírgula.
-function joinsText(ms: Message[], nameOf: (username: string) => string) {
-  const parts: string[] = [];
-  const joined = uniq(ms.filter((x) => x.t === 'uj').map(actor));
-  if (joined.length) parts.push(`${nameList(joined)} ${joined.length === 1 ? 'entrou' : 'entraram'} na sala`);
-  for (const [t, verb] of [
-    ['au', 'adicionou'],
-    ['ru', 'removeu'],
-  ] as const) {
-    const by = new Map<string, string[]>();
-    for (const x of ms) if (x.t === t) by.set(actor(x), [...(by.get(actor(x)) ?? []), nameOf(x.msg)]);
-    for (const [who, list] of by) parts.push(`${who} ${verb} ${nameList(uniq(list))}`);
-  }
-  const left = uniq(ms.filter((x) => x.t === 'ul').map(actor));
-  if (left.length) parts.push(`${nameList(left)} ${left.length === 1 ? 'saiu' : 'saíram'} da sala`);
-  return parts.join('; ');
-}
 
 function joinsIcon(ms: Message[]): IconName {
   const kinds = new Set(ms.map((x) => x.t));

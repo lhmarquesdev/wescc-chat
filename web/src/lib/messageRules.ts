@@ -4,6 +4,7 @@
 import type { Message } from '@shared/index';
 import type { MessageForward, MessagePoll } from '@shared/messages';
 import { encryptedContent, messageLink } from '@shared/messages';
+import { nameList } from './format';
 import { whenText } from './messageTimes';
 
 // O tipo aceita edição: nem mensagem de sistema, nem figurinha, nem enquete, nem encaminhada (o servidor recusa no chat.update).
@@ -80,4 +81,54 @@ export function continuesGroup(prev: Message, m: Message, periodMs: number) {
     a.toDateString() === b.toDateString() &&
     b.getTime() - a.getTime() < periodMs
   );
+}
+
+// Linha agrupada de entradas e saídas ("Alice e Bruno entraram na sala; Administrador adicionou Renata"). Cada pessoa
+// que entrou e saiu aparece uma vez, com o que aconteceu na ordem certa ("saiu e voltou", "entrou e saiu da sala"), e
+// as partes seguem a ordem em que cada uma começou: quem saiu e voltou nunca fica parecendo fora da sala.
+export function joinsText(ms: Message[], nameOf: (username: string) => string = (u) => u): string {
+  const sorted = ms.map((m, i) => ({ m, i })).sort((a, b) => a.m.ts.localeCompare(b.m.ts) || a.i - b.i).map((x) => x.m);
+  const actor = (m: Message) => m.u.name || m.u.username;
+  const parts: { at: number; text: string }[] = [];
+  // Entrou/saiu: o primeiro e o último movimento de cada pessoa.
+  const moves = new Map<string, { name: string; first: string; last: string; at: number }>();
+  sorted.forEach((x, at) => {
+    if (x.t !== 'uj' && x.t !== 'ul') return;
+    const cur = moves.get(x.u.username);
+    if (cur) cur.last = x.t;
+    else moves.set(x.u.username, { name: actor(x), first: x.t, last: x.t, at });
+  });
+  const VERB: Record<string, [string, string]> = {
+    uj: ['entrou na sala', 'entraram na sala'],
+    ul: ['saiu da sala', 'saíram da sala'],
+    'ul>uj': ['saiu e voltou', 'saíram e voltaram'],
+    'uj>ul': ['entrou e saiu da sala', 'entraram e saíram da sala'],
+  };
+  const byOutcome = new Map<string, { names: string[]; at: number }>();
+  for (const mv of moves.values()) {
+    const key = mv.first === mv.last ? mv.first : `${mv.first}>${mv.last}`;
+    const g = byOutcome.get(key) ?? { names: [], at: mv.at };
+    g.names.push(mv.name);
+    g.at = Math.min(g.at, mv.at);
+    byOutcome.set(key, g);
+  }
+  for (const [key, g] of byOutcome) parts.push({ at: g.at, text: `${nameList(g.names)} ${VERB[key][g.names.length === 1 ? 0 : 1]}` });
+  // Adicionou/removeu: por quem fez, com as pessoas na ordem.
+  for (const [t, verb] of [
+    ['au', 'adicionou'],
+    ['ru', 'removeu'],
+  ] as const) {
+    const by = new Map<string, { names: string[]; at: number }>();
+    sorted.forEach((x, at) => {
+      if (x.t !== t) return;
+      const g = by.get(actor(x)) ?? { names: [], at };
+      if (!g.names.includes(nameOf(x.msg))) g.names.push(nameOf(x.msg));
+      by.set(actor(x), g);
+    });
+    for (const [who, g] of by) parts.push({ at: g.at, text: `${who} ${verb} ${nameList(g.names)}` });
+  }
+  return parts
+    .sort((a, b) => a.at - b.at)
+    .map((p) => p.text)
+    .join('; ');
 }

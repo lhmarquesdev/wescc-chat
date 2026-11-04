@@ -301,8 +301,10 @@ function ComposerView({
           insert: `@${u.username} `,
         });
         const items: Suggestion[] = r.items.filter((u: any) => u.username !== me.username).map(person);
+        // @all e @here só para quem pode (o servidor recusa o envio sem mention-all / mention-here).
+        const myRoles = [...me.roles, ...(useStore.getState().subscriptions[rid]?.roles ?? [])];
         for (const g of ['all', 'here'])
-          if (g.startsWith(term))
+          if (g.startsWith(term) && canWithRoles(g === 'all' ? 'mention-all' : 'mention-here', myRoles))
             items.push({ key: g, lead: <Icon name="mention" size={16} />, title: `@${g}`, sub: g === 'all' ? 'todos da sala' : 'todos online', insert: `@${g} ` });
         // Quem escreve vai para o fim, depois de @all e @here: quase nunca se menciona a si mesmo.
         const self = r.items.find((u: any) => u.username === me.username);
@@ -343,7 +345,7 @@ function ComposerView({
       }
       setSel(0);
     },
-    [rid, me.username, me._id],
+    [rid, me.username, me._id, me.roles],
   );
 
   const applySuggestion = (s: Suggestion) => {
@@ -445,7 +447,9 @@ function ComposerView({
     return {};
   };
 
+  // Vários arquivos com uma descrição: ela vai só com o primeiro que sair (não se repete embaixo de cada um).
   const doUpload = async (files: File[], description: string, extra: Record<string, string> = {}, label?: string) => {
+    let caption = description;
     for (const f of files) {
       if (room?.encrypted) {
         const problem = e2eFileProblem(f);
@@ -459,8 +463,9 @@ function ComposerView({
       setUploads((u) => [...u, { id, name: label ?? f.name, progress: 0, abort }]);
       try {
         const progress = (p: number) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, progress: p } : x)));
-        if (room?.encrypted) await sendEncryptedFile(room, f, { msg: description, tmid, meta: await e2eMeta(f, extra), onProgress: progress, signal: abort.signal });
-        else await uploadTo(`rooms.upload/${rid}`, f, { description, tmid: tmid ?? '', ...extra }, progress, abort.signal);
+        if (room?.encrypted) await sendEncryptedFile(room, f, { msg: caption, tmid, meta: await e2eMeta(f, extra), onProgress: progress, signal: abort.signal });
+        else await uploadTo(`rooms.upload/${rid}`, f, { description: caption, tmid: tmid ?? '', ...extra }, progress, abort.signal);
+        caption = '';
       } catch (e) {
         // Cancelado por quem enviou: a barra some e basta.
         if (!(e instanceof ApiError && e.errorType === 'aborted')) useStore.getState().toast(errorMessage(e), 'error');
@@ -993,7 +998,14 @@ function ComposerView({
               </li>
             ))}
           </ul>
-          <input autoFocus placeholder="Descrição (opcional)" aria-label="Descrição" value={fileDesc} onChange={(e) => setFileDesc(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && confirmPending()} />
+          <input
+            autoFocus
+            placeholder={pending.length > 1 ? 'Descrição (opcional, vai com o primeiro arquivo)' : 'Descrição (opcional)'}
+            aria-label="Descrição"
+            value={fileDesc}
+            onChange={(e) => setFileDesc(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && confirmPending()}
+          />
         </Modal>
       )}
     </div>

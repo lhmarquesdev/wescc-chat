@@ -794,19 +794,22 @@ function withCopy(nodes: ReactNode): ReactNode {
 }
 
 // Quem respondeu no tópico: nomes tirados das mensagens já carregadas (sem lista nova a cada leitura do estado).
-function useReplyFaces(m: Message) {
+// Quem participa do tópico (até 3), pelo id que vem na mensagem: com o @usuário conhecido (mensagens carregadas), a
+// mesma imagem dos outros avatares; sem ele (respondeu só dentro do tópico), a imagem pelo id.
+function useReplyFaces(m: Message): { id: string; src: string }[] {
   const ids = (m.replies ?? []).slice(0, 3);
   const key = useStore((s) => {
     if (!ids.length) return '';
     const known = new Map<string, string>();
     for (const x of s.threads[m._id] ?? []) known.set(x.u._id, x.u.username);
     for (const x of s.messages[m.rid]?.list ?? []) if (!known.has(x.u._id)) known.set(x.u._id, x.u.username);
-    return ids
-      .map((id) => known.get(id))
-      .filter(Boolean)
-      .join(' ');
+    return ids.map((id) => `${id}:${known.get(id) ?? ''}`).join(' ');
   });
-  return key ? key.split(' ') : [];
+  if (!key) return [];
+  return key.split(' ').map((pair) => {
+    const [id, username] = pair.split(':');
+    return { id, src: username ? `/avatar/${encodeURIComponent(username)}?v=${avatarBust[username] ?? ''}` : `/avatar/uid/${encodeURIComponent(id)}` };
+  });
 }
 
 // "Última há 3 min", "Última em 16/10"; "agora" e "ontem" pedem o substantivo: "Última resposta agora".
@@ -823,8 +826,8 @@ function ThreadSummary({ m, onOpen }: { m: Message; onOpen: () => void }) {
     <button type="button" className="thread-summary" onClick={onOpen}>
       {faces.length > 0 && (
         <span className="avatar-stack" aria-hidden="true">
-          {faces.map((u) => (
-            <img key={u} className="avatar mini-follow" src={`/avatar/${encodeURIComponent(u)}?v=${avatarBust[u] ?? ''}`} width={20} height={20} alt="" loading="lazy" />
+          {faces.map((f) => (
+            <img key={f.id} className="avatar mini-follow" src={f.src} width={20} height={20} alt="" loading="lazy" />
           ))}
         </span>
       )}

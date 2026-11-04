@@ -158,6 +158,10 @@ describe('origens e cookies', () => {
     const anon = await fetch(urlOf(`/avatar/${u.username}`));
     expect(anon.headers.get('content-type')).toContain('image/svg+xml');
     expect((await raw(`/avatar/${u.username}`, A)).headers.get('content-type')).toContain('image/png');
+    // Pelo id (rostos do resumo de conversa): a mesma regra de visibilidade.
+    expect((await fetch(urlOf(`/avatar/uid/${u.userId}`))).headers.get('content-type')).toContain('image/svg+xml');
+    expect((await raw(`/avatar/uid/${u.userId}`, A)).headers.get('content-type')).toContain('image/png');
+    expect(await (await raw('/avatar/uid/nao-existe', A)).text()).toContain('<svg');
 
     const g = await api('POST', 'groups.create', { name: 'diretoria-secreta' }, A);
     const outsider = await newUser(A);

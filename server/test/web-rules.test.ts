@@ -8,7 +8,7 @@ import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 import { listSettings } from '../src/services/settings';
 import { EMOJI as WEB_EMOJI } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
-import { authorName, continuesGroup, editableKind, forwardableKind, forwardOrigin, lastOwnEditable, messageLink, pollMeta, pollShares } from '../../web/src/lib/messageRules';
+import { authorName, continuesGroup, editableKind, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, messageLink, pollMeta, pollShares } from '../../web/src/lib/messageRules';
 import { fromLocalInput, reminderPresets, schedulePresets, toLocalInput, whenText } from '../../web/src/lib/messageTimes';
 import { AHEAD_ERROR, aheadError, POLL_ERRORS, pollInputError, type MessageForward, type MessagePoll } from '@shared/messages';
 import { messagePreviewText } from '@shared/stickers';
@@ -847,5 +847,20 @@ describe('nome do dispositivo (Dispositivos, e-mail de acesso novo e Meus dados)
     expect(deviceLabel({ name: 'Firefox em Desconhecido', browser: 'Firefox', os: 'Desconhecido' })).toBe('Firefox');
     expect(deviceLabel({ name: 'Notebook da Ana' })).toBe('Notebook da Ana');
     expect(deviceLabel({})).toBe('Navegador ou aplicativo desconhecido');
+  });
+});
+
+describe('linha agrupada de entradas e saídas', () => {
+  const ev = (t: string, username: string, name: string, min: number, msg = '') =>
+    ({ _id: `${t}-${username}-${min}`, rid: 'r', t, msg, u: { _id: username, username, name }, ts: new Date(Date.UTC(2026, 10, 4, 3, min)).toISOString() }) as unknown as Message;
+  it('quem saiu e voltou aparece uma vez, na ordem certa', () => {
+    expect(joinsText([ev('ul', 'gabi', 'Gabriela Nunes', 1), ev('uj', 'gabi', 'Gabriela Nunes', 2)])).toBe('Gabriela Nunes saiu e voltou');
+    expect(joinsText([ev('uj', 'gabi', 'Gabriela Nunes', 1), ev('ul', 'gabi', 'Gabriela Nunes', 2)])).toBe('Gabriela Nunes entrou e saiu da sala');
+    // Fora de ordem na lista: vale a hora.
+    expect(joinsText([ev('uj', 'gabi', 'Gabriela Nunes', 2), ev('ul', 'gabi', 'Gabriela Nunes', 1)])).toBe('Gabriela Nunes saiu e voltou');
+  });
+  it('as partes seguem a ordem em que começaram', () => {
+    const ms = [ev('ul', 'bia', 'Bia', 1), ev('uj', 'ana', 'Ana', 2), ev('uj', 'caio', 'Caio', 3), ev('au', 'adm', 'Administrador', 4, 'rui')];
+    expect(joinsText(ms, (u) => (u === 'rui' ? 'Rui Costa' : u))).toBe('Bia saiu da sala; Ana e Caio entraram na sala; Administrador adicionou Rui Costa');
   });
 });

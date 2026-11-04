@@ -533,6 +533,15 @@ export function usersRoutes(app: FastifyInstance) {
     if (u?.data) return reply.type(u.content_type).send(u.data);
     return reply.type('image/svg+xml').send(initialsSvg(u?.name || u?.username || name));
   });
+  // Pelo id da conta (os rostos do resumo do tópico, que só têm o id de quem respondeu). Mesma regra de visibilidade.
+  app.get('/avatar/uid/:id', async (req: any, reply) => {
+    const visible = !!req.ctx || avatarsPublic();
+    reply.header('Cache-Control', visible && !req.ctx ? 'public, max-age=300' : 'private, max-age=300');
+    if (!visible) return reply.type('image/svg+xml').send(initialsSvg('?'));
+    const u = await one('SELECT u.id, u.username, u.name, a.content_type, a.data FROM users u LEFT JOIN avatars a ON a.user_id = u.id WHERE u.id = $1', [String(req.params.id)]);
+    if (u?.data) return reply.type(u.content_type).send(u.data);
+    return reply.type('image/svg+xml').send(initialsSvg(u?.name || u?.username || '?'));
+  });
   app.get('/avatar/room/:rid', async (req: any, reply) => {
     const r = await one('SELECT r.*, a.content_type, a.data FROM rooms r LEFT JOIN room_avatars a ON a.room_id = r.id WHERE r.id = $1', [req.params.rid]);
     reply.header('Cache-Control', 'private, max-age=300');

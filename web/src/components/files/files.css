@@ -473,11 +473,14 @@
   background: var(--ok-soft);
   color: var(--ok);
 }
-.fl-folder-card > .menu-wrap,
-.fl-file-card > .menu-wrap {
+.fl-folder-card > .fl-more-wrap,
+.fl-file-card > .fl-more-wrap {
   position: absolute;
   top: 6px;
   right: 6px;
+}
+.fl-more-wrap {
+  display: inline-flex;
 }
 .fl-more {
   opacity: 0;
