@@ -119,6 +119,32 @@ const rateBefore = before.find((x) => x._id === RATE)?.value;
 if (rateBefore !== false) await setSettings({ [RATE]: false });
 // O passo 1 liga a tradução pela tela: começa desligada e sem endereço.
 await setSettings({ AutoTranslate_Enabled: false, AutoTranslate_LibreTranslate_Url: '', Language: 'pt-BR' });
+// Criptografia de ponta a ponta (passo 9): ligar numa sala pede E2E_Enable e as chaves de quem liga. O roteiro liga a
+// função só no passo e devolve o valor de antes no fim.
+const e2eBefore = before.find((x) => x._id === 'E2E_Enable')?.value;
+let adminKeysMade = false;
+const b64u = (buf) => Buffer.from(buf).toString('base64url');
+async function ensureAdminE2eKeys() {
+  if (ok('e2e.fetchMyKeys', await admin.call('GET', 'e2e.fetchMyKeys')).publicKey) return;
+  // As mesmas contas de web/src/lib/e2e/crypto.ts (RSA-OAEP 2048 e a privada cifrada com PBKDF2 → AES-GCM), com uma
+  // senha que ninguém guarda: o fim do roteiro redefine a criptografia do admin.
+  const s = globalThis.crypto.subtle;
+  const pair = await s.generateKey({ name: 'RSA-OAEP', hash: 'SHA-256', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) }, true, ['encrypt', 'decrypt']);
+  const jwk = await s.exportKey('jwk', pair.publicKey);
+  const salt = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
+  const base = await s.importKey('raw', crypto.randomBytes(32), 'PBKDF2', false, ['deriveKey']);
+  const key = await s.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 100_000 }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+  const ct = await s.encrypt({ name: 'AES-GCM', iv }, key, await s.exportKey('pkcs8', pair.privateKey));
+  ok(
+    'e2e.setUserPublicAndPrivateKeys admin',
+    await admin.call('POST', 'e2e.setUserPublicAndPrivateKeys', {
+      public_key: JSON.stringify({ alg: 'RSA-OAEP-256', e: jwk.e, kty: 'RSA', n: jwk.n }),
+      private_key: JSON.stringify({ v: 1, kdf: 'PBKDF2-SHA256', iter: 100_000, salt: b64u(salt), iv: b64u(iv), ct: b64u(ct) }),
+    }),
+  );
+  adminKeysMade = true;
+}
 
 for (const p of Object.values(PEOPLE)) await ensurePerson(p);
 const { maria, john, op1 } = PEOPLE;
@@ -556,7 +582,10 @@ await step(8, 'Operação traduz pelo menu e não ganha DM nova', async () => {
 await step(9, 'Grupo criptografado: sem painel nem "Traduzir"; ligar a criptografia desliga a automática', async () => {
   ok('saveSettings secreto', await john.api.call('POST', 'autoTranslate.saveSettings', { roomId: ROOMS.secreto, field: 'autoTranslate', value: true }));
   const msg = await send(maria, ROOMS.secreto, 'Olá, o servidor voltou? Não consigo entrar hoje.');
+  await setSettings({ E2E_Enable: true });
+  await ensureAdminE2eKeys();
   ok('encrypted', await admin.call('POST', 'rooms.saveRoomSettings', { rid: ROOMS.secreto, encrypted: true }));
+  if (e2eBefore !== true) await setSettings({ E2E_Enable: false });
   await waitFor('automática desligada', async () => {
     const r = await john.api.call('GET', 'subscriptions.getOne', { roomId: ROOMS.secreto });
     return r.subscription && !r.subscription.autoTranslate ? true : null;
@@ -738,6 +767,12 @@ for (const ctx of pages) await ctx.close().catch(() => {});
 await browser.close();
 await setSettings({ AutoTranslate_Enabled: false }).catch((e) => problems.push(`desligar a tradução: ${e.message}`));
 if (rateBefore !== undefined && rateBefore !== false) await setSettings({ [RATE]: rateBefore }).catch(() => {});
+if (e2eBefore !== true) await setSettings({ E2E_Enable: false }).catch(() => {});
+// Por último (redefinir a criptografia encerra as outras sessões do admin): as chaves que o passo 9 criou saem.
+if (adminKeysMade) {
+  const r = await admin.call('POST', 'e2e.resetOwnE2EKey', { password: lib.ADMIN_PASSWORD }).catch((e) => ({ success: false, error: e.message }));
+  if (!r.success) problems.push(`redefinir a criptografia do admin: ${JSON.stringify(r)}`);
+}
 await stopFake();
 await killFake(fake2, LIBRE_URL2);
 fs.writeFileSync(path.join(OUT, 'resultado.json'), JSON.stringify({ results, problems }, null, 2));

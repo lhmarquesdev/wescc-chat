@@ -369,7 +369,9 @@ await step(1, 'Busca: pessoa sem conversa, canal para entrar, código de acesso,
 // ---------- 2. Operação ----------
 await step(2, 'Operação: "Sem conversa direta" e Enter só explica', async () => {
   const p = await open(op1);
-  await search(p, 'op2');
+  // Pelo nome: "op2" também acha e2e.cripto.op2 (Usuário), de scripts/e2e/criptografia.mjs no mesmo banco, e o Enter
+  // abriria a conversa com ela.
+  await search(p, 'Olga');
   const row = people(p).locator('.side-item', { hasText: 'Olga Operadora' });
   await expectVisible(row, 'Olga em Pessoas');
   await expectVisible(row.locator('.pill.blocked', { hasText: 'Sem conversa direta' }), 'pílula "Sem conversa direta"');
