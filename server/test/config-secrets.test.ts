@@ -29,7 +29,8 @@ async function messageOf(fn: () => unknown) {
 
 // config.ts lido de novo com outro ambiente, como num processo novo.
 const KNOWN = ['DATABASE_URL_FILE', 'TLS_PFX_FILE', 'TLS_PFX_PASSPHRASE', 'TLS_PFX_PASSPHRASE_FILE', 'TLS_CERT_FILE', 'TLS_KEY_FILE', 'TRUST_PROXY',
-  'LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'LIVEKIT_API_SECRET_FILE', 'PORT', 'INTERNAL_PORT', 'HTTP_REDIRECT_PORT'];
+  'LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'LIVEKIT_API_SECRET_FILE', 'PORT', 'INTERNAL_PORT', 'HTTP_REDIRECT_PORT',
+  'LIBRETRANSLATE_API_KEY', 'LIBRETRANSLATE_API_KEY_FILE'];
 async function freshConfig(env: Record<string, string>) {
   vi.unstubAllEnvs();
   for (const k of KNOWN) vi.stubEnv(k, undefined);
@@ -79,6 +80,15 @@ describe('segredos em arquivo, TRUST_PROXY e log das requisições', () => {
     expect(c.tls).toMatchObject({ pfxFile: path.join(dir, 'chat.pfx'), pfxPassphrase: '<senha>', certFile: null, keyFile: null });
     expect(c.livekit).toEqual({ url: 'http://127.0.0.1:7880', apiKey: 'APIabcdefghijkl', apiSecret: '<segredo-livekit>' });
     await expect(freshConfig({ LIVEKIT_API_SECRET_FILE: missing })).rejects.toThrow(`Não foi possível ler LIVEKIT_API_SECRET_FILE: ${missing}`);
+  });
+
+  it('chave do LibreTranslate (tradução de mensagens) de arquivo ou da variável', async () => {
+    expect((await freshConfig({})).translate).toEqual({ apiKey: null });
+    expect((await freshConfig({ LIBRETRANSLATE_API_KEY: 'da-variavel' })).translate).toEqual({ apiKey: 'da-variavel' });
+    const c = await freshConfig({ LIBRETRANSLATE_API_KEY: 'da-variavel', LIBRETRANSLATE_API_KEY_FILE: f('libretranslate-key.txt', '<chave-lt>\r\n') });
+    expect(c.translate).toEqual({ apiKey: '<chave-lt>' });
+    const missing = path.join(dir, 'sem-chave-lt.txt');
+    await expect(freshConfig({ LIBRETRANSLATE_API_KEY_FILE: missing })).rejects.toThrow(`Não foi possível ler LIBRETRANSLATE_API_KEY_FILE: ${missing} (o arquivo não existe)`);
   });
 
   it('TRUST_PROXY: padrão false com HTTPS próprio e true sem ele; lista de endereços aceita', async () => {

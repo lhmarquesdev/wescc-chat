@@ -61,7 +61,7 @@ describe('papel operacao e migração 013', () => {
   it('a migração 013 recria o papel e as permissões num banco antigo', async () => {
     // A 013 dá ao papel as chaves que existiam nela; chaves do catálogo mais novas (Arquivos, migração 022) chegam ao
     // papel pelo seed de chaves novas no boot, não pela migração.
-    const AFTER_013 = ['view-files', 'forward-message'];
+    const AFTER_013 = ['view-files', 'forward-message', 'auto-translate'];
     // O mesmo para o Publicador: as chaves de Mensagens (enquetes e envio agendado) são mais novas que a 013.
     const PUBLISHER_AFTER_013 = ['create-poll', 'schedule-message'];
     const forget013 = async () => {

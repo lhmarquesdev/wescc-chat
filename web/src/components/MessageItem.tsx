@@ -26,6 +26,8 @@ import { authorName, editableKind, forwardableKind } from '../lib/messageRules';
 import { canRemoveEverywhere, useStickers } from '../lib/stickers';
 import { useNames } from '../lib/names';
 import { avatarBust, useSetting, useStore } from '../lib/store';
+import { useMessageTranslation, type MessageTranslationView } from '../lib/translate';
+import { languageLabel } from '../lib/translateRules';
 import { EmojiPicker, recentEmoji } from './EmojiPicker';
 // Chamadas em grupo: o cartão da chamada mudou para call/CallCard.tsx (o registro a dois, sem mudanças).
 import { CallCard } from './call/CallCard';
@@ -621,6 +623,81 @@ function copyText(text: string, done: string) {
   );
 }
 
+// Tradução pedida pelo menu da mensagem: a linha abaixo do corpo ("Traduzida do inglês · Ver original"). Com a
+// tradução pronta, a linha fica também com o original na tela ("Original em inglês · Ver tradução"): o foco continua
+// no mesmo botão e dá para voltar ali mesmo. Todos os estados começam pelo mesmo ícone (ou o spinner, do mesmo
+// tamanho), então o texto não pula quando o estado muda.
+function TranslationLine({ tr }: { tr: MessageTranslationView }) {
+  if (!tr.can || !tr.manual) return null;
+  if (tr.ready) {
+    const translated = tr.shown === 'translation';
+    const from = tr.source ? languageLabel(tr.source) : null;
+    return (
+      <div className="msg-translated">
+        <Icon name="translate" size={12} />
+        <span>{translated ? (from ? `Traduzida do ${from}` : 'Traduzida') : from ? `Original em ${from}` : 'Original'}</span>
+        <span aria-hidden="true">·</span>
+        <button type="button" className="msg-tr-btn" onClick={tr.toggle}>
+          {translated ? 'Ver original' : 'Ver tradução'}
+        </button>
+      </div>
+    );
+  }
+  if (!tr.wanted) return null;
+  if (tr.state === 'pending')
+    return (
+      <div className="msg-translated" role="status">
+        <span className="spinner" aria-hidden="true" />
+        <span>Traduzindo…</span>
+      </div>
+    );
+  if (tr.state !== 'failed' || tr.reason === 'changed') return null;
+  // Longa demais não melhora tentando de novo.
+  const tooLong = tr.reason === 'too-long';
+  return (
+    <div className="msg-translated">
+      <Icon name="translate" size={12} />
+      <span>{tooLong ? 'Esta mensagem é longa demais para o servidor de tradução.' : 'Tradução indisponível agora.'}</span>
+      {!tooLong && (
+        <>
+          <span aria-hidden="true">·</span>
+          <button type="button" className="msg-tr-btn" onClick={tr.retry}>
+            Tentar de novo
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Tradução automática da sala: uma marca curta junto da hora (nas mensagens agrupadas, no fim do corpo), como
+// "editada", em vez de uma linha a mais por mensagem. Clicar troca entre a tradução e o original; o menu da mensagem
+// também tem "Ver original". Enquanto traduz, nada (a mensagem não pula); sem tradução, a marca diz e o chat tenta de
+// novo sozinho.
+function TranslationMark({ tr }: { tr: MessageTranslationView }) {
+  if (!tr.can || !tr.auto || tr.manual) return null;
+  const from = tr.source ? languageLabel(tr.source) : null;
+  if (tr.ready) {
+    const translated = tr.shown === 'translation';
+    const label = translated ? `${from ? `Traduzida do ${from}` : 'Traduzida'}. Ver original` : `${from ? `Original em ${from}` : 'Original'}. Ver tradução`;
+    return (
+      <button type="button" className="msg-tr-mark" onClick={tr.toggle} title={label} aria-label={label}>
+        <Icon name="translate" size={12} />
+        <span>{translated ? 'traduzida' : 'original'}</span>
+      </button>
+    );
+  }
+  if (!tr.wanted || tr.state !== 'failed' || tr.reason === 'changed') return null;
+  const why = tr.reason === 'too-long' ? 'Esta mensagem é longa demais para o servidor de tradução.' : 'Tradução indisponível agora. O chat tenta de novo sozinho.';
+  return (
+    <span className="msg-tr-mark off" title={why}>
+      <Icon name="translate" size={12} />
+      <span>sem tradução</span>
+      <span className="visually-hidden">{`: ${why}`}</span>
+    </span>
+  );
+}
+
 // Blocos de código ganham "Copiar" (renderMarkdown devolve os <pre> no primeiro nível).
 function withCopy(nodes: ReactNode): ReactNode {
   if (!Array.isArray(nodes)) return nodes;
@@ -796,6 +873,8 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   const integrations = useIntegrations((s) => s.me);
   // Palavras destacadas de quem lê (Minha conta › Preferências).
   const hlm = useHighlights();
+  // Tradução para quem lê (LibreTranslate da empresa): o texto na tela pode ser a tradução; a edição usa o original.
+  const tr = useMessageTranslation(m);
   const own = m.u._id === me._id;
   const perms = me.permissions;
   const gate = useContext(MessageGateContext);
@@ -813,8 +892,9 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   // Chamadas em grupo: o cartão da chamada (a dois ou em grupo) fica sob o nome de quem ligou.
   const call = m.t === 'call_ended' || m.t === 'call_missed' || m.t === 'call_group';
   const notice = !!m.ackRequired && !m.t;
-  const lifted = notice ? noticeTitle(m.msg) : null;
-  const text = lifted ? lifted.rest : m.msg;
+  const shownMsg = tr.shown === 'translation' && tr.text ? tr.text : m.msg;
+  const lifted = notice ? noticeTitle(shownMsg) : null;
+  const text = lifted ? lifted.rest : shownMsg;
   const starred = m.starred?.some((s) => s._id === me._id);
   const bot = !!m.alias || !!m.bot;
   const copyLink = () => {
@@ -851,7 +931,13 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
       }),
       opt(!m.t, { key: 'remind', icon: 'remind', label: reminder ? 'Alterar lembrete' : 'Lembrar-me', run: () => setReminding(true) }),
       { key: 'link', icon: 'copy-link', label: 'Copiar link', run: copyLink } as MenuItem,
-      opt(!m.sticker, { key: 'text', icon: 'copy', label: 'Copiar texto', run: () => copyText(m.msg, 'Texto copiado.') }),
+      opt(!m.sticker, { key: 'text', icon: 'copy', label: 'Copiar texto', run: () => copyText(shownMsg, 'Texto copiado.') }),
+      opt(tr.can, {
+        key: 'translate',
+        icon: tr.shown === 'translation' ? 'translate-original' : 'translate',
+        label: tr.shown === 'translation' ? 'Ver original' : 'Traduzir',
+        run: tr.toggle,
+      }),
       opt(!own, { key: 'unread', icon: 'mark-unread', label: 'Marcar como não lida', run: () => void api.post('subscriptions.unread', { firstUnreadMessage: { _id: m._id } }).catch(fail) }),
       opt(showReceipts, { key: 'receipts', icon: 'receipts', label: 'Confirmações de leitura', run: () => setReceipts(true) }),
       opt(m.sticker, { key: 'sticker', el: (close, sheetRole) => <StickerMenuItems message={m} close={close} sheetRole={sheetRole} /> }),
@@ -1014,8 +1100,10 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
           <div className={`msg-body ${isEmojiOnly(text) ? 'big-emoji' : ''}`}>
             {body}
             {grouped && edited}
+            {grouped && <TranslationMark tr={tr} />}
           </div>
         ))}
+      {!stickerView && !call && <TranslationLine tr={tr} />}
       {attachments}
     </>
   );
@@ -1038,6 +1126,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
 
   return (
     <div
+      ref={tr.observe}
       className={cls}
       id={`msg-${m._id}`}
       onPointerDown={coarse ? onPointerDown : undefined}
@@ -1087,6 +1176,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
               {formatTime(m.ts)}
             </time>
             {edited}
+            <TranslationMark tr={tr} />
             {m.pinned && (
               <span className="msg-flag pin" title="Fixada" role="img" aria-label="Fixada">
                 <Icon name="pin" size={12} />

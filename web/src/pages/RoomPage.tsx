@@ -11,6 +11,7 @@ import { renderMarkdown } from '../lib/markdown';
 import { sendText } from '../lib/direct';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { lastOwnEditable } from '../lib/messageRules';
+import { useTranslateAllowed } from '../lib/translate';
 import { Composer } from '../components/Composer';
 import { Icon, type IconName } from '../components/Icon';
 import { CreateModal } from '../components/CreateModal';
@@ -41,6 +42,8 @@ const PANELS: { id: PanelId; icon: IconName; label: string; when?: (r: Room) => 
   { id: 'starred', icon: 'panel-starred', label: 'Favoritas' },
   { id: 'mentions', icon: 'panel-mentions', label: 'Menções' },
   { id: 'notifications', icon: 'panel-notifications', label: 'Notificações' },
+  // Tradução automática: a permissão é global (a de quem lê) e a função precisa estar ligada; RoomPage filtra.
+  { id: 'translate', icon: 'panel-translate', label: 'Tradução automática', when: (r) => !r.encrypted },
   { id: 'invite', icon: 'panel-invite', label: 'Link de convite', when: (r) => r.t !== 'd', perm: 'create-invite-links' },
   { id: 'prune', icon: 'panel-prune', label: 'Limpar histórico', when: (r) => r.t !== 'd', perm: 'clean-channel-history' },
   // Sem "when": numa conversa direta exporta quem tem a permissão global (o administrador).
@@ -326,6 +329,7 @@ export function RoomPage() {
   const roles = useMemo(() => [...me.roles, ...roomRoles], [me.roles, roomRoles]);
   // O painel "Mensagens agendadas" só aparece quando há agendadas aqui (ou quando já está aberto).
   const scheduledHere = useStore((s) => s.scheduled.some((x) => x.rid === rid));
+  const translateOn = useTranslateAllowed();
   const canModerate = roles.some((r) => ['admin', 'owner', 'moderator'].includes(r));
 
   const setPanel = (p: PanelId | null) => {
@@ -473,7 +477,8 @@ export function RoomPage() {
       (!p.when || p.when(room)) &&
       (!p.perm || [p.perm].flat().some((x) => canWithRoles(x, roles))) &&
       !(p.id === 'members' && membersHidden) &&
-      !(p.id === 'scheduled' && !scheduledHere && panel !== 'scheduled'),
+      !(p.id === 'scheduled' && !scheduledHere && panel !== 'scheduled') &&
+      !(p.id === 'translate' && !translateOn),
   );
   // Chamadas em grupo: a conversa a dois mantém voz e vídeo no cabeçalho em qualquer largura. Nas outras salas, abaixo
   // de 440 px iniciar vai para o Mais; a pílula de uma chamada viva fica e toma o lugar de Membros (que vai para o Mais).

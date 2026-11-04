@@ -120,4 +120,6 @@ export const config = {
     apiKey: env.LIVEKIT_API_KEY || null,
     apiSecret: readSecret('LIVEKIT_API_SECRET') || null,
   },
+  // Tradução (LibreTranslate): a chave pode vir de arquivo; com ela definida, a configuração da tela não vale.
+  translate: { apiKey: readSecret('LIBRETRANSLATE_API_KEY') || null },
 };

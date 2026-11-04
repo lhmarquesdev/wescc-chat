@@ -74,6 +74,12 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
     description: 'A mensagem sai no horário escolhido, em nome da pessoa, se ela ainda puder escrever na sala.',
     room: true,
   },
+  // Tradução de mensagens: só leitura (não publica nada na sala); regra global, os papéis da sala não mudam nada.
+  'auto-translate': {
+    label: 'Traduzir mensagens',
+    defaults: [A, U, OP],
+    description: 'Pelo servidor de tradução da empresa. A tradução também precisa estar ligada em Configurações.',
+  },
   'start-discussion': { label: 'Criar discussões', defaults: [A, U, G, B], description: 'Abrir uma discussão (sala derivada) a partir de uma sala.', room: true },
   'start-discussion-other-user': { label: 'Criar discussões a partir de mensagens de outros', defaults: [A, U, G, B, O], description: 'Abrir uma discussão a partir da mensagem de outra pessoa.', room: true },
   'create-team': { label: 'Criar times', defaults: [A, U], description: 'Criar times, que juntam salas e pessoas.' },
@@ -268,7 +274,7 @@ export const RBAC_GROUPS: RbacGroup[] = [
         label: 'Mensagens',
         description: 'O que a pessoa faz com as próprias mensagens e menções.',
         levels: [],
-        extras: ['delete-own-message', 'view-message-read-receipts', 'mention-here', 'mention-all', 'forward-message', 'create-poll', 'schedule-message'],
+        extras: ['delete-own-message', 'view-message-read-receipts', 'mention-here', 'mention-all', 'forward-message', 'create-poll', 'schedule-message', 'auto-translate'],
       },
       { id: 'discussions', label: 'Discussões', description: 'Conversas derivadas de uma sala ou mensagem.', levels: [], extras: ['start-discussion', 'start-discussion-other-user'] },
       { id: 'teams', label: 'Times', description: 'Times agrupam salas e pessoas.', levels: [{ label: 'Criar times', keys: ['create-team'] }], extras: ['view-all-teams'] },

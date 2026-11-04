@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { splitHighlights, type HighlightMatcher } from '@shared/highlights';
 import type { Message } from '@shared/index';
+import { BOLD_SRC, CHANNEL_SRC, CODE_SRC, EMOJI_SRC, ITALIC_SRC, MD_LINK_SRC, MENTION_SRC, STRIKE_SRC, URL_SRC } from '@shared/markdownTokens';
 import { resolveEmoji } from './emoji';
 
 // Renderização das mensagens no estilo do Rocket.Chat, sem HTML bruto:
@@ -30,22 +31,18 @@ function hl(text: string, o: Opts, key: string): ReactNode[] {
   );
 }
 
-// Cada alternativa, quando falha, só percorre texto onde ela mesma não pode começar de novo, então a busca é linear:
-// uma linha cheia de '[' não trava a tela de quem abre a sala. O rótulo do link não aceita '['; o endereço aceita '[' e
-// ']' (?ids[]=1, filter[x]=y, [::1]), menos um '[' que abre outro "[texto](", e é aí que a tentativa que falhou para.
-const MD_LINK = '\\[[^\\[\\]\\n]+\\]\\((?:https?:\\/\\/|\\/)(?:[^)\\s\\[]|\\[(?![^\\[\\]\\n]*\\]\\())+\\)';
-
+// Os padrões ficam em @shared/markdownTokens: a tradução corta a mensagem nos mesmos tokens.
 const INLINE = new RegExp(
   [
-    '(`[^`\\n]+`)', // 1 código
-    `(${MD_LINK})`, // 2 link markdown
-    '((?:https?:\\/\\/|www\\.)[^\\s<]+[^\\s<.,;:!?)\\]\'"])', // 3 url
-    '(\\*\\*[^*\\n]+\\*\\*|\\*[^*\\s][^*\\n]*\\*)', // 4 negrito
-    '(__[^_\\n]+__|(?<![\\w])_[^_\\s][^_\\n]*_(?![\\w]))', // 5 itálico
-    '(~~[^~\\n]+~~|~[^~\\s][^~\\n]*~)', // 6 tachado
-    '((?<![\\w@])@[0-9a-zA-Z._-]+)', // 7 menção
-    '((?<![\\w#&])#[0-9a-zA-Z\\u00C0-\\u017F._-]+)', // 8 canal
-    '(:[a-z0-9_+\\-]+:)', // 9 emoji
+    `(${CODE_SRC})`, // 1 código
+    `(${MD_LINK_SRC})`, // 2 link markdown
+    `(${URL_SRC})`, // 3 url
+    `(${BOLD_SRC})`, // 4 negrito
+    `(${ITALIC_SRC})`, // 5 itálico
+    `(${STRIKE_SRC})`, // 6 tachado
+    `(${MENTION_SRC})`, // 7 menção
+    `(${CHANNEL_SRC})`, // 8 canal
+    `(${EMOJI_SRC})`, // 9 emoji
   ].join('|'),
   'g',
 );

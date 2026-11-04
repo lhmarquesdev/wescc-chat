@@ -31,8 +31,8 @@ export interface FakeServer {
   close(): Promise<void>;
 }
 
-// http em 127.0.0.1:0; responde 404 JSON ao que não foi registrado.
-export async function startFake(): Promise<FakeServer> {
+// http em 127.0.0.1 (porta 0 = qualquer uma livre); responde 404 JSON ao que não foi registrado.
+export async function startFake(port = 0): Promise<FakeServer> {
   const handlers: { method: string; path: string | RegExp; h: FakeHandler }[] = [];
   const calls: FakeRequest[] = [];
   const sockets = new Set<import('node:net').Socket>();
@@ -81,12 +81,15 @@ export async function startFake(): Promise<FakeServer> {
     sockets.add(s);
     s.on('close', () => sockets.delete(s));
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
-  const port = (server.address() as import('node:net').AddressInfo).port;
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve());
+  });
+  const bound = (server.address() as import('node:net').AddressInfo).port;
 
   return {
-    url: `http://127.0.0.1:${port}`,
-    host: `127.0.0.1:${port}`,
+    url: `http://127.0.0.1:${bound}`,
+    host: `127.0.0.1:${bound}`,
     calls,
     on(method, path, h) {
       handlers.push({ method, path, h });

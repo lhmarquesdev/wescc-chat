@@ -19,6 +19,7 @@ import { getSetting } from './settings';
 import { recordActivity } from './stats';
 import { actorOf, type Ctx } from './users';
 import { emit } from './hooks';
+import { forgetMessageTranslations } from '../translate/forget';
 
 export const MENTION_RE = /(?:^|[\s(>"'])@([0-9a-zA-Z._-]+)/g;
 export const CHANNEL_RE = /(?:^|[\s(])#([0-9a-zA-ZÀ-ſ._-]+)/g;
@@ -461,6 +462,8 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
     `UPDATE messages SET msg = $2, mentions = $3, channels = $4, edited_at = now(), edited_by = $5, updated_at = now() WHERE id = $1 RETURNING *`,
     [m.id, msg, JSON.stringify(mentions), JSON.stringify(channels), JSON.stringify({ _id: ctx.userId, username: ctx.username })],
   );
+  // Tradução: a do texto antigo não vale mais (quem está com a mensagem na tela pede de novo pelo editedAt).
+  await forgetMessageTranslations(m.id);
   if (room.last_message?._id === m.id) {
     await query(`UPDATE rooms SET last_message = jsonb_set(last_message, '{msg}', to_jsonb($2::text)) WHERE id = $1`, [room.id, truncate(msg, 200)]);
   }
@@ -503,6 +506,8 @@ export async function removeMessageRow(m: any) {
       [m.id],
     );
     await query('DELETE FROM polls WHERE message_id = $1', [m.id]);
+    // A tradução nunca guarda texto removido (a linha que é apagada leva as traduções junto, ON DELETE CASCADE).
+    await forgetMessageTranslations(m.id);
     if (m.ack_required) await query('UPDATE message_reads SET ack_at = NULL WHERE message_id = $1 AND ack_at IS NOT NULL', [m.id]);
     bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
   } else {

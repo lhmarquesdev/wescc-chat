@@ -99,6 +99,9 @@ export function mapSubscription(s: any, room: any, user: { id: string; username:
     // Hora da última mensagem da sala: a ordem de "Recentes" (ler a sala não pode mudar a lista de lugar).
     lm: room.lm ? new Date(room.lm).toISOString() : undefined,
     notifications: s.notifications,
+    // Tradução automática desta pessoa nesta sala (só quando ligada ou com idioma escolhido).
+    autoTranslate: s.auto_translate || undefined,
+    autoTranslateLanguage: s.auto_translate_language ?? undefined,
     _updatedAt: s.updated_at,
   };
 }

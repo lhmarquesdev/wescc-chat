@@ -58,10 +58,11 @@ Para desenvolver o front com recarga automática, rode `npm run dev -w web` em o
 | `INTEGRATIONS_PROXY_FILE` / `INTEGRATIONS_PROXY` | `HTTPS_PROXY` | Proxy das integrações: `http://[usuário:senha@]proxy:porta` |
 | `INTEGRATIONS_PROXY_FOR_ALLOWED` | — | `1` manda também os hosts de `INTEGRATIONS_ALLOWED_HOSTS` pelo proxy |
 | `INTEGRATIONS_DEV_ENDPOINTS` | — | Só em desenvolvimento: `1` deixa `JIRA_API_GATEWAY`, e `ATLASSIAN_AUTH_URL` apontarem para os servidores falsos |
+| `LIBRETRANSLATE_API_KEY_FILE` / `LIBRETRANSLATE_API_KEY` | — | Chave da API do LibreTranslate (tradução de mensagens), se o servidor de tradução exigir |
 
-Senhas e chaves podem vir de arquivo: `DATABASE_URL_FILE`, `TLS_PFX_PASSPHRASE_FILE` e `LIVEKIT_API_SECRET_FILE`
-apontam para um arquivo com o valor (espaços e quebras de linha no fim são ignorados) e têm precedência sobre
-`DATABASE_URL`, `TLS_PFX_PASSPHRASE` e `LIVEKIT_API_SECRET`. Um arquivo que não dá para ler impede o chat de subir.
+Senhas e chaves podem vir de arquivo: `DATABASE_URL_FILE`, `TLS_PFX_PASSPHRASE_FILE`, `LIVEKIT_API_SECRET_FILE` e
+`LIBRETRANSLATE_API_KEY_FILE` apontam para um arquivo com o valor (espaços e quebras de linha no fim são ignorados) e
+têm precedência sobre `DATABASE_URL`, `TLS_PFX_PASSPHRASE`, `LIVEKIT_API_SECRET` e `LIBRETRANSLATE_API_KEY`. Um arquivo que não dá para ler impede o chat de subir.
 `SECRETS_KEY_FILE` e `INTEGRATIONS_PROXY_FILE` seguem a mesma regra, mas um problema neles para só as integrações:
 o chat sobe e o hub de Administração › Integrações mostra o motivo (o caminho do arquivo e o erro do sistema ficam
 no log do serviço e, no caso da chave, aparecem também para o papel admin).
@@ -770,6 +771,40 @@ Num **canal de avisos** (📢) só algumas pessoas publicam e todos os membros l
   quem publica vê quem confirmou e quem falta. Funciona com a confirmação de leitura do chat ligada ou desligada.
 - **Ocultar a lista de membros**: só donos e moderadores veem quem está no canal (inclusive pela lista do time e pelas
   confirmações de leitura).
+
+## Tradução de mensagens (LibreTranslate)
+
+Opcional e desligada por padrão. Quem lê traduz uma mensagem pelo menu dela (**Traduzir** / **Ver original**) ou liga
+a tradução automática de uma sala inteira, só para si, em menu da sala › **Tradução automática** (cada mensagem
+traduzida ganha a marca “traduzida” ao lado da hora; um clique nela mostra o original). O destino é o idioma
+da pessoa (Minha conta › Preferências › Tradução) ou, sem ele, o idioma padrão da empresa (Configurações › Geral).
+O único tradutor é um **LibreTranslate instalado pela empresa na rede interna**: o texto das mensagens não sai da
+empresa e nenhum serviço da internet (Google, DeepL, Microsoft…) é usado.
+
+1. **Instale o LibreTranslate** num servidor da rede interna (Docker ou `pip install libretranslate`). Carregue só os
+   idiomas que a empresa usa, por exemplo `LT_LOAD_ONLY=pt,en,es` (ou `--load-only pt,en,es`): sobe mais rápido e usa
+   menos memória.
+2. **Libere o endereço** no servidor do chat: `INTEGRATIONS_ALLOWED_HOSTS=10.0.0.20:5000` (`host:porta`, separado por
+   vírgula dos outros) e reinicie o serviço. O chat recusa endereço da internet: o nome precisa resolver só para
+   endereços internos (10.x, 172.16-31.x, 192.168.x, loopback, IPv6 local), conferido também no endereço em que cada
+   conexão é feita (um DNS que muda depois não leva o texto para fora).
+3. **Configure** em Administração › Configurações › **Tradução automática**: ligue “Tradução de mensagens”, informe o
+   endereço (por exemplo `http://10.0.0.20:5000`) e, se o LibreTranslate exigir, a chave da API (ou
+   `LIBRETRANSLATE_API_KEY_FILE` no serviço, que tem precedência e trava o campo). Use **Testar conexão**: ele testa o
+   que está na tela, antes de salvar, e mostra quantos idiomas o servidor tem e uma frase traduzida.
+4. Quem pode traduzir: a permissão **Traduzir mensagens** (`auto-translate`), dada por padrão aos papéis admin, user e
+   operacao.
+
+- O chat guarda cada tradução no banco (por mensagem e idioma) e pede de novo só quando a mensagem é editada; não é
+  preciso ligar cache no LibreTranslate. Só o que aparece na tela é traduzido.
+- Se o LibreTranslate usa limite de requisições (`--req-limit`), dê ao chat uma chave de API (`--api-keys`) com limite
+  alto: o próprio chat já limita as traduções por pessoa por minuto e as chamadas ao mesmo tempo (Limites).
+- Fora do ar, lento ou recusando: a mensagem fica no original (marcada “sem tradução”) e o chat tenta de novo sozinho
+  depois de 30 segundos; a lista de idiomas também volta sozinha.
+- Nunca são traduzidas: salas criptografadas e mensagens cifradas, mensagens de sistema, figurinhas, enquetes e
+  encaminhadas. Trechos de código, links, menções, canais e emojis não vão para o tradutor e ficam iguais.
+- Notificações, e-mails, busca, prévia na barra lateral, citações e a auditoria continuam mostrando o original.
+  Nenhum texto de mensagem vai para o log.
 
 ## Active Directory / LDAP
 

@@ -45,7 +45,7 @@ export interface User {
 }
 
 export interface UserPreferences {
-  language?: string;
+  language?: string; // idioma da pessoa: destino das traduções de mensagens (ausente = padrão da empresa)
   theme?: 'light' | 'dark' | 'auto';
   desktopNotifications?: 'all' | 'mentions' | 'nothing';
   emailNotificationMode?: 'mentions' | 'nothing';
@@ -151,6 +151,9 @@ export interface Subscription {
   notice?: boolean; // a sala é um canal de avisos (ícone na barra lateral)
   lm?: string; // hora da última mensagem da sala (ordem de "Recentes")
   notifications: SubscriptionNotifyPrefs;
+  // Tradução automática nesta sala (como no Rocket.Chat). Idioma ausente = o da pessoa (preferences.language).
+  autoTranslate?: boolean;
+  autoTranslateLanguage?: string | null;
   _updatedAt: string;
 }
 

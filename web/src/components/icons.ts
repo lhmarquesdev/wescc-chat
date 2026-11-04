@@ -271,6 +271,9 @@ import { FileDown as ExportFileDown, FolderDown as ExportFolderDown } from 'luci
 // Busca e status
 import { BellOff as StatusBellOff, CircleDotDashed as StatusCircleDotDashed, Highlighter as StatusHighlighter, KeyRound as SearchKeyRound } from 'lucide-react';
 
+// Tradução de mensagens
+import { Languages as TranslateLanguages, Undo2 as TranslateUndo } from 'lucide-react';
+
 export const ICONS = {
   // ---------- Dono 1: comuns ----------
   close: X,
@@ -671,6 +674,10 @@ export const ICONS = {
   'video-message': Video, // "Gravar vídeo"
   'record-start': Circle, // começar a gravar
   'record-stop': Square, // parar
+  // ---------- Tradução de mensagens ----------
+  translate: TranslateLanguages, // "Traduzir" e a linha "Traduzida do inglês"
+  'panel-translate': TranslateLanguages, // painel "Tradução automática"
+  'translate-original': TranslateUndo, // "Ver original"
 } as const;
 
 export type IconName = keyof typeof ICONS;
