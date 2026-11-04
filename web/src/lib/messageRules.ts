@@ -132,3 +132,16 @@ export function joinsText(ms: Message[], nameOf: (username: string) => string = 
     .map((p) => p.text)
     .join('; ');
 }
+
+// Sugestões do "@" no compositor: @all e @here entram para quem pode (o servidor recusa o envio sem mention-all /
+// mention-here) e só se o termo combina.
+export const mentionGroups = (term: string, can: (permission: 'mention-all' | 'mention-here') => boolean): ('all' | 'here')[] =>
+  (['all', 'here'] as const).filter((g) => g.startsWith(term) && can(g === 'all' ? 'mention-all' : 'mention-here'));
+
+// A lista: pessoas primeiro, depois os grupos e, no fim, quem escreve (quase nunca se menciona a si mesmo). Os grupos e
+// quem escreve têm vaga garantida: antes eles vinham depois das pessoas e o corte em 10 os tirava sempre que 10 ou mais
+// pessoas combinavam com o termo (no "@" sozinho, quase sempre).
+export function mentionSuggestions<T>(people: readonly T[], groups: readonly T[], self?: T, max = 10): T[] {
+  const tail = [...groups, ...(self === undefined ? [] : [self])].slice(0, max);
+  return [...people.slice(0, max - tail.length), ...tail];
+}

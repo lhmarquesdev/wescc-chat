@@ -1451,22 +1451,27 @@ a.att-title {
 .composer:focus-within {
   border-color: color-mix(in srgb, var(--accent) 60%, var(--border-strong));
 }
+/* Sem poder enviar: o motivo e, em cima, a faixa das agendadas (se houver). */
 .composer.disabled {
+  display: flex;
+  flex-direction: column;
+  border-color: var(--border);
+  background: var(--bg-subtle);
+  box-shadow: none;
+}
+.composer-note {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   min-height: 48px;
   padding: 12px 16px;
-  border-color: var(--border);
-  background: var(--bg-subtle);
-  box-shadow: none;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   color: var(--fg-muted);
   text-align: center;
 }
-.composer.disabled > span {
+.composer-note > span {
   text-wrap: balance;
 }
 .composer-bar {
@@ -2021,7 +2026,7 @@ a.att-title {
   .composer-row textarea {
     max-height: 50dvh;
   }
-  .composer.disabled {
+  .composer-note {
     justify-content: flex-start;
     text-align: left;
   }

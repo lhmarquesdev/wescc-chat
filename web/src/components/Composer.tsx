@@ -9,6 +9,7 @@ import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
 import { slashCommands } from '../lib/commands';
 import { EMOJI, searchEmoji } from '../lib/emoji';
 import { formatBytes, roomPath } from '../lib/format';
+import { mentionGroups, mentionSuggestions } from '../lib/messageRules';
 import { whenText } from '../lib/messageTimes';
 import { realtime } from '../lib/realtime';
 import { registerComposer, useStickers } from '../lib/stickers';
@@ -300,15 +301,17 @@ function ComposerView({
           sub: `@${u.username}`,
           insert: `@${u.username} `,
         });
-        const items: Suggestion[] = r.items.filter((u: any) => u.username !== me.username).map(person);
-        // @all e @here só para quem pode (o servidor recusa o envio sem mention-all / mention-here).
+        const people: Suggestion[] = r.items.filter((u: any) => u.username !== me.username).map(person);
         const myRoles = [...me.roles, ...(useStore.getState().subscriptions[rid]?.roles ?? [])];
-        for (const g of ['all', 'here'])
-          if (g.startsWith(term) && canWithRoles(g === 'all' ? 'mention-all' : 'mention-here', myRoles))
-            items.push({ key: g, lead: <Icon name="mention" size={16} />, title: `@${g}`, sub: g === 'all' ? 'todos da sala' : 'todos online', insert: `@${g} ` });
-        // Quem escreve vai para o fim, depois de @all e @here: quase nunca se menciona a si mesmo.
+        const groups: Suggestion[] = mentionGroups(term, (p) => canWithRoles(p, myRoles)).map((g) => ({
+          key: g,
+          lead: <Icon name="mention" size={16} />,
+          title: `@${g}`,
+          sub: g === 'all' ? 'todos da sala' : 'todos online',
+          insert: `@${g} `,
+        }));
         const self = r.items.find((u: any) => u.username === me.username);
-        put([...items.slice(0, self ? 9 : 10), ...(self ? [person(self)] : [])], '@');
+        put(mentionSuggestions(people, groups, self ? person(self) : undefined), '@');
       } else if (trig === '#') {
         const r = await api.get('rooms.autocomplete.channelAndPrivate', { term }).catch(() => ({ items: [] }));
         put(
@@ -653,13 +656,19 @@ function ComposerView({
   const cancelPending = () => (setPending([]), setFileDesc(''));
   const confirmPending = () => (void doUpload(pending, fileDesc), setPending([]), setFileDesc(''));
 
+  const scheduledStrip = !tmid && <ScheduledStrip rid={rid} onOpen={() => navigate(`${roomPath({ _id: rid, t: room?.t ?? sub?.t ?? 'c' })}?tab=scheduled`)} />;
+
   if (disabled) {
-    // Os motivos do servidor citam @usuário: aqui aparece o nome da pessoa.
+    // Os motivos do servidor citam @usuário: aqui aparece o nome da pessoa. A faixa das agendadas fica também aqui:
+    // quem deixou de publicar num canal de avisos ainda precisa ver a que não saiu (e reagendar, enviar ou excluir).
     const note = namesIn(disabledText(disabledReason), nameOf);
     return (
-      <div className="composer disabled" ref={box} title={note !== disabledReason ? disabledReason : undefined}>
-        <Icon name={disabledIcon ?? disabledIconFor(disabledReason)} size={16} />
-        <span>{note}</span>
+      <div className="composer disabled" ref={box}>
+        {scheduledStrip}
+        <div className="composer-note" title={note !== disabledReason ? disabledReason : undefined}>
+          <Icon name={disabledIcon ?? disabledIconFor(disabledReason)} size={16} />
+          <span>{note}</span>
+        </div>
       </div>
     );
   }
@@ -722,7 +731,7 @@ function ComposerView({
           </button>
         </div>
       ))}
-      {!tmid && <ScheduledStrip rid={rid} onOpen={() => navigate(`${roomPath({ _id: rid, t: room?.t ?? sub?.t ?? 'c' })}?tab=scheduled`)} />}
+      {scheduledStrip}
       {sugs.length > 0 && (
         <Portal>
           <div

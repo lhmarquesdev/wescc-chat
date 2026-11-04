@@ -8,7 +8,7 @@ import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 import { listSettings } from '../src/services/settings';
 import { EMOJI as WEB_EMOJI } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
-import { authorName, continuesGroup, editableKind, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, messageLink, pollMeta, pollShares } from '../../web/src/lib/messageRules';
+import { authorName, continuesGroup, editableKind, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageLink, pollMeta, pollShares } from '../../web/src/lib/messageRules';
 import { fromLocalInput, reminderPresets, schedulePresets, toLocalInput, whenText } from '../../web/src/lib/messageTimes';
 import { AHEAD_ERROR, aheadError, POLL_ERRORS, pollInputError, type MessageForward, type MessagePoll } from '@shared/messages';
 import { messagePreviewText } from '@shared/stickers';
@@ -939,3 +939,24 @@ describe('screenGapWarning', () => {
   });
 });
 
+
+// Sobras da validação final: no "@" sozinho, com 10 ou mais pessoas, @all e @here sumiam no corte em 10.
+describe('sugestões do @ (compositor)', () => {
+  const people = Array.from({ length: 12 }, (_, i) => `p${i}`);
+  it('os grupos que a pessoa pode usar têm vaga mesmo com 10 ou mais pessoas', () => {
+    expect(mentionSuggestions(people, ['@all', '@here'])).toEqual([...people.slice(0, 8), '@all', '@here']);
+    expect(mentionSuggestions(people, ['@all', '@here'], 'eu')).toEqual([...people.slice(0, 7), '@all', '@here', 'eu']);
+    expect(mentionSuggestions(people, [])).toEqual(people.slice(0, 10));
+    // Com poucas pessoas, todas aparecem antes dos grupos.
+    expect(mentionSuggestions(['ana', 'bia'], ['@all'], 'eu')).toEqual(['ana', 'bia', '@all', 'eu']);
+    expect(mentionSuggestions([], ['@all', '@here'])).toEqual(['@all', '@here']);
+  });
+  it('@all e @here só para quem pode e só se o termo combina', () => {
+    const all = () => true;
+    expect(mentionGroups('', all)).toEqual(['all', 'here']);
+    expect(mentionGroups('h', all)).toEqual(['here']);
+    expect(mentionGroups('ana', all)).toEqual([]);
+    expect(mentionGroups('', (p) => p === 'mention-here')).toEqual(['here']);
+    expect(mentionGroups('', () => false)).toEqual([]);
+  });
+});
