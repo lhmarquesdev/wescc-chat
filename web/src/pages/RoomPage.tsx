@@ -366,7 +366,7 @@ export function RoomPage() {
   const voteBlocked = !room
     ? ''
     : !sub
-      ? 'Entre na sala para votar.'
+      ? 'Entre no canal para votar.'
       : room.archived
         ? 'Esta sala está arquivada.'
         : muted
