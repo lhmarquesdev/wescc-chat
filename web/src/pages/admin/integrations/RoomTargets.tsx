@@ -164,6 +164,7 @@ export function RoomTargets(p: {
             role="combobox"
             aria-expanded={shown.length > 0}
             aria-controls={shown.length ? listId : undefined}
+            aria-activedescendant={shown.length && active >= 0 ? `${listId}-${active}` : undefined}
             aria-autocomplete="list"
             {...invalid}
             aria-describedby={describedBy}
@@ -180,9 +181,11 @@ export function RoomTargets(p: {
                 <button
                   key={r._id}
                   type="button"
+                  id={`${listId}-${i}`}
                   role="option"
                   aria-selected={i === active}
                   className={i === active ? 'active' : undefined}
+                  tabIndex={-1}
                   onMouseEnter={() => setActive(i)}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => add(r)}

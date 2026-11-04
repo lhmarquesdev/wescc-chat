@@ -158,6 +158,13 @@
   --ring-surface: var(--bg-subtle);
   background: var(--bg-subtle);
 }
+/* A linha recebe o foco quando um modal aberto pelo "Mais" fecha (restoreFocus): o anel mostra onde o Tab continua. */
+.msg:focus {
+  outline: none;
+}
+.msg:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
 .msg.grouped {
   padding-top: 2px;
   padding-bottom: 2px;
@@ -529,6 +536,7 @@ button.msg-tr-mark:hover {
 }
 .msg:hover .msg-toolbar,
 .msg:has(:focus-visible) .msg-toolbar,
+.msg:focus-visible .msg-toolbar,
 .msg.menu-open .msg-toolbar {
   visibility: visible;
   opacity: 1;

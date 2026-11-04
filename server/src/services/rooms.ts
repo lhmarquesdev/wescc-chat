@@ -565,8 +565,10 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   for (const [t, msg] of sys) await sendSystemMessage(rid, t, me, msg);
   await audit(actorOf(ctx), 'room.settings.changed', { rid, name: room.name }, { fields: Object.keys(s) });
   await notifyRoomUpdated(rid);
-  // Nome, tipo e canal de avisos mudam a exibição das assinaturas.
-  if (s.roomName !== undefined || s.roomType !== undefined || noticeChanged) await republishSubscriptions(rid);
+  // Nome, tipo, canal de avisos, somente leitura e criptografia mudam o que as assinaturas mostram.
+  const roChanged = s.readOnly !== undefined && s.readOnly !== !!room.ro;
+  const e2eChanged = s.encrypted !== undefined && s.encrypted !== !!room.encrypted;
+  if (s.roomName !== undefined || s.roomType !== undefined || noticeChanged || roChanged || e2eChanged) await republishSubscriptions(rid);
   return getRoom(rid);
 }
 
@@ -579,6 +581,7 @@ export async function setArchived(ctx: Ctx, rid: string, archived: boolean) {
   await sendSystemMessage(rid, archived ? 'room-archived' : 'room-unarchived', { id: ctx.userId, username: ctx.username }, '');
   await audit(actorOf(ctx), archived ? 'room.archived' : 'room.unarchived', { rid, name: room.name });
   await notifyRoomUpdated(rid);
+  await republishSubscriptions(rid);
   if (archived) emit('room.archived', { room, by: { _id: ctx.userId, username: ctx.username } });
 }
 

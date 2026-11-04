@@ -598,6 +598,7 @@ export function ChipInput({
           role={suggest ? 'combobox' : undefined}
           aria-expanded={suggest ? shown.length > 0 : undefined}
           aria-controls={suggest && shown.length ? listId : undefined}
+          aria-activedescendant={suggest && shown.length && active >= 0 ? `${listId}-${active}` : undefined}
           aria-autocomplete={suggest ? 'list' : undefined}
           {...invalid}
           onChange={(e) => (setTerm(e.target.value), setOpen(true))}
@@ -619,9 +620,11 @@ export function ChipInput({
             <button
               key={s.value}
               type="button"
+              id={`${listId}-${i}`}
               role="option"
               aria-selected={i === active}
               className={i === active ? 'active' : undefined}
+              tabIndex={-1}
               onMouseEnter={() => setActive(i)}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => pick(s.value)}

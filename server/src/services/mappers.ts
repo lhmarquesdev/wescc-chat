@@ -99,6 +99,10 @@ export function mapSubscription(s: any, room: any, user: { id: string; username:
     teamId: room.team_id,
     teamMain: room.team_main,
     notice: room.notice ? true : undefined,
+    // O que decide se dá para enviar à sala sem abrir a sala (Encaminhar, por exemplo).
+    encrypted: room.encrypted ? true : undefined,
+    archived: room.archived ? true : undefined,
+    ro: room.ro ? true : undefined,
     // Hora da última mensagem da sala: a ordem de "Recentes" (ler a sala não pode mudar a lista de lugar).
     lm: room.lm ? new Date(room.lm).toISOString() : undefined,
     notifications: s.notifications,

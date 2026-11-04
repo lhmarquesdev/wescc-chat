@@ -1226,6 +1226,7 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
       ref={tr.observe}
       className={cls}
       id={`msg-${m._id}`}
+      data-focus-return=""
       onPointerDown={coarse ? onPointerDown : undefined}
       onPointerMove={coarse ? onPointerMove : undefined}
       onPointerUp={coarse ? endPress : undefined}

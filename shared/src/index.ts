@@ -159,6 +159,10 @@ export interface Subscription {
   teamId?: string | null;
   teamMain?: boolean;
   notice?: boolean; // a sala é um canal de avisos (ícone na barra lateral)
+  // Da sala, para decidir sem abrir a sala se dá para enviar a ela (Encaminhar):
+  encrypted?: boolean; // criptografada de ponta a ponta
+  archived?: boolean;
+  ro?: boolean; // somente leitura
   lm?: string; // hora da última mensagem da sala (ordem de "Recentes")
   notifications: SubscriptionNotifyPrefs;
   // Tradução automática nesta sala (como no Rocket.Chat). Idioma ausente = o da pessoa (preferences.language).

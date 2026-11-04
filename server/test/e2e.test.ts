@@ -1019,7 +1019,17 @@ describe('criptografia: outras funções numa conversa criptografada', () => {
     await save(ana, room.rid, { encrypted: false });
     const still = await api('POST', 'chat.forwardMessage', { messageId: m._id, targets: [{ rid: plain }] }, ana);
     expect(still.errorType).toBe('error-forward-encrypted');
-    await save(ana, room.rid, { encrypted: true });
+    // A inscrição diz se a sala é criptografada (o Encaminhar desativa a linha sem abrir a sala) e muda ao vivo.
+    expect((await api('GET', 'subscriptions.getOne', { roomId: room.rid }, ana)).subscription.encrypted).toBeUndefined();
+    const ws = await online(ana);
+    try {
+      const on = next(ws, (e) => e.type === 'subscription' && e.action === 'updated' && e.subscription.rid === room.rid && e.subscription.encrypted === true);
+      await save(ana, room.rid, { encrypted: true });
+      await on();
+    } finally {
+      ws.close();
+    }
+    expect((await api('GET', 'subscriptions.getOne', { roomId: room.rid }, ana)).subscription.encrypted).toBe(true);
     const src = (await send(ana, plain, 'aberta')).message;
     const into = await api('POST', 'chat.forwardMessage', { messageId: src._id, targets: [{ rid: room.rid }] }, ana);
     expect(into.results[0]).toMatchObject({ ok: false, errorType: 'error-forward-encrypted-target' });

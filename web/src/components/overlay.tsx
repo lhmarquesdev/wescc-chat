@@ -84,6 +84,22 @@ export function focusables(root: HTMLElement) {
 const traps: HTMLElement[] = [];
 
 // Prende o Tab no contêiner, foca o primeiro campo (ou o próprio contêiner) e devolve o foco a quem abriu.
+// Devolve o foco a quem abriu a camada. Quem abriu pode estar escondido nessa hora (o "Mais" da barra de ações da
+// mensagem só aparece com o mouse ou o foco na linha): aí o foco vai para o ancestral marcado com data-focus-return
+// (a linha da mensagem), e o próximo Tab continua dali, não do começo da página.
+export function restoreFocus(prev: HTMLElement) {
+  prev.focus({ preventScroll: true });
+  if (document.activeElement === prev) return;
+  const host = prev.closest<HTMLElement>('[data-focus-return]');
+  if (!host) return;
+  if (!host.hasAttribute('tabindex')) {
+    // Só enquanto tem o foco: um clique depois na linha não deve prender o foco nela.
+    host.tabIndex = -1;
+    host.addEventListener('blur', () => host.removeAttribute('tabindex'), { once: true });
+  }
+  host.focus({ preventScroll: true });
+}
+
 export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean, initial?: string) {
   // Quem abriu é lido no primeiro render: um autoFocus dos filhos move o foco antes de qualquer efeito.
   const [opener] = useState(() => (typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null)));
@@ -127,7 +143,7 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean
       const i = traps.indexOf(root);
       if (i >= 0) traps.splice(i, 1);
       if (prev && prev.isConnected && (!document.activeElement || document.activeElement === document.body || root.contains(document.activeElement)))
-        prev.focus({ preventScroll: true });
+        restoreFocus(prev);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);

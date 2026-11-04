@@ -121,6 +121,7 @@ function KeySearch({ onPick }: { onPick: (k: string) => void }) {
           role="combobox"
           aria-expanded={shown || empty}
           aria-controls="rbac-who-options"
+          aria-activedescendant={shown && active >= 0 ? `rbac-who-opt-${active}` : undefined}
           aria-autocomplete="list"
           aria-label="Busque uma ação"
           placeholder="Busque uma ação, ex.: apagar mensagens"
@@ -155,9 +156,11 @@ function KeySearch({ onPick }: { onPick: (k: string) => void }) {
                     <button
                       key={k}
                       type="button"
+                      id={`rbac-who-opt-${i}`}
                       role="option"
                       aria-selected={i === active}
                       className={i === active ? 'active' : undefined}
+                      tabIndex={-1}
                       onMouseDown={(e) => e.preventDefault()}
                       onMouseEnter={() => setActive(i)}
                       onClick={() => choose(k)}

@@ -109,6 +109,23 @@ describe('encaminhar', () => {
     expect(ok.results[0]).toMatchObject({ ok: true });
   });
 
+  it('a inscrição avisa ao vivo quando a sala vira somente leitura ou é arquivada', async () => {
+    const rid = await channel(A, [bruno]);
+    const ws = connectWs(bruno);
+    await ws.ready;
+    try {
+      const subEv = (pred: (s: any) => boolean) => ws.waitFor((e) => e.type === 'subscription' && e.action === 'updated' && e.subscription.rid === rid && pred(e.subscription));
+      const ro = subEv((x) => x.ro === true);
+      expect((await api('POST', 'channels.setReadOnly', { roomId: rid, readOnly: true }, A)).success).toBe(true);
+      await ro;
+      const arch = subEv((x) => x.archived === true);
+      expect((await api('POST', 'channels.archive', { roomId: rid }, A)).success).toBe(true);
+      await arch;
+    } finally {
+      ws.close();
+    }
+  });
+
   it('destinos com regras: aviso, somente leitura, arquivada, silenciado; os outros saem', async () => {
     const src = await channel(ana, [bruno]);
     const orig = (await send(ana, src, 'conteúdo')).message;
@@ -117,6 +134,11 @@ describe('encaminhar', () => {
     await pool.query('UPDATE rooms SET ro = true WHERE id = $1', [ro]);
     const arq = await channel(A, [bruno]);
     await api('POST', 'channels.archive', { roomId: arq }, A);
+    // A inscrição traz da sala o que decide a linha do Encaminhar sem abrir a sala.
+    const subOf = async (rid: string) => (await api('GET', 'subscriptions.getOne', { roomId: rid }, bruno)).subscription;
+    expect(await subOf(arq)).toMatchObject({ archived: true });
+    expect(await subOf(ro)).toMatchObject({ ro: true });
+    expect((await subOf(src)).archived).toBeUndefined();
     const muted = await channel(A, [bruno]);
     expect((await api('POST', 'rooms.muteUser', { roomId: muted, userId: bruno.userId }, A)).success).toBe(true);
     const ok = await channel(A, [bruno]);

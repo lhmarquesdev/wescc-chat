@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api';
 import { roomIconName } from '../lib/format';
@@ -53,16 +53,23 @@ export function SuggestionList({ anchor, children, label, nav }: { anchor: HTMLE
 
 // ↑ ↓ escolhem, Enter confirma, Esc fecha só a lista (não o modal). nav diz quem escolheu por último:
 // pelas setas o item ganha o anel de foco; pelo mouse, só o fundo.
+// O foco fica sempre no campo (padrão combobox): os itens têm tabIndex -1 e o item ativo vai em aria-activedescendant.
+// Tab fecha a lista e segue para o próximo campo; se o foco entrasse num item, ele sumiria com a lista e o foco cairia
+// no <body>.
 export function useListKeys(count: number, pick: (i: number) => void, closeList: () => void) {
   const [active, setActive] = useState(-1);
   const [nav, setNav] = useState<'key' | 'pointer'>('pointer');
+  const base = useId();
   useEffect(() => {
     setActive(count ? 0 : -1);
     setNav('pointer');
   }, [count]);
+  const optId = (i: number) => `${base}-opt-${i}`;
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (!count) return;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (e.key === 'Tab') {
+      closeList();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       setNav('key');
       setActive((a) => (a + (e.key === 'ArrowDown' ? 1 : -1) + count) % count);
@@ -78,7 +85,10 @@ export function useListKeys(count: number, pick: (i: number) => void, closeList:
     setNav('pointer');
     setActive(i);
   };
-  return { active, nav, hover, onKeyDown };
+  // Para o campo e para cada item da lista.
+  const inputProps = { 'aria-activedescendant': count && active >= 0 ? optId(active) : undefined };
+  const optionProps = (i: number) => ({ id: optId(i), tabIndex: -1 });
+  return { active, nav, hover, onKeyDown, inputProps, optionProps };
 }
 
 // Dentro de um modal a lista empurra o rodapé. Se ela some no mousedown (blur do campo), Cancelar/Criar sobem antes
@@ -165,6 +175,7 @@ export function UserPicker({
             role="combobox"
             aria-expanded={shown.length > 0}
             aria-autocomplete="list"
+            {...keys.inputProps}
           />
         )}
       </div>
@@ -183,6 +194,7 @@ export function UserPicker({
                   title={reason}
                   role="option"
                   aria-selected={i === keys.active}
+                  {...keys.optionProps(i)}
                   onMouseDown={(e) => e.preventDefault()}
                 >
                   <Avatar username={u.username} size={24} />
@@ -201,6 +213,7 @@ export function UserPicker({
                 className={cls}
                 role="option"
                 aria-selected={i === keys.active}
+                {...keys.optionProps(i)}
                 onMouseEnter={() => keys.hover(i)}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => add(u)}
@@ -264,6 +277,7 @@ export function RoomPicker({ value, onChange, placeholder = 'Buscar sala' }: { v
         role="combobox"
         aria-expanded={shown.length > 0}
         aria-autocomplete="list"
+        {...keys.inputProps}
       />
       {shown.length > 0 && (
         <SuggestionList anchor={inputRef.current} label="Salas" nav={keys.nav}>
@@ -273,6 +287,7 @@ export function RoomPicker({ value, onChange, placeholder = 'Buscar sala' }: { v
               type="button"
               role="option"
               aria-selected={i === keys.active}
+              {...keys.optionProps(i)}
               className={i === keys.active ? 'active' : undefined}
               onMouseEnter={() => keys.hover(i)}
               onMouseDown={(e) => e.preventDefault()}

@@ -64,13 +64,17 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
     return () => clearTimeout(t);
   }, [term, me.username]);
 
-  // Motivo de não poder enviar a uma inscrição (o mesmo que o servidor diria).
+  // Motivo de não poder enviar a uma inscrição (o mesmo que o servidor diria). A sala só está no store depois de aberta
+  // nesta página; sem ela, valem os sinais que a inscrição traz da sala.
   const roomReason = (s: Subscription): string | undefined => {
     const room = rooms[s.rid];
-    if (encryptedContent(room)) return 'Não dá para encaminhar para uma sala criptografada.';
-    if (room?.archived) return 'Esta sala está arquivada.';
+    const encrypted = room ? encryptedContent(room) : !!s.encrypted;
+    const archived = room ? !!room.archived : !!s.archived;
+    const ro = room ? !!room.ro : !!s.ro;
+    if (encrypted) return 'Não dá para encaminhar para uma sala criptografada.';
+    if (archived) return 'Esta sala está arquivada.';
     if (s.notice && !canWithRoles('post-readonly', [...me.roles, ...s.roles])) return 'Só os publicadores enviam aqui.';
-    if (room?.ro && !s.notice && !canWithRoles('post-readonly', [...me.roles, ...s.roles])) return 'Esta sala é somente leitura.';
+    if (ro && !s.notice && !canWithRoles('post-readonly', [...me.roles, ...s.roles])) return 'Esta sala é somente leitura.';
     if ((room as { muted?: string[] } | undefined)?.muted?.includes(me.username)) return 'Você está silenciado nesta sala.';
     if (room?.direct?.canSend === false) return room.direct.sendBlockedReason || 'Você não pode enviar mensagens nesta conversa.';
     return undefined;
@@ -95,9 +99,11 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
           .filter((u) => !listedDm.has(u.username) && !pickedKeys.has(`u:${u.username.toLowerCase()}`))
           .map<Candidate>((u) => {
             const st = direct.state([partyOf(u)]);
+            // A conversa direta que já existe (fora das 8 listadas) é para onde a mensagem iria: valem as regras dela.
+            const dm = Object.values(subs).find((s) => s.t === 'd' && s.name.toLowerCase() === u.username.toLowerCase());
             return {
               target: { key: `u:${u.username.toLowerCase()}`, kind: 'user', username: u.username, label: u.name || u.username, userId: u._id },
-              reason: st.kind !== 'open' ? st.text : undefined,
+              reason: (dm && roomReason(dm)) || (st.kind !== 'open' ? st.text : undefined),
             };
           })
       : [];
@@ -181,6 +187,7 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
         role="option"
         aria-selected={i === keys.active}
         aria-disabled={reason ? 'true' : undefined}
+        {...keys.optionProps(i)}
         className={[i === keys.active && 'active', reason && 'blocked'].filter(Boolean).join(' ') || undefined}
         title={reason}
         onMouseEnter={() => keys.hover(i)}
@@ -250,6 +257,7 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
               role="combobox"
               aria-expanded={listOpen && flat.length > 0}
               aria-autocomplete="list"
+              {...keys.inputProps}
             />
           </div>
         </div>
