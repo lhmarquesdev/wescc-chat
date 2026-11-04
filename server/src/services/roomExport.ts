@@ -32,6 +32,7 @@ import {
   messageJson,
   nameResolver,
   plural,
+  pollVotersOf,
   roomKindLabel,
   roomLabel,
   toExportMessage,
@@ -257,10 +258,12 @@ async function* documentChunks(d: DocInfo, place: FilePlacement): AsyncGenerator
   let day = '';
   for await (const rows of pages(p)) {
     await names.prime(rows, p.format === 'html');
+    // Enquetes não anônimas: quem votou em cada opção (a sala vê isso no chat).
+    const pagePlace: FilePlacement = { ...place, pollVoters: await pollVotersOf(rows) };
     let out = '';
     for (const row of rows) {
       // mapMessage não leva a coluna e2e: ela vai junto da linha crua, para isEncryptedMessage enxergar.
-      const em = toExportMessage({ ...withExtra(row), e2e: row.e2e }, names.nameOf, place);
+      const em = toExportMessage({ ...withExtra(row), e2e: row.e2e }, names.nameOf, pagePlace);
       if (p.format === 'html') {
         const k = dayKey(em.ts);
         if (k !== day) {

@@ -18,7 +18,7 @@ import { newId } from '../lib/ids';
 import { zipStore, type ZipEntry } from '../lib/zip';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
-import { dayKey, encryptedSql, escapeHtml, EXPORT_TZ, formatDayTime, formatLong, htmlEnd, htmlStart, plural, roomKindLabel, roomLabel } from './exportRender';
+import { dayKey, encryptedSql, escapeHtml, exportPoll, EXPORT_TZ, formatDayTime, formatLong, htmlEnd, htmlStart, plural, pollSummary, roomKindLabel, roomLabel } from './exportRender';
 import { canAccessRoom } from './rooms';
 import { getSetting } from './settings';
 import { siteUrl } from './sso';
@@ -483,6 +483,16 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
     }
   }
   const textOf = (m: any) => (isEncryptedMessage(m) ? null : messagePreviewText({ msg: m.msg, sticker: m.extra?.sticker, files: m.files }, { withName: false }));
+  const pollOf = (m: any) => {
+    const p = exportPoll(m);
+    return p && { pergunta: p.question, opcoes: p.options.map((o) => ({ texto: o.text, votos: o.votes })), pessoasQueVotaram: p.voters, variasRespostas: p.multiple, anonima: p.anonymous, encerrada: p.closed };
+  };
+  // Enquete no HTML: a pergunta e o resultado ("Sim: 2 · Não: 1 · 3 pessoas votaram · encerrada").
+  const pollText = (m: any): string | null => {
+    if (isEncryptedMessage(m) || !m.extra?.poll) return null;
+    const p = exportPoll(m);
+    return p ? `📊 ${p.question}\n${pollSummary(p)}` : null;
+  };
   let messageCount = 0;
   async function* messagesJson() {
     yield '[';
@@ -502,7 +512,15 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
           arquivos: encrypted ? [] : ((m.files ?? []) as { _id: string }[]).map((f) => f._id),
           ...(encrypted ? { criptografada: true } : {}),
           // Encaminhada: o texto é o da original; o comentário é o que a pessoa escreveu.
-          ...(m.extra?.forward && !encrypted ? { encaminhada: true, ...(m.extra.forward.comment ? { comentario: m.extra.forward.comment } : {}) } : {}),
+          ...(m.extra?.forward && !encrypted
+            ? {
+                encaminhada: true,
+                encaminhadaDe: { autor: m.extra.forward.u?.username ?? null, data: m.extra.forward.ts ?? null },
+                ...(m.extra.forward.comment ? { comentario: m.extra.forward.comment } : {}),
+              }
+            : {}),
+          // Enquete que a pessoa criou: as opções com a contagem (sem quem votou: são dados de outras pessoas).
+          ...(m.extra?.poll && !encrypted ? { enquete: pollOf(m) } : {}),
         };
         chunk += `${first ? '\n' : ',\n'}${JSON.stringify(item)}`;
         first = false;
@@ -588,7 +606,7 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
         const lab = await rooms(rows.map((m) => m.room_id));
         let chunk = '';
         for (const m of rows) {
-          const text = textOf(m);
+          const text = pollText(m) ?? textOf(m);
           const comment = text !== null && m.extra?.forward?.comment ? `${m.extra.forward.comment}\n↪ ` : text !== null && m.extra?.forward ? '↪ ' : '';
           const cell = text === null ? `<td><i>${escapeHtml(ENCRYPTED_PLACEHOLDER)}</i></td>` : `<td>${escapeHtml(comment + text).replace(/\r?\n/g, '<br>')}</td>`;
           chunk += `<tr>${td(formatDayTime(m.created_at))}${td(lab(m.room_id)?.nome ?? '')}${cell}</tr>`;

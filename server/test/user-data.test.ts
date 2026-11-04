@@ -424,9 +424,35 @@ describe('meus dados', () => {
     expect(json('votos.json')).toEqual([expect.objectContaining({ mensagemId: poll._id, pergunta: 'Café?', opcao: 'Sim' })]);
     const mine = json('mensagens.json').find((m: any) => m.id === fwd.results[0].message._id);
     expect(mine).toMatchObject({ texto: 'lembra disso', encaminhada: true, comentario: 'olha isso' });
+    expect(mine.encaminhadaDe).toMatchObject({ autor: rui.username });
     const html = byName.get('meus-dados.html')!.toString('utf8');
     expect(html).toContain('texto agendado');
     expect(html).toContain('olha isso');
     expect(html).not.toContain('>Não<');
+  });
+
+  it('a enquete que a pessoa criou sai com as opções e a contagem, sem quem votou', async () => {
+    const lia = await newUser(A, { name: 'Lia Enquete' });
+    const rui = await newUser(A, { name: 'Rui Enquete' });
+    const rid = (await api('POST', 'channels.create', { name: `enquete-${Date.now()}`, members: [rui.username] }, lia)).channel._id;
+    const poll = (await api('POST', 'polls.create', { rid, question: 'Pizza de volta?', options: ['Sim', 'Não'] }, lia)).message;
+    await api('POST', 'polls.vote', { messageId: poll._id, optionIds: ['o1'] }, rui);
+    await api('POST', 'polls.close', { messageId: poll._id }, lia);
+    const { json, byName } = await readyZip(lia);
+    const mine = json('mensagens.json').find((m: any) => m.id === poll._id);
+    expect(mine.enquete).toEqual({
+      pergunta: 'Pizza de volta?',
+      opcoes: [
+        { texto: 'Sim', votos: 1 },
+        { texto: 'Não', votos: 0 },
+      ],
+      pessoasQueVotaram: 1,
+      variasRespostas: false,
+      anonima: false,
+      encerrada: true,
+    });
+    const html = byName.get('meus-dados.html')!.toString('utf8');
+    expect(html).toContain('📊 Pizza de volta?<br>Sim: 1 · Não: 0 · 1 pessoa votou · encerrada');
+    expect(html).not.toContain(rui.username);
   });
 });

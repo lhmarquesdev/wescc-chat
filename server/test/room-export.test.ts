@@ -65,6 +65,51 @@ async function upload(auth: Auth, rid: string, fileName: string, bytes: Buffer |
   return r.message;
 }
 
+describe('exportar mensagens: enquetes e encaminhadas', () => {
+  it('a enquete sai com as opções, os votos, quem votou (não anônima) e se encerrou; a encaminhada com a origem e o comentário', async () => {
+    const rid = await channel(ana, [bruno]);
+    await clearSystem(rid);
+    const poll = (await api('POST', 'polls.create', { rid, question: 'Pizza de volta?', options: ['Sim', 'Não'] }, ana)).message;
+    await api('POST', 'polls.vote', { messageId: poll._id, optionIds: ['o1'] }, ana);
+    await api('POST', 'polls.vote', { messageId: poll._id, optionIds: ['o1'] }, bruno);
+    expect((await api('POST', 'polls.close', { messageId: poll._id }, ana)).success).toBe(true);
+    const anon = (await api('POST', 'polls.create', { rid, question: 'Dono cria?', options: ['Sim', 'Não'], anonymous: true }, ana)).message;
+    await api('POST', 'polls.vote', { messageId: anon._id, optionIds: ['o2'] }, bruno);
+    const orig = await send(bruno, rid, 'texto original do Bruno');
+    const fwd = await api('POST', 'chat.forwardMessage', { messageId: orig._id, targets: [{ rid }], comment: 'Comentário da Ana no encaminhamento' }, ana);
+    expect(fwd.results[0].ok).toBe(true);
+    const fid = fwd.results[0].message._id;
+
+    const doc = JSON.parse(await text(ana, rid, { format: 'json' }));
+    const p = doc.messages.find((m: any) => m.id === poll._id);
+    expect(p.poll).toMatchObject({ question: 'Pizza de volta?', voters: 2, closed: true, anonymous: false, multiple: false });
+    expect(p.poll.options[0]).toMatchObject({ text: 'Sim', votes: 2 });
+    expect(p.poll.options[0].voters.map((v: any) => v.username).sort()).toEqual([ana.username, bruno.username].sort());
+    const a = doc.messages.find((m: any) => m.id === anon._id);
+    expect(a.poll).toMatchObject({ anonymous: true, closed: false, voters: 1 });
+    expect(a.poll.options[1]).toEqual({ id: 'o2', text: 'Não', votes: 1 });
+    const f = doc.messages.find((m: any) => m.id === fid);
+    expect(f.u.id).toBe(ana.userId);
+    expect(f.forward).toMatchObject({ author: { username: bruno.username, name: 'Bruno Lima' }, comment: 'Comentário da Ana no encaminhamento', hops: 1 });
+    expect(f.forward.from).toMatch(/^#exp-/);
+
+    const csv = parse(await text(ana, rid, { format: 'csv' }), { delimiter: ';', bom: true }) as string[][];
+    const pr = csv.find((r) => r[11] === poll._id)!;
+    expect(pr[14]).toMatch(/^Sim: 2 \(.+\) · Não: 0 · 2 pessoas votaram · encerrada$/);
+    expect(csv.find((r) => r[11] === anon._id)![14]).toBe('Sim: 0 · Não: 1 · 1 pessoa votou · voto anônimo');
+    const fr = csv.find((r) => r[11] === fid)!;
+    expect(fr[4]).toBe('texto original do Bruno');
+    expect(fr[12]).toMatch(/^Bruno Lima \(@[^)]+\) · #exp-.+ · \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/);
+    expect(fr[13]).toBe('Comentário da Ana no encaminhamento');
+
+    const html = await text(ana, rid);
+    expect(html).toContain('<b>Enquete:</b> Pizza de volta?');
+    expect(html).toContain('<li><span>Sim</span> <b>2</b> <span class="u">100%</span>');
+    expect(html).toContain('2 pessoas votaram · encerrada');
+    expect(html).toContain('<div class="text">Comentário da Ana no encaminhamento</div><blockquote class="fwd"><div class="fwd-head">↪ Encaminhada de Bruno Lima');
+  });
+});
+
 describe('exportar mensagens', () => {
   it('só quem tem a permissão exporta: dono sim, membro não', async () => {
     const rid = await channel(ana, [bruno]);
@@ -141,7 +186,23 @@ describe('exportar mensagens', () => {
     expect(body.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]))).toBe(true);
     expect(body.toString('utf8')).toContain('\r\n');
     const rows = parse(body, { delimiter: ';', bom: true }) as string[][];
-    expect(rows[0]).toEqual(['Data e hora', 'Autor', 'Usuário', 'Tipo', 'Mensagem', 'Resposta ao tópico', 'Editada em', 'Arquivos', 'Reações', 'Cientes', 'Fixada', 'ID da mensagem']);
+    expect(rows[0]).toEqual([
+      'Data e hora',
+      'Autor',
+      'Usuário',
+      'Tipo',
+      'Mensagem',
+      'Resposta ao tópico',
+      'Editada em',
+      'Arquivos',
+      'Reações',
+      'Cientes',
+      'Fixada',
+      'ID da mensagem',
+      'Encaminhada de',
+      'Comentário do encaminhamento',
+      'Enquete',
+    ]);
     expect(rows.slice(1).map((r) => r[4])).toEqual(["'=SOMA(A1)", 'a;b', 'diz "oi"', 'linha 1\nlinha 2', 'ação com acento']);
     expect(rows[1].slice(1, 4)).toEqual(['Ana Souza', ana.username, 'mensagem']);
     expect(rows[1][0]).toMatch(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/);

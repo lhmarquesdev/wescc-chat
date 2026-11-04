@@ -59,6 +59,10 @@ article:target{background:var(--soft);border-radius:8px}
 .reply:hover{text-decoration:underline}
 blockquote{margin:4px 0;padding:2px 10px;border-left:3px solid var(--line);color:var(--muted)}
 ul.files{margin:4px 0;padding-left:20px}
+blockquote.fwd{color:var(--fg)}
+.fwd-head{font-size:13px;color:var(--muted)}
+ul.poll-opts{margin:4px 0;padding-left:20px}
+ul.poll-opts .u{color:var(--muted);font-size:13px}
 .flag{color:var(--warn)}
 .tags{font-size:13px;color:var(--muted)}
 .reactions span{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:0 8px;margin:4px 4px 0 0;font-size:13px}
@@ -182,12 +186,108 @@ export interface ExportMessage {
   attachments: Attachment[];
   ackRequired: boolean;
   ackCount: number;
+  poll: ExportPoll | null;
+  forward: ExportForward | null;
+}
+
+// Enquete: as opções com a contagem, como a sala vê. voters (por opção) só numa enquete não anônima.
+export interface ExportPoll {
+  question: string;
+  options: { id: string; text: string; votes: number; voters?: { username: string; name: string }[] }[];
+  voters: number;
+  multiple: boolean;
+  anonymous: boolean;
+  closed: boolean;
+  closesAt: string | null;
+  closedAt: string | null;
+}
+
+// Encaminhada: quem escreveu a original, de onde (só o nome de canal público; grupo e conversa direta pelo tipo),
+// quando, e o comentário de quem encaminhou (o autor da linha).
+export interface ExportForward {
+  author: { username: string; name: string };
+  from: string | null;
+  ts: string;
+  hops: number;
+  comment: string | null;
 }
 
 export interface FilePlacement {
   // Só no .zip: o caminho de cada arquivo incluído. Sem isso, cada arquivo leva o link do chat.
   zipped?: Map<string, string>;
+  // Quem votou em cada opção das enquetes não anônimas da página (pollVotersOf).
+  pollVoters?: Map<string, Map<string, { username: string; name: string }[]>>;
 }
+
+// Quem votou em cada opção, nas enquetes não anônimas destas linhas (uma consulta por página).
+export async function pollVotersOf(rows: any[]): Promise<Map<string, Map<string, { username: string; name: string }[]>>> {
+  const ids = rows.filter((r) => r.extra?.poll && !r.extra.poll.anonymous && !isEncryptedMessage(r)).map((r) => r.id);
+  const out = new Map<string, Map<string, { username: string; name: string }[]>>();
+  if (!ids.length) return out;
+  const votes = await many(
+    `SELECT v.message_id, v.option_id, u.username, u.name FROM poll_votes v JOIN users u ON u.id = v.user_id
+      WHERE v.message_id = ANY($1) ORDER BY v.voted_at, u.username`,
+    [ids],
+  );
+  for (const v of votes) {
+    const byOption = out.get(v.message_id) ?? new Map();
+    byOption.set(v.option_id, [...(byOption.get(v.option_id) ?? []), { username: v.username, name: v.name || v.username }]);
+    out.set(v.message_id, byOption);
+  }
+  return out;
+}
+
+const FORWARD_FROM: Record<string, string> = { d: 'conversa direta', p: 'grupo privado', c: 'canal' };
+
+export function exportPoll(m: any, place: FilePlacement = {}): ExportPoll | null {
+  const p = m.poll ?? m.extra?.poll;
+  if (!p || typeof p !== 'object') return null;
+  const voters = place.pollVoters?.get(m._id ?? m.id);
+  const closesAt = p.closesAt ?? null;
+  const closedAt = p.closedAt ?? null;
+  return {
+    question: String(p.question ?? ''),
+    options: (Array.isArray(p.options) ? p.options : []).map((o: any) => ({
+      id: String(o.id),
+      text: String(o.text ?? ''),
+      votes: Number(o.votes ?? 0),
+      ...(p.anonymous ? {} : { voters: voters?.get(String(o.id)) ?? [] }),
+    })),
+    voters: Number(p.voters ?? 0),
+    multiple: !!p.multiple,
+    anonymous: !!p.anonymous,
+    closed: !!closedAt || (!!closesAt && new Date(closesAt).getTime() <= Date.now()),
+    closesAt,
+    closedAt,
+  };
+}
+
+function exportForward(m: any): ExportForward | null {
+  const f = m.forward ?? m.extra?.forward;
+  if (!f || typeof f !== 'object') return null;
+  return {
+    author: { username: f.u?.username ?? '', name: f.alias || f.u?.name || f.u?.username || '' },
+    from: f.roomName ? (f.t === 'c' ? `#${f.roomName}` : f.roomName) : (FORWARD_FROM[f.t] ?? null),
+    ts: f.ts ?? null,
+    hops: Number(f.hops ?? 1),
+    comment: f.comment ? String(f.comment) : null,
+  };
+}
+
+// "Sim: 2 (Ana, Bruno) · Não: 1 · 3 pessoas votaram · encerrada" (CSV e o resumo de Meus dados).
+export function pollSummary(p: ExportPoll, nameOf: (u: { username: string; name: string }) => string = (u) => u.name): string {
+  const opts = p.options.map((o) => `${o.text}: ${o.votes}${o.voters?.length ? ` (${o.voters.map(nameOf).join(', ')})` : ''}`);
+  const tail = [
+    p.voters === 1 ? '1 pessoa votou' : `${p.voters.toLocaleString('pt-BR')} pessoas votaram`,
+    p.multiple && 'várias respostas',
+    p.anonymous && 'voto anônimo',
+    p.closed ? 'encerrada' : p.closesAt ? `encerra em ${formatDayTime(p.closesAt)}` : null,
+  ].filter(Boolean);
+  return [...opts, ...tail].join(' · ');
+}
+
+const forwardHead = (f: ExportForward) =>
+  [`${f.author.name}${f.author.username ? ` (@${f.author.username})` : ''}`, f.from, f.ts ? formatDayTime(f.ts) : null, f.hops > 1 ? 'encaminhada várias vezes' : null].filter(Boolean).join(' · ');
 
 // m: a linha já com extra (withExtra), para call, sticker e role chegarem a systemText (papéis pelo nome de ROLE_LABEL;
 // um papel criado pelo administrador sai pelo id).
@@ -242,6 +342,8 @@ export function toExportMessage(m: any, nameOf: (u: string) => string, place: Fi
     attachments: encrypted ? [] : ((m.attachments ?? []) as Attachment[]),
     ackRequired: !!m.ackRequired,
     ackCount: Number(m.ackCount ?? 0),
+    poll: encrypted || kind !== 'message' ? null : exportPoll(m, place),
+    forward: encrypted || kind !== 'message' ? null : exportForward(m),
   };
 }
 
@@ -268,7 +370,21 @@ export function messageHtml(em: ExportMessage, nameOf: (username: string) => str
     parts.push(`<div class="who"><b>${escapeHtml(em.author.name)}</b><span class="u">@${escapeHtml(em.author.username)}</span>${gone}</div>`);
   }
   if (em.tmid) parts.push(`<a class="reply" href="#m-${escapeHtml(em.tmid)}">↳ Resposta no tópico</a>`);
-  if (!em.fileOnly && em.text) parts.push(`<div class="text">${htmlText(em.text)}</div>`);
+  if (em.forward) {
+    // Como no chat: o comentário de quem encaminhou e, embaixo, a original com quem escreveu.
+    if (em.forward.comment) parts.push(`<div class="text">${htmlText(em.forward.comment)}</div>`);
+    const body = !em.fileOnly && em.text ? `<div class="text">${htmlText(em.text)}</div>` : '';
+    parts.push(`<blockquote class="fwd"><div class="fwd-head">↪ Encaminhada de ${escapeHtml(forwardHead(em.forward))}</div>${body}</blockquote>`);
+  } else if (em.poll) {
+    const p = em.poll;
+    const total = Math.max(1, p.options.reduce((n, o) => n + o.votes, 0));
+    const li = (o: ExportPoll['options'][number]) => {
+      const who = o.voters?.length ? ` <span class="u">(${escapeHtml(o.voters.map((v) => v.name).join(', '))})</span>` : '';
+      return `<li><span>${escapeHtml(o.text)}</span> <b>${o.votes.toLocaleString('pt-BR')}</b> <span class="u">${Math.round((o.votes / total) * 100)}%</span>${who}</li>`;
+    };
+    const meta = pollSummary({ ...p, options: [] });
+    parts.push(`<div class="poll"><div class="text"><b>Enquete:</b> ${htmlText(p.question)}</div><ul class="poll-opts">${p.options.map(li).join('')}</ul><div class="tags">${escapeHtml(meta)}</div></div>`);
+  } else if (!em.fileOnly && em.text) parts.push(`<div class="text">${htmlText(em.text)}</div>`);
   for (const a of em.attachments) {
     if (!a.message_link) continue;
     const who = a.author_alias || a.author_name || '';
@@ -293,7 +409,23 @@ export function dayHeading(iso: string) {
   return `<h2>${escapeHtml(headingFmt.format(new Date(iso)))}</h2>`;
 }
 
-export const CSV_HEADER = csvRow(['Data e hora', 'Autor', 'Usuário', 'Tipo', 'Mensagem', 'Resposta ao tópico', 'Editada em', 'Arquivos', 'Reações', 'Cientes', 'Fixada', 'ID da mensagem']);
+export const CSV_HEADER = csvRow([
+  'Data e hora',
+  'Autor',
+  'Usuário',
+  'Tipo',
+  'Mensagem',
+  'Resposta ao tópico',
+  'Editada em',
+  'Arquivos',
+  'Reações',
+  'Cientes',
+  'Fixada',
+  'ID da mensagem',
+  'Encaminhada de',
+  'Comentário do encaminhamento',
+  'Enquete',
+]);
 
 export function messageCsv(em: ExportMessage): string {
   const files = em.files.map((f) => `${f.name}${f.encrypted ? ' (criptografado)' : f.missing ? ' (indisponível)' : ''}`).join(' | ');
@@ -313,6 +445,9 @@ export function messageCsv(em: ExportMessage): string {
     em.ackRequired ? em.ackCount : '',
     em.pinned ? 'sim' : '',
     em.id,
+    em.forward ? forwardHead(em.forward) : '',
+    em.forward?.comment ?? '',
+    em.poll ? pollSummary(em.poll) : '',
   ]);
 }
 
@@ -333,5 +468,7 @@ export function messageJson(em: ExportMessage): string {
     attachments: em.attachments,
     ackRequired: em.ackRequired,
     ackCount: em.ackCount,
+    ...(em.poll ? { poll: em.poll } : {}),
+    ...(em.forward ? { forward: em.forward } : {}),
   });
 }
