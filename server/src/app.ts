@@ -104,6 +104,8 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   // Exportar mensagens e Meus dados (LGPD)
   const { dataExportRoutes } = await import('./api/dataExport');
   dataExportRoutes(app);
+  const { translateRoutes } = await import('./translate/api'); // Tradução de mensagens (LibreTranslate da empresa)
+  translateRoutes(app);
 
   app.get('/health', async () => ({ ok: true }));
 
