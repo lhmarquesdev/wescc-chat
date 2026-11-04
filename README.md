@@ -725,6 +725,35 @@ arquivos e pastas com nome fora do UTF-8 ficam de fora, com um aviso só.
 Os downloads (URL, arquivos e fotos pendentes) recusam endereços da rede interna. Para liberar um servidor interno,
 inclua `host:porta` em `IMPORT_ALLOWED_HOSTS`.
 
+## Papéis e permissões
+
+Em Administração › Papéis e permissões, três visões na mesma faixa:
+
+- **Papéis**: a lista (Todos, Sistema, Personalizados). O editor de cada papel tem as abas Resumo (nome, "Para que
+  serve", escopo global ou de sala, 2FA obrigatório, **Restrito em conversas diretas** e a delegação: quais papéis
+  quem tem este pode dar, que só um administrador define), Permissões (por área), Pessoas e Histórico.
+- **Matriz**: uma coluna por papel e uma linha por permissão, agrupadas por área; marca e desmarca em vários papéis de
+  uma vez e grava só o que mudou. **Comparar** mostra dois papéis lado a lado, com "Só diferenças".
+- **Quem pode…?**: parte da ação (busca pelo que ela faz) e mostra os papéis globais que a dão, os papéis de sala em
+  que ela vale e as pessoas, com o papel de onde vem.
+
+- **Novo papel**: em branco, a partir de um **modelo** (Operador, Supervisor de operação, Auditor, Moderador de
+  conteúdo, Gestor de pessoas) ou copiando outro papel. Modelo e cópia levam só as permissões que quem cria tem.
+- Um papel criado não se passa por outro: o identificador e o nome exibido não podem repetir, nem com letras de outro
+  alfabeto (o "А" cirílico), de largura total, invisíveis ou com outra pontuação, o nome de um papel padrão
+  (Administrador, Dono da sala, Moderador, Usuário, Operação…) ou de outro papel. Nomes que só acrescentam palavras
+  ("Administrador do NOC") passam; o selo do Administrador tem a coroa, que nenhum papel criado recebe.
+- **Revisar alterações** mostra, antes de gravar, o que muda em linguagem de gestor e quantas pessoas ativas são
+  afetadas; com permissão sensível entrando (marcada na lista), salvar pede "Entendi".
+- **Histórico**: quem mudou o quê, com o antes e o depois, e **Reverter** com prévia.
+- Ninguém dá o que não tem: só as permissões e os papéis que cabem no que a pessoa tem (ou que o administrador
+  delegou ao papel dela). Dar o papel Administrador pede `assign-admin-role`.
+- **Papéis em lote**, em Administração › Usuários: selecione as pessoas (até 500 por vez), escolha dar ou tirar papéis
+  e veja a prévia (quem muda, quem já está assim e quem fica de fora, com o motivo) antes de aplicar. Quem está
+  travado fica como estava.
+- No editor de cada pessoa, **Acesso efetivo** soma os papéis e mostra o que ela pode em cada área (e simula a troca
+  de papéis antes de salvar).
+
 ## Operação: conversas diretas restritas
 
 Para equipes de operação (central de atendimento, por exemplo) dá para impedir que as pessoas da operação conversem
@@ -807,6 +836,81 @@ empresa e nenhum serviço da internet (Google, DeepL, Microsoft…) é usado.
   encaminhadas. Trechos de código, links, menções, canais e emojis não vão para o tradutor e ficam iguais.
 - Notificações, e-mails, busca, prévia na barra lateral, citações e a auditoria continuam mostrando o original.
   Nenhum texto de mensagem vai para o log.
+
+## Criptografia de ponta a ponta (opcional)
+
+Desligada por padrão. Para ligar: Administração › Configurações › Segurança › Criptografia de ponta a ponta
+(`E2E_Enable`). O chat precisa estar em HTTPS (o navegador só cifra em página segura; `localhost` também serve).
+Desligar depois só impede ligar de novo: as conversas já criptografadas continuam assim.
+
+- Vale só em **conversas diretas e grupos privados**. Na conversa direta, qualquer participante liga (menu Mais ›
+  Ligar criptografia de ponta a ponta); no grupo privado, quem tem `toggle-room-e2e-encryption` (por padrão, o Dono da
+  sala), e o grupo também pode nascer criptografado (Criptografar de ponta a ponta, ao criar). Grupo criptografado não
+  vira público.
+- Cada pessoa tem uma **senha da criptografia** (Minha conta › Segurança): a que o chat gera (25 caracteres) ou uma
+  escolhida (12 ou mais). Cada navegador pede uma vez; ao sair da conta, ele esquece. **O chat não guarda nem recupera
+  essa senha.** Quem a esqueceu redefine a própria criptografia, ou um administrador redefine em Administração ›
+  Usuários (`edit-other-user-e2ee`, que também encerra as sessões da pessoa): nos dois casos, as mensagens
+  criptografadas antigas ficam ilegíveis para ela.
+- **Quem entra ou volta** para a conversa recebe a chave atual pelo navegador de quem já participa (com o chat aberto) e
+  lê o histórico cifrado com essa chave, como no Rocket.Chat. Quem sai, é removido ou tem a conta excluída perde as
+  chaves, e a conversa troca de chave sozinha: se voltar, lê o que veio depois dessa troca, inclusive o que foi escrito
+  enquanto estava fora, e nada de antes. **Gerar chave nova** (menu Mais, para quem pode ligar a criptografia) corta o
+  histórico para quem entrar dali em diante.
+- Numa conversa criptografada **não funcionam**: busca no servidor (a busca da sala procura só nas mensagens já
+  carregadas), tradução, enquetes, envio agendado, mensagem de vídeo, figurinhas, encaminhar de ou para ela, prévias
+  do Jira, bots e integrações. Exportar mensagens e Meus dados trazem “Mensagem criptografada” no lugar do texto, e o
+  push e o e-mail também (com o chat aberto, a notificação decifra no navegador). O rascunho não fica salvo no
+  navegador.
+- **Chamadas de voz e vídeo não são cifradas de ponta a ponta**, mesmo numa conversa criptografada.
+
+O que protege: o conteúdo é cifrado e decifrado no navegador; o banco de dados e os backups guardam só o conteúdo
+cifrado, e nem os administradores do chat leem (eles veem que a conversa é criptografada, quem participa e quando houve
+mensagens). O que não protege: um servidor modificado, que pode entregar ao navegador uma página que copia a senha ou o
+texto. Por isso a proteção depende de o servidor do chat ser o original e de o acesso ser por HTTPS.
+
+## Recursos das conversas
+
+- **Busca da barra lateral** (Ctrl+K, ⌘K no Mac): primeiro as conversas da lista; a partir de 2 letras, também pessoas
+  para conversar e canais públicos em que a pessoa ainda não está. `@ana` procura só pessoas, `#sup` só salas;
+  maiúsculas e acentos não importam.
+- **Status personalizados**: em Administração › Status do usuário (`manage-user-status`), até 30, cada um com um tipo
+  (Disponível, Ausente, Ocupado ou Invisível) que decide o comportamento; as pessoas escolhem no menu da própria foto.
+  **Ocupado** (ou um personalizado do tipo Ocupado) silencia notificações, som, push e e-mail, inclusive de menções e
+  DMs; os contadores continuam subindo e as chamadas continuam tocando. Invisível aparece offline.
+- **Palavras destacadas** (Minha conta › Preferências): até 20 palavras ou expressões (2 a 40 caracteres) por pessoa.
+  A mensagem com uma delas, inteira, fica marcada e avisa como uma menção; maiúsculas e acentos não importam.
+- **Encaminhar** (menu da mensagem, `forward-message`: Administrador, Usuário e Operação): para até 10 conversas por
+  vez, com comentário opcional e os arquivos junto; a mensagem mostra de onde veio, sem revelar um grupo privado ou
+  uma conversa direta a quem não participa dela. Valem as regras de envio de cada destino (somente leitura, canal de
+  avisos, arquivada, Operação); os destinos que não aceitam já aparecem desativados.
+- **Enquetes** (botão + › Criar enquete, `create-poll`: Administrador, Usuário, Dono, Moderador e Publicador): 2 a 10
+  opções, com escolha múltipla, voto anônimo (ninguém vê quem votou, nem quem criou) e prazo opcional (de 5 minutos a
+  90 dias). Votar não depende da permissão; encerrar antes do prazo, só quem criou ou um moderador da sala.
+- **Mensagens de vídeo** (botão + › Gravar vídeo): até 2 minutos, pela câmera do aparelho. Seguem as regras de upload
+  (Configurações › Upload de arquivos; o tipo `video/webm` ou `video/mp4` precisa ser aceito) e pedem HTTPS.
+- **Lembrar-me** (menu da mensagem): a pessoa escolhe quando quer ser lembrada (até 200 lembretes); na hora chegam o
+  aviso no chat e o push, e o lembrete fica em **Lembretes**, na barra lateral, até ela concluir ou adiar. Só a
+  própria pessoa vê os seus.
+- **Agendar envio** (seta ao lado de Enviar, `schedule-message`: Administrador, Usuário, Dono, Moderador e Publicador):
+  só texto, com tópico e “Ciente”, de 1 minuto a 1 ano à frente (até 100 por pessoa). Sai em nome da pessoa se ela
+  ainda puder escrever na sala. A que não sai (por exemplo, a pessoa não pode mais escrever ali, ou o servidor ficou
+  parado mais de 1 hora depois do horário) avisa por push e fica em vermelho acima do campo de mensagem, também num
+  canal de avisos, até ser reagendada, enviada ou excluída no painel Mensagens agendadas da sala. Só a própria pessoa
+  vê as suas.
+- **Exportar mensagens da sala** (painel Exportar mensagens, `export-room-messages`: Administrador e Dono da sala;
+  numa DM, só por um papel global): as mensagens de um período em HTML, CSV ou JSON, com ou sem os arquivos (num
+  .zip, até `DataExport_Max_Files_MB`, padrão 2048 MB, em Configurações › Mensagens › Exportação). Cada exportação
+  fica na auditoria.
+- **Meus dados (LGPD)**, em Minha conta: a pessoa pede uma cópia (.zip) do que é dela (perfil, mensagens que escreveu,
+  arquivos que enviou, reações e eventos da Agenda; mensagens de outras pessoas nunca entram). O chat monta em segundo
+  plano, avisa no chat, por push e por e-mail, e o arquivo fica disponível por `UserData_Download_Expiration_Hours`
+  (padrão 72 h). Um pedido a cada 24 horas. Desligue em Configurações › Contas › Privacidade (LGPD)
+  (`UserData_EnableDownload`).
+- **E-mail de acesso por dispositivo novo** (`Device_Management_Enable_Login_Emails`, ligado por padrão, em
+  Configurações › Segurança › Gestão de dispositivos): avisa a pessoa quando alguém entra na conta por um navegador ou
+  programa que ela ainda não usou; nunca no primeiro dispositivo da conta. Só sai com o SMTP configurado
+  (Configurações › E-mail; use **Enviar e-mail de teste**).
 
 ## Active Directory / LDAP
 
