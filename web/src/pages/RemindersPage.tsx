@@ -52,10 +52,11 @@ export function RemindersPage() {
   };
   const snoozeOptions = reminderPresets(now).filter((p) => p.key !== '3h');
 
+  // O ícone ao lado já diz o tipo (canal, grupo, conversa direta): aqui só o nome.
   const roomLabel = (r: MessageReminder) => {
     const sub = subs[r.rid];
-    if (r.roomName) return r.t === 'p' ? r.roomName : `#${r.roomName}`;
-    if (sub) return sub.t === 'd' ? sub.fname || sub.name : `#${sub.fname || sub.name}`;
+    if (r.roomName) return r.roomName;
+    if (sub) return sub.fname || sub.name;
     return r.t === 'd' ? 'Conversa direta' : 'Conversa';
   };
 

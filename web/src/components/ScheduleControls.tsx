@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Room, ScheduledMessage } from '@shared/index';
 import { AHEAD_MIN_MS, aheadError } from '@shared/messages';
@@ -132,7 +132,10 @@ export function ScheduledStrip({ rid, onOpen }: { rid: string; onOpen: () => voi
 
 // Painel "Mensagens agendadas" da sala.
 export function ScheduledPanel({ room }: { room: Room }) {
-  const list = useStore((s) => s.scheduled.filter((x) => x.rid === room._id));
+  // O seletor devolve a lista do store (referência estável); o filtro fica fora dele, senão cada leitura seria um
+  // array novo e o React entraria em laço.
+  const all = useStore((s) => s.scheduled);
+  const list = useMemo(() => all.filter((x) => x.rid === room._id), [all, room._id]);
   const me = useStore((s) => s.me)!;
   const phone = useIsPhone();
   const navigate = useNavigate();
