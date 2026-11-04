@@ -214,18 +214,21 @@ export async function myVotes(ctx: Ctx, messageIds: string[]): Promise<Record<st
   return out;
 }
 
+// Quem votou numa enquete não anônima. Num canal de avisos ou com a lista de membros oculta, só quem publica no canal
+// (ou, com a lista oculta, quem vê a lista de membros): a mesma regra dos recibos de leitura. Vale para polls.voters e
+// para a exportação da sala, que sem ela leva só as contagens.
+export async function canSeePollVoters(userId: string, room: { id: string; notice?: boolean | null; broadcast?: boolean | null }): Promise<boolean> {
+  if (!room.notice && !room.broadcast) return true;
+  const roles = await getUserRoles(userId, room.id);
+  return rolesHavePermission(roles, 'post-readonly') || (!!room.broadcast && rolesHavePermission(roles, 'view-broadcast-member-list'));
+}
+
 export async function pollVoters(ctx: Ctx, messageId: string): Promise<{ options: { id: string; total: number; users: UserRef[] }[] }> {
   const p = await loadPoll(messageId);
   const room = await getRoom(p.room_id);
   if (!(await canAccessRoom(ctx.userId, room))) throw forbidden('Você não tem acesso a esta sala.');
   if (p.anonymous) throw badRequest('error-poll-anonymous', 'Esta enquete é anônima: ninguém vê quem votou.');
-  // Canal de avisos ou lista de membros oculta: a mesma regra dos recibos de leitura.
-  if (room.notice || room.broadcast) {
-    const roles = await getUserRoles(ctx.userId, room.id);
-    if (!rolesHavePermission(roles, 'post-readonly') && !(room.broadcast && rolesHavePermission(roles, 'view-broadcast-member-list'))) {
-      throw new ApiError(403, 'error-not-allowed', 'Só quem publica neste canal vê quem votou.');
-    }
-  }
+  if (!(await canSeePollVoters(ctx.userId, room))) throw new ApiError(403, 'error-not-allowed', 'Só quem publica neste canal vê quem votou.');
   const totals = new Map((await many('SELECT option_id, count(*)::int AS n FROM poll_votes WHERE message_id = $1 GROUP BY option_id', [messageId])).map((r) => [r.option_id, r.n]));
   // Conta excluída: fora da lista, dentro do total.
   const rows = await many(

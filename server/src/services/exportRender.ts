@@ -190,7 +190,8 @@ export interface ExportMessage {
   forward: ExportForward | null;
 }
 
-// Enquete: as opções com a contagem, como a sala vê. voters (por opção) só numa enquete não anônima.
+// Enquete: as opções com a contagem, como a sala vê. voters (por opção) só numa enquete não anônima e só quando quem
+// exporta veria quem votou (pollVoters); sem isso, o campo nem aparece (um [] diria que ninguém votou).
 export interface ExportPoll {
   question: string;
   options: { id: string; text: string; votes: number; voters?: { username: string; name: string }[] }[];
@@ -215,7 +216,8 @@ export interface ExportForward {
 export interface FilePlacement {
   // Só no .zip: o caminho de cada arquivo incluído. Sem isso, cada arquivo leva o link do chat.
   zipped?: Map<string, string>;
-  // Quem votou em cada opção das enquetes não anônimas da página (pollVotersOf).
+  // Quem votou em cada opção das enquetes não anônimas da página (pollVotersOf). Ausente: a exportação leva só as
+  // contagens (canal de avisos ou lista de membros oculta, para quem não vê quem votou).
   pollVoters?: Map<string, Map<string, { username: string; name: string }[]>>;
 }
 
@@ -251,7 +253,7 @@ export function exportPoll(m: any, place: FilePlacement = {}): ExportPoll | null
       id: String(o.id),
       text: String(o.text ?? ''),
       votes: Number(o.votes ?? 0),
-      ...(p.anonymous ? {} : { voters: voters?.get(String(o.id)) ?? [] }),
+      ...(p.anonymous || !place.pollVoters ? {} : { voters: voters?.get(String(o.id)) ?? [] }),
     })),
     voters: Number(p.voters ?? 0),
     multiple: !!p.multiple,

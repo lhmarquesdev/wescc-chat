@@ -40,6 +40,7 @@ import {
 } from './exportRender';
 import { withExtra } from './messages';
 import { hasPermission } from './permissions';
+import { canSeePollVoters } from './polls';
 import { loadRoomForUser } from './rooms';
 import { getSetting } from './settings';
 import { actorOf, type Ctx } from './users';
@@ -256,10 +257,12 @@ async function* documentChunks(d: DocInfo, place: FilePlacement): AsyncGenerator
   }
   let n = 0;
   let day = '';
+  const showVoters = await canSeePollVoters(me.id, room);
   for await (const rows of pages(p)) {
     await names.prime(rows, p.format === 'html');
-    // Enquetes não anônimas: quem votou em cada opção (a sala vê isso no chat).
-    const pagePlace: FilePlacement = { ...place, pollVoters: await pollVotersOf(rows) };
+    // Enquetes não anônimas: quem votou em cada opção, só para quem veria isso no chat (canSeePollVoters); sem ela,
+    // só as contagens.
+    const pagePlace: FilePlacement = showVoters ? { ...place, pollVoters: await pollVotersOf(rows) } : place;
     let out = '';
     for (const row of rows) {
       // mapMessage não leva a coluna e2e: ela vai junto da linha crua, para isEncryptedMessage enxergar.

@@ -108,6 +108,44 @@ describe('exportar mensagens: enquetes e encaminhadas', () => {
     expect(html).toContain('2 pessoas votaram · encerrada');
     expect(html).toContain('<div class="text">Comentário da Ana no encaminhamento</div><blockquote class="fwd"><div class="fwd-head">↪ Encaminhada de Bruno Lima');
   });
+
+  it('canal de avisos e lista de membros oculta: quem não vê quem votou no chat exporta só as contagens', async () => {
+    // Um papel criado só com a exportação: exporta, mas não publica no canal (sem post-readonly).
+    const roleId = name('exportador');
+    expect((await api('POST', 'rbac.roles.create', { name: roleId, description: `Exportador ${roleId}`, permissions: ['export-room-messages'] }, A)).success).toBe(true);
+    const [exp, votante] = await Promise.all([newUser(A, { name: 'Edu Exportador' }), newUser(A, { name: 'Vera Votante' })]);
+    expect((await api('POST', 'rbac.users.setRoles', { userId: exp.userId, roles: ['user', roleId] }, A)).success).toBe(true);
+    const rid = await channel(ana, [votante, exp], { extraData: { notice: true } });
+    await clearSystem(rid);
+    const poll = (await api('POST', 'polls.create', { rid, question: 'Turno extra?', options: ['Sim', 'Não'] }, ana)).message;
+    expect((await api('POST', 'polls.vote', { messageId: poll._id, optionIds: ['o1'] }, votante)).success).toBe(true);
+    expect((await api('GET', 'polls.voters', { messageId: poll._id }, exp)).status).toBe(403);
+
+    const html = await text(exp, rid);
+    expect(html).toContain('<li><span>Sim</span> <b>1</b> <span class="u">100%</span></li>');
+    expect(html).not.toContain('Vera Votante');
+    const doc = JSON.parse(await text(exp, rid, { format: 'json' }));
+    const p = doc.messages.find((m: any) => m.id === poll._id).poll;
+    expect(p).toMatchObject({ question: 'Turno extra?', voters: 1, anonymous: false });
+    expect(p.options[0]).toEqual({ id: 'o1', text: 'Sim', votes: 1 });
+    const csv = parse(await text(exp, rid, { format: 'csv' }), { delimiter: ';', bom: true }) as string[][];
+    expect(csv.find((r) => r[11] === poll._id)![14]).toBe('Sim: 1 · Não: 0 · 1 pessoa votou');
+    // A dona publica no canal: vê quem votou no chat e na exportação.
+    expect(await text(ana, rid)).toContain('<span class="u">(Vera Votante)</span>');
+
+    // Lista de membros oculta: quem vê a lista (view-broadcast-member-list) vê quem votou; sem ela, não.
+    const oculta = await channel(ana, [votante, exp]);
+    await pool.query('UPDATE rooms SET broadcast = true WHERE id = $1', [oculta]);
+    await clearSystem(oculta);
+    const op = (await api('POST', 'polls.create', { rid: oculta, question: 'Pauta da semana?', options: ['Sim', 'Não'] }, ana)).message;
+    expect((await api('POST', 'polls.vote', { messageId: op._id, optionIds: ['o2'] }, votante)).success).toBe(true);
+    expect(await text(exp, oculta)).not.toContain('Vera Votante');
+    expect((await api('POST', 'rbac.roles.update', { roleId, permissions: ['export-room-messages', 'view-broadcast-member-list'] }, A)).success).toBe(true);
+    expect((await api('GET', 'polls.voters', { messageId: op._id }, exp)).status).toBe(200);
+    expect(await text(exp, oculta)).toContain('<span class="u">(Vera Votante)</span>');
+    // No canal de avisos a lista de membros não basta: só quem publica.
+    expect(await text(exp, rid)).not.toContain('Vera Votante');
+  });
 });
 
 describe('exportar mensagens', () => {
