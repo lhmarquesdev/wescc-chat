@@ -30,6 +30,11 @@ const KIND_ICON: Record<string, IconName> = {
   other: 'file',
 };
 const kindOf = (f: { name: string; type: string }) => fileKind(f.name, f.type);
+// Cor do tipo: texto simples (TXT, MD) fica neutro, sem repetir o vermelho do PDF nem o azul do Word.
+const toneOf = (f: { name: string; type: string }) => {
+  const ext = f.name.includes('.') ? f.name.split('.').pop()!.toLowerCase() : '';
+  return ext === 'txt' || ext === 'md' ? 'text' : kindOf(f);
+};
 const isText = (f: DriveFile) => /^text\//.test(f.type) || /\.(txt|md|csv|log|json|xml|ya?ml|ini|sql)$/i.test(f.name);
 const canPreview = (f: DriveFile) => /^(image|video|audio)\//.test(f.type) || f.type === 'application/pdf' || isText(f);
 const LEVEL_ICON: Record<number, IconName> = { 1: 'files-view', 2: 'files-edit', 3: 'files-manage' };
@@ -481,7 +486,7 @@ export function FolderGlyph({ color, size = 20, open }: { color: string | null; 
 function FileGlyph({ file, size = 20 }: { file: { name: string; type: string }; size?: 16 | 20 | 24 | 32 }) {
   const k = kindOf(file);
   return (
-    <span className={`fl-file-glyph k-${k}`} aria-hidden="true">
+    <span className={`fl-file-glyph k-${toneOf(file)}`} aria-hidden="true">
       <Icon name={KIND_ICON[k] ?? 'file'} size={size} />
     </span>
   );
@@ -496,7 +501,7 @@ function Thumb({ file }: { file: DriveFile }) {
       </span>
     );
   return (
-    <span className={`fl-thumb icon k-${kindOf(file)}`}>
+    <span className={`fl-thumb icon k-${toneOf(file)}`}>
       <FileGlyph file={file} size={32} />
       <span className="fl-ext">{file.name.includes('.') ? file.name.split('.').pop()!.slice(0, 5).toUpperCase() : ''}</span>
     </span>

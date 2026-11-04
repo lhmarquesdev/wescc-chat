@@ -1567,11 +1567,12 @@ input[type='checkbox']:checked:where(:disabled) {
   }
   /* Botão pequeno, X da busca e X do chip mantêm o tamanho à vista; a área de toque cresce por baixo
      (o mesmo recurso das reações em room.css). :where() deixa vencer quem já posiciona o botão. */
-  :where(.btn.small, .chip button) {
+  :where(.btn.small, .chip button, .side-search-clear) {
     position: relative;
   }
   .btn.small::after,
   .search-field .search-clear::after,
+  .side-search-clear::after,
   .chip button::after {
     content: '';
     position: absolute;

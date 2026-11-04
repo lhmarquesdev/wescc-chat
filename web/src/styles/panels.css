@@ -382,6 +382,22 @@
   font-size: inherit;
   line-height: inherit;
 }
+.panel-head .sub-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3em;
+  min-width: 0;
+}
+.panel-head .sub-line > * {
+  flex-shrink: 0;
+}
+.panel-head .sub-line > .sub-room {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .panel-body {
   flex: 1;
   overflow-y: auto;

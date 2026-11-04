@@ -320,10 +320,13 @@ export function PollModal({ rid, tmid, onClose }: { rid: string; tmid?: string |
                   }
                 }}
               />
-              {i >= 2 && (
+              {i >= 2 ? (
                 <button type="button" className="icon-btn" aria-label="Remover opção" title="Remover opção" onClick={() => setOptions((list) => list.filter((_, j) => j !== i))}>
                   <Icon name="close" size={16} />
                 </button>
+              ) : (
+                // As duas primeiras não saem; o espaço do X fica reservado para todos os campos terem a mesma largura.
+                options.length > 2 && <span className="icon-btn poll-opt-slot" aria-hidden="true" />
               )}
             </div>
           ))}

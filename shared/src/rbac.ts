@@ -872,3 +872,27 @@ export function roleNameProblem(
   if (shown && taken.has(shown)) return { code: 'RBAC_DUPLICATE_ROLE_LABEL', error: `Já existe um papel que aparece como “${opts.displayName(id, description)}”. Escolha outro nome de exibição.` };
   return null;
 }
+
+// ---------- Permissão sem tela ----------
+// Permissões que só se usam numa tela que pede outra para abrir: Usuários pede "Ver a lista de usuários". Sem a da
+// tela, quem tem o papel (e nenhum outro que dê a da tela) recebe a permissão, mas não acha onde usá-la.
+const SCREEN_KEY: Record<string, string> = {
+  'assign-roles': 'view-user-administration',
+  'assign-admin-role': 'view-user-administration',
+};
+
+export function screenGaps(perms: Iterable<string>): { key: string; needs: string }[] {
+  const set = new Set(perms);
+  return Object.entries(SCREEN_KEY)
+    .filter(([key, needs]) => set.has(key) && !set.has(needs))
+    .map(([key, needs]) => ({ key, needs }));
+}
+
+export function screenGapWarning(perms: Iterable<string>): string | undefined {
+  const gaps = screenGaps(perms);
+  if (!gaps.length) return undefined;
+  const needs = [...new Set(gaps.map((g) => g.needs))];
+  const keys = gaps.map((g) => `“${rbacLabel(g.key)}”`);
+  const list = keys.length > 1 ? `${keys.slice(0, -1).join(', ')} e ${keys[keys.length - 1]}` : keys[0];
+  return `Sem “${needs.map(rbacLabel).join('” e “')}”, quem tiver este papel (e nenhum outro com ela) não encontra a tela para usar ${list}.`;
+}

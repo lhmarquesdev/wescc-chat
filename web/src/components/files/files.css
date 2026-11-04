@@ -243,9 +243,14 @@
   flex-shrink: 0;
   color: var(--fg-muted);
 }
-.k-pdf,
-.k-doc {
+.k-pdf {
   --fl-k: var(--fl-red);
+}
+.k-doc {
+  --fl-k: var(--fl-blue);
+}
+.k-text {
+  --fl-k: var(--fl-gray);
 }
 .k-sheet {
   --fl-k: var(--fl-green);
@@ -267,9 +272,6 @@
 }
 .fl-file-glyph[class*='k-'] {
   color: var(--fl-k, var(--fg-muted));
-}
-.k-doc.fl-file-glyph {
-  color: var(--fl-blue);
 }
 
 /* ---------- Conteúdo ---------- */
@@ -307,6 +309,16 @@
 .fl-crumb strong {
   color: var(--fg);
   font-weight: var(--fw-semibold);
+}
+@media (pointer: coarse) {
+  /* Alvo de toque de 40px nos links do caminho ("Arquivos › pasta"). */
+  .fl-crumbs a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    padding-inline: var(--space-1);
+    margin-inline: calc(-1 * var(--space-1));
+  }
 }
 
 .fl-toolbar {
@@ -541,7 +553,8 @@
   font-weight: var(--fw-semibold);
   letter-spacing: 0.03em;
   background: color-mix(in srgb, var(--fl-k, var(--fg-muted)) 16%, var(--bg-surface));
-  color: var(--fl-k, var(--fg-2));
+  /* Texto pequeno: a cor do tipo puxada para o texto principal passa de 4,5:1 nos dois temas. */
+  color: color-mix(in srgb, var(--fl-k, var(--fg-2)) 55%, var(--fg));
 }
 
 /* Lista */

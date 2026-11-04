@@ -63,5 +63,8 @@ export function normalizeStatusName(
 
 // Por tipo (STATUS_TYPES) e nome (pt-BR).
 export function sortStatuses<T extends CustomUserStatus>(list: T[]): T[] {
-  return [...list].sort((a, b) => STATUS_TYPES.indexOf(a.statusType) - STATUS_TYPES.indexOf(b.statusType) || a.name.localeCompare(b.name, 'pt-BR'));
+  // numeric: "Status 2" vem antes de "Status 10"; sensitivity base: maiúsculas e acentos não separam nomes iguais.
+  return [...list].sort(
+    (a, b) => STATUS_TYPES.indexOf(a.statusType) - STATUS_TYPES.indexOf(b.statusType) || a.name.localeCompare(b.name, 'pt-BR', { numeric: true, sensitivity: 'base' }),
+  );
 }

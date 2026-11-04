@@ -2827,8 +2827,10 @@ svg.rbac-tag-sensitive {
   .rbac-people-item {
     padding-right: var(--space-3);
   }
-  .rbac-perm-tools .rbac-chips button,
-  .rbac-matrix-tools .rbac-chips button {
+  /* Alvos de toque de 44px: filtros, busca e seleção das barras (lista de usuários, papéis, permissões, matriz). */
+  .rbac-chips button,
+  .rbac-strip .rbac-search,
+  .rbac-strip-select {
     min-height: 44px;
   }
 }

@@ -2,7 +2,7 @@
 // filtros (com acesso, sem acesso, alteradas, sensíveis) e, por grupo, as áreas com o nível e as capacidades avulsas.
 // Cada permissão mostra o que libera; a trava por chave fica só para "você não tem" e para a gestão do Administrador.
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { areaLevel, isRoomChecked, isSensitive, KEY_AREA, keyMatches, RBAC_GROUPS, RBAC_KEYS, rbacLabel, ROOT_KEEP, withAreaLevel, type RbacArea, type RbacGroup } from '@shared/rbac';
+import { areaLevel, isRoomChecked, isSensitive, KEY_AREA, keyMatches, RBAC_GROUPS, RBAC_KEYS, rbacLabel, ROOT_KEEP, screenGapWarning, withAreaLevel, type RbacArea, type RbacGroup } from '@shared/rbac';
 import { foldMatches } from '@shared/search';
 import { Icon } from '../../../components/Icon';
 import { Menu, Tooltip } from '../../../components/ui';
@@ -136,6 +136,7 @@ export function PermissionsTab({
     <div className="rbac-stack">
       {!editable && <Notice kind="lock">{lockNotice}</Notice>}
       {editable && !grant.root && <Notice>Você só dá ou tira permissões que você mesmo tem. As outras aparecem com cadeado.</Notice>}
+      {!roomRole && screenGapWarning(perms) && <Notice kind="warn">{screenGapWarning(perms)}</Notice>}
       <div className="rbac-perm-tools">
         <Chips<string>
           label="Grupo"

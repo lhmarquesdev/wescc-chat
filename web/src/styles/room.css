@@ -2537,18 +2537,46 @@ mark.hl-word {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px 6px;
+  gap: 2px 10px;
   margin-bottom: 2px;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   color: var(--fg-muted);
 }
-.fwd-head > .icon {
+/* Ícone e origem juntos; a origem longa corta com reticências (o nome inteiro fica no title). */
+.fwd-from {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.fwd-from > .icon {
   flex-shrink: 0;
+}
+.fwd-origin {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fwd-meta {
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
 }
 .fwd-head a {
   color: inherit;
   font-weight: var(--fw-medium);
+}
+@media (pointer: coarse) {
+  /* Alvo de toque de 40px sem mudar a altura da linha. */
+  .fwd-head a.fwd-origin {
+    padding-block: 12px;
+    margin-block: -12px;
+  }
 }
 .fwd-head a:hover {
   color: var(--fg);

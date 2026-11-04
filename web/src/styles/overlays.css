@@ -853,11 +853,18 @@
   flex-shrink: 0;
   margin-top: 1px;
 }
+/* Nome longo corta com reticências: o texto da mensagem fica sempre com pelo menos 60% da largura. */
 .fwd-preview > strong {
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  max-width: 40%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: var(--fw-semibold);
 }
 .fwd-preview-text {
+  flex: 1 1 0;
   min-width: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -977,6 +984,12 @@
 .poll-modal-opt > input {
   flex: 1;
   min-width: 0;
+}
+.poll-modal-opt > .icon-btn {
+  flex: none;
+}
+.poll-opt-slot {
+  visibility: hidden;
 }
 .btn.poll-add {
   align-self: flex-start;

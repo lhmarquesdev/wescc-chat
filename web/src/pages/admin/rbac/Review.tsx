@@ -3,7 +3,7 @@
 // ativas são afetadas. Com permissão sensível entrando, salvar pede o "Entendi". A matriz usa o modo de vários papéis.
 import { useState } from 'react';
 import { DIRECT_LOOPHOLES } from '@shared/direct';
-import { AREA_GROUP, diffPermissions, levelText, RBAC_AREAS, RBAC_GROUPS, RBAC_KEYS, rbacLabel, sensitiveAdded, type AreaChange } from '@shared/rbac';
+import { AREA_GROUP, diffPermissions, levelText, RBAC_AREAS, RBAC_GROUPS, RBAC_KEYS, rbacLabel, screenGapWarning, sensitiveAdded, type AreaChange } from '@shared/rbac';
 import { nameList, roleLabel } from '../../../lib/format';
 import { Icon } from '../../../components/Icon';
 import { useIsPhone } from '../../../components/overlay';
@@ -35,6 +35,9 @@ export function permissionWarnings(role: RbacRole | undefined, before: Set<strin
   if (restricted && holes.length) warnings.push(`O papel é restrito em conversas diretas, mas deixa ${nameList(holes.map((k) => rbacLabel(k).toLowerCase()), 3)}: isso abre conversas particulares.`);
   const diff = diffPermissions(before, after);
   if (diff.areas.some((a) => a.area === 'admin-permissions' && a.direction !== 'down')) warnings.push('Quem tem este papel passa a mexer em papéis e permissões (só no que ele mesmo tiver).');
+  // Dar papéis sem ver a lista de usuários: a permissão vale, mas não há tela para usá-la (só quando a troca cria isso).
+  const gap = screenGapWarning(after);
+  if (gap && gap !== screenGapWarning(before)) warnings.push(gap);
   const n = role?.activeUsers ?? 0;
   const sensitive = sensitiveAdded(before, after).map((k) => `Sensível: ${rbacLabel(k)}. ${RBAC_KEYS[k].sensitive}${n ? ` ${active(n)} ${n === 1 ? 'passa' : 'passam'} a ter.` : ''}`);
   return { warnings, sensitive, diff };

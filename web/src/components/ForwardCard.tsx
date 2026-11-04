@@ -16,26 +16,34 @@ export function ForwardCard({ f, children }: { f: MessageForward; children: Reac
   return (
     <div className="fwd-card">
       <div className="fwd-head">
-        <Icon name="forward" size={14} />
-        {origin.link ? (
-          <a
-            href={origin.link}
-            onClick={(e) => {
-              e.preventDefault();
-              navigate(origin.link!);
-            }}
-          >
-            {origin.text}
-          </a>
-        ) : (
-          <span>{origin.text}</span>
-        )}
-        <span aria-hidden="true">·</span>
-        <span className="fwd-author">{author}</span>
-        <span aria-hidden="true">·</span>
-        <time dateTime={f.ts} title={formatDateTime(f.ts)}>
-          {formatWhen(f.ts)}
-        </time>
+        <span className="fwd-from">
+          <Icon name="forward" size={14} />
+          {origin.link ? (
+            <a
+              className="fwd-origin"
+              href={origin.link}
+              title={origin.text}
+              onClick={(e) => {
+                e.preventDefault();
+                navigate(origin.link!);
+              }}
+            >
+              {origin.text}
+            </a>
+          ) : (
+            <span className="fwd-origin" title={origin.text}>
+              {origin.text}
+            </span>
+          )}
+        </span>
+        {/* Autor e hora não se separam: na tela estreita o par desce inteiro, sem deixar um "·" sozinho na linha. */}
+        <span className="fwd-meta">
+          <span className="fwd-author">{author}</span>
+          <span aria-hidden="true">·</span>
+          <time dateTime={f.ts} title={formatDateTime(f.ts)}>
+            {formatWhen(f.ts)}
+          </time>
+        </span>
       </div>
       {children}
     </div>

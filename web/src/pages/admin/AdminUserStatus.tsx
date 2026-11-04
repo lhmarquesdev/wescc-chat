@@ -2,7 +2,7 @@
 // menu. O tipo decide o comportamento: Ocupado silencia as notificações; Invisível aparece offline para os outros.
 import { useState } from 'react';
 import type { CustomUserStatus, UserStatus } from '@shared/index';
-import { STATUS_NAME_MAX, STATUS_TYPES, STATUS_TYPE_LABEL, normalizeStatusName, sortStatuses } from '@shared/status';
+import { MAX_CUSTOM_STATUSES, STATUS_NAME_MAX, STATUS_TYPES, STATUS_TYPE_LABEL, normalizeStatusName, sortStatuses } from '@shared/status';
 import { ApiError, api, errorMessage } from '../../lib/api';
 import { plural } from '../../lib/format';
 import { useStore } from '../../lib/store';
@@ -65,15 +65,33 @@ export function AdminUserStatus() {
       fail(e);
     }
   };
+  // No limite, o botão fica desligado e a dica diz o que fazer (antes, o limite só aparecia depois de preencher tudo).
+  const full = rows.length >= MAX_CUSTOM_STATUSES;
   const newButton = (
-    <button className="btn primary" onClick={() => setEditing('new')}>
+    <button className="btn primary" onClick={() => setEditing('new')} disabled={full} aria-describedby={full ? 'user-status-limit' : undefined}>
       <Icon name="add" />
       Novo status
     </button>
   );
   return (
     <>
-      <PageHead title="Status do usuário" count={rows.length || undefined}>
+      <PageHead
+        title={
+          <>
+            Status do usuário
+            {rows.length > 0 && (
+              <span className={full ? 'pill warn head-count' : 'pill head-count'} title={`Até ${MAX_CUSTOM_STATUSES} status personalizados`}>
+                {rows.length} de {MAX_CUSTOM_STATUSES}
+              </span>
+            )}
+          </>
+        }
+      >
+        {full && (
+          <span className="muted small" id="user-status-limit">
+            Limite de {MAX_CUSTOM_STATUSES} status. Apague um para criar outro.
+          </span>
+        )}
         {rows.length > 0 && newButton}
       </PageHead>
       {loading && !data ? (

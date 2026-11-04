@@ -19,7 +19,7 @@ import type { SpotlightUser, Subscription } from '@shared/index';
 import { foldText, parseSpotlightQuery, spotlightReady } from '@shared/search';
 import { compileHighlights, findHighlight, normalizeHighlights, splitHighlights } from '@shared/highlights';
 import { normalizeStatusName, presenceLabel, selfUserPatch, shownCustomStatus, silencesNotifications, sortStatuses, statusLine, type CustomUserStatus } from '@shared/status';
-import { RBAC_AREAS, foldRoleName, roleNameProblem } from '@shared/rbac';
+import { RBAC_AREAS, foldRoleName, roleNameProblem, screenGapWarning, screenGaps } from '@shared/rbac';
 import { ROLE_LABEL } from '@shared/messageText';
 import { readableError } from '../../web/src/lib/errorText';
 import { deviceLabel } from '@shared/devices';
@@ -520,6 +520,9 @@ describe('status personalizados', () => {
     expect(silencesNotifications(undefined)).toBe(false);
     const sorted = sortStatuses([...list, { _id: 'st-pausa', name: 'Em pausa', statusType: 'away' }]);
     expect(sorted.map((s) => s.name)).toEqual(['Almoço', 'Em pausa', 'Em reunião']);
+    // Validação final: números em ordem de número ("Status 2" antes de "Status 10").
+    const numbered = sortStatuses(['Status 10', 'Status 2', 'Status 1', 'Status 11'].map((name, i) => ({ _id: `n${i}`, name, statusType: 'away' as const })));
+    expect(numbered.map((s) => s.name)).toEqual(['Status 1', 'Status 2', 'Status 10', 'Status 11']);
   });
 
   // Revisão: em Membros, a mensagem de status escondia o personalizado ("Em atendimento" virava só "até as 15h").
@@ -864,3 +867,18 @@ describe('linha agrupada de entradas e saídas', () => {
     expect(joinsText(ms, (u) => (u === 'rui' ? 'Rui Costa' : u))).toBe('Bia saiu da sala; Ana e Caio entraram na sala; Administrador adicionou Rui Costa');
   });
 });
+
+// Validação final: papel com "Dar e tirar papéis" sem "Ver a lista de usuários" não acha a tela de Usuários.
+describe('screenGapWarning', () => {
+  it('avisa quando a permissão não tem a tela, e só então', () => {
+    expect(screenGaps(['assign-roles'])).toEqual([{ key: 'assign-roles', needs: 'view-user-administration' }]);
+    expect(screenGapWarning(['assign-roles'])).toBe(
+      'Sem “Ver a lista de usuários”, quem tiver este papel (e nenhum outro com ela) não encontra a tela para usar “Dar e tirar papéis de pessoas”.',
+    );
+    expect(screenGapWarning(['assign-roles', 'assign-admin-role'])).toContain('“Dar e tirar papéis de pessoas” e “Dar o papel de Administrador”');
+    expect(screenGapWarning(['assign-roles', 'view-user-administration'])).toBeUndefined();
+    expect(screenGapWarning(['view-user-administration'])).toBeUndefined();
+    expect(screenGapWarning([])).toBeUndefined();
+  });
+});
+

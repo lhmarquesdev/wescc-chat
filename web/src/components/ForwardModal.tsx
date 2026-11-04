@@ -223,7 +223,7 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
     >
       <div className="fwd-preview">
         <Avatar username={origin.username} size={16} />
-        <strong>{origin.name}</strong>
+        <strong title={origin.name}>{origin.name}</strong>
         <span className="fwd-preview-text">{preview}</span>
       </div>
       <div className="field">

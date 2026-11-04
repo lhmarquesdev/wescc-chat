@@ -81,13 +81,14 @@ export function ThreadPanel({
       <PanelHead
         title="Tópico"
         sub={
-          <>
-            em{' '}
-            <button type="button" className="link" onClick={() => (refocusRoom(), onClose())}>
+          // Nome de sala longo corta com reticências dentro do link: "em" e "· você segue" ficam sempre à vista.
+          <span className="sub-line">
+            <span>em</span>
+            <button type="button" className="link sub-room" title={where} onClick={() => (refocusRoom(), onClose())}>
               {where}
             </button>
-            {following && ' · você segue'}
-          </>
+            {following && <span>· você segue</span>}
+          </span>
         }
         actions={
           root && (
