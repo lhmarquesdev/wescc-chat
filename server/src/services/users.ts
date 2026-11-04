@@ -1,5 +1,5 @@
 import { normalizeHighlights } from '@shared/highlights';
-import type { UserPreferences, UserStatus } from '@shared/index';
+import type { LogoutReason, UserPreferences, UserStatus } from '@shared/index';
 import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound, unauthorized } from '../lib/errors';
 import { newId, randomToken, sha256 } from '../lib/ids';
@@ -322,9 +322,10 @@ export async function revokeSession(ctx: Ctx, sessionId: string, asAdmin: boolea
   await audit(actorOf(ctx), 'session.revoked', { sessionId, userId: s.user_id });
 }
 
-export async function revokeAllSessions(userId: string, exceptSessionId?: string) {
+// reason: o motivo que a tela de entrar mostra a quem saiu.
+export async function revokeAllSessions(userId: string, exceptSessionId?: string, reason?: LogoutReason) {
   const rows = await many('DELETE FROM sessions WHERE user_id = $1 AND id <> $2 RETURNING id', [userId, exceptSessionId ?? '']);
-  if (rows.length) bus.forceLogout({ sessionIds: rows.map((r) => r.id) });
+  if (rows.length) bus.forceLogout({ sessionIds: rows.map((r) => r.id), reason });
   return rows.length;
 }
 

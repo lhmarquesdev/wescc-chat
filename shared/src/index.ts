@@ -42,10 +42,14 @@ export interface User {
   authSource?: 'local' | 'ldap' | 'saml' | 'oauth';
   authProvider?: string; // provedor OAuth da conta (authSource 'oauth')
   twoFactorEnabled?: boolean;
+  e2eConfigured?: boolean; // users.info para quem administra: a pessoa tem chaves da criptografia
   preferences?: UserPreferences;
   createdAt: string;
   lastLogin?: string | null;
 }
+
+// Motivo de uma saída forçada que a tela de entrar explica (e2e-reset: um administrador redefiniu a criptografia).
+export type LogoutReason = 'e2e-reset';
 
 export interface UserPreferences {
   language?: string;
@@ -419,7 +423,7 @@ export type ServerEvent =
   // roles: papéis alterados; by: quem alterou (vazio quando foi o sistema). Campos opcionais: ouvintes antigos seguem iguais.
   | { type: 'permissions.changed'; roles?: string[]; by?: string }
   | { type: 'settings.changed'; settings: { _id: string; value: unknown }[] }
-  | { type: 'force_logout' }
+  | { type: 'force_logout'; reason?: LogoutReason }
   | { type: 'call'; call: Call }
   | { type: 'call.signal'; callId: string; data: CallSignal }
   | { type: 'call.room'; rid: string; call: Call | null } // resumo para a sala; null = acabou

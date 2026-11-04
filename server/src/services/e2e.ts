@@ -101,6 +101,7 @@ export async function setMyKeys(ctx: Ctx, pub: string, priv: string): Promise<vo
     await update();
     return;
   }
+  await query('UPDATE users SET e2e_reset_at = NULL WHERE id = $1 AND e2e_reset_at IS NOT NULL', [ctx.userId]);
   await audit(actorOf(ctx), 'user.e2e.keys.created', { userId: ctx.userId });
   bus.publish({ user: ctx.userId }, { type: 'e2e.keys', action: 'created' });
   // Quem está nas conversas criptografadas e já tem a chave entrega para a pessoa.
@@ -382,6 +383,8 @@ export async function resetUserKeys(actor: Ctx, userId: string, opts: { self: bo
     await c.query('DELETE FROM e2e_room_keys WHERE user_id = $1', [userId]);
     const k = await c.query('DELETE FROM e2e_user_keys WHERE user_id = $1 RETURNING user_id', [userId]);
     if (!k.rowCount && !opts.self) throw E2E_ERR.userNoKeys();
+    // Pelo administrador: a pessoa fica sabendo o motivo ao entrar de novo (me.e2eResetByAdmin).
+    await c.query('UPDATE users SET e2e_reset_at = $2 WHERE id = $1', [userId, opts.self ? null : new Date()]);
     return rs;
   });
   await markRotate(rooms);

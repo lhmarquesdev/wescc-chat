@@ -1,5 +1,5 @@
 import pg from 'pg';
-import type { ServerEvent } from '@shared/index';
+import type { LogoutReason, ServerEvent } from '@shared/index';
 import { newId } from '../lib/ids';
 import { config } from '../config';
 import { pool } from '../db/pool';
@@ -20,7 +20,7 @@ type Internal =
   | { type: '_leave'; userId: string; rid: string }
   | { type: '_settings'; settings: { _id: string; value: unknown }[] }
   | { type: '_permissions' }
-  | { type: '_logout'; sessionIds?: string[]; userId?: string };
+  | { type: '_logout'; sessionIds?: string[]; userId?: string; reason?: LogoutReason };
 
 export interface Conn {
   id: string;
@@ -191,7 +191,7 @@ class Bus {
       case '_logout':
         for (const c of this.conns.values()) {
           if ((i.sessionIds && i.sessionIds.includes(c.sessionId)) || (i.userId && c.userId === i.userId)) {
-            c.send({ type: 'force_logout' });
+            c.send(i.reason ? { type: 'force_logout', reason: i.reason } : { type: 'force_logout' });
             c.close();
           }
         }
@@ -225,7 +225,8 @@ class Bus {
     this.internal({ type: '_permissions' });
     this.publish({ all: true }, { type: 'permissions.changed', ...meta });
   }
-  forceLogout(opts: { sessionIds?: string[]; userId?: string }) {
+  // reason: o motivo que a tela de entrar mostra (sem ele, só volta para a tela de entrar).
+  forceLogout(opts: { sessionIds?: string[]; userId?: string; reason?: LogoutReason }) {
     this.internal({ type: '_logout', ...opts });
   }
 }

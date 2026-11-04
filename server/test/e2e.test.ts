@@ -23,7 +23,7 @@ import {
   newMessageId,
   wrapRoomKey,
 } from '../../web/src/lib/e2e/crypto';
-import { admin, api, connectWs, enable2fa, newUser, raw, sleep, startServer, stopServer, urlOf, type Auth } from './helpers';
+import { admin, api, connectWs, enable2fa, login, newUser, raw, sleep, startServer, stopServer, urlOf, type Auth } from './helpers';
 import { unzip } from './zip-read';
 
 // Os e-mails ficam numa caixa de saída em memória.
@@ -289,6 +289,34 @@ describe('criptografia: ligar e desligar', () => {
     expect([k.status, k.errorType]).toEqual([403, 'error-direct-restricted']);
     expect(await keyRows(old)).toHaveLength(0);
     await pool.query('UPDATE rooms SET encrypted = false WHERE id = $1', [old]);
+  });
+
+  it('7b. sem edit-room, quem não participa não lê a sala pela resposta (nem sem mudar nada)', async () => {
+    const ana = await person();
+    const bruno = await person();
+    const fora = await person();
+    const dm = (await api('POST', 'im.create', { username: bruno.username }, ana)).room._id;
+    await send(ana, dm, 'segredo da DM 4321');
+    const gid = await group(ana, [bruno]);
+    await api('POST', 'groups.setTopic', { roomId: gid, topic: 'tópico secreto' }, ana);
+    await send(ana, gid, 'segredo do grupo 9876');
+    for (const rid of [dm, gid]) {
+      for (const body of [{}, { encrypted: false }, { encrypted: true }]) {
+        const r = await save(fora, rid, body);
+        expect(r.status).toBe(403);
+        expect(r.room).toBeUndefined();
+        expect(JSON.stringify(r)).not.toContain('segredo');
+        expect(JSON.stringify(r)).not.toContain(ana.username);
+      }
+    }
+    // Só {rid}, mesmo para quem participa da DM: não é pedido de ligar nem de desligar.
+    expect((await save(bruno, dm, {})).status).toBe(403);
+    // Quem participa da DM, sem mudar nada: passa pela regra de ligar e recebe a sala.
+    const same = await save(bruno, dm, { encrypted: false });
+    expect(same.success).toBe(true);
+    expect(same.room.encrypted).toBe(false);
+    expect(await info(ana, dm)).toMatchObject({ encrypted: false });
+    expect((await info(ana, gid)).encrypted).toBe(false);
   });
 
   it('8. grupo criptografado não vira público', async () => {
@@ -567,6 +595,24 @@ describe('criptografia: mensagens', () => {
     const plain = await api('POST', 'chat.update', { roomId: room.rid, msgId: mid, text: 'aberto' }, ana);
     expect([plain.status, plain.errorType]).toEqual([400, 'error-e2e-required']);
     expect((await info(ana, room.rid)).lastMessage.msg).toBe(E2E_PREVIEW);
+
+    // Mensagem aberta de antes de ligar a criptografia, editada depois: a prévia deixa de mostrar o texto antigo.
+    const rid = await group(ana);
+    const old = (await send(ana, rid, 'texto antigo aberto')).message;
+    expect((await save(ana, rid, { encrypted: true })).success).toBe(true);
+    const later = await createKey(ana, rid);
+    expect((await info(ana, rid)).lastMessage.msg).toBe('texto antigo aberto');
+    const ws = await online(ana);
+    try {
+      const changed = next(ws, (e) => e.type === 'room' && e.room?._id === rid && e.room?.lastMessage?.msg === E2E_PREVIEW);
+      const e = await api('POST', 'chat.update', { roomId: rid, msgId: old._id, e2e: await envelope(ana, later, old._id, 'texto novo'), e2eMentions: [] }, ana);
+      expect(e.message).toMatchObject({ msg: '', e2e: { kid: later.keyID } });
+      await changed();
+    } finally {
+      ws.close();
+    }
+    expect((await info(ana, rid)).lastMessage.msg).toBe(E2E_PREVIEW);
+    expect(JSON.stringify(await roomRow(rid))).not.toContain('texto antigo aberto');
   });
 
   it('20. thread: resposta cifrada conta na raiz; filtro por texto não acha', async () => {
@@ -663,6 +709,12 @@ describe('criptografia: arquivos', () => {
       const list = await api('GET', 'groups.files', { roomId: room.rid }, ana);
       expect(list.files[0]).toMatchObject({ _id: f._id, e2e: true });
       expect(hooked.some((h) => h.id === mid)).toBe(false);
+      // Reenvio do mesmo arquivo (a rede caiu depois de gravar): a mesma mensagem, e a cópia nova não fica solta.
+      const again = await api('POST', `rooms.upload/${room.rid}`, e2eForm({ _id: mid, e2e: JSON.stringify(e2e), e2eMentions: '' }, new Uint8Array(data), 'application/pdf', 'relatório.pdf'), ana);
+      expect(again.success).toBe(true);
+      expect(again.message.files[0]._id).toBe(f._id);
+      expect((await pool.query('SELECT id, message_id FROM files WHERE room_id = $1', [room.rid])).rows).toEqual([{ id: f._id, message_id: mid }]);
+      expect((await api('GET', 'groups.files', { roomId: room.rid }, ana)).total).toBe(1);
     } finally {
       await setSettings({ FileUpload_MediaTypeWhiteList: '' });
     }
@@ -796,12 +848,31 @@ describe('criptografia: redefinir e excluir', () => {
     const nobody = await newUser(A);
     const r = await api('POST', 'users.resetE2EKey', { userId: ana.userId }, nobody);
     expect(r.status).toBe(403);
-    expect((await api('POST', 'users.resetE2EKey', { userId: ana.userId }, A)).success).toBe(true);
+    // O editor do administrador sabe quem configurou (o botão fica travado sem chaves, como o do 2FA).
+    expect((await api('GET', 'users.info', { userId: ana.userId }, A)).user.e2eConfigured).toBe(true);
+    expect((await api('GET', 'users.info', { userId: nobody.userId }, A)).user.e2eConfigured).toBe(false);
+    expect((await api('GET', 'users.info', { userId: ana.userId }, nobody)).user.e2eConfigured).toBeUndefined();
+    expect((await api('GET', 'me', {}, ana)).e2eResetByAdmin).toBeUndefined();
+    const ws = await online(ana);
+    try {
+      const out = next(ws, (e) => e.type === 'force_logout');
+      expect((await api('POST', 'users.resetE2EKey', { userId: ana.userId }, A)).success).toBe(true);
+      // A saída forçada leva o motivo: a tela de entrar explica o que aconteceu.
+      expect(await out()).toEqual({ type: 'force_logout', reason: 'e2e-reset' });
+    } finally {
+      ws.close();
+    }
     expect((await api('GET', 'me', {}, ana)).status).toBe(401);
+    expect((await api('GET', 'users.info', { userId: ana.userId }, A)).user.e2eConfigured).toBe(false);
     expect((await pool.query('SELECT 1 FROM e2e_user_keys WHERE user_id = $1', [ana.userId])).rowCount).toBe(0);
     expect((await audits('user.e2e.reset')).find((a) => a.target.userId === ana.userId)).toMatchObject({ actor_id: A.userId, data: { self: false } });
     const again = await api('POST', 'users.resetE2EKey', { userId: ana.userId }, A);
     expect([again.status, again.errorType]).toEqual([400, 'error-e2e-user-no-keys']);
+    // Entrando de novo, o aviso continua até a pessoa criar as chaves novas.
+    const back = await login(ana.username, 'senha-forte-1');
+    expect((await api('GET', 'me', {}, back)).e2eResetByAdmin).toBe(true);
+    await withKeys(back);
+    expect((await api('GET', 'me', {}, back)).e2eResetByAdmin).toBeUndefined();
   });
 
   it('33. conta excluída: as chaves vão junto e as salas trocam', async () => {

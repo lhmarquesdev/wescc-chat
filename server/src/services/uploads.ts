@@ -225,7 +225,15 @@ async function saveEncryptedUpload(ctx: Ctx, room: any, file: StoredFile, fields
   if (e2e === undefined) throw E2E_ERR.required();
   const e2eMentions = (fields.e2eMentions ?? '').split(',').map((u) => u.trim()).filter(Boolean);
   const f = await registerFile(file, room.id, { userId: ctx.userId });
-  return sendMessage(ctx, { _id: fields._id, rid: room.id, tmid: fields.tmid || null, e2e, e2eMentions, files: [{ ...f, e2e: true }] }, { skipCommands: true, internalAttachments: true });
+  const message = await sendMessage(
+    ctx,
+    { _id: fields._id, rid: room.id, tmid: fields.tmid || null, e2e, e2eMentions, files: [{ ...f, e2e: true }] },
+    { skipCommands: true, internalAttachments: true },
+  );
+  // Reenvio (a rede caiu depois de gravar): volta a mensagem que já existia, com o arquivo da primeira vez. Esta cópia
+  // não ficaria presa a mensagem nenhuma, então sai.
+  if (!(message.files ?? []).some((x: { _id: string }) => x._id === f._id)) await discardFile(file);
+  return message;
 }
 
 export async function getFileForUser(ctx: Ctx | null, id: string) {

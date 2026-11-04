@@ -3,6 +3,7 @@ import { EMOJI } from '@shared/emoji';
 import type { MessageJira, MessageMeeting } from '@shared/integrations';
 import type { MessageForward, MessagePoll } from '@shared/messages';
 import { messagePreviewText, type MessageSticker } from '@shared/stickers';
+import { E2E_PREVIEW } from '@shared/e2e';
 import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
@@ -527,9 +528,14 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
     `UPDATE messages SET msg = $2, mentions = $3, channels = $4, edited_at = now(), edited_by = $5, e2e = $6, updated_at = now() WHERE id = $1 RETURNING *`,
     [m.id, msg, JSON.stringify(mentions), JSON.stringify(e2e ? [] : channels), JSON.stringify({ _id: ctx.userId, username: ctx.username }), e2e ? JSON.stringify(e2e) : null],
   );
-  // A prévia da sala de uma mensagem cifrada continua "Mensagem criptografada".
-  if (room.last_message?._id === m.id && !e2e) {
-    await query(`UPDATE rooms SET last_message = jsonb_set(last_message, '{msg}', to_jsonb($2::text)) WHERE id = $1`, [room.id, truncate(msg, 200)]);
+  // Prévia da sala: o texto novo. Editada cifrada, "Mensagem criptografada", também quando a mensagem era aberta (de
+  // antes de ligar a criptografia): o texto antigo não fica na lista de conversas.
+  if (room.last_message?._id === m.id) {
+    const preview = e2e ? E2E_PREVIEW : truncate(msg, 200);
+    if (preview !== room.last_message.msg) {
+      await query(`UPDATE rooms SET last_message = jsonb_set(last_message, '{msg}', to_jsonb($2::text)) WHERE id = $1`, [room.id, preview]);
+      if (e2e) await notifyRoomUpdated(room.id);
+    }
   }
   if (!own) await audit(actorOf(ctx), 'message.edited', { rid: m.room_id, msgId: m.id, author: m.username });
   const message = withExtra(row);

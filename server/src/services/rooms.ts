@@ -441,9 +441,15 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   const roles = await getUserRoles(ctx.userId, rid);
   const can = (p: string) => rolesHavePermission(roles, p);
-  // Só ligar ou desligar a criptografia: numa DM quem participa não tem edit-room (as regras ficam em assertCanToggleE2e).
-  const onlyE2e = Object.entries(s).every(([k, v]) => k === 'encrypted' || k === 'rid' || v === undefined);
-  if (!onlyE2e && !can('edit-room')) throw forbidden();
+  // Sem edit-room só passa o pedido de ligar ou desligar a criptografia (numa DM quem participa não tem edit-room), e
+  // sempre com a regra dele, mesmo quando nada muda: a resposta traz a sala, e quem não participa não pode lê-la.
+  let toggleChecked = false;
+  if (!can('edit-room')) {
+    const onlyE2e = Object.entries(s).every(([k, v]) => k === 'encrypted' || k === 'rid' || v === undefined);
+    if (!onlyE2e || s.encrypted === undefined) throw forbidden();
+    await assertCanToggleE2e(ctx, room, !!s.encrypted, roles);
+    toggleChecked = true;
+  }
   const sets: string[] = [];
   const params: unknown[] = [rid];
   const sys: [string, string][] = [];
@@ -522,7 +528,7 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
     // Ligar vale para o tipo que a sala terá depois desta gravação; desligar, para o de agora (o grupo pode virar canal
     // na mesma gravação).
     const t = s.encrypted && s.roomType !== undefined && room.t !== 'd' ? s.roomType : room.t;
-    await assertCanToggleE2e(ctx, { ...room, t }, !!s.encrypted, roles);
+    if (!toggleChecked) await assertCanToggleE2e(ctx, { ...room, t }, !!s.encrypted, roles);
     sets.push(`encrypted = $${params.push(!!s.encrypted)}`);
     sys.push([s.encrypted ? 'room_e2e_enabled' : 'room_e2e_disabled', '']);
   }

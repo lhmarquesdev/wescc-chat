@@ -46,6 +46,10 @@ ALTER TABLE message_history ADD COLUMN e2e jsonb;
 -- Arquivo enviado cifrado: o servidor não sabe o nome nem o tipo.
 ALTER TABLE files ADD COLUMN e2e boolean NOT NULL DEFAULT false;
 
+-- Quando um administrador redefiniu a criptografia da pessoa: a tela de entrar e a de configurar avisam o motivo até
+-- ela criar as chaves novas.
+ALTER TABLE users ADD COLUMN e2e_reset_at timestamptz;
+
 -- A opção "Criptografia ponta a ponta" de antes não cifrava nada (021 a tirou da tela). Ela volta só com esta
 -- implementação, e começa desligada em toda instalação: nenhum valor antigo vale.
 DELETE FROM settings WHERE id = 'E2E_Enable';
