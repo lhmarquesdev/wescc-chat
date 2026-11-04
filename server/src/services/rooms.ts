@@ -6,6 +6,7 @@ import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
 import { assertCanBringIn, assertCanStartDirect } from './direct';
+import { assertCanToggleE2e, E2E_ERR, e2eOn, forgetRoomKeys, hasUserKeys, requestKeyForNewMember } from './e2e';
 import { mapRoom, mapSubscription, visibleStatusCustom } from './mappers';
 import { sendSystemMessage } from './messages';
 import { hasPermission, rolesHavePermission, getUserRoles, roleInfos } from './permissions';
@@ -183,6 +184,8 @@ export async function addUserToRoom(
         await sendSystemMessage(rid, 'uj', { id: user.id, username: user.username }, user.username);
       }
     }
+    // Conversa criptografada: quem já tem a chave entrega para a pessoa nova (se ela já configurou a criptografia).
+    await requestKeyForNewMember(room, userId);
   };
   if (opts.db) setImmediate(() => void after().catch(() => {}));
   else await after();
@@ -203,6 +206,8 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
   if (room.team_main && room.team_id) {
     await query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [room.team_id, userId]);
   }
+  // Criptografia: as chaves da pessoa nesta sala saem, e quem fica gera uma chave nova (ela não lê o que vier depois).
+  await forgetRoomKeys(rid, userId);
   bus.leaveRoom(userId, rid);
   bus.publish({ user: userId }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(sub, room) });
   if (!opts.silent && user) {
@@ -276,6 +281,12 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
   if (!input.prid) {
     validateRoomName(input.name);
     if (await getRoomByName(input.name)) throw badRequest('error-duplicate-channel-name', `Já existe uma sala chamada ${input.name}.`);
+  }
+  // Grupo criado já criptografado (a discussão herda da sala de origem, conferida em createDiscussion).
+  if (input.encrypted && !input.prid) {
+    if (input.type !== 'p') throw E2E_ERR.roomType();
+    if (!e2eOn()) throw E2E_ERR.disabled(400);
+    if (owner && !(await hasUserKeys(owner.id))) throw E2E_ERR.noKeys();
   }
   const usernames = [...new Set((input.members ?? []).map((m) => m.replace(/^@/, '')))].filter((u) => u !== owner?.username);
   const users = usernames.length ? await many('SELECT id, username FROM users WHERE lower(username) = ANY($1) AND active', [usernames.map((u) => u.toLowerCase())]) : [];
@@ -429,7 +440,9 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   const roles = await getUserRoles(ctx.userId, rid);
   const can = (p: string) => rolesHavePermission(roles, p);
-  if (!can('edit-room')) throw forbidden();
+  // Só ligar ou desligar a criptografia: numa DM quem participa não tem edit-room (as regras ficam em assertCanToggleE2e).
+  const onlyE2e = Object.entries(s).every(([k, v]) => k === 'encrypted' || k === 'rid' || v === undefined);
+  if (!onlyE2e && !can('edit-room')) throw forbidden();
   const sets: string[] = [];
   const params: unknown[] = [rid];
   const sys: [string, string][] = [];
@@ -459,6 +472,7 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   }
   if (s.roomType !== undefined && s.roomType !== room.t && room.t !== 'd') {
     if (!can(s.roomType === 'c' ? 'create-c' : 'create-p')) throw forbidden();
+    if (s.roomType === 'c' && (s.encrypted ?? room.encrypted)) throw E2E_ERR.public();
     if (s.roomType === 'p') {
       const ids = (await many('SELECT user_id FROM subscriptions WHERE room_id = $1', [rid])).map((r) => r.user_id);
       await assertCanBringIn(ctx.userId, { t: 'p', team_id: room.team_id, team_main: room.team_main }, ids, { privatize: true });
@@ -504,8 +518,11 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
     if (s.featured !== undefined) sets.push(`featured = $${params.push(s.featured)}`);
   }
   if (s.encrypted !== undefined && s.encrypted !== room.encrypted) {
-    if (!can('toggle-room-e2e-encryption') && !can('edit-room')) throw forbidden();
-    sets.push(`encrypted = $${params.push(s.encrypted)}`);
+    // Ligar vale para o tipo que a sala terá depois desta gravação; desligar, para o de agora (o grupo pode virar canal
+    // na mesma gravação).
+    const t = s.encrypted && s.roomType !== undefined && room.t !== 'd' ? s.roomType : room.t;
+    await assertCanToggleE2e(ctx, { ...room, t }, !!s.encrypted, roles);
+    sets.push(`encrypted = $${params.push(!!s.encrypted)}`);
     sys.push([s.encrypted ? 'room_e2e_enabled' : 'room_e2e_disabled', '']);
   }
   if (s.joinCode !== undefined) sets.push(`join_code = $${params.push(s.joinCode || null)}`);

@@ -409,7 +409,7 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
   // arquivos/<id>-<nome>: os enviados pela pessoa, dos mais antigos aos mais novos, até o limite. Cada um é aberto
   // antes de entrar no .zip; arquivo de mensagem cifrada não entra.
   const max = Math.max(1, getSetting<number>('DataExport_Max_Files_MB') || 2048) * 1024 * 1024;
-  const enc = await encryptedSql('m');
+  const enc = encryptedSql('m');
   const items: FileItem[] = [];
   let total = 0;
   let included = 0;

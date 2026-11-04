@@ -5,7 +5,7 @@ import { csvRow, ENCRYPTED_PLACEHOLDER, isEncryptedMessage } from '@shared/dataE
 import { emojiText } from '@shared/emoji';
 import { formatBytes, systemText } from '@shared/messageText';
 import { messagePreviewText } from '@shared/stickers';
-import { many, one } from '../db/pool';
+import { many } from '../db/pool';
 import { truncate } from '../lib/text';
 import { siteUrl } from './sso';
 
@@ -121,11 +121,9 @@ export function roomKindLabel(room: { t: string; prid?: string | null; team_main
 
 // ---------- Criptografia ponta a ponta no SQL ----------
 
-// O mesmo teste de isEncryptedMessage (shared/dataExport.ts), para as contagens e listas de arquivos feitas no banco:
-// "<alias>.e2e IS NOT NULL" depois que a criptografia criar a coluna messages.e2e; antes, nenhuma mensagem é cifrada.
-export async function encryptedSql(alias = 'm'): Promise<string> {
-  const col = await one(`SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'messages' AND column_name = 'e2e'`);
-  return col ? `${alias}.e2e IS NOT NULL` : 'false';
+// O mesmo teste de isEncryptedMessage (shared/dataExport.ts), para as contagens e listas de arquivos feitas no banco.
+export function encryptedSql(alias = 'm'): string {
+  return `${alias}.e2e IS NOT NULL`;
 }
 
 // ---------- Nomes das pessoas citadas em mensagens de sistema e nas reações ----------

@@ -44,6 +44,9 @@ export function chatRoutes(app: FastifyInstance) {
       avatar: m.avatar,
       customFields: m.customFields,
       ackRequired: !!bool(m.ackRequired),
+      // Conversa criptografada: o texto vai cifrado e as menções vêm da web.
+      e2e: m.e2e,
+      e2eMentions: Array.isArray(m.e2eMentions) ? m.e2eMentions.map(String) : undefined,
     });
     return { message: out };
   });
@@ -67,6 +70,10 @@ export function chatRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'chat.update', {}, async (req, _rep, ctx) => {
     const body = b(req);
+    if (body.e2e) {
+      const mentions = Array.isArray(body.e2eMentions) ? body.e2eMentions.map(String) : undefined;
+      return { message: await updateMessage(ctx, str(body.msgId, 'msgId'), '', body.roomId, { envelope: body.e2e, mentions }) };
+    }
     return { message: await updateMessage(ctx, str(body.msgId, 'msgId'), str(body.text, 'text'), body.roomId) };
   });
   route(app, 'POST', 'chat.delete', {}, async (req, _rep, ctx) => {
@@ -211,8 +218,8 @@ export function chatRoutes(app: FastifyInstance) {
   // ---------- Upload ----------
   const uploadHandler = async (req: any, _rep: any, ctx: any) => {
     const rid = req.params.rid;
-    await assertCanUpload(ctx, rid);
-    const { file, fields } = await readUpload(req);
+    const room = await assertCanUpload(ctx, rid);
+    const { file, fields } = await readUpload(req, { opaque: !!room.encrypted });
     if (!file) throw badRequest('error-invalid-params', 'Nenhum arquivo enviado.');
     return { message: await saveUpload(ctx, rid, file, fields) };
   };

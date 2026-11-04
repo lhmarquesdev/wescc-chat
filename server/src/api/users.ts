@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { many, one, pool } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
 import { audit } from '../services/audit';
+import { fingerprintOf, resetUserKeys } from '../services/e2e';
 import { readDeviceId } from '../services/loginDevices';
 import { mapUser, visibleStatusCustom } from '../services/mappers';
 import { createCustomStatus, deleteCustomStatus, getCustomStatus, listCustomStatuses, updateCustomStatus } from '../services/userStatus';
@@ -46,7 +47,14 @@ async function meResponse(userId: string) {
   const u = await getUserById(userId);
   const roles = await getUserRoles(userId);
   // O servidor também bloqueia o resto da API enquanto a troca de senha ou o 2FA estiverem pendentes (api/http.ts).
-  return { ...mapUser(u, { full: true }), permissions: permissionsForRoles(roles), requirePasswordChange: u.require_password_change, require2faSetup: await needs2faSetup(u) };
+  return {
+    ...mapUser(u, { full: true }),
+    permissions: permissionsForRoles(roles),
+    requirePasswordChange: u.require_password_change,
+    require2faSetup: await needs2faSetup(u),
+    // Criptografia de ponta a ponta: a impressão da chave pública (null sem chaves).
+    e2eKeys: await fingerprintOf(userId),
+  };
 }
 
 export async function resolveUserParam(params: Record<string, any>) {
@@ -473,6 +481,19 @@ export function usersRoutes(app: FastifyInstance) {
     const { query } = await import('../db/pool');
     await query("UPDATE users SET totp_enabled = false, totp_secret = NULL, backup_codes = '{}' WHERE id = $1", [userId]);
     await audit(actorOf(ctx), 'user.2fa.reset', { userId });
+    return {};
+  });
+  // Criptografia de ponta a ponta: apaga as chaves da pessoa (ela cria uma senha nova no próximo acesso) e encerra as
+  // sessões dela, como no Rocket.Chat.
+  route(app, 'POST', 'users.resetE2EKey', { permissions: ['edit-other-user-e2ee'] }, async (req, _rep, ctx) => {
+    const userId = str(b(req).userId, 'userId');
+    await assertCanManageUser(ctx, userId);
+    await resetUserKeys(ctx, userId, { self: false });
+    // A própria conta (administrador redefinindo a sua) continua nesta sessão.
+    if (userId !== ctx.userId) {
+      await revokeAllSessions(userId);
+      bus.forceLogout({ userId });
+    }
     return {};
   });
   route(app, 'GET', 'users.listPendingApproval', { permissions: ['view-user-administration'] }, async () => {

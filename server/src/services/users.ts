@@ -246,7 +246,7 @@ export async function login(params: { user: string; password: string; code?: str
   return { user, ...s };
 }
 
-async function check2fa(user: any, code: string) {
+export async function check2fa(user: any, code: string) {
   if (user.totp_secret && verifyTotp(user.totp_secret, code)) return true;
   const hashed = sha256(code.trim());
   if (user.backup_codes.includes(hashed)) {
@@ -609,7 +609,11 @@ export async function deleteUser(actor: Ctx, userId: string, opts: { confirmReli
     const admins = await one(`SELECT count(*)::int AS n FROM users WHERE 'admin' = ANY(roles) AND active`);
     if (admins.n <= 1) throw badRequest('error-action-not-allowed', 'Não é possível remover o último administrador.');
   }
+  // Criptografia de ponta a ponta: as chaves da conta saem em cascata; as salas em que ela tinha chave trocam de chave.
+  const { markRotate, roomsWithKeysOf } = await import('./e2e');
+  let e2eRooms: string[] = [];
   await tx(async (c) => {
+    e2eRooms = await roomsWithKeysOf(userId, c);
     // Salas onde ele é o único dono: transferem para o membro mais antigo.
     const owned = await c.query(`SELECT room_id FROM subscriptions WHERE user_id = $1 AND 'owner' = ANY(roles)`, [userId]);
     for (const { room_id } of owned.rows) {
@@ -628,6 +632,7 @@ export async function deleteUser(actor: Ctx, userId: string, opts: { confirmReli
     await renameInReactions(u.username, null, c);
     await c.query('DELETE FROM users WHERE id = $1', [userId]);
   });
+  await markRotate(e2eRooms);
   bus.forceLogout({ userId });
   await audit(actorOf(actor), 'user.deleted', { userId, username: u.username }, { relinquish: !!opts.confirmRelinquish });
 }

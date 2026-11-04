@@ -3,6 +3,7 @@ import { DEFAULT_STICKER_NAME, STICKER_LIMITS, stickerPosterUrl, stickerUrl, typ
 import { one, pool } from '../db/pool';
 import { ApiError, badRequest, notFound } from '../lib/errors';
 import { bus } from '../realtime/bus';
+import { E2E_ERR } from '../services/e2e';
 import { canPostInRoom, filterBadWords, getMessageRow, sanitizeAttachments, sendMessage, withExtra } from '../services/messages';
 import { getRoom, notifyRoomUpdated } from '../services/rooms';
 import { getSetting } from '../services/settings';
@@ -116,6 +117,8 @@ export function assertStickersEnabled() {
 }
 
 export function assertStickerRoomAllowed(room: any) {
+  // Conversa criptografada: a figurinha seria conteúdo aberto (o servidor monta a mensagem).
+  if (room.encrypted) throw E2E_ERR.sticker();
   if (room.notice && !getSetting('Stickers_In_Notice_Rooms')) {
     throw new ApiError(403, 'error-sticker-not-allowed-here', 'Figurinhas não são permitidas em canais de avisos.');
   }

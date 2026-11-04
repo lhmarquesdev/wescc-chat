@@ -57,6 +57,7 @@ export async function pruneMessages(rid: string, o: PruneOptions): Promise<numbe
   await query(
     `UPDATE rooms SET last_message = (
        SELECT jsonb_build_object('_id', id, 'msg', left(CASE
+         WHEN e2e IS NOT NULL THEN 'Mensagem criptografada'
          WHEN extra ? 'poll' THEN '📊 ' || (extra->'poll'->>'question')
          WHEN coalesce(extra->'forward'->>'comment', '') <> '' THEN extra->'forward'->>'comment'
          WHEN msg <> '' THEN msg
