@@ -99,6 +99,16 @@ export async function notifyRoomUpdated(rid: string) {
   if (room.t === 'c') bus.publish({ all: true }, { type: 'room', action: 'updated', room: mapRoom(room) });
 }
 
+// A sala mudou algo que a inscrição de cada membro mostra (nome, tipo, canal de avisos, sala principal de time):
+// cada membro recebe a inscrição de novo.
+export async function republishSubscriptions(rid: string) {
+  const room = await getRoom(rid);
+  if (!room) return;
+  for (const sub of await many('SELECT * FROM subscriptions WHERE room_id = $1', [rid])) {
+    bus.publish({ user: sub.user_id }, { type: 'subscription', action: 'updated', subscription: await buildSubscription(sub, room) });
+  }
+}
+
 export async function listSubscriptions(userId: string, updatedSince?: string) {
   const params: unknown[] = [userId];
   let w = '';
@@ -556,13 +566,7 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   await audit(actorOf(ctx), 'room.settings.changed', { rid, name: room.name }, { fields: Object.keys(s) });
   await notifyRoomUpdated(rid);
   // Nome, tipo e canal de avisos mudam a exibição das assinaturas.
-  if (s.roomName !== undefined || s.roomType !== undefined || noticeChanged) {
-    const subs = await many('SELECT * FROM subscriptions WHERE room_id = $1', [rid]);
-    const updated = await getRoom(rid);
-    for (const sub of subs) {
-      bus.publish({ user: sub.user_id }, { type: 'subscription', action: 'updated', subscription: await buildSubscription(sub, updated) });
-    }
-  }
+  if (s.roomName !== undefined || s.roomType !== undefined || noticeChanged) await republishSubscriptions(rid);
   return getRoom(rid);
 }
 

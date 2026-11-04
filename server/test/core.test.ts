@@ -328,4 +328,17 @@ describe('administração', () => {
     const mine = await api('GET', 'teams.list', undefined, u);
     expect(mine.teams[0].name).toBe('engenharia');
   });
+
+  it('time novo: quem criou recebe a inscrição já como sala principal do time (a barra lateral não o põe em Canais)', async () => {
+    const ws = connectWs(A);
+    await ws.ready;
+    try {
+      const name = `time-noc-${Date.now().toString(36)}`;
+      const t = await api('POST', 'teams.create', { name, type: 0 }, A);
+      const ev = await ws.waitFor((e) => e.type === 'subscription' && e.action === 'updated' && e.subscription.rid === t.team.roomId && e.subscription.teamMain === true);
+      expect(ev.subscription.teamId).toBe(t.team._id);
+    } finally {
+      ws.close();
+    }
+  });
 });

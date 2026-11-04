@@ -4,7 +4,7 @@ import { newId } from '../lib/ids';
 import { audit } from './audit';
 import { mapRoom, mapTeam } from './mappers';
 import { hasPermission } from './permissions';
-import { addUserToRoom, createRoom, deleteRoom, getRoom, getRoomByName, notifyRoomUpdated, removeUserFromRoom } from './rooms';
+import { addUserToRoom, createRoom, deleteRoom, getRoom, getRoomByName, notifyRoomUpdated, removeUserFromRoom, republishSubscriptions } from './rooms';
 import { sendSystemMessage } from './messages';
 import { actorOf, type Ctx } from './users';
 
@@ -54,6 +54,9 @@ export async function createTeam(ctx: Ctx, input: { name: string; type: 0 | 1; m
   }
   await audit(actorOf(ctx), 'team.created', { teamId: id, name: input.name });
   await notifyRoomUpdated(room.id);
+  // A inscrição de quem criou saiu antes de a sala virar a principal do time: sem isso, a barra lateral a mostra em
+  // Canais (com #) até recarregar.
+  await republishSubscriptions(room.id);
   return one('SELECT * FROM teams WHERE id = $1', [id]);
 }
 
@@ -215,6 +218,7 @@ export async function convertRoomToTeam(ctx: Ctx, rid: string) {
   );
   await sendSystemMessage(rid, 'user-converted-to-team', { id: ctx.userId, username: ctx.username }, room.name);
   await notifyRoomUpdated(rid);
+  await republishSubscriptions(rid);
   return one('SELECT * FROM teams WHERE id = $1', [id]);
 }
 
@@ -225,4 +229,5 @@ export async function convertTeamToRoom(ctx: Ctx, team: any) {
   await query('DELETE FROM teams WHERE id = $1', [team.id]);
   await sendSystemMessage(team.room_id, 'user-converted-to-channel', { id: ctx.userId, username: ctx.username }, team.name);
   await notifyRoomUpdated(team.room_id);
+  await republishSubscriptions(team.room_id);
 }
