@@ -300,6 +300,7 @@ let groupRid = '';
 let keyBefore = '';
 let anaPage = null;
 let brunoPage = null;
+let carlaPage = null;
 
 // ---------- 1. Ana liga a criptografia na conversa direta ----------
 await step(1, 'Conversa direta: Ana liga a criptografia, configura a senha gerada e escreve', async () => {
@@ -469,7 +470,7 @@ await step(6, 'Grupo privado criptografado: Ana cria, Carla configura depois e r
   // Ana fecha o navegador: quem entrega para a Carla é o Bruno.
   await anaPage.context().close();
   anaPage = null;
-  const carlaPage = await open(carla);
+  carlaPage = await open(carla);
   await openRoom(carlaPage, groupRid, 'p');
   await expectVisible(banner(carlaPage).getByText(T.none), 'faixa "configure" na Carla');
   await banner(carlaPage).getByRole('button', { name: 'Configurar' }).click();
@@ -486,12 +487,13 @@ await step(6, 'Grupo privado criptografado: Ana cria, Carla configura depois e r
   await carlaPage.locator('.panel-search input').first().fill('bem-vindos');
   await expectVisible(carlaPage.locator('.panel-search .result', { hasText: 'Primeira do grupo' }), 'resultado decifrado na busca');
   await shot(carlaPage, 'busca-carregadas');
-  await carlaPage.context().close();
+  // A aba da Carla fica aberta no grupo, com a chave antiga na memória, para o passo 7.
 });
 
 // ---------- 7. Carla sai: chave nova; Davi chega depois da troca (celular) ----------
 await step(7, 'Carla sai do grupo: chave nova; Davi chega depois e não lê o que veio antes da troca', async () => {
   keyBefore = (await roomInfo(bruno, groupRid)).e2eKeyId;
+  expected.add('403 /api/v1/calls.roomCall');
   ok('tirar a Carla', await ana.api.call('POST', 'groups.kick', { roomId: groupRid, userId: carla.id }));
   // Quem está online (o Bruno) troca a chave entre 0 e 5 s.
   const room = await waitFor('chave nova no grupo', async () => {
@@ -499,6 +501,14 @@ await step(7, 'Carla sai do grupo: chave nova; Davi chega depois e não lê o qu
     return r.e2eKeyId && r.e2eKeyId !== keyBefore && !r.e2eRotate ? r : null;
   }, 30000);
   await send(brunoPage, 'Depois da troca de chave.');
+  // A aba da Carla, aberta no grupo com a chave antiga, não recebe nem decifra a mensagem nova. (A tela de chamadas
+  // da sala ainda pergunta pela chamada da sala depois da remoção: 403 esperado, fora da criptografia.)
+  if (carlaPage) {
+    await sleep(2000);
+    assert(!(await bodyWith(carlaPage, 'Depois da troca de chave.').count()), 'a Carla, removida, leu a mensagem nova');
+    await carlaPage.context().close();
+    carlaPage = null;
+  }
   const msgs = await history(bruno, groupRid);
   const after = msgs.find((m) => m.e2e && m.u.username === bruno.username && m.ts === msgs.filter((x) => x.e2e && x.u.username === bruno.username).map((x) => x.ts).sort().pop());
   assert(after?.e2e.kid === room.e2eKeyId && after.e2e.kid !== keyBefore, 'a mensagem nova não usa a chave nova');
