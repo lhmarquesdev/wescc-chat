@@ -5,6 +5,7 @@ import { config } from '../src/config';
 import { pool } from '../src/db/pool';
 import { __resetLibreForTests } from '../src/translate/libre';
 import { __resetTranslateForTests } from '../src/translate/service';
+import { encryptPrivateKey, generateUserKeys } from '../../web/src/lib/e2e/crypto';
 import { defaultLanguages, startFakeLibre, type FakeLibre } from './fake-libretranslate';
 import { admin, api, connectWs, newUser, sleep, startServer, stopServer, type Auth } from './helpers';
 
@@ -32,6 +33,13 @@ async function channel(owner: Auth, members: Auth[] = [], extra: Record<string, 
   const r = await api('POST', 'channels.create', { name: uniq('trad'), members: members.map((m) => m.username), ...extra }, owner);
   if (!r.channel) throw new Error(JSON.stringify(r));
   return r.channel as { _id: string; name: string };
+}
+
+// Criptografia de ponta a ponta: ligar numa sala pede a função ligada (E2E_Enable) e as chaves de quem liga.
+async function withE2eKeys(u: Auth) {
+  const { publicKey, pkcs8 } = await generateUserKeys();
+  const r = await api('POST', 'e2e.setUserPublicAndPrivateKeys', { public_key: publicKey, private_key: await encryptPrivateKey(pkcs8, 'senha da criptografia comprida', 100_000) }, u);
+  if (!r.success) throw new Error(JSON.stringify(r));
 }
 
 async function group(owner: Auth, members: Auth[] = []) {
@@ -351,6 +359,8 @@ describe('traduzir', () => {
     const m = await send(bruno, g._id, 'Bom dia, hoje é dia de deploy');
     expect((await api('POST', 'autoTranslate.saveSettings', { roomId: g._id, field: 'autoTranslate', value: true }, ana)).status).toBe(200);
     expect((await tr(ana, g._id, [m._id])).translations[0].status).toBe('translated');
+    expect((await settings({ E2E_Enable: true })).status).toBe(200);
+    await withE2eKeys(bruno);
     const ws = connectWs(ana);
     await ws.ready;
     try {
@@ -359,6 +369,7 @@ describe('traduzir', () => {
       expect(ev.subscription.autoTranslate).toBeUndefined();
     } finally {
       ws.close();
+      await settings({ E2E_Enable: false });
     }
     expect((await pool.query('SELECT auto_translate FROM subscriptions WHERE room_id = $1 AND user_id = $2', [g._id, ana.userId])).rows[0].auto_translate).toBe(false);
     const left = await pool.query(
@@ -376,6 +387,29 @@ describe('traduzir', () => {
     expect(F.calls).toHaveLength(0);
   });
 
+  it('conversa direta: quem participa liga a criptografia (sem edit-room) e o guardado sai do mesmo jeito', async () => {
+    const dana = await newUser(A);
+    const dm = (await api('POST', 'im.create', { username: bruno.username }, dana)).room as { _id: string };
+    const m = await send(bruno, dm._id, 'Bom dia, o relatório está pronto');
+    expect((await api('POST', 'autoTranslate.saveSettings', { roomId: dm._id, field: 'autoTranslate', value: true }, dana)).status).toBe(200);
+    expect((await tr(dana, dm._id, [m._id], 'en')).translations[0].status).toBe('translated');
+    expect(await rowsOf('message_translations', m._id)).toHaveLength(1);
+    expect((await settings({ E2E_Enable: true })).status).toBe(200);
+    try {
+      await withE2eKeys(dana);
+      expect((await api('POST', 'rooms.saveRoomSettings', { rid: dm._id, encrypted: true }, dana)).status).toBe(200);
+    } finally {
+      await settings({ E2E_Enable: false });
+    }
+    expect((await pool.query('SELECT auto_translate FROM subscriptions WHERE room_id = $1 AND user_id = $2', [dm._id, dana.userId])).rows[0].auto_translate).toBe(false);
+    expect(await rowsOf('message_translations', m._id)).toHaveLength(0);
+    expect(await rowsOf('message_languages', m._id)).toHaveLength(0);
+    F.calls.length = 0;
+    expect((await tr(dana, dm._id, [m._id], 'en')).errorType).toBe('error-translate-encrypted');
+    expect((await api('POST', 'autoTranslate.translateMessage', { messageId: m._id, targetLanguage: 'en' }, dana)).errorType).toBe('error-translate-encrypted');
+    expect(F.calls).toHaveLength(0);
+  });
+
   it('mensagem de sistema ou cifrada (messages.e2e) fica fora da resposta, numa sala comum', async () => {
     const m = await send(bruno, ch._id, 'Bom dia, hoje tem treinamento');
     const sys = `sys${crypto.randomBytes(6).toString('hex')}`;
@@ -385,26 +419,24 @@ describe('traduzir', () => {
       bruno.userId,
       bruno.username,
     ]);
-    // A coluna da criptografia ponta a ponta (messages.e2e) chega com outro grupo: o teste cria a coluna se ela ainda
-    // não existe e confere que a mensagem cifrada nunca chega ao tradutor.
-    const had = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'messages' AND column_name = 'e2e'`)).rowCount;
-    if (!had) await pool.query('ALTER TABLE messages ADD COLUMN e2e jsonb');
+    // Mensagem com messages.e2e numa sala comum (de antes de desligar a criptografia): nunca chega ao tradutor. O
+    // banco já não deixa texto aberto junto do envelope (messages_e2e_no_text, migração 034).
     const enc = `enc${crypto.randomBytes(6).toString('hex')}`;
     try {
-      await pool.query(`INSERT INTO messages (id, room_id, user_id, username, user_name, msg, e2e) VALUES ($1, $2, $3, $4, '', $5, '{"algorithm":"x","ciphertext":"y"}')`, [
+      await pool.query(`INSERT INTO messages (id, room_id, user_id, username, user_name, msg, e2e) VALUES ($1, $2, $3, $4, '', $5, '{"v":1,"kid":"k","iv":"i","ct":"c","by":"b"}')`, [
         enc,
         ch._id,
         bruno.userId,
         bruno.username,
-        had ? '' : 'Bom dia, texto que veio cifrado',
+        '',
       ]);
       const r = await tr(ana, ch._id, [sys, enc, m._id]);
       expect(r.translations.map((t: any) => t._id)).toEqual([m._id]);
       expect(sentToFake()).not.toContain('texto');
       expect(await rowsOf('message_languages', enc)).toHaveLength(0);
+      expect(await rowsOf('message_translations', enc)).toHaveLength(0);
     } finally {
       await pool.query('DELETE FROM messages WHERE id = ANY($1)', [[sys, enc]]);
-      if (!had) await pool.query('ALTER TABLE messages DROP COLUMN e2e');
     }
   });
 
