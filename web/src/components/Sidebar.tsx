@@ -394,6 +394,10 @@ export function UserMenu({ trigger, placement }: { trigger: ReactNode; placement
   const theme = String(me.preferences?.theme ?? 'auto');
   const chosen = me.statusDefault ?? status;
   const chosenCustom = me.statusCustom && statuses.some((x) => x._id === me.statusCustom) ? me.statusCustom : null;
+  // Lembretes: no celular o item fica aqui (no desktop é a linha da navegação), só quando há lembretes.
+  const phone = useIsPhone();
+  const reminders = useStore((s) => s.reminders);
+  const fired = reminders.filter((r) => r.firedAt).length;
   return (
     <>
       <Menu align="left" placement={placement} label="Menu do usuário" className="user-menu" trigger={trigger}>
@@ -431,6 +435,15 @@ export function UserMenu({ trigger, placement }: { trigger: ReactNode; placement
               <Icon name="account" />
               Minha conta
             </button>
+            {phone && reminders.length > 0 && (
+              <button onClick={() => (navigate('/reminders'), close())}>
+                <Icon name="nav-reminders" />
+                <span className="menu-text">
+                  <span>Lembretes</span>
+                </span>
+                {fired > 0 && <span className="badge">{fired}</span>}
+              </button>
+            )}
             {adminHome && (
               <button onClick={() => (navigate(adminHome), close())}>
                 <Icon name="admin" />
@@ -614,6 +627,9 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
   const siteName = useSetting<string>('Site_Name');
   const callsEnabled = useSetting<boolean>('Calls_Enabled');
   const calendarOn = useSetting<boolean>('Calendar_Enabled') !== false;
+  // Lembretes: a linha só aparece quando há lembretes; o número é o dos já avisados.
+  const remindersCount = useStore((s) => s.reminders.length);
+  const remindersFired = useStore((s) => s.reminders.filter((r) => r.firedAt).length);
   const filesOn = useFilesTab(); // Arquivos
   const phone = useIsPhone();
   const list = mode === 'list';
@@ -798,6 +814,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
           <NavRow to="/home" icon="nav-home" label="Início" onNavigate={onNavigate} />
           {callsEnabled && <NavRow to="/calls" icon="nav-calls" label="Chamadas" extra={<CallsNavBadge />} onNavigate={onNavigate} />}
           {calendarOn && <NavRow to="/calendar" icon="nav-calendar" label="Agenda" onNavigate={onNavigate} />}
+          {remindersCount > 0 && <NavRow to="/reminders" icon="nav-reminders" label="Lembretes" badge={remindersFired} onNavigate={onNavigate} />}
           {filesOn && <NavRow to="/files" icon="nav-files" label="Arquivos" onNavigate={onNavigate} />}
           <NavRow to="/directory" icon="nav-directory" label="Diretório" onNavigate={onNavigate} />
         </nav>

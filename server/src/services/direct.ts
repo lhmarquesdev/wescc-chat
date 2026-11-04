@@ -93,7 +93,7 @@ export async function assertCanCall(ctx: Ctx, room: any): Promise<void> {
 }
 
 // Sala que só os membros leem: grupo privado (com as discussões de grupos e de DMs) ou canal de um time privado.
-async function isPrivateRoom(room: { t: string; team_id?: string | null; team_main?: boolean }) {
+export async function isPrivateRoom(room: { t: string; team_id?: string | null; team_main?: boolean }) {
   if (room.t === 'p') return true;
   if (room.t !== 'c' || !room.team_id || room.team_main) return false;
   return (await one('SELECT type FROM teams WHERE id = $1', [room.team_id]))?.type === 1;

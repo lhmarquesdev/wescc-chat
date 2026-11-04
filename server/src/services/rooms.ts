@@ -196,6 +196,9 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
   const user = await one('SELECT id, username FROM users WHERE id = $1', [userId]);
   const sub = await one('DELETE FROM subscriptions WHERE room_id = $1 AND user_id = $2 RETURNING *', [rid, userId]);
   if (!sub) return;
+  // Envios agendados da pessoa nesta sala: sem a inscrição não sairiam mais.
+  const { removeScheduledOfUserInRoom } = await import('./scheduled');
+  await removeScheduledOfUserInRoom(rid, userId);
   await query('UPDATE rooms SET users_count = GREATEST(users_count - 1, 0), updated_at = now() WHERE id = $1', [rid]);
   if (room.team_main && room.team_id) {
     await query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [room.team_id, userId]);

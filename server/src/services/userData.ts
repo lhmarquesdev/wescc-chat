@@ -325,6 +325,40 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
   ).map((c) => ({ titulo: c.title, organizador: c.owner_name || c.owner_username || null, inicio: c.starts_at, fim: c.ends_at, diaInteiro: c.all_day, status: c.status, resposta: c.response }));
   yield { name: 'agenda.json', data: json({ eventos, convites }), mtime: now };
 
+  // lembretes.json, agendadas.json e votos.json ("Lembrar-me", envios agendados e os próprios votos em enquetes; numa
+  // enquete anônima também só o voto da pessoa). Pelo id da conta, então são sempre da própria pessoa.
+  const reminderRows = await many('SELECT * FROM message_reminders WHERE user_id = $1 ORDER BY remind_at, id', [user.id]);
+  const scheduledRows = await many('SELECT * FROM scheduled_messages WHERE user_id = $1 ORDER BY send_at, id', [user.id]);
+  const voteRows = await many(
+    `SELECT v.message_id, v.option_id, v.voted_at, m.room_id, m.extra->'poll' AS poll
+       FROM poll_votes v JOIN messages m ON m.id = v.message_id
+      WHERE v.user_id = $1 ORDER BY v.voted_at, v.message_id, v.option_id`,
+    [user.id],
+  );
+  const lab2 = await rooms([...reminderRows, ...scheduledRows, ...voteRows].map((r) => r.room_id));
+  const lembretes = reminderRows.map((r) => ({ mensagemId: r.message_id, sala: lab2(r.room_id)?.nome ?? null, lembrarEm: r.remind_at, avisadoEm: r.fired_at, criadoEm: r.created_at }));
+  const statusLabel: Record<string, string> = { pending: 'Agendada', sending: 'Enviando', failed: 'Não enviada' };
+  const agendadas = scheduledRows.map((r) => ({
+    sala: lab2(r.room_id)?.nome ?? null,
+    texto: r.msg,
+    enviarEm: r.send_at,
+    situacao: statusLabel[r.status] ?? r.status,
+    erro: r.error,
+    topico: r.tmid,
+    pedeCiente: r.ack_required,
+    criadaEm: r.created_at,
+  }));
+  const votos = voteRows.map((v) => ({
+    mensagemId: v.message_id,
+    sala: lab2(v.room_id)?.nome ?? null,
+    pergunta: v.poll?.question ?? null,
+    opcao: (v.poll?.options as { id: string; text: string }[] | undefined)?.find((o) => o.id === v.option_id)?.text ?? v.option_id,
+    votadoEm: v.voted_at,
+  }));
+  yield { name: 'lembretes.json', data: json(lembretes), mtime: now };
+  yield { name: 'agendadas.json', data: json(agendadas), mtime: now };
+  yield { name: 'votos.json', data: json(votos), mtime: now };
+
   // reacoes.json: as reações ficam guardadas pelo @usuário, não pelo id da conta. O mesmo @usuário pode ter sido de
   // outra pessoa (conta excluída antes desta versão, nome reaproveitado no AD), então só entram as salas que a pessoa
   // pode abrir hoje: nunca o nome de um grupo privado ou de uma conversa dos outros. Uma passada pela chave primária
@@ -467,6 +501,8 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
           editadaEm: m.edited_at ?? null,
           arquivos: encrypted ? [] : ((m.files ?? []) as { _id: string }[]).map((f) => f._id),
           ...(encrypted ? { criptografada: true } : {}),
+          // Encaminhada: o texto é o da original; o comentário é o que a pessoa escreveu.
+          ...(m.extra?.forward && !encrypted ? { encaminhada: true, ...(m.extra.forward.comment ? { comentario: m.extra.forward.comment } : {}) } : {}),
         };
         chunk += `${first ? '\n' : ',\n'}${JSON.stringify(item)}`;
         first = false;
@@ -513,6 +549,21 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
       for (const c of convites) h += `<tr>${td(c.titulo)}${td(formatDayTime(c.inicio))}${td(`${resp[c.resposta] ?? c.resposta} · ${c.organizador ?? ''}`)}</tr>`;
       h += '</tbody></table>';
     } else h += '<p class="meta">Nenhum evento.</p>';
+    if (lembretes.length) {
+      h += `<h3>Lembretes (${lembretes.length.toLocaleString('pt-BR')})</h3><table><thead><tr><th>Conversa</th><th>Lembrar em</th><th>Situação</th></tr></thead><tbody>`;
+      for (const r of lembretes) h += `<tr>${td(r.sala ?? '—')}${td(formatDayTime(r.lembrarEm))}${td(r.avisadoEm ? 'Avisado' : 'Aguardando')}</tr>`;
+      h += '</tbody></table>';
+    }
+    if (agendadas.length) {
+      h += `<h3>Mensagens agendadas (${agendadas.length.toLocaleString('pt-BR')})</h3><table><thead><tr><th>Conversa</th><th>Enviar em</th><th>Mensagem</th><th>Situação</th></tr></thead><tbody>`;
+      for (const a of agendadas) h += `<tr>${td(a.sala ?? '—')}${td(formatDayTime(a.enviarEm))}${td(a.texto)}${td(a.erro ? `${a.situacao}: ${a.erro}` : a.situacao)}</tr>`;
+      h += '</tbody></table>';
+    }
+    if (votos.length) {
+      h += `<h3>Votos em enquetes (${votos.length.toLocaleString('pt-BR')})</h3><table><thead><tr><th>Pergunta</th><th>Sua resposta</th><th>Votou em</th></tr></thead><tbody>`;
+      for (const v of votos) h += `<tr>${td(v.pergunta ?? '—')}${td(v.opcao)}${td(formatDayTime(v.votadoEm))}</tr>`;
+      h += '</tbody></table>';
+    }
     h += `<h3>Arquivos que você enviou (${items.length.toLocaleString('pt-BR')})</h3>`;
     yield h;
     if (items.length) {
@@ -538,7 +589,8 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
         let chunk = '';
         for (const m of rows) {
           const text = textOf(m);
-          const cell = text === null ? `<td><i>${escapeHtml(ENCRYPTED_PLACEHOLDER)}</i></td>` : `<td>${escapeHtml(text).replace(/\r?\n/g, '<br>')}</td>`;
+          const comment = text !== null && m.extra?.forward?.comment ? `${m.extra.forward.comment}\n↪ ` : text !== null && m.extra?.forward ? '↪ ' : '';
+          const cell = text === null ? `<td><i>${escapeHtml(ENCRYPTED_PLACEHOLDER)}</i></td>` : `<td>${escapeHtml(comment + text).replace(/\r?\n/g, '<br>')}</td>`;
           chunk += `<tr>${td(formatDayTime(m.created_at))}${td(lab(m.room_id)?.nome ?? '')}${cell}</tr>`;
         }
         yield chunk;

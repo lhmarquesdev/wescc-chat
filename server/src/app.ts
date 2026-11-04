@@ -14,6 +14,7 @@ import { config } from './config';
 import { adminRoutes } from './api/admin';
 import { registerRbac } from './api/rbac';
 import { chatRoutes } from './api/chat';
+import { messageToolsRoutes } from './api/messageTools';
 import { authenticate, errorHandler } from './api/http';
 import { roomsRoutes } from './api/rooms';
 import { usersRoutes } from './api/users';
@@ -75,6 +76,7 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   usersRoutes(app);
   roomsRoutes(app);
   chatRoutes(app);
+  messageToolsRoutes(app); // encaminhar, enquetes, "Lembrar-me" e envios agendados
   adminRoutes(app);
   registerRbac(app);
   registerWebsocket(app);

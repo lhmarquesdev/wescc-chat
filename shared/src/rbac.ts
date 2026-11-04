@@ -61,6 +61,19 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
   'view-message-read-receipts': { label: 'Ver confirmações de leitura', defaults: [A, O, M, U, OP], description: 'Ver quem já leu cada mensagem.', room: true },
   'mention-all': { label: 'Mencionar @all', defaults: [A, O, M, U, P], description: 'Avisar todos os membros da sala com @all, mesmo quem está offline.', room: true },
   'mention-here': { label: 'Mencionar @here', defaults: [A, O, M, U, P], description: 'Avisar quem está online na sala com @here.', room: true },
+  // Mensagens: encaminhar (regra global; valem as regras de envio de cada destino), enquetes e envio agendado (na sala)
+  'forward-message': {
+    label: 'Encaminhar mensagens',
+    defaults: [A, U, OP],
+    description: 'Mandar uma mensagem que a pessoa lê para outras conversas, com os arquivos. Valem as regras de envio de cada destino.',
+  },
+  'create-poll': { label: 'Criar enquetes', defaults: [A, U, O, M, P], description: 'Em canais, grupos e conversas diretas. Votar não depende desta permissão.', room: true },
+  'schedule-message': {
+    label: 'Agendar o envio de mensagens',
+    defaults: [A, U, O, M, P],
+    description: 'A mensagem sai no horário escolhido, em nome da pessoa, se ela ainda puder escrever na sala.',
+    room: true,
+  },
   'start-discussion': { label: 'Criar discussões', defaults: [A, U, G, B], description: 'Abrir uma discussão (sala derivada) a partir de uma sala.', room: true },
   'start-discussion-other-user': { label: 'Criar discussões a partir de mensagens de outros', defaults: [A, U, G, B, O], description: 'Abrir uma discussão a partir da mensagem de outra pessoa.', room: true },
   'create-team': { label: 'Criar times', defaults: [A, U], description: 'Criar times, que juntam salas e pessoas.' },
@@ -255,7 +268,7 @@ export const RBAC_GROUPS: RbacGroup[] = [
         label: 'Mensagens',
         description: 'O que a pessoa faz com as próprias mensagens e menções.',
         levels: [],
-        extras: ['delete-own-message', 'view-message-read-receipts', 'mention-here', 'mention-all'],
+        extras: ['delete-own-message', 'view-message-read-receipts', 'mention-here', 'mention-all', 'forward-message', 'create-poll', 'schedule-message'],
       },
       { id: 'discussions', label: 'Discussões', description: 'Conversas derivadas de uma sala ou mensagem.', levels: [], extras: ['start-discussion', 'start-discussion-other-user'] },
       { id: 'teams', label: 'Times', description: 'Times agrupam salas e pessoas.', levels: [{ label: 'Criar times', keys: ['create-team'] }], extras: ['view-all-teams'] },

@@ -55,7 +55,7 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
   const groupDM = isDM && (room.uids?.length ?? 0) > 2;
   const roomName = groupDM ? await groupDmLabel(room.uids) : isDM ? senderName : room.fname || room.name || '';
   const hidePush = getSetting<boolean>('Push_Privacy_Hide_Content');
-  const preview = messagePreviewText({ msg: row.msg, sticker: row.extra?.sticker, files: row.files });
+  const preview = messagePreviewText({ msg: row.msg, sticker: row.extra?.sticker, files: row.files, forward: row.extra?.forward, poll: row.extra?.poll, e2e: row.e2e });
   const text = (await serverBuiltMarkdown(ctx, row)) ? plainIntegrationText(preview) : preview;
   const emailEnabled = getSetting<boolean>('Email_Notifications_Enabled');
   const pushTargets: string[] = [];

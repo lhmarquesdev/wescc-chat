@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { CustomUserStatus, Message, Room, ServerEvent, Subscription, User, UserStatus } from '@shared/index';
+import type { CustomUserStatus, Message, MessageReminder, Room, ScheduledMessage, ServerEvent, Subscription, User, UserStatus } from '@shared/index';
 import { selfUserPatch } from '@shared/status';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
@@ -10,6 +10,7 @@ export interface ToastItem {
   action?: { label: string; onClick: () => void };
   duration: number;
   icon?: string; // nome de ícone no lugar do ícone do tipo (ex.: fim de chamada)
+  key?: string; // um aviso por chave: o novo troca o anterior, e dismissToastKey tira (ex.: a falha de uma agendada)
 }
 
 export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean };
@@ -30,13 +31,17 @@ interface State {
   presence: Record<string, Presence>;
   userStatuses: CustomUserStatus[]; // status personalizados (Administração › Status do usuário)
   typing: Record<string, Record<string, number>>;
-  recording: Record<string, Record<string, boolean>>; // quem do typing está gravando áudio
+  recording: Record<string, Record<string, 'recording' | 'video'>>; // quem do typing está gravando áudio ou vídeo
   connected: boolean;
   emojiVersion: number;
   toasts: ToastItem[];
   permMap: Record<string, string[]>;
   restrictedRoles: string[]; // papéis globais com "Restrito em conversas diretas"
   userRoles: Record<string, string[]>; // papéis globais anunciados por eventos "user" desde a conexão (id -> papéis)
+  // Mensagens: os lembretes e as agendadas da pessoa (só ela vê) e os próprios votos em enquetes (id da mensagem -> opções)
+  reminders: MessageReminder[];
+  scheduled: ScheduledMessage[];
+  pollVotes: Record<string, string[]>;
 
   setMe(me: Me | null): void;
   setSettings(s: Record<string, any>): void;
@@ -51,10 +56,18 @@ interface State {
   setThread(tmid: string, list: Message[]): void;
   markReads(rid: string, ids: string[]): void;
   setPresence(username: string, status: UserStatus, statusText?: string, statusCustom?: string | null): void;
-  setTyping(rid: string, username: string, typing: boolean, recording?: boolean): void;
+  setTyping(rid: string, username: string, typing: boolean, recording?: 'recording' | 'video'): void;
   setConnected(c: boolean): void;
-  toast(text: string, kind?: ToastKind, opts?: { action?: ToastItem['action']; duration?: number; icon?: string }): void;
+  setReminders(list: MessageReminder[]): void;
+  upsertReminder(r: MessageReminder): void;
+  removeReminder(id: string): void;
+  setScheduled(list: ScheduledMessage[]): void;
+  upsertScheduled(s: ScheduledMessage): void;
+  removeScheduled(id: string): void;
+  setPollVotes(votes: Record<string, string[]>): void;
+  toast(text: string, kind?: ToastKind, opts?: { action?: ToastItem['action']; duration?: number; icon?: string; key?: string }): void;
   dismissToast(id: number): void;
+  dismissToastKey(key: string): void;
   reset(): void;
 }
 
@@ -96,6 +109,9 @@ const initial = {
   permMap: {},
   restrictedRoles: [],
   userRoles: {},
+  reminders: [],
+  scheduled: [],
+  pollVotes: {},
 };
 
 export const useStore = create<State>((set, get) => ({
@@ -148,25 +164,43 @@ export const useStore = create<State>((set, get) => ({
     set({ messages: { ...get().messages, [rid]: { ...cur, list: cur.list.map((m) => (s.has(m._id) ? { ...m, unread: false } : m)) } } });
   },
   setPresence: (username, status, statusText, statusCustom = null) => set({ presence: { ...get().presence, [username]: { status, statusText, statusCustom } } }),
-  setTyping: (rid, username, typing, recording = false) => {
+  setTyping: (rid, username, typing, recording) => {
     const room = { ...(get().typing[rid] ?? {}) };
     const rec = { ...(get().recording[rid] ?? {}) };
     if (typing) room[username] = Date.now();
     else delete room[username];
-    if (typing && recording) rec[username] = true;
+    if (typing && recording) rec[username] = recording;
     else delete rec[username];
     set({ typing: { ...get().typing, [rid]: room }, recording: { ...get().recording, [rid]: rec } });
   },
   // Sem conexão os eventos de "parou de digitar" não chegam: a faixa de digitação sairia presa.
   setConnected: (connected) => set(connected ? { connected } : { connected, typing: {}, recording: {} }),
+  setReminders: (reminders) => set({ reminders }),
+  upsertReminder: (r) => set({ reminders: [...get().reminders.filter((x) => x._id !== r._id && x.messageId !== r.messageId), r] }),
+  removeReminder: (id) => set({ reminders: get().reminders.filter((x) => x._id !== id) }),
+  setScheduled: (scheduled) => set({ scheduled }),
+  // Enviada, cancelada ou de volta a pendente (editada): o aviso de falha dela não vale mais.
+  upsertScheduled: (s) => {
+    set({ scheduled: [...get().scheduled.filter((x) => x._id !== s._id), s].sort((a, b) => a.sendAt.localeCompare(b.sendAt)) });
+    if (s.status !== 'failed') get().dismissToastKey(scheduledFailKey(s._id));
+  },
+  removeScheduled: (id) => {
+    set({ scheduled: get().scheduled.filter((x) => x._id !== id) });
+    get().dismissToastKey(scheduledFailKey(id));
+  },
+  setPollVotes: (votes) => set({ pollVotes: { ...get().pollVotes, ...votes } }),
   // O tempo corre no componente (pausa com o mouse em cima): erro 8 s, os outros 4 s.
   toast: (text, kind = 'info', opts) => {
     const id = ++toastSeq;
     const duration = opts?.duration ?? (kind === 'error' ? 8000 : 4000);
     // No máximo 3: um aviso antigo não reaparece depois que os novos saem.
-    set({ toasts: [...get().toasts, { id, text, kind, action: opts?.action, duration, icon: opts?.icon }].slice(-3) });
+    const rest = opts?.key ? get().toasts.filter((t) => t.key !== opts.key) : get().toasts;
+    set({ toasts: [...rest, { id, text, kind, action: opts?.action, duration, icon: opts?.icon, key: opts?.key }].slice(-3) });
   },
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
+  dismissToastKey: (key) => {
+    if (get().toasts.some((t) => t.key === key)) set({ toasts: get().toasts.filter((t) => t.key !== key) });
+  },
   reset: () => set({ ...initial }),
 }));
 
@@ -220,8 +254,11 @@ export function applyEvent(ev: ServerEvent) {
       break;
     }
     case 'subscription':
-      if (ev.action === 'removed') st.removeSubscription(ev.subscription.rid);
-      else st.upsertSubscription(ev.subscription);
+      if (ev.action === 'removed') {
+        st.removeSubscription(ev.subscription.rid);
+        // Saiu da sala: as agendadas dela já saíram no servidor.
+        if (st.scheduled.some((x) => x.rid === ev.subscription.rid)) st.setScheduled(st.scheduled.filter((x) => x.rid !== ev.subscription.rid));
+      } else st.upsertSubscription(ev.subscription);
       break;
     case 'room':
       if (ev.action !== 'removed') st.upsertRoom(ev.room);
@@ -235,7 +272,7 @@ export function applyEvent(ev: ServerEvent) {
       useStore.setState({ userStatuses: ev.statuses });
       break;
     case 'typing':
-      if (ev.username !== st.me?.username) st.setTyping(ev.tmid ? `${ev.rid}:${ev.tmid}` : ev.rid, ev.username, ev.typing, ev.activity === 'recording');
+      if (ev.username !== st.me?.username) st.setTyping(ev.tmid ? `${ev.rid}:${ev.tmid}` : ev.rid, ev.username, ev.typing, ev.activity);
       break;
     case 'reads':
       st.markReads(ev.rid, ev.messageIds);
@@ -245,6 +282,17 @@ export function applyEvent(ev: ServerEvent) {
       if (st.me && ev.user._id === st.me._id) st.setMe({ ...st.me, ...selfUserPatch(ev.user) } as Me);
       if (ev.user.roles) useStore.setState({ userRoles: { ...st.userRoles, [ev.user._id]: ev.user.roles } });
       if (ev.user.avatarETag !== undefined && ev.user.username) avatarBust[ev.user.username] = String(ev.user.avatarETag ?? Date.now());
+      break;
+    case 'poll.myVotes':
+      st.setPollVotes({ [ev.messageId]: ev.optionIds });
+      break;
+    case 'message.reminder':
+      if (ev.action === 'removed') st.removeReminder(ev.reminder._id);
+      else st.upsertReminder(ev.reminder);
+      break;
+    case 'message.scheduled':
+      if (ev.action === 'removed') st.removeScheduled(ev.scheduled._id);
+      else st.upsertScheduled(ev.scheduled);
       break;
     case 'settings.changed': {
       const patch: Record<string, unknown> = {};
@@ -259,3 +307,6 @@ export function applyEvent(ev: ServerEvent) {
 }
 
 export const avatarBust: Record<string, string> = {};
+
+// Chave do aviso "Sua mensagem agendada … não foi enviada" (um por agendada).
+export const scheduledFailKey = (id: string) => `scheduled-failed-${id}`;

@@ -17,7 +17,7 @@ export interface PickedUser {
 // Fora de modal, a lista fica em posição fixa, com a largura do campo, em #overlay-root (".ldap-options .picker-list" não
 // acha; ".picker-list" acha). Dentro de um modal ela entra no fluxo, logo abaixo do campo: empurra o rodapé em vez de
 // cobrir Cancelar/Criar ou passar da borda do modal.
-function SuggestionList({ anchor, children, label, nav }: { anchor: HTMLElement | null; children: ReactNode; label: string; nav: 'key' | 'pointer' }) {
+export function SuggestionList({ anchor, children, label, nav }: { anchor: HTMLElement | null; children: ReactNode; label: string; nav: 'key' | 'pointer' }) {
   const inline = !!anchor?.closest('.modal, .sheet');
   const anch = useAnchored({ open: !inline, placement: 'bottom-start', matchWidth: true });
   const inlineRef = useRef<HTMLDivElement>(null);
@@ -53,7 +53,7 @@ function SuggestionList({ anchor, children, label, nav }: { anchor: HTMLElement 
 
 // ↑ ↓ escolhem, Enter confirma, Esc fecha só a lista (não o modal). nav diz quem escolheu por último:
 // pelas setas o item ganha o anel de foco; pelo mouse, só o fundo.
-function useListKeys(count: number, pick: (i: number) => void, closeList: () => void) {
+export function useListKeys(count: number, pick: (i: number) => void, closeList: () => void) {
   const [active, setActive] = useState(-1);
   const [nav, setNav] = useState<'key' | 'pointer'>('pointer');
   useEffect(() => {
@@ -89,7 +89,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('pointerup', () => (pointerDown = false), true);
   window.addEventListener('pointercancel', () => (pointerDown = false), true);
 }
-function closeAfterPointer(close: () => void) {
+export function closeAfterPointer(close: () => void) {
   if (!pointerDown) return close();
   const done = () => setTimeout(close, 0);
   window.addEventListener('pointerup', done, { once: true, capture: true });
@@ -97,7 +97,7 @@ function closeAfterPointer(close: () => void) {
 }
 
 // Na sugestão vai só a primeira oração do motivo, numa linha; o texto inteiro fica no title do item.
-const briefReason = (reason: string) => reason.split(/[:.]\s/)[0].replace(/\.$/, '');
+export const briefReason = (reason: string) => reason.split(/[:.]\s/)[0].replace(/\.$/, '');
 
 export function UserPicker({
   value,

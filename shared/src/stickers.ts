@@ -1,4 +1,5 @@
 // Figurinhas: tipos e funções puras usadas pelo servidor e pela web.
+import { ENCRYPTED_PLACEHOLDER, isEncryptedMessage } from './dataExport';
 
 export type StickerScope = 'org' | 'personal';
 export type StickerMime = 'image/webp' | 'image/png' | 'image/gif';
@@ -319,16 +320,31 @@ export function formatVoiceDuration(seconds: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// Prévia de uma mensagem sem texto (notificação, última mensagem, citação, fixar, integrações).
+// Prévia de uma mensagem sem texto (notificação, última mensagem, citação, fixar, integrações, lembretes).
+// Enquete: a pergunta. Encaminhada: o comentário de quem encaminhou ou "↪ " e o conteúdo levado. Cifrada (e2e): só o
+// aviso, nunca o conteúdo.
 export function messagePreviewText(
-  m: { msg?: string | null; sticker?: MessageSticker | null; files?: { name: string; voice?: boolean; duration?: number }[] | null },
+  m: {
+    msg?: string | null;
+    sticker?: MessageSticker | null;
+    files?: { name: string; voice?: boolean; video?: boolean; duration?: number }[] | null;
+    forward?: { comment?: string } | null;
+    poll?: { question: string } | null;
+    e2e?: unknown;
+  },
   opts: { withName?: boolean } = {},
 ): string {
-  if (m.msg) return m.msg;
-  if (m.sticker) return stickerPreviewText(m.sticker, opts);
-  if (m.files?.[0]?.voice) return `🎤 Mensagem de voz${m.files[0].duration ? ` (${formatVoiceDuration(m.files[0].duration)})` : ''}`;
-  if (m.files?.length) return `📎 ${m.files[0].name}`; // igual aos outros produtores de prévia (dívida do DS, design §1.4)
-  return '';
+  if (isEncryptedMessage(m)) return ENCRYPTED_PLACEHOLDER;
+  if (m.poll) return `📊 ${m.poll.question}`;
+  if (m.forward?.comment) return m.forward.comment;
+  const f = m.files?.[0];
+  const inner =
+    m.msg ||
+    (m.sticker ? stickerPreviewText(m.sticker, opts) : '') ||
+    (f?.voice ? `🎤 Mensagem de voz${f.duration ? ` (${formatVoiceDuration(f.duration)})` : ''}` : '') ||
+    (f?.video ? `🎥 Mensagem de vídeo${f.duration ? ` (${formatVoiceDuration(f.duration)})` : ''}` : '') ||
+    (f ? `📎 ${f.name}` : ''); // igual aos outros produtores de prévia (dívida do DS, design §1.4)
+  return m.forward ? `↪ ${inner || 'Mensagem encaminhada'}` : inner;
 }
 
 // ---------- Onde e o que dá para enviar ----------

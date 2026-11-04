@@ -370,6 +370,30 @@ describe('palavras destacadas', () => {
     expect((await subOf(bruno, ch._id)).userMentions).toBe(0);
   });
 
+  it('encaminhada: o texto levado não destaca de novo; só o comentário de quem encaminhou', async () => {
+    const ana = await newUser(A);
+    const bruno = await newUser(A);
+    await highlights(bruno, ['plantão']);
+    const src = await channelWith(ana, []);
+    const dest = await channelWith(ana, [bruno]);
+    const orig = await send(ana, src._id, 'Quem pega o plantão hoje?');
+    const wb = await online(bruno);
+    try {
+      const r1 = await api('POST', 'chat.forwardMessage', { messageId: orig._id, targets: [{ rid: dest._id }] }, ana);
+      expect(r1.results?.[0]?.ok, JSON.stringify(r1)).toBe(true);
+      expect(await noNotification(wb, r1.results[0].message._id)).toBe(true);
+      expect((await subOf(bruno, dest._id)).userMentions).toBe(0);
+      // A palavra no comentário avisa como uma menção.
+      const n = next(wb, (e) => e.type === 'notification' && e.rid === dest._id);
+      const r2 = await api('POST', 'chat.forwardMessage', { messageId: orig._id, targets: [{ rid: dest._id }], comment: 'o plantão é seu' }, ana);
+      expect(r2.results?.[0]?.ok, JSON.stringify(r2)).toBe(true);
+      expect((await n()).messageId).toBe(r2.results[0].message._id);
+      expect((await subOf(bruno, dest._id)).userMentions).toBe(1);
+    } finally {
+      wb.close();
+    }
+  });
+
   it('editar e pôr a palavra não avisa de novo', async () => {
     const ana = await newUser(A);
     const bruno = await newUser(A);
