@@ -690,10 +690,16 @@ describe('criptografia: troca de chave', () => {
     const carla = await person();
     const room = await encryptedGroup(owner, [bruno, carla]);
     const ws = await online(bruno);
+    const carlaWs = await online(carla);
     try {
       const rotate = next(ws, (e) => e.type === 'e2e.rotate' && e.rid === room.rid);
+      const since = carlaWs.events.length;
+      const removed = next(carlaWs, (e) => e.type === 'subscription' && e.action === 'removed');
       expect((await api('POST', 'groups.leave', { roomId: room.rid }, carla)).success).toBe(true);
       expect(await rotate()).toMatchObject({ keyID: room.keyID });
+      // Quem saiu não ouve mais a sala: o pedido de troca e a sala atualizada não chegam para ela.
+      await removed();
+      expect(countSince(carlaWs, since, (e) => e.type === 'e2e.rotate' || (e.type === 'room' && (e.room?._id ?? e.rid) === room.rid))).toBe(0);
       expect((await info(owner, room.rid)).e2eRotate).toBe(true);
       expect((await keyRows(room.rid)).map((r) => r.user_id).sort()).toEqual([owner.userId, bruno.userId].sort());
       const fresh = await generateRoomKey();
@@ -718,6 +724,7 @@ describe('criptografia: troca de chave', () => {
       expect((await sendE2e(bruno, { ...room, keyID: fresh.keyID, key: fresh.key }, 'chave nova')).success).toBe(true);
     } finally {
       ws.close();
+      carlaWs.close();
     }
   });
 

@@ -531,6 +531,8 @@ export function handleE2eEvent(ev: ServerEvent) {
     return;
   }
   if (status() !== 'ready') return;
+  // Avisos de uma sala da qual a pessoa saiu (a aba ainda ouvia a sala): nada a fazer.
+  if ('rid' in ev && !useStore.getState().subscriptions[ev.rid]) return;
   if (ev.type === 'e2e.keyRequest') {
     void (async () => {
       await loadRoomKeys(ev.rid, !keyOf(ev.rid, ev.keyID)).catch(() => {});

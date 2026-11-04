@@ -317,7 +317,8 @@ export function RoomPage() {
 
   // Criptografia: a chave da conversa (criar, pedir ou trocar) ao abrir, quando a sala muda e ao desbloquear.
   const e2eStatus = useE2e((s) => s.status);
-  const e2eRoom = room && room._id === rid && (room.encrypted || room.e2eKeyId) ? room : null;
+  // Só quem participa: removido com a conversa aberta, nada de pedir chaves (o servidor recusaria).
+  const e2eRoom = room && room._id === rid && sub && (room.encrypted || room.e2eKeyId) ? room : null;
   useEffect(() => {
     if (e2eRoom) void ensureRoom(e2eRoom);
     // eslint-disable-next-line react-hooks/exhaustive-deps

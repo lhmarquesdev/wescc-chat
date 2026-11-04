@@ -206,10 +206,11 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
   if (room.team_main && room.team_id) {
     await query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [room.team_id, userId]);
   }
-  // Criptografia: as chaves da pessoa nesta sala saem, e quem fica gera uma chave nova (ela não lê o que vier depois).
-  await forgetRoomKeys(rid, userId);
   bus.leaveRoom(userId, rid);
   bus.publish({ user: userId }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(sub, room) });
+  // Criptografia: as chaves da pessoa nesta sala saem, e quem fica gera uma chave nova (ela não lê o que vier depois).
+  // Depois de tirar a pessoa da sala: o pedido de chave nova não chega para ela.
+  await forgetRoomKeys(rid, userId);
   if (!opts.silent && user) {
     if (opts.by && opts.by.id !== userId) await sendSystemMessage(rid, 'ru', opts.by, user.username);
     else await sendSystemMessage(rid, 'ul', { id: user.id, username: user.username }, user.username);
