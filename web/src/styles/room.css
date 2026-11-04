@@ -430,11 +430,11 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-/* No toque o alvo cresce sem empurrar a linha */
+/* No toque o alvo cresce para 44 px (16 da linha + 2 × 14) sem empurrar a linha */
 @media (pointer: coarse) {
   .msg-translated .msg-tr-btn {
-    padding: 12px 8px;
-    margin: -12px -8px;
+    padding: 14px 8px;
+    margin: -14px -8px;
   }
 }
 .msg-body {

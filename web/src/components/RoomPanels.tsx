@@ -11,7 +11,7 @@ import { renderMarkdown } from '../lib/markdown';
 import { authorName } from '../lib/messageRules';
 import { useNames } from '../lib/names';
 import { canWithRoles, useStore } from '../lib/store';
-import { clearRoomError, useLanguages, useMyLanguage, useRoomTranslate, useTranslations } from '../lib/translate';
+import { clearRoomError, resetTranslationViews, useLanguages, useMyLanguage, useRoomTranslate, useTranslations } from '../lib/translate';
 import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
 import { normalizeLang } from '@shared/translate';
 import { Icon, type IconName } from './Icon';
@@ -1096,7 +1096,10 @@ function TranslatePanel({ room, sub }: Props) {
     <div className="form">
       <Toggle
         checked={!!sub.autoTranslate}
-        onChange={(v) => save('autoTranslate', v)}
+        onChange={(v) => {
+          resetTranslationViews();
+          save('autoTranslate', v);
+        }}
         label={`Traduzir automaticamente para ${languageLabel(lang)}`}
         description="Mensagens de outras pessoas em outros idiomas aparecem traduzidas. Só para você."
       />

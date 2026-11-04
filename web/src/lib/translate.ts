@@ -20,7 +20,7 @@ interface Languages {
 
 interface TranslateState {
   byKey: Record<string, Entry>;
-  view: Record<string, 'translation' | 'original'>; // por mensagem: a escolha da pessoa nesta sessão
+  view: Record<string, 'translation' | 'original'>; // por chave: a escolha da pessoa nesta sessão, para o texto atual
   manual: Record<string, true>; // chaves pedidas pelo menu: "Traduzindo…", avisos e "Tentar de novo"
   roomError: Record<string, string>; // sala → o idioma escolhido não existe no servidor de tradução
   languages: Languages | null;
@@ -72,7 +72,7 @@ const askedDuring = new Set<string>(); // pedido pelo menu enquanto a mesma chav
 let epoch = 0; // troca quando outra pessoa entra: respostas antigas são descartadas
 
 const putEntries = (patch: Record<string, Entry>) => useTranslations.setState((s) => ({ byKey: { ...s.byKey, ...patch } }));
-const setView = (id: string, v: 'translation' | 'original') => useTranslations.setState((s) => (s.view[id] === v ? s : { view: { ...s.view, [id]: v } }));
+const setView = (key: string, v: 'translation' | 'original') => useTranslations.setState((s) => (s.view[key] === v ? s : { view: { ...s.view, [key]: v } }));
 const markManual = (key: string) => useTranslations.setState((s) => (s.manual[key] ? s : { manual: { ...s.manual, [key]: true } }));
 const failed = (id: string, lang: string, reason: TranslateFailReason, retryAt?: number): Entry => ({
   _id: id,
@@ -164,7 +164,7 @@ function received(batch: [string, Waiting][], r: TranslateResponse) {
     if (!askedNow(w)) continue;
     const notice = manualNotice(t);
     if (notice) {
-      setView(id, 'original');
+      setView(key, 'original');
       notices.push(notice);
     } else if (t.status === 'failed' && t.reason !== 'changed') manualFailed = true;
   }
@@ -195,6 +195,11 @@ function refused(q: Queue, batch: [string, Waiting][], e: unknown) {
   putEntries(patch);
   if (anyManual) toast(err ? err.message : 'Não foi possível traduzir agora. Confira a conexão.', 'warning');
   if (retryAt) ensureTick();
+}
+
+// Ligou ou desligou a tradução automática de uma sala: vale o padrão novo, não o "Ver original" de antes.
+export function resetTranslationViews() {
+  useTranslations.setState({ view: {} });
 }
 
 // O painel da sala salvou um idioma novo: a fila daquela sala pode pedir de novo.
@@ -356,7 +361,7 @@ export function useMessageTranslation(m: Message): MessageTranslationView {
   const can = rt.on && isTranslatable(m, meId, { encrypted });
   const key = translationKey(m, rt.lang);
   const entry = useTranslations((s) => (can ? s.byKey[key] : undefined));
-  const choice = useTranslations((s) => (can ? s.view[m._id] : undefined));
+  const choice = useTranslations((s) => (can ? s.view[key] : undefined));
   const manual = useTranslations((s) => (can ? !!s.manual[key] : false));
   const wanted = can && (choice ?? (rt.auto ? 'translation' : 'original')) === 'translation';
   const done = entry && entry.status !== 'pending' ? entry : null;
@@ -411,25 +416,25 @@ export function useMessageTranslation(m: Message): MessageTranslationView {
   const toggle = () => {
     if (!can) return;
     if (shown === 'translation') {
-      setView(m._id, 'original');
+      setView(key, 'original');
       return;
     }
     const e = useTranslations.getState().byKey[key];
     if (e && e.status !== 'pending' && FINAL.has(e.status)) {
       // Já se sabe que não há o que traduzir: avisa sem pedir de novo.
-      setView(m._id, 'original');
+      setView(key, 'original');
       const notice = manualNotice(e);
       if (notice) toast(notice, 'info');
       return;
     }
-    setView(m._id, 'translation');
+    setView(key, 'translation');
     if (!e || e.status === 'failed') request(m.rid, rt.lang, m._id, key, true);
     else markManual(key);
   };
 
   const retry = () => {
     if (!can) return;
-    setView(m._id, 'translation');
+    setView(key, 'translation');
     request(m.rid, rt.lang, m._id, key, true);
   };
 
