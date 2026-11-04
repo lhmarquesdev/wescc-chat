@@ -2,7 +2,8 @@
 // quem cria tem (templatePlan); a delegação do modelo só vem quando quem cria é administrador. O resto se ajusta no
 // editor, que abre na aba Permissões.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RBAC_TEMPLATES, rbacLabel, templatePlan, VISIBLE_KEYS, type RbacTemplate, type RoleInfo } from '@shared/rbac';
+import { RBAC_TEMPLATES, rbacLabel, roleNameProblem, templatePlan, VISIBLE_KEYS, type RbacTemplate, type RoleInfo } from '@shared/rbac';
+import { ROLE_LABEL, roleDisplayName } from '@shared/messageText';
 import { api } from '../../../lib/api';
 import { nameList, plural, roleLabel } from '../../../lib/format';
 import { Icon } from '../../../components/Icon';
@@ -16,13 +17,24 @@ const PURPOSE_MAX = 200;
 
 const infoOf = (r: RbacRole): RoleInfo => ({ id: r._id, scope: r.scope, protected: !!r.protected, root: !!r.root, permissions: r.permissions, delegable: r.delegable ?? [] });
 
-// Identificador livre: o do modelo, ou com -2, -3… se já existir.
+const nameRoles = (roles: RbacRole[]) => roles.map((r) => ({ id: r._id, description: r.description }));
+const problemOf = (id: string, label: string, roles: RbacRole[]) =>
+  roleNameProblem(id, label, nameRoles(roles), ROLE_LABEL, { isNew: true, displayName: roleDisplayName });
+
+// Identificador livre: o do modelo, ou com -2, -3… se já existir (sem maiúsculas e pontuação, como o servidor confere).
 function freeId(base: string, roles: RbacRole[]) {
-  const taken = new Set(roles.map((r) => r._id));
-  if (!taken.has(base)) return base;
+  if (!problemOf(base, '', roles)) return base;
   let i = 2;
-  while (taken.has(`${base}-${i}`)) i++;
+  while (problemOf(`${base}-${i}`, '', roles)) i++;
   return `${base}-${i}`;
+}
+
+// Nome exibido livre: o do modelo, ou com 2, 3… se outro papel já aparece com ele.
+function freeLabel(id: string, base: string, roles: RbacRole[]) {
+  if (problemOf(id, base, roles)?.code !== 'RBAC_DUPLICATE_ROLE_LABEL') return base;
+  let i = 2;
+  while (problemOf(id, `${base} ${i}`.slice(0, NAME_MAX), roles)?.code === 'RBAC_DUPLICATE_ROLE_LABEL' && i < 50) i++;
+  return `${base} ${i}`.slice(0, NAME_MAX);
 }
 
 export function CreateRole({ source, roles, grant, onClose, onCreated }: { source?: RbacRole; roles: RbacRole[]; grant: Grant; onClose: () => void; onCreated: (id: string) => void }) {
@@ -31,7 +43,7 @@ export function CreateRole({ source, roles, grant, onClose, onCreated }: { sourc
   const [tplId, setTplId] = useState<string | null>(null);
   const [copyId, setCopyId] = useState(source?._id ?? '');
   const [name, setName] = useState(source ? freeId(`${source._id}-copia`, roles) : '');
-  const [label, setLabel] = useState(source ? `Cópia de ${roleLabel(source._id)}`.slice(0, NAME_MAX) : '');
+  const [label, setLabel] = useState(source ? freeLabel(name, `Cópia de ${roleLabel(source._id)}`.slice(0, NAME_MAX), roles) : '');
   const [purpose, setPurpose] = useState(source?.purpose ?? '');
   const [scope, setScope] = useState<'Users' | 'Subscriptions'>(source?.scope ?? 'Users');
   const [busy, setBusy] = useState(false);
@@ -58,8 +70,9 @@ export function CreateRole({ source, roles, grant, onClose, onCreated }: { sourc
 
   const pickTemplate = (t: RbacTemplate) => {
     setTplId(t.id);
-    setName(freeId(t.id, roles));
-    setLabel(t.label);
+    const id = freeId(t.id, roles);
+    setName(id);
+    setLabel(freeLabel(id, t.label, roles));
     setPurpose(t.description);
     setScope(t.scope);
   };
@@ -67,8 +80,9 @@ export function CreateRole({ source, roles, grant, onClose, onCreated }: { sourc
     setCopyId(id);
     const r = roles.find((x) => x._id === id);
     if (!r) return;
-    setName(freeId(`${r._id}-copia`, roles));
-    setLabel(`Cópia de ${roleLabel(r._id)}`.slice(0, NAME_MAX));
+    const next = freeId(`${r._id}-copia`, roles);
+    setName(next);
+    setLabel(freeLabel(next, `Cópia de ${roleLabel(r._id)}`.slice(0, NAME_MAX), roles));
     setPurpose(r.purpose ?? '');
     setScope(r.scope);
   };
@@ -77,7 +91,9 @@ export function CreateRole({ source, roles, grant, onClose, onCreated }: { sourc
     if (s === 'copy' && !copyId && roles.length) pickCopy(roles.find((r) => !r.root)?._id ?? roles[0]._id);
   };
 
-  const valid = /^[a-zA-Z0-9 _.-]+$/.test(name.trim()) && (start !== 'template' || !!tpl) && (start !== 'copy' || !!copy);
+  // As mesmas regras do servidor: o identificador e o nome exibido não se passam por outro papel.
+  const problem = name.trim() ? problemOf(name.trim(), label.trim(), roles) : null;
+  const valid = !!name.trim() && !problem && (start !== 'template' || !!tpl) && (start !== 'copy' || !!copy);
   const create = async () => {
     setBusy(true);
     try {
@@ -165,10 +181,10 @@ export function CreateRole({ source, roles, grant, onClose, onCreated }: { sourc
             </select>
           </Field>
         )}
-        <Field label="Identificador" hint="Sem acentos, ex.: supervisor. Não muda depois.">
+        <Field label="Identificador" hint="Sem acentos, ex.: supervisor. Não muda depois." error={problem && problem.code !== 'RBAC_DUPLICATE_ROLE_LABEL' ? problem.error : undefined}>
           <input value={name} autoFocus={start === 'blank'} maxLength={60} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="Nome exibido" hint={`Até ${NAME_MAX} caracteres. ${label.length}/${NAME_MAX}`}>
+        <Field label="Nome exibido" hint={`Até ${NAME_MAX} caracteres. ${label.length}/${NAME_MAX}`} error={problem?.code === 'RBAC_DUPLICATE_ROLE_LABEL' ? problem.error : undefined}>
           <input value={label} maxLength={NAME_MAX} placeholder="Supervisor de operação" onChange={(e) => setLabel(e.target.value)} />
         </Field>
         <Field label="Para que serve" hint={`Uma frase simples. Aparece embaixo do nome. ${purpose.length}/${PURPOSE_MAX}`}>

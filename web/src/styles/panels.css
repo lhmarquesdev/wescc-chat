@@ -1070,6 +1070,11 @@
 .user-card .chips {
   gap: var(--space-1);
 }
+/* O Administrador: coroa e a cor de destaque, que nenhum papel criado recebe. */
+.user-card .pill.root-role {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
 .bio {
   font-size: var(--fs-13);
   line-height: var(--lh-13);

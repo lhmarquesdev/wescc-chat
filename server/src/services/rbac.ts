@@ -9,12 +9,14 @@ import {
   RBAC_KEYS,
   roleDeleteLock,
   roleLock,
+  roleNameProblem,
   ROOT_KEEP,
   userLock,
   type GrantContext,
   type LockReason,
   type RoleInfo,
 } from '@shared/rbac';
+import { ROLE_LABEL, roleDisplayName } from '@shared/messageText';
 import { many, one, tx } from '../db/pool';
 import { ApiError, badRequest, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
@@ -267,9 +269,15 @@ async function assertKnownKeys(keys: string[]) {
   if (bad.length) throw badRequest('error-invalid-permission', `Permissão inexistente: ${bad.join(', ')}`);
 }
 
+// Nome e nome de exibição: um papel não se passa por outro (ver roleNameProblem).
+async function assertRoleName(id: string, description: string | undefined, isNew: boolean) {
+  const roles = await many<{ id: string; description: string | null }>('SELECT id, description FROM roles');
+  const p = roleNameProblem(id, description, roles, ROLE_LABEL, { isNew, displayName: roleDisplayName });
+  if (p) throw rbacError(400, p.code, p.error);
+}
+
 export async function createRole(ctx: Ctx, name: string, input: RoleInput, opts: { canEditPermissions: boolean; batchId?: string; revertsId?: number | null; action?: 'create' | 'rollback' }) {
-  if (!/^[a-zA-Z0-9 _.-]+$/.test(name)) throw badRequest('error-invalid-role-name', 'Nome de papel inválido.');
-  if (name.toLowerCase() === 'admin') throw rbacError(400, 'RBAC_RESERVED_ROLE_NAME', 'O nome admin é reservado.');
+  await assertRoleName(name, input.description, true);
   if (await one('SELECT 1 FROM roles WHERE lower(id) = lower($1)', [name])) throw badRequest('error-duplicate-role-names-not-allowed', 'Já existe um papel com esse nome.');
   const scope = input.scope === 'Subscriptions' ? 'Subscriptions' : 'Users';
   const restrictDirect = !!input.restrictDirect;
@@ -354,6 +362,7 @@ export async function updateRole(ctx: Ctx, id: string, input: RoleInput, opts: {
       (meta.scope !== undefined && meta.scope !== existing.scope) ||
       (meta.restrictDirect !== undefined && meta.restrictDirect !== existing.restrict_direct);
     if (metaChanged && !opts.canEditRole) throw rbacError(403, 'error-not-allowed', 'Sem permissão para editar papéis.');
+    if (meta.description !== undefined && meta.description !== existing.description) await assertRoleName(id, meta.description, false);
     const scope = meta.scope ?? existing.scope;
     if ((meta.restrictDirect ?? existing.restrict_direct) && scope !== 'Users') throw badRequest('error-invalid-params', RESTRICT_GLOBAL_ONLY);
 

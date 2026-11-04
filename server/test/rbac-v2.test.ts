@@ -580,3 +580,69 @@ describe('supervisor que só dá Operação', () => {
     expect((await api('GET', 'users.info', { userId: dona.userId }, plainUser)).user.email).toBeUndefined();
   });
 });
+
+describe('nome de papel: nenhum papel criado se passa por outro', () => {
+  it('recusa "admin " e "admin.", o nome de exibição de um papel padrão e o de outro papel; editar a descrição também', async () => {
+    const mano = await newUser(A);
+    await roleWith(uniq('so-papeis'), ['manage-roles']);
+    const roleId = (await pool.query(`SELECT id FROM roles WHERE id LIKE 'so-papeis-%' ORDER BY id DESC LIMIT 1`)).rows[0].id;
+    expect((await api('POST', 'roles.addUserToRole', { roleName: roleId, userId: mano.userId }, A)).success).toBe(true);
+    for (const name of ['admin ', 'admin.', 'Admin', ' admin', 'ad-min', '.oculto']) {
+      const r = await api('POST', 'rbac.roles.create', { name, description: 'Papel' }, mano);
+      expect(r.success, name).toBe(false);
+      expect(['RBAC_RESERVED_ROLE_NAME', 'error-invalid-role-name']).toContain(r.errorType);
+    }
+    // Nome de exibição de papel padrão (sem maiúsculas e acentos) ou de outro papel.
+    for (const description of ['Administrador', 'administrador', 'ADMIN', 'Usuário', 'usuario', 'Auditor', 'Dono']) {
+      const r = await api('POST', 'rbac.roles.create', { name: uniq('falso'), description }, mano);
+      expect(r.errorType, description).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    }
+    const turno = uniq('turno');
+    expect((await api('POST', 'rbac.roles.create', { name: turno, description: 'Chefe de turno' }, mano)).success).toBe(true);
+    expect((await api('POST', 'rbac.roles.create', { name: uniq('turno2'), description: 'chefe de TURNO' }, mano)).errorType).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    // Um identificador que dobra no de outro papel.
+    expect((await api('POST', 'rbac.roles.create', { name: `${turno.toUpperCase()}`, description: 'Outro' }, mano)).errorType).toBe('error-duplicate-role-names-not-allowed');
+    // Editar a descrição para a de um papel padrão também é recusado; a mesma descrição de antes passa.
+    expect((await api('POST', 'rbac.roles.update', { roleId: turno, description: 'Administrador' }, mano)).errorType).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    expect((await api('POST', 'rbac.roles.update', { roleId: turno, description: 'Chefe de turno', purpose: 'Turno da noite' }, mano)).success).toBe(true);
+    const list = (await api('GET', 'roles.list', undefined, mano)).roles as { _id: string; description: string }[];
+    expect(list.filter((r) => r.description === 'Administrador').map((r) => r._id)).toEqual(['admin']);
+  });
+});
+
+describe('users.setStatus de outra pessoa', () => {
+  it('passa pela hierarquia (o supervisor não mexe no status do Administrador), fica na auditoria e erra em português', async () => {
+    const sup = await newUser(A);
+    const role = uniq('sup-status');
+    await roleWith(role, ['edit-other-user-info']);
+    expect((await api('POST', 'roles.addUserToRole', { roleName: role, userId: sup.userId }, A)).success).toBe(true);
+    const plain = await newUser(A);
+    const before = (await pool.query('SELECT status_text FROM users WHERE id = $1', [A.userId])).rows[0].status_text;
+    const r = await api('POST', 'users.setStatus', { userId: A.userId, status: 'offline', message: 'De férias — fale com a Ana' }, sup);
+    expect(r.status).toBe(403);
+    expect(r.errorType).toBe('RBAC_ADMIN_ONLY');
+    expect((await pool.query('SELECT status_text FROM users WHERE id = $1', [A.userId])).rows[0].status_text).toBe(before);
+    // Quem ele gerencia: muda, e a auditoria guarda antes e depois.
+    expect((await api('POST', 'users.setStatus', { userId: plain.userId, status: 'away', message: 'Em treinamento' }, sup)).success).toBe(true);
+    const row = (await pool.query(`SELECT * FROM audit_log WHERE action = 'user.status.changedByAdmin' AND target->>'userId' = $1 ORDER BY created_at DESC LIMIT 1`, [plain.userId])).rows[0];
+    expect(row?.actor_id).toBe(sup.userId);
+    expect(row.data).toMatchObject({ before: { message: '' }, after: { status: 'away', message: 'Em treinamento' } });
+    // Sem a permissão: a recusa em português; pessoa que não existe: 404.
+    const r2 = await api('POST', 'users.setStatus', { userId: plain.userId, status: 'busy' }, await newUser(A));
+    expect(r2.status).toBe(403);
+    expect(r2.error).toBe('Você não tem permissão para mudar o status de outra pessoa.');
+    expect((await api('POST', 'users.setStatus', { userId: 'nao-existe', status: 'busy' }, sup)).status).toBe(404);
+    // O próprio status continua livre.
+    expect((await api('POST', 'users.setStatus', { status: 'busy', message: 'Reunião' }, sup)).success).toBe(true);
+  });
+
+  it('as recusas padrão saem em português', async () => {
+    const u = await newUser(A);
+    const r = await api('GET', 'audit.log', undefined, u);
+    expect(r.status).toBe(403);
+    expect(r.error).toBe('Você não tem permissão para fazer isso.');
+    const anon = await api('GET', 'me');
+    expect(anon.status).toBe(401);
+    expect(anon.error).toBe('Entre de novo para continuar.');
+  });
+});

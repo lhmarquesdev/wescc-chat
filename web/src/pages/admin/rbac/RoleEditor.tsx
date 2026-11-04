@@ -4,7 +4,8 @@
 // em outras permissões continua.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { areaLevel, isSensitive, KEY_AREA, levelText, RBAC_GROUPS, rbacLabel, ROLE_PURPOSE, VISIBLE_KEYS } from '@shared/rbac';
+import { areaLevel, isSensitive, KEY_AREA, levelText, RBAC_GROUPS, rbacLabel, ROLE_PURPOSE, roleNameProblem, VISIBLE_KEYS } from '@shared/rbac';
+import { roleDisplayName } from '@shared/messageText';
 import { api } from '../../../lib/api';
 import { plural, ROLE_LABEL, roleLabel } from '../../../lib/format';
 import { realtime } from '../../../lib/realtime';
@@ -261,6 +262,11 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
   );
 
   const nameEditable = canEditRole && !role.root && !ROLE_LABEL[role._id];
+  // O nome exibido novo não pode ser o de outro papel (a mesma regra do servidor).
+  const labelProblem =
+    nameEditable && draft.description !== initial.description
+      ? roleNameProblem(role._id, draft.description, roles.map((r) => ({ id: r._id, description: r.description })), ROLE_LABEL, { isNew: false, displayName: roleDisplayName })
+      : null;
 
   return (
     <>
@@ -307,7 +313,7 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
                     <Field label="Identificador" hint="Não muda depois de criado.">
                       <input value={role._id} disabled />
                     </Field>
-                    <Field label="Nome exibido" hint={nameEditable ? `Até ${NAME_MAX} caracteres. ${draft.description.length}/${NAME_MAX}` : 'Nome do sistema.'}>
+                    <Field label="Nome exibido" hint={nameEditable ? `Até ${NAME_MAX} caracteres. ${draft.description.length}/${NAME_MAX}` : 'Nome do sistema.'} error={labelProblem?.error}>
                       <input value={nameEditable ? draft.description : roleLabel(role._id)} disabled={!nameEditable} maxLength={NAME_MAX} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
                     </Field>
                   </div>

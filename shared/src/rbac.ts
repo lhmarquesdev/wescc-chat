@@ -833,3 +833,42 @@ export function templatePlan(t: RbacTemplate, ctx: GrantContext, roles: RoleInfo
   });
   return ctx.root ? { keys, stripped, delegable: valid, delegationSkipped: [] } : { keys, stripped, delegable: [], delegationSkipped: valid };
 }
+
+// ---------- Nome de papel ----------
+
+// Um papel criado não pode se passar por outro (o Administrador, sobretudo). O identificador começa e termina com letra
+// ou número; nem ele (sem maiúsculas, acentos, espaços e pontuação: "admin.", "Admin " e "ad-min" viram "admin") nem o
+// nome de exibição (a descrição curta, ver roleDisplayName) repetem os de outro papel ou os dos papéis padrão.
+export const ROLE_NAME_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9 _.-]*[a-zA-Z0-9])?$/;
+export const foldRoleName = (s: string) => foldText(s).replace(/[^a-z0-9]/g, '');
+
+export interface RoleNameProblem {
+  code: 'error-invalid-role-name' | 'RBAC_RESERVED_ROLE_NAME' | 'error-duplicate-role-names-not-allowed' | 'RBAC_DUPLICATE_ROLE_LABEL';
+  error: string;
+}
+
+// id: o identificador (num papel novo, conferido inteiro; ao editar, só o nome de exibição muda). roles: os papéis que
+// existem, com a descrição. builtin: os nomes dos papéis padrão (ROLE_LABEL), que valem mesmo se a linha sumir.
+export function roleNameProblem(
+  id: string,
+  description: string | null | undefined,
+  roles: { id: string; description?: string | null }[],
+  builtin: Record<string, string>,
+  opts: { isNew: boolean; displayName: (id: string, description?: string | null) => string },
+): RoleNameProblem | null {
+  const others = roles.filter((r) => r.id !== id);
+  if (opts.isNew) {
+    if (!ROLE_NAME_RE.test(id)) return { code: 'error-invalid-role-name', error: 'Use letras, números, espaço, ponto, hífen ou _, começando e terminando com letra ou número.' };
+    const f = foldRoleName(id);
+    if (f === 'admin' || f === foldRoleName(builtin.admin ?? 'Administrador')) return { code: 'RBAC_RESERVED_ROLE_NAME', error: 'O nome admin é reservado.' };
+    const ids = new Set([...Object.keys(builtin), ...others.map((r) => r.id)].map(foldRoleName));
+    if (ids.has(f)) return { code: 'error-duplicate-role-names-not-allowed', error: 'Já existe um papel com esse nome.' };
+  }
+  if (builtin[id]) return null;
+  const shown = foldRoleName(opts.displayName(id, description));
+  const taken = new Set<string>();
+  for (const [k, label] of Object.entries(builtin)) taken.add(foldRoleName(k)).add(foldRoleName(label));
+  for (const r of others) taken.add(foldRoleName(r.id)).add(foldRoleName(opts.displayName(r.id, r.description)));
+  if (shown && taken.has(shown)) return { code: 'RBAC_DUPLICATE_ROLE_LABEL', error: `Já existe um papel que aparece como “${opts.displayName(id, description)}”. Escolha outro nome de exibição.` };
+  return null;
+}

@@ -212,11 +212,19 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
       </div>
       {(globalRoles.length > 0 || data.roles.length > 0) && (
         <div className="chips">
-          {globalRoles.map((r) => (
-            <span key={r} className="pill">
-              {roleLabel(r)}
-            </span>
-          ))}
+          {/* O Administrador tem marca própria (coroa): um papel criado nunca fica igual a ele. */}
+          {globalRoles.map((r) =>
+            r === 'admin' ? (
+              <span key={r} className="pill root-role">
+                <Icon name="rbac-root" size={12} />
+                {roleLabel(r)}
+              </span>
+            ) : (
+              <span key={r} className="pill">
+                {roleLabel(r)}
+              </span>
+            ),
+          )}
           {data.roles.map((r) => (
             <span key={r} className="pill accent">
               {roleLabel(r)} da sala

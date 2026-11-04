@@ -216,18 +216,35 @@ export function usersRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'users.setStatus', {}, async (req, _rep, ctx) => {
     const body = b(req);
-    const target = body.userId && body.userId !== ctx.userId ? body.userId : ctx.userId;
-    if (target !== ctx.userId && !(await hasPermission(ctx.userId, 'edit-other-user-info'))) throw forbidden();
+    const target = body.userId && body.userId !== ctx.userId ? String(body.userId) : ctx.userId;
+    // De outra pessoa: a permissão e a hierarquia (como users.update), e fica na auditoria.
+    const other = target !== ctx.userId ? await one('SELECT id, username, status_default, status_text, status_custom FROM users WHERE id = $1', [target]) : null;
+    if (target !== ctx.userId) {
+      if (!(await hasPermission(ctx.userId, 'edit-other-user-info'))) throw forbidden('Você não tem permissão para mudar o status de outra pessoa.');
+      if (!other) throw notFound('error-invalid-user', 'Usuário não encontrado.');
+      await assertCanManageUser(ctx, target);
+    }
     const message = body.message === undefined || body.message === null ? undefined : String(body.message);
     // Status personalizado: vale o tipo dele e ganha de status. Sem statusId, um status de base limpa o personalizado.
+    let status: string | undefined = body.status;
+    let customId: string | null = null;
     if (body.statusId) {
       const s = await getCustomStatus(String(body.statusId));
       if (!s) throw badRequest('error-invalid-status', 'Status não encontrado.');
-      await setStatus(target, s.status_type, message, s.id);
-      return {};
-    }
-    if (body.status && !['online', 'away', 'busy', 'offline'].includes(body.status)) throw badRequest('error-invalid-status', 'Status inválido.');
-    await setStatus(target, body.status, message);
+      status = s.status_type;
+      customId = s.id;
+    } else if (status && !['online', 'away', 'busy', 'offline'].includes(status)) throw badRequest('error-invalid-status', 'Status inválido.');
+    await setStatus(target, status as any, message, customId);
+    if (other)
+      await audit(
+        actorOf(ctx),
+        'user.status.changedByAdmin',
+        { userId: target, username: other.username },
+        {
+          before: { status: other.status_default, message: other.status_text ?? '', statusId: other.status_custom ?? null },
+          after: { status: status ?? other.status_default, message: message ?? other.status_text ?? '', statusId: status ? customId : other.status_custom ?? null },
+        },
+      );
     return {};
   });
   route(app, 'GET', 'users.getStatus', {}, async (req, _rep, ctx) => {

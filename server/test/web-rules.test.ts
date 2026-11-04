@@ -19,7 +19,9 @@ import type { SpotlightUser, Subscription } from '@shared/index';
 import { foldText, parseSpotlightQuery, spotlightReady } from '@shared/search';
 import { compileHighlights, findHighlight, normalizeHighlights, splitHighlights } from '@shared/highlights';
 import { normalizeStatusName, presenceLabel, selfUserPatch, shownCustomStatus, silencesNotifications, sortStatuses, statusLine, type CustomUserStatus } from '@shared/status';
-import { RBAC_AREAS } from '@shared/rbac';
+import { RBAC_AREAS, foldRoleName, roleNameProblem } from '@shared/rbac';
+import { ROLE_LABEL } from '@shared/messageText';
+import { readableError } from '../../web/src/lib/errorText';
 import { dedupePeople, dedupeRooms, matchesLocal, orderPeople, resultCountText, spotlightHint } from '../../web/src/lib/spotlightRules';
 // Tradução de mensagens
 import { capitalize, isTranslatable, languageLabel, languageOptions, translationKey } from '../../web/src/lib/translateRules';
@@ -790,5 +792,47 @@ describe('tradução de mensagens (regras da web)', () => {
       { value: 'en', label: 'Inglês' },
       { value: 'pt-BR', label: 'Português (Brasil)' },
     ]);
+  });
+});
+
+describe('nome de papel (Novo papel e o editor, iguais ao servidor)', () => {
+  const roles = [
+    { id: 'admin', description: 'Administrador' },
+    { id: 'user', description: 'Usuário' },
+    { id: 'operacao', description: 'Operação' },
+    { id: 'supervisor', description: '' },
+  ];
+  const check = (id: string, d: string, isNew = true) => roleNameProblem(id, d, roles, ROLE_LABEL, { isNew, displayName: roleDisplayName })?.code ?? null;
+  it('o identificador não imita outro e começa e termina com letra ou número', () => {
+    expect(foldRoleName('Admin. ')).toBe('admin');
+    expect(check('admin ', 'X')).toBe('error-invalid-role-name');
+    expect(check('admin.', 'X')).toBe('error-invalid-role-name');
+    expect(check('Ad-min', 'X')).toBe('RBAC_RESERVED_ROLE_NAME');
+    expect(check('administrador', 'X')).toBe('RBAC_RESERVED_ROLE_NAME');
+    expect(check('Super visor', 'X')).toBe('error-duplicate-role-names-not-allowed');
+    expect(check('chefe-turno', 'Chefe de turno')).toBeNull();
+  });
+  it('o nome exibido não repete o de um papel padrão nem o de outro papel (sem maiúsculas e acentos)', () => {
+    expect(check('falso', 'Administrador')).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    expect(check('falso', 'ADMIN')).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    expect(check('falso', 'usuario')).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    expect(check('falso', 'Operacao')).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    expect(check('falso', 'Supervisor')).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    // Sem nome exibido, vale o identificador (Falso), que é livre.
+    expect(check('falso', '')).toBeNull();
+    // Editar: o próprio nome não conta; o identificador já existente não é conferido de novo.
+    expect(check('operacao', 'Operação', false)).toBeNull();
+    expect(check('operacao', 'Auditor', false)).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    expect(check('admin', 'Qualquer', false)).toBeNull();
+  });
+});
+
+describe('texto de erro da API (web)', () => {
+  it('troca o padrão em inglês e o código cru por português, e mantém o texto do servidor', () => {
+    expect(readableError(403, 'error-not-allowed', 'User does not have the permissions required for this action')).toBe('Você não tem permissão para fazer isso.');
+    expect(readableError(401, 'error-unauthorized', 'You must be logged in to do this.')).toBe('Entre de novo para continuar.');
+    expect(readableError(404, 'error-room-not-found', 'error-room-not-found')).toBe('Não encontrado.');
+    expect(readableError(500, undefined, undefined)).toBe('Não deu certo (erro 500).');
+    expect(readableError(400, 'error-invalid-params', 'O parâmetro "name" é obrigatório.')).toBe('O parâmetro "name" é obrigatório.');
   });
 });

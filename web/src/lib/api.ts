@@ -1,4 +1,5 @@
 // Cliente HTTP da API v1.
+import { readableError } from './errorText';
 
 export class ApiError extends Error {
   constructor(
@@ -134,7 +135,7 @@ async function request<T = any>(method: string, path: string, data?: Params | Fo
   if (!res.ok || json.success === false) {
     if (res.status === 401 && path !== 'login') onUnauthorized?.();
     if (res.status === 403 && (json.errorType === 'error-2fa-setup-required' || json.errorType === 'error-password-change-required')) setupRequired();
-    throw new ApiError(res.status, json.errorType ?? 'error', json.error ?? `Erro ${res.status}`, json.details);
+    throw new ApiError(res.status, json.errorType ?? 'error', readableError(res.status, json.errorType, json.error), json.details);
   }
   return json as T;
 }
@@ -165,7 +166,10 @@ export function uploadTo<T = any>(path: string, file: File, fields: Record<strin
         // ignora
       }
       if (xhr.status >= 200 && xhr.status < 300 && json.success !== false) resolve(json);
-      else reject(new ApiError(xhr.status, json.errorType ?? 'error', json.error ?? (xhr.status === 413 ? 'O arquivo é grande demais para o servidor.' : 'Falha no upload'), json.details));
+      else
+        reject(
+          new ApiError(xhr.status, json.errorType ?? 'error', json.error ? readableError(xhr.status, json.errorType, json.error) : xhr.status === 413 ? 'O arquivo é grande demais para o servidor.' : 'Falha no upload', json.details),
+        );
     };
     xhr.onerror = () => reject(new ApiError(0, 'network', 'Falha de rede no upload'));
     xhr.onabort = () => reject(new ApiError(0, 'aborted', 'Envio cancelado.'));
