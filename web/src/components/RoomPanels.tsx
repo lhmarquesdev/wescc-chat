@@ -11,6 +11,9 @@ import { renderMarkdown } from '../lib/markdown';
 import { authorName } from '../lib/messageRules';
 import { useNames } from '../lib/names';
 import { canWithRoles, useStore } from '../lib/store';
+import { clearRoomError, useLanguages, useMyLanguage, useRoomTranslate, useTranslations } from '../lib/translate';
+import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
+import { normalizeLang } from '@shared/translate';
 import { Icon, type IconName } from './Icon';
 import { FileTile } from './MessageItem';
 import { useEscape, useIsPhone } from './overlay';
@@ -26,7 +29,7 @@ import { ExportPanel } from './ExportPanel';
 // Envios agendados: só quem agendou vê as suas.
 import { ScheduledPanel } from './ScheduleControls';
 
-export type PanelId = 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune' | 'access' | 'export' | 'scheduled';
+export type PanelId = 'info' | 'threads' | 'discussions' | 'team' | 'members' | 'search' | 'files' | 'pinned' | 'starred' | 'mentions' | 'notifications' | 'invite' | 'prune' | 'access' | 'export' | 'scheduled' | 'translate';
 
 const TITLES: Record<PanelId, string> = {
   info: 'Informações da sala',
@@ -45,6 +48,7 @@ const TITLES: Record<PanelId, string> = {
   access: 'Permissões do canal',
   export: 'Exportar mensagens',
   scheduled: 'Mensagens agendadas',
+  translate: 'Tradução automática',
 };
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
@@ -139,6 +143,7 @@ export function RoomPanel(p: Props) {
         {p.id === 'access' && <RoomAccessPanel room={p.room} onChanged={p.onChanged} />}
         {p.id === 'export' && <ExportPanel room={p.room} />}
         {p.id === 'scheduled' && <ScheduledPanel room={p.room} />}
+        {p.id === 'translate' && <TranslatePanel {...p} />}
       </div>
     </aside>
   );
@@ -1052,6 +1057,72 @@ function NotificationsPanel({ room, sub }: Props) {
           <option value="nothing">Nada</option>
         </select>
       </Field>
+    </div>
+  );
+}
+
+// Tradução automática desta sala, só para quem liga (o LibreTranslate da empresa traduz o que aparece na tela).
+function TranslatePanel({ room, sub }: Props) {
+  const { list, unavailable } = useLanguages();
+  const mine = useMyLanguage();
+  const { lang } = useRoomTranslate(room._id);
+  const roomError = useTranslations((s) => s.roomError[room._id]);
+  const [busy, setBusy] = useState(false);
+  if (!sub)
+    return (
+      <Empty icon="panel-translate" title="Você não participa desta sala">
+        Entre na sala para ligar a tradução automática. Uma mensagem você ainda pode traduzir pelo menu dela.
+      </Empty>
+    );
+  // Muda na hora; o evento da inscrição confirma (e desfaz se o servidor recusar).
+  const save = (field: 'autoTranslate' | 'autoTranslateLanguage', value: boolean | string | null) => {
+    const before = sub;
+    useStore.getState().upsertSubscription({ ...sub, [field]: value });
+    setBusy(true);
+    api
+      .post('autoTranslate.saveSettings', { roomId: room._id, field, value })
+      .then(() => clearRoomError(room._id))
+      .catch((e) => {
+        useStore.getState().upsertSubscription(before);
+        fail(e);
+      })
+      .finally(() => setBusy(false));
+  };
+  const current = sub.autoTranslateLanguage ? normalizeLang(sub.autoTranslateLanguage) : '';
+  const options = languageOptions(list ?? []);
+  // O idioma salvo continua visível mesmo quando a lista não veio.
+  if (current && !options.some((o) => o.value === current)) options.unshift({ value: current, label: capitalize(languageLabel(current)) });
+  return (
+    <div className="form">
+      <Toggle
+        checked={!!sub.autoTranslate}
+        onChange={(v) => save('autoTranslate', v)}
+        label={`Traduzir automaticamente para ${languageLabel(lang)}`}
+        description="Mensagens de outras pessoas em outros idiomas aparecem traduzidas. Só para você."
+      />
+      <Field label="Idioma">
+        <select value={current} disabled={busy || unavailable || !list} onChange={(e) => save('autoTranslateLanguage', e.target.value || null)}>
+          <option value="">{`Meu idioma (${capitalize(languageLabel(mine))})`}</option>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {unavailable && (
+        <div className="callout warn">
+          <Icon name="error" />
+          <span>O servidor de tradução não respondeu. A lista de idiomas volta quando ele responder.</span>
+        </div>
+      )}
+      {roomError && !unavailable && (
+        <div className="callout warn" role="alert">
+          <Icon name="error" />
+          <span>O idioma escolhido não está disponível no servidor de tradução. Escolha outro.</span>
+        </div>
+      )}
+      <p className="muted small">A tradução é feita pelo servidor da empresa. O texto das mensagens não sai da rede da empresa.</p>
     </div>
   );
 }

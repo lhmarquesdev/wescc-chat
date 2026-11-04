@@ -6,6 +6,9 @@ import { formatDateTime } from '../lib/format';
 import { disablePushHere, enablePushHere, pushEnabledHere, pushSupported, syncPushSubscription } from '../lib/push';
 import { endSession, startSession } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
+import { useLanguages, useTranslateAllowed } from '../lib/translate';
+import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
+import { normalizeLang } from '@shared/translate';
 import { Avatar, Empty, Field, Modal, Segmented, SkeletonList, SkeletonTable, Toggle, confirmDialog, useAsync } from '../components/ui';
 import { useMedia } from '../components/overlay';
 import { Icon } from '../components/Icon';
@@ -357,8 +360,46 @@ function Preferences() {
             </div>
           </div>
         )}
+        {/* Também no celular (o destino das traduções não depende do teclado). */}
+        <TranslationCard value={p.language} onSave={(v) => save({ language: v || null })} />
       </div>
     </>
+  );
+}
+
+// Tradução de mensagens: o idioma de destino (preferences.language). Vazio = o padrão da empresa.
+function TranslationCard({ value, onSave }: { value: unknown; onSave: (v: string) => void }) {
+  const allowed = useTranslateAllowed();
+  const { list, unavailable } = useLanguages();
+  const site = useSetting<string>('Language') || 'pt-BR';
+  if (!allowed) return null;
+  const current = typeof value === 'string' && value ? normalizeLang(value) : '';
+  const options = languageOptions(list ?? []);
+  if (current && !options.some((o) => o.value === current)) options.unshift({ value: current, label: capitalize(languageLabel(current)) });
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div>
+          <h2>Tradução</h2>
+          <p className="card-desc">Mensagens em outros idiomas podem ser traduzidas pelo servidor de tradução da empresa.</p>
+        </div>
+      </div>
+      <div className="form">
+        <Field
+          label="Traduzir mensagens para"
+          hint={unavailable ? 'O servidor de tradução não respondeu. Tente de novo mais tarde.' : 'Para traduzir uma sala inteira, abra Tradução automática no menu da sala.'}
+        >
+          <select value={current} disabled={unavailable || !list} onChange={(e) => onSave(e.target.value)}>
+            <option value="">{`Padrão da empresa (${capitalize(languageLabel(site))})`}</option>
+            {options.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+    </div>
   );
 }
 

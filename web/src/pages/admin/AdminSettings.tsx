@@ -29,6 +29,8 @@ const GROUP_LABEL: Record<string, string> = {
   Calendar: 'Agenda',
   // Integração com o Jira: nome do grupo (aparece na busca de outras telas, nunca na navegação daqui)
   Jira: 'Jira',
+  // Tradução de mensagens (LibreTranslate da empresa)
+  AutoTranslate: 'Tradução automática',
 };
 
 // Integração com o Jira: este grupo tem página própria em Administração → Integrações, então some da navegação e da
@@ -101,6 +103,7 @@ export function AdminSettings() {
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [filter, setFilter] = useState('');
   const [saving, setSaving] = useState(false);
+  const [testingTranslate, setTestingTranslate] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
 
   // Integrações (Jira): sem os grupos que têm página própria (HIDDEN_GROUPS).
@@ -177,6 +180,19 @@ export function AdminSettings() {
       .post('retention.run')
       .then((r) => ok(`${r.removed} itens removidos em ${r.rooms} salas.`))
       .catch(fail);
+  };
+  // Tradução: testa o rascunho da tela (endereço e chave ainda não salvos); a chave mascarada vale como a gravada.
+  const testTranslate = () => {
+    const url = all.find((s) => s._id === 'AutoTranslate_LibreTranslate_Url');
+    setTestingTranslate(true);
+    api
+      .post('autoTranslate.testConnection', { url: url ? value(url) : undefined, apiKey: draft.AutoTranslate_LibreTranslate_ApiKey })
+      .then((r) => {
+        ok(r.message);
+        for (const w of r.warnings ?? []) useStore.getState().toast(w, 'warning');
+      })
+      .catch(fail)
+      .finally(() => setTestingTranslate(false));
   };
   const onNavKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const i = groups.indexOf(group);
@@ -279,6 +295,12 @@ export function AdminSettings() {
               </Link>
             </div>
           )}
+          {group === 'AutoTranslate' && !q && (
+            <div className="callout info">
+              <Icon name="translate" />
+              <span>As mensagens são traduzidas só pelo LibreTranslate da empresa. O endereço precisa ser da rede interna e estar em INTEGRATIONS_ALLOWED_HOSTS (host:porta) no servidor do chat.</span>
+            </div>
+          )}
           {q && !visible.length && (
             <Empty
               icon="search"
@@ -325,6 +347,14 @@ export function AdminSettings() {
               >
                 <Icon name="sync" />
                 Sincronizar agora
+              </button>
+            </div>
+          )}
+          {group === 'AutoTranslate' && !q && (
+            <div className="settings-extra row-actions wrap">
+              <button className="btn" onClick={testTranslate} disabled={testingTranslate} aria-busy={testingTranslate || undefined}>
+                <Icon name="translate" />
+                Testar conexão
               </button>
             </div>
           )}

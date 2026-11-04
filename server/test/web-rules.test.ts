@@ -21,6 +21,8 @@ import { compileHighlights, findHighlight, normalizeHighlights, splitHighlights 
 import { normalizeStatusName, presenceLabel, selfUserPatch, shownCustomStatus, silencesNotifications, sortStatuses, statusLine, type CustomUserStatus } from '@shared/status';
 import { RBAC_AREAS } from '@shared/rbac';
 import { dedupePeople, dedupeRooms, matchesLocal, orderPeople, resultCountText, spotlightHint } from '../../web/src/lib/spotlightRules';
+// Tradução de mensagens
+import { capitalize, isTranslatable, languageLabel, languageOptions, translationKey } from '../../web/src/lib/translateRules';
 
 // Regras puras do chat web que mais de uma tela usa (seta para cima, agrupamento, nome do autor, menu da
 // Administração): os casos que já divergiram entre as telas depois de juntar figurinhas, chamadas e Jira.
@@ -730,5 +732,58 @@ describe('validação de enquete e de horário (bordas exatas)', () => {
     expect(aheadError(ms(365 * 86_400_000 + 1), now)).toBe(AHEAD_ERROR);
     expect(aheadError('ontem', now)).toBe(AHEAD_ERROR);
     expect(aheadError(undefined, now)).toBe(AHEAD_ERROR);
+  });
+});
+
+describe('tradução de mensagens (regras da web)', () => {
+  const OTHER = { _id: 'u-bia', username: 'bia', name: 'Bia' };
+  it('isTranslatable: texto de outra pessoa; nunca o próprio, sistema, figurinha, enquete, encaminhada, cifrada ou vazio', () => {
+    expect(isTranslatable(msg({ u: OTHER, msg: 'Hello team' }), ME._id)).toBe(true);
+    expect(isTranslatable(msg({ u: ME, msg: 'Hello team' }), ME._id)).toBe(false);
+    expect(isTranslatable(msg({ u: OTHER, t: 'uj' }), ME._id)).toBe(false);
+    expect(isTranslatable(msg({ u: OTHER, t: 'rm', msg: '' }), ME._id)).toBe(false);
+    expect(isTranslatable(msg({ u: OTHER, msg: '   ' }), ME._id)).toBe(false);
+    expect(isTranslatable(msg({ u: OTHER, sticker: { fileId: 'f1' } as unknown as MessageSticker }), ME._id)).toBe(false);
+    expect(isTranslatable(msg({ u: OTHER, poll: { question: 'Qual?' } as unknown as MessagePoll }), ME._id)).toBe(false);
+    expect(isTranslatable(msg({ u: OTHER, forward: { rid: 'r2' } as unknown as MessageForward }), ME._id)).toBe(false);
+    // Mensagem cifrada (E2E: msg vazia e e2e preenchido) e sala criptografada: nunca.
+    expect(isTranslatable({ ...msg({ u: OTHER, msg: 'texto' }), e2e: { v: 1 } } as Message, ME._id)).toBe(false);
+    expect(isTranslatable(msg({ u: OTHER, msg: 'Hello' }), ME._id, { encrypted: true })).toBe(false);
+    expect(isTranslatable(msg({ u: OTHER, msg: 'Hello' }), ME._id, { encrypted: false })).toBe(true);
+    // Autor excluído (u._id nulo): continua traduzível.
+    expect(isTranslatable(msg({ u: { _id: null as unknown as string, username: 'removido' }, msg: 'Hello' }), ME._id)).toBe(true);
+  });
+  it('translationKey muda com a edição e com o idioma', () => {
+    const m = msg({ _id: 'x1' });
+    expect(translationKey(m, 'en')).toBe('x1|en|');
+    expect(translationKey({ ...m, editedAt: '2026-11-04T10:00:00.000Z' }, 'en')).toBe('x1|en|2026-11-04T10:00:00.000Z');
+    expect(translationKey(m, 'pt-BR')).not.toBe(translationKey(m, 'en'));
+  });
+  it('languageLabel: nome em português, códigos antigos do LibreTranslate e o nome do servidor como reserva', () => {
+    expect(languageLabel('en')).toBe('inglês');
+    expect(languageLabel('pt-BR')).toBe('português (Brasil)');
+    expect(languageLabel('pt-br')).toBe('português (Brasil)');
+    expect(languageLabel('pb')).toBe('português (Brasil)');
+    expect(languageLabel('es')).toBe('espanhol');
+    expect(languageLabel('xx', 'Xx')).toBe('Xx');
+    expect(languageLabel('xx')).toBe('xx');
+    expect(languageLabel('not a code!', 'Nome')).toBe('Nome');
+  });
+  it('capitalize e languageOptions (ordem do nome em português, sem repetir pb e pt-BR)', () => {
+    expect(capitalize('inglês')).toBe('Inglês');
+    expect(capitalize('')).toBe('');
+    const opts = languageOptions([
+      { language: 'en', name: 'English' },
+      { language: 'pb', name: 'Portuguese (Brazil)' },
+      { language: 'pt-BR', name: 'Portuguese (Brazil)' },
+      { language: 'de', name: 'German' },
+      { language: 'es', name: 'Spanish' },
+    ]);
+    expect(opts).toEqual([
+      { value: 'de', label: 'Alemão' },
+      { value: 'es', label: 'Espanhol' },
+      { value: 'en', label: 'Inglês' },
+      { value: 'pt-BR', label: 'Português (Brasil)' },
+    ]);
   });
 });
