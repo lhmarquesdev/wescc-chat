@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { deviceLabel as sharedDeviceLabel } from '@shared/devices';
 import { Icon } from '../../components/Icon';
 import { Menu, UserAvatar } from '../../components/ui';
 import { formatDateTime, roleLabel } from '../../lib/format';
@@ -114,12 +115,9 @@ export function lastSeen(iso?: string | null) {
 
 type Device = { name?: string; os?: string; browser?: string; type?: string };
 
-// O servidor monta "Chrome em Windows"; partes desconhecidas viram "Navegador desconhecido".
-export function deviceLabel(d: Device) {
-  const name = String(d.name ?? '');
-  if (/^(Outro|API)?\s*em\s+Desconhecido$/i.test(name) || /^Outro\b/i.test(name)) return d.os && d.os !== 'Desconhecido' ? `Navegador desconhecido em ${d.os}` : 'Navegador desconhecido';
-  return name.replace(/ em Desconhecido$/, '') || 'Navegador desconhecido';
-}
+// O servidor monta "Chrome em Windows"; partes desconhecidas viram "Navegador ou aplicativo desconhecido" (a mesma regra
+// do e-mail de acesso novo e de Meus dados, em shared/devices.ts).
+export const deviceLabel = (d: Device) => sharedDeviceLabel(d);
 
 export function isMobileDevice(d: Device) {
   return d.os === 'Android' || d.os === 'iOS' || d.type === 'mobile';

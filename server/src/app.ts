@@ -48,6 +48,7 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   await app.register(websocket, { options: { maxPayload: 64 * 1024, server: chatUpgrades as unknown as http.Server } });
   const { isSfuUpgrade, sfuUpgrade, useBridgeLogger } = await import('./calls/sfu-bridge');
   useBridgeLogger(app.log);
+  (await import('./lib/log')).useAppLog(app.log);
   app.server.on('upgrade', (req, socket, head) => {
     if (isSfuUpgrade(req.url)) sfuUpgrade(req, socket, head);
     else chatUpgrades.emit('upgrade', req, socket, head);

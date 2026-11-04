@@ -8,6 +8,7 @@ import { listPermissions, listRoles, hasPermission, roleScope } from '../service
 import { assertRoleChange, createRole, deleteRole, updatePermissionMatrix, updateRole, writeUserRoles } from '../services/rbac';
 import { getSetting, isKnownSetting, isSecretSetting, listSettings, updateSettings } from '../services/settings';
 import { engagementChannels, engagementMessages, engagementUsers, workspaceStatistics } from '../services/stats';
+import { mailStatus, sendMail } from '../services/mailer';
 import { runRetention } from '../services/retention';
 import { getRoom, setRoomRole } from '../services/rooms';
 import { mapUser } from '../services/mappers';
@@ -225,6 +226,28 @@ export function adminRoutes(app: FastifyInstance) {
     const r = await runRetention();
     await audit(actorOf(ctx), 'retention.run.manual', {}, r);
     return r;
+  });
+
+  // ---------- E-mail (SMTP) ----------
+  // O último envio desta instância (a tela mostra a última falha) e o e-mail de teste, com o motivo da falha.
+  route(app, 'GET', 'email.status', { permissions: ['view-privileged-setting'] }, async () => ({ status: mailStatus() }));
+  route(app, 'POST', 'email.sendTest', { permissions: ['edit-privileged-setting'] }, async (req, _rep, ctx) => {
+    if (!getSetting<string>('SMTP_Host')) throw badRequest('error-smtp-not-configured', 'Preencha o servidor SMTP e salve antes de testar.');
+    const me = await one<{ email: string | null }>('SELECT email FROM users WHERE id = $1', [ctx.userId]);
+    const to = String(b(req).to ?? '').trim() || me?.email || '';
+    if (!/^[^\s@]+@[^\s@]+$/.test(to)) throw badRequest('error-invalid-email', 'Informe um e-mail para receber o teste (a sua conta não tem e-mail).');
+    const site = getSetting<string>('Site_Name');
+    try {
+      await sendMail(
+        { to, subject: `[${site}] E-mail de teste`, text: `Este é um e-mail de teste do ${site}. Se ele chegou, o envio de e-mails está funcionando.` },
+        { throwOnError: true },
+      );
+    } catch (e: any) {
+      await audit(actorOf(ctx), 'email.test', { to }, { ok: false, error: e.message });
+      throw badRequest('error-smtp-failed', e.message);
+    }
+    await audit(actorOf(ctx), 'email.test', { to }, { ok: true });
+    return { message: `E-mail de teste enviado para ${to}.`, status: mailStatus() };
   });
 
   // ---------- LDAP ----------

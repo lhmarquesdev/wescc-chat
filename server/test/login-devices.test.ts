@@ -147,7 +147,8 @@ describe('login em dispositivo novo', () => {
     await browserLogin(u.username, { ua: 'curl/8.5.0' });
     await settle();
     expect(outbox).toHaveLength(1);
-    expect(outbox[0].text).toContain('Dispositivo: Outro em Desconhecido');
+    expect(outbox[0].text).toContain('Dispositivo: Navegador ou aplicativo desconhecido\n');
+    expect(outbox[0].text).not.toContain('Outro em Desconhecido');
     await browserLogin(u.username, { ua: 'python-requests/2.32' });
     await announced(u.id, 2);
     expect(outbox).toHaveLength(2);

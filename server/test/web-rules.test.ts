@@ -22,6 +22,7 @@ import { normalizeStatusName, presenceLabel, selfUserPatch, shownCustomStatus, s
 import { RBAC_AREAS, foldRoleName, roleNameProblem } from '@shared/rbac';
 import { ROLE_LABEL } from '@shared/messageText';
 import { readableError } from '../../web/src/lib/errorText';
+import { deviceLabel } from '@shared/devices';
 import { dedupePeople, dedupeRooms, matchesLocal, orderPeople, resultCountText, spotlightHint } from '../../web/src/lib/spotlightRules';
 // Tradução de mensagens
 import { capitalize, isTranslatable, languageLabel, languageOptions, translationKey } from '../../web/src/lib/translateRules';
@@ -834,5 +835,17 @@ describe('texto de erro da API (web)', () => {
     expect(readableError(404, 'error-room-not-found', 'error-room-not-found')).toBe('Não encontrado.');
     expect(readableError(500, undefined, undefined)).toBe('Não deu certo (erro 500).');
     expect(readableError(400, 'error-invalid-params', 'O parâmetro "name" é obrigatório.')).toBe('O parâmetro "name" é obrigatório.');
+  });
+});
+
+describe('nome do dispositivo (Dispositivos, e-mail de acesso novo e Meus dados)', () => {
+  it('programa ou navegador desconhecido nunca vira "Outro em Desconhecido"', () => {
+    expect(deviceLabel({ name: 'Chrome em Windows', browser: 'Chrome', os: 'Windows' })).toBe('Chrome em Windows');
+    expect(deviceLabel({ name: 'Outro em Desconhecido', browser: 'Outro', os: 'Desconhecido' })).toBe('Navegador ou aplicativo desconhecido');
+    expect(deviceLabel({ name: 'Outro em Linux', browser: 'Outro', os: 'Linux' })).toBe('Navegador ou aplicativo desconhecido em Linux');
+    expect(deviceLabel({ name: 'API em Desconhecido', browser: 'API', os: 'Desconhecido' })).toBe('Navegador ou aplicativo desconhecido');
+    expect(deviceLabel({ name: 'Firefox em Desconhecido', browser: 'Firefox', os: 'Desconhecido' })).toBe('Firefox');
+    expect(deviceLabel({ name: 'Notebook da Ana' })).toBe('Notebook da Ana');
+    expect(deviceLabel({})).toBe('Navegador ou aplicativo desconhecido');
   });
 });

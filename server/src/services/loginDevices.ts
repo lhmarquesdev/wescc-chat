@@ -10,6 +10,7 @@
 // para quem já usava o chat antes desta versão (nenhuma conta recebe uma leva de e-mails). Os dispositivos são anotados
 // sempre, mesmo com o aviso desligado: ligar depois não dispara e-mails para todo mundo.
 import net from 'node:net';
+import { deviceLabel } from '@shared/devices';
 import { one, query } from '../db/pool';
 import { randomToken, sha256 } from '../lib/ids';
 import { audit } from './audit';
@@ -100,7 +101,7 @@ export async function sendNewDeviceEmail(user: { email?: string | null; type?: s
   const site = getSetting<string>('Site_Name');
   const name = user.name || user.username;
   const when = formatLong(at);
-  const device = parsed.name || `${parsed.browser} em ${parsed.os}`;
+  const device = deviceLabel(parsed);
   const where = ip || 'desconhecido';
   const link = `${siteUrl()}/account/devices`;
   const text =

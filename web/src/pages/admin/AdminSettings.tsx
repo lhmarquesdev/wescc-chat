@@ -1,7 +1,7 @@
 import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { api, errorMessage } from '../../lib/api';
-import { plural } from '../../lib/format';
+import { formatDateTime, plural } from '../../lib/format';
 import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { RoomPicker } from '../../components/Pickers';
@@ -96,6 +96,54 @@ const LABEL_OVERRIDE: Record<string, string> = { Default_Channels: 'Canais padr�
 const labelOf = (s: any): string => LABEL_OVERRIDE[s._id] ?? s.label;
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+// E-mail: a última falha de envio desta instância (o envio é em segundo plano: senão ninguém fica sabendo) e o e-mail
+// de teste, que mostra o motivo. O teste usa o que está salvo.
+function EmailExtra({ unsaved }: { unsaved: boolean }) {
+  const { data, reload } = useAsync(() => api.get('email.status'), []);
+  const [testing, setTesting] = useState(false);
+  const st = data?.status as { configured: boolean; lastSuccessAt: string | null; lastFailure: { at: string; error: string; subject: string } | null } | undefined;
+  const failedLast = !!st?.lastFailure && (!st.lastSuccessAt || st.lastFailure.at > st.lastSuccessAt);
+  const test = () => {
+    setTesting(true);
+    api
+      .post('email.sendTest')
+      .then((r) => ok(r.message))
+      .catch(fail)
+      .finally(() => {
+        setTesting(false);
+        reload();
+      });
+  };
+  const hint = !st?.configured ? 'Preencha o servidor SMTP e salve para testar.' : unsaved ? 'Salve as alterações antes de testar.' : 'Vai para o e-mail da sua conta.';
+  return (
+    <>
+      {st && failedLast && (
+        <div className="callout warn" role="status">
+          <Icon name="warning" />
+          <span>
+            Último envio falhou em {formatDateTime(st.lastFailure!.at)} ({st.lastFailure!.subject}): {st.lastFailure!.error}
+          </span>
+        </div>
+      )}
+      {st && !failedLast && st.lastSuccessAt && (
+        <div className="callout info" role="status">
+          <Icon name="success" />
+          <span>Último envio bem-sucedido em {formatDateTime(st.lastSuccessAt)}.</span>
+        </div>
+      )}
+      <div className="settings-extra row-actions wrap">
+        <button className="btn" onClick={test} disabled={testing || unsaved || !st?.configured} aria-busy={testing || undefined} aria-describedby="email-test-hint">
+          <Icon name="email" />
+          Enviar e-mail de teste
+        </button>
+        <span id="email-test-hint" className="muted small">
+          {hint}
+        </span>
+      </div>
+    </>
+  );
+}
 
 export function AdminSettings() {
   const { data, loading, reload } = useAsync(() => api.get('settings'), []);
@@ -373,6 +421,7 @@ export function AdminSettings() {
               )}
             </div>
           )}
+          {group === 'Email' && !q && <EmailExtra unsaved={changedIn('Email') > 0} />}
           {group === 'RetentionPolicy' && !q && (
             <div className="settings-extra row-actions">
               <button className="btn danger" onClick={runRetention}>

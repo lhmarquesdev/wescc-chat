@@ -8,6 +8,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { UserDataRequest } from '@shared/index';
 import { ENCRYPTED_PLACEHOLDER, EXPORT_MAX_FILES, exportSlug, isEncryptedMessage, nextDataRequestAt, safeZipName } from '@shared/dataExport';
+import { deviceLabel } from '@shared/devices';
 import { emojiText } from '@shared/emoji';
 import { formatBytes, roleDisplayName } from '@shared/messageText';
 import { messagePreviewText } from '@shared/stickers';
@@ -259,7 +260,7 @@ async function* userZipEntries(user: any): AsyncGenerator<ZipEntry> {
   const salas: { id: string; nome: string; tipo: string; papeis: string[]; entrouEm: string }[] = [];
   for (const s of subs) salas.push({ id: s.id, nome: await roomLabel(s, user.id), tipo: roomKindLabel(s), papeis: s.sub_roles, entrouEm: s.joined_at });
   const sessoes = (await many('SELECT device, created_at, last_active_at FROM sessions WHERE user_id = $1 AND expires_at > now() ORDER BY created_at', [user.id])).map((s) => ({
-    dispositivo: s.device?.name ?? '',
+    dispositivo: deviceLabel(s.device ?? {}),
     ip: s.device?.ip ?? null,
     criadaEm: s.created_at,
     ultimoUso: s.last_active_at,
