@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import type { Setting, SettingType } from '@shared/index';
 import { jiraSiteAllowed, parseAllowedHosts } from '@shared/integrations';
+import { translateUrlCheck } from '@shared/translate';
 import { config } from '../config';
 import { many, query } from '../db/pool';
 import { bus } from '../realtime/bus';
@@ -42,7 +43,7 @@ function validateLdapMap(v: unknown): string | null {
 // ---------- Geral ----------
 add('General', 'Workspace', 'Site_Name', 'string', 'Wescc Chat', { public: true, label: 'Nome do workspace' });
 add('General', 'Workspace', 'Site_Url', 'string', process.env.SITE_URL ?? 'http://localhost:3000', { public: true, label: 'URL do site' });
-add('General', 'Workspace', 'Language', 'string', 'pt-BR', { public: true, label: 'Idioma padrão' });
+add('General', 'Workspace', 'Language', 'string', 'pt-BR', { public: true, label: 'Idioma padrão (destino das traduções de mensagens)' });
 add('General', 'Workspace', 'Default_Channels', 'string', 'geral', { label: 'Canais padrão (separados por vírgula)' });
 add('Layout', 'Home', 'Layout_Home_Title', 'string', 'Início', { public: true, label: 'Título da página inicial' });
 add('Layout', 'Home', 'Layout_Home_Body', 'multiline', 'Boas-vindas ao chat interno.', { public: true, label: 'Conteúdo da página inicial (Markdown)' });
@@ -392,6 +393,27 @@ add('Jira', 'Chat', 'Jira_Unfurl_Max', 'int', 3, { label: 'Prévias por mensagem
 add('Jira', 'Chat', 'Jira_Projects_Visible', 'string', '', { label: 'Projetos visíveis para toda a empresa (prévias)', validate: validateProjectKeys });
 add('Jira', 'Chat', 'Jira_Projects_Create', 'string', '', { label: 'Projetos em que o chat cria issues (vazio = todos que a pessoa pode)', validate: validateProjectKeys });
 add('Jira', 'Chat', 'Jira_Default_Project', 'string', '', { label: 'Projeto sugerido ao criar issues', validate: validateProjectKeys });
+
+// Tradução de mensagens: só pelo LibreTranslate da empresa (server/src/translate). O endereço precisa estar em
+// INTEGRATIONS_ALLOWED_HOSTS e ser da rede interna (conferido a cada chamada); a chave pode vir de arquivo.
+const translateUrlRule = (v: unknown) => {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+  const r = translateUrlCheck(s, parseAllowedHosts(process.env.INTEGRATIONS_ALLOWED_HOSTS));
+  return 'problem' in r ? r.problem : null;
+};
+add('AutoTranslate', 'Servidor', 'AutoTranslate_Enabled', 'boolean', false, { public: true, label: 'Tradução de mensagens' });
+add('AutoTranslate', 'Servidor', 'AutoTranslate_LibreTranslate_Url', 'string', '', { label: 'Endereço do LibreTranslate (ex.: http://10.0.0.20:5000)', validate: translateUrlRule });
+add('AutoTranslate', 'Servidor', 'AutoTranslate_LibreTranslate_ApiKey', 'password', '', {
+  label: 'Chave da API do LibreTranslate (deixe vazio se o servidor não pede)',
+  validate: envLocked('LIBRETRANSLATE_API_KEY_FILE', () => !!config.translate.apiKey),
+});
+add('AutoTranslate', 'Limites', 'AutoTranslate_Timeout_Seconds', 'int', 15, { label: 'Tempo limite de cada chamada ao LibreTranslate (segundos)', validate: intRange(3, 60) });
+add('AutoTranslate', 'Limites', 'AutoTranslate_User_Limit_Per_Minute', 'int', 120, {
+  label: 'Mensagens traduzidas por pessoa por minuto (as que já têm tradução não contam)',
+  validate: intRange(10, 2000),
+});
+add('AutoTranslate', 'Limites', 'AutoTranslate_Max_Concurrent', 'int', 4, { label: 'Chamadas ao mesmo tempo ao LibreTranslate, por instância do chat', validate: intRange(1, 32) });
 
 // Agenda (aparece na tela genérica de configurações, grupo Agenda).
 add('Calendar', 'Agenda', 'Calendar_Enabled', 'boolean', true, { public: true, label: 'Agenda e reuniões do chat' });

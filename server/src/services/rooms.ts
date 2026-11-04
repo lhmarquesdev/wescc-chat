@@ -12,6 +12,7 @@ import { hasPermission, rolesHavePermission, getUserRoles, roleInfos } from './p
 import { getSetting } from './settings';
 import { actorOf, getUserById, type Ctx } from './users';
 import { emit } from './hooks';
+import { forgetRoomTranslations } from '../translate/forget';
 
 const ROOM_NAME_RE = /^[0-9a-zA-ZÀ-ſ._-]{1,64}$/;
 
@@ -523,6 +524,10 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   if (!sets.length) return room;
   sets.push('updated_at = now()');
   await query(`UPDATE rooms SET ${sets.join(', ')} WHERE id = $1`, params);
+  if (s.encrypted === true && !room.encrypted) {
+    // Sala criptografada não guarda nem faz traduções: o servidor não pode ler o texto.
+    for (const sub of await forgetRoomTranslations(rid)) await notifySubscription(sub.user_id, rid, 'updated', sub);
+  }
   for (const [t, msg] of sys) await sendSystemMessage(rid, t, me, msg);
   await audit(actorOf(ctx), 'room.settings.changed', { rid, name: room.name }, { fields: Object.keys(s) });
   await notifyRoomUpdated(rid);

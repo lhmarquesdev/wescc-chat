@@ -1,5 +1,6 @@
 import { normalizeHighlights } from '@shared/highlights';
 import type { UserPreferences, UserStatus } from '@shared/index';
+import { LANG_RE, normalizeLang } from '@shared/translate';
 import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound, unauthorized } from '../lib/errors';
 import { newId, randomToken, sha256 } from '../lib/ids';
@@ -574,8 +575,22 @@ export async function setPreferences(ctx: Ctx, prefs: UserPreferences) {
     if (!r.ok) throw badRequest('error-invalid-highlights', r.error);
     data.highlights = r.words;
   }
+  // Idioma da pessoa (destino das traduções de mensagens). Vazio volta ao padrão da empresa: a chave sai.
+  const drop: string[] = [];
+  if ('language' in data) {
+    const v = data.language;
+    if (v === '' || v === null || v === undefined) {
+      delete data.language;
+      drop.push('language');
+    } else if (typeof v !== 'string' || !LANG_RE.test(v.trim())) throw badRequest('error-invalid-params', 'Idioma inválido.');
+    else data.language = normalizeLang(v);
+  }
   const before = await one('SELECT preferences FROM users WHERE id = $1', [ctx.userId]);
-  const row = await one(`UPDATE users SET preferences = preferences || $2::jsonb, updated_at = now() WHERE id = $1 RETURNING *`, [ctx.userId, JSON.stringify(data)]);
+  const row = await one(`UPDATE users SET preferences = (preferences - $3::text[]) || $2::jsonb, updated_at = now() WHERE id = $1 RETURNING *`, [
+    ctx.userId,
+    JSON.stringify(data),
+    drop,
+  ]);
   if (row && JSON.stringify(before?.preferences ?? {}) !== JSON.stringify(row.preferences ?? {})) {
     bus.publish({ user: row.id }, { type: 'user', action: 'updated', user: { _id: row.id, preferences: row.preferences } });
   }
