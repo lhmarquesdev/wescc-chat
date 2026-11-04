@@ -59,7 +59,9 @@ export function E2eBanner({ room }: { room: Room }) {
     return (
       <div className="e2e-banner" role="note">
         <Icon name="encrypted" size={16} />
-        <span className="e2e-banner-text">{E2E_UI.ready}</span>
+        <span className="e2e-banner-text" title={E2E_UI.ready}>
+          {E2E_UI.ready}
+        </span>
         <button type="button" className="link" onClick={() => void openE2eDialog('info')}>
           Saiba mais
         </button>

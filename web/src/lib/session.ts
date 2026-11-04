@@ -192,10 +192,11 @@ export async function logout() {
   clearDrafts();
   resetStickers();
   await api.post('logout').catch(() => {});
-  endSession();
+  await endSession();
 }
 
-export function endSession() {
+// Devolve a limpeza que leva tempo (a chave da criptografia no IndexedDB): espere antes de trocar de página.
+export function endSession(): Promise<void> {
   void unsubscribeOnLogout();
   setCredentials(null);
   realtime.stop();
@@ -208,7 +209,7 @@ export function endSession() {
   clearDrafts();
   resetStickers();
   // Criptografia: a chave guardada neste navegador e tudo o que foi decifrado saem junto com a conta.
-  resetE2e();
+  return resetE2e();
 }
 
 // Rascunhos ficam no navegador: ao sair, não podem ficar para o próximo usuário do computador.
@@ -222,8 +223,9 @@ function clearDrafts() {
 
 setUnauthorizedHandler(() => {
   if (getCredentials()) {
-    endSession();
-    if (!location.pathname.startsWith('/login')) location.href = '/login';
+    void endSession().finally(() => {
+      if (!location.pathname.startsWith('/login')) location.href = '/login';
+    });
   }
 });
 
@@ -231,8 +233,9 @@ setUnauthorizedHandler(() => {
 // Outra pessoa entrou lá: a aba abre de novo com a conta dela (limpar aqui a tiraria da conta na outra aba).
 export function signedOutElsewhere(why: 'gone' | 'other') {
   if (why === 'other') return location.reload();
-  endSession();
-  if (!location.pathname.startsWith('/login')) location.href = '/login';
+  void endSession().finally(() => {
+    if (!location.pathname.startsWith('/login')) location.href = '/login';
+  });
 }
 setSignedOutElsewhereHandler(signedOutElsewhere);
 

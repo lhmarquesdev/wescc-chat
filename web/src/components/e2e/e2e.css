@@ -167,6 +167,18 @@
   color: var(--fg-2);
 }
 
+/* ---------- Busca nas mensagens carregadas ---------- */
+.e2e-search-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1-5);
+  margin: var(--space-2) 0 0;
+}
+.e2e-search-hint > .icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
 /* ---------- Minha conta ---------- */
 .e2e-card .form-actions {
   flex-wrap: wrap;

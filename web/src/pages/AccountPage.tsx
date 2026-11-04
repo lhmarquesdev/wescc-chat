@@ -224,7 +224,7 @@ function DeleteAccount({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       await api.post('users.deleteOwnAccount', { password });
-      endSession();
+      await endSession();
       location.href = '/login';
     } catch (e) {
       fail(e);

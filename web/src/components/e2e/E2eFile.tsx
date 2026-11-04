@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { E2EFileRef, Message } from '@shared/index';
 import { E2E_AUTO_DECRYPT_MAX, E2E_FILE_NAME, safeBlobType } from '@shared/e2e';
+import { formatVoiceDuration } from '@shared/stickers';
 import { getCredentials } from '../../lib/api';
 import { decryptFile } from '../../lib/e2e/crypto';
 import { formatBytes } from '../../lib/format';
@@ -174,7 +175,7 @@ export function E2eFile({ m, file }: { m: Message; file: E2EFileRef }) {
         <span className="att-file-meta">
           <strong className="att-file-name">{label}</strong>
           <span className="att-file-size">
-            {state.st === 'loading' ? 'Decifrando…' : kind === 'file' ? meta : `${file.duration ? `${Math.round(file.duration)} s · ` : ''}${tapText}`}
+            {state.st === 'loading' ? 'Decifrando…' : kind === 'file' ? meta : `${file.duration ? `${formatVoiceDuration(file.duration)} · ` : ''}${tapText}`}
           </span>
         </span>
         <span className="att-file-dl" aria-hidden="true">

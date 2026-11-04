@@ -198,11 +198,12 @@ async function restoreFromStore(expected?: string) {
 }
 
 // Ao sair da conta: nada fica (IndexedDB, memória e mensagens decifradas).
-export function resetE2e() {
+// Devolve a limpeza do IndexedDB: quem sai e já troca de página espera por ela (a navegação cancelaria a limpeza).
+export function resetE2e(): Promise<void> {
   forgetMemory();
   myId = null;
   useE2e.setState({ status: 'loading' });
-  void clearKeystore();
+  return clearKeystore();
 }
 
 async function becomeReady(priv: CryptoKey, pub: string, fp: string) {
@@ -466,6 +467,9 @@ async function provide(rid: string, keyID: string, opts: { wait: boolean }) {
   await exclusive(`wescc-e2e-${rid}`, async () => {
     const key = keyOf(rid, keyID);
     if (!key || my !== epoch) return;
+    // A chave trocou durante a espera (ou vai trocar): quem troca entrega a nova; a antiga não serve mais.
+    const cur = current.get(rid);
+    if (cur && (cur.keyID !== keyID || cur.rotate)) return;
     const r = await api.get<{ users: { _id: string; e2e: { public_key: string } }[] }>('e2e.getUsersOfRoomWithoutKey', { rid, keyID });
     if (!r.users.length || my !== epoch) return;
     await sendBatches(rid, keyID, await wrapFor(r.users, key));
