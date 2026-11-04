@@ -40,7 +40,11 @@ export function MessageNotices() {
         const sub = st.subscriptions[s.rid];
         const where = sub ? (sub.t === 'd' ? sub.fname || sub.name : `#${sub.fname || sub.name}`) : 'uma conversa';
         const path = `${roomPath({ rid: s.rid, t: sub?.t ?? 'c' })}?tab=scheduled`;
-        st.toast(`Sua mensagem agendada em ${where} não foi enviada: ${s.error ?? ''}`, 'error', { icon: 'schedule', duration: 15_000, key: scheduledFailKey(s._id), action: { label: 'Ver', onClick: () => navigate(path) } });
+        const text = `Sua mensagem agendada em ${where} não foi enviada: ${s.error ?? ''}`;
+        // Fica até a pessoa fechar (ou resolver a agendada); com a janela em segundo plano, também a notificação do
+        // sistema. Depois disso, o cartão "Agendada não enviada" em Para você continua lá.
+        st.toast(text, 'error', { icon: 'schedule', duration: Infinity, key: scheduledFailKey(s._id), action: { label: 'Ver', onClick: () => navigate(path) } });
+        systemNotify('Mensagem agendada não enviada', `${where}: ${s.error ?? ''}`.slice(0, 300), `scheduled-${s._id}`, path);
       }
     });
     return () => void off();

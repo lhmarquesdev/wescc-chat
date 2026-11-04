@@ -118,11 +118,19 @@ export function ScheduleModal({
 // Faixa acima do compositor: quantas agendadas nesta conversa.
 export function ScheduledStrip({ rid, onOpen }: { rid: string; onOpen: () => void }) {
   const count = useStore((s) => s.scheduled.filter((x) => x.rid === rid).length);
+  // As que não saíram aparecem em destaque até a pessoa reagendar, enviar ou excluir.
+  const failed = useStore((s) => s.scheduled.filter((x) => x.rid === rid && x.status === 'failed').length);
   if (!count) return null;
   return (
-    <div className="composer-bar scheduled">
-      <Icon name="schedule" size={14} />
-      <span className="composer-bar-text">{count === 1 ? '1 mensagem agendada nesta conversa' : `${plural(count, 'mensagem agendada', 'mensagens agendadas')} nesta conversa`}</span>
+    <div className={failed ? 'composer-bar scheduled failed' : 'composer-bar scheduled'} role={failed ? 'status' : undefined}>
+      <Icon name={failed ? 'warning' : 'schedule'} size={14} />
+      <span className="composer-bar-text">
+        {failed
+          ? plural(failed, 'mensagem agendada não foi enviada', 'mensagens agendadas não foram enviadas')
+          : count === 1
+            ? '1 mensagem agendada nesta conversa'
+            : `${plural(count, 'mensagem agendada', 'mensagens agendadas')} nesta conversa`}
+      </span>
       <button type="button" className="btn ghost small" onClick={onOpen}>
         Ver
       </button>

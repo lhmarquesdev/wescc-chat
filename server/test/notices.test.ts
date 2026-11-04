@@ -385,6 +385,29 @@ describe('"Ciente" nos avisos', () => {
     expect((await api('POST', 'chat.ack', { messageId: 'naoexiste123' }, m1)).status).toBe(404);
   });
 
+  it('aviso que pede Ciente notifica os membros como uma menção (também com "só menções"); aviso comum, não', async () => {
+    const turno = (await noticeChannel(owner, [m2], { noticeAck: true }))._id;
+    const ws = connectWs(m2);
+    await ws.ready;
+    try {
+      // Sem preferência própria: na sala de canal vale "só menções".
+      await send(owner, turno, 'Aviso comum, sem Ciente.');
+      await send(owner, turno, 'Troca de turno às 18h. Confirme.', { ackRequired: true });
+      const ev = await ws.waitFor((e) => e.type === 'notification' && e.rid === turno);
+      expect(ev.text).toContain('Troca de turno às 18h.');
+      expect(ws.events.filter((e) => e.type === 'notification' && e.rid === turno)).toHaveLength(1);
+      // Ocupado continua sem aviso.
+      await api('POST', 'users.setStatus', { status: 'busy' }, m2);
+      const before = ws.events.length;
+      await send(owner, turno, 'Outro aviso com Ciente.', { ackRequired: true });
+      await sleep(300);
+      expect(ws.events.slice(before).filter((e) => e.type === 'notification')).toHaveLength(0);
+      await api('POST', 'users.setStatus', { status: 'online' }, m2);
+    } finally {
+      ws.close();
+    }
+  });
+
   it('quem publica vê confirmados e pendentes; leitor não', async () => {
     const acked = await api('GET', 'chat.getAcks', { messageId: notice._id, status: 'acked' }, pub);
     expect(acked.status).toBe(200);

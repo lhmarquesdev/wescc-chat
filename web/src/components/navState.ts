@@ -79,7 +79,7 @@ export function useMentionTotal() {
 
 export interface ForYouItem {
   key: string;
-  kind: 'mention' | 'missed';
+  kind: 'mention' | 'missed' | 'scheduled';
   title: string;
   sub: string;
   ts: string;
@@ -131,7 +131,22 @@ export function useForYou(max = 3): ForYouItem[] {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   const { recent } = useMissedCalls();
+  // Agendada que não saiu: fica aqui até a pessoa reagendar, enviar ou excluir (a lista do store só tem as dela).
+  const scheduled = useStore((s) => s.scheduled);
   return useMemo(() => {
+    const failed: ForYouItem[] = scheduled
+      .filter((x) => x.status === 'failed')
+      .map((x) => {
+        const s = subs[x.rid];
+        return {
+          key: `s-${x._id}`,
+          kind: 'scheduled',
+          title: 'Agendada não enviada',
+          sub: [s ? (s.t === 'd' ? s.fname || s.name : roomLabel(s)) : '', when(x.sendAt)].filter(Boolean).join(' · '),
+          ts: x._updatedAt || x.sendAt,
+          to: `${roomPath(s ?? { rid: x.rid, t: 'c' })}?tab=scheduled`,
+        };
+      });
     const mentions: ForYouItem[] = rooms.map((s) => {
       const m = last[s.rid];
       // O alias (webhook) no lugar do robô, como no cabeçalho da mensagem.
@@ -160,6 +175,7 @@ export function useForYou(max = 3): ForYouItem[] {
         username: c.caller.username,
       };
     });
-    return [...mentions, ...calls].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, max);
-  }, [rooms, last, recent, max]);
+    // As que falharam vêm primeiro: a mensagem não chegou a ninguém.
+    return [...failed.sort((a, b) => b.ts.localeCompare(a.ts)), ...[...mentions, ...calls].sort((a, b) => b.ts.localeCompare(a.ts))].slice(0, max);
+  }, [rooms, last, recent, max, scheduled, subs]);
 }

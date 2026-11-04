@@ -45,6 +45,9 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
     ? new Set((await many('SELECT user_id FROM team_members WHERE team_id = ANY($1)', [teamIds])).map((r) => r.user_id))
     : new Set<string>();
   const followers = new Set<string>(row.tmid && parent ? parent.replies ?? [] : []);
+  // Aviso que pede "Ciente": leitura obrigatória, avisa como uma menção (também com "só menções"); quem desligou as
+  // notificações da sala, escolheu "nada" ou está Ocupado continua sem aviso.
+  const ackNotice = !!row.ack_required && !row.tmid;
   const isDM = room.t === 'd';
   // Quem a pessoa vê como autor: o apelido da mensagem (webhooks) ou o usuário.
   // O sender do evento continua a conta que publicou.
@@ -78,7 +81,7 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
     if (silencesNotifications(m.status_default)) continue;
     const direct = ids.has(m.user_id) || teamMembers.has(m.user_id) || (!prefs.muteGroupMentions && (all || (here && m.status !== 'offline')));
     const word = highlights.get(m.user_id);
-    const mentioned = direct || !!word;
+    const mentioned = direct || !!word || ackNotice;
     const following = followers.has(m.user_id);
     let desktop: string = prefs.desktop && prefs.desktop !== 'default' ? prefs.desktop : m.preferences?.desktopNotifications ?? (isDM ? 'all' : 'mentions');
     if (isDM && (!prefs.desktop || prefs.desktop === 'default')) desktop = 'all';
@@ -95,7 +98,13 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
     if (emailEnabled && m.email && !connected.has(m.user_id) && emailPref !== 'nothing' && (mentioned || isDM)) {
       const site = getSetting<string>('Site_Name');
       const url = `${getSetting<string>('Site_Url')}/${isDM ? 'direct' : room.t === 'p' ? 'group' : 'channel'}/${room.id}`;
-      const subject = isDM ? `Mensagem direta de ${senderName}` : !direct && word ? `“${word}” em #${roomName}` : `Você foi mencionado em #${roomName}`;
+      const subject = isDM
+        ? `Mensagem direta de ${senderName}`
+        : !direct && word
+          ? `“${word}” em #${roomName}`
+          : !direct && ackNotice
+            ? `Aviso que pede seu Ciente em #${roomName}`
+            : `Você foi mencionado em #${roomName}`;
       void sendMail({
         to: m.email,
         subject: `[${site}] ${subject}`,

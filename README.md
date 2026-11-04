@@ -769,6 +769,8 @@ Num **canal de avisos** (📢) só algumas pessoas publicam e todos os membros l
 - **Pedir “Ciente”**: cada aviso pode pedir confirmação de leitura (o botão fica ligado no campo de mensagem de quem
   publica). Os membros clicam em “✔ Ciente”, o topo do canal mostra quantos avisos esperam a confirmação de cada um, e
   quem publica vê quem confirmou e quem falta. Funciona com a confirmação de leitura do chat ligada ou desligada.
+  O aviso que pede “Ciente” notifica os membros como uma menção (notificação do sistema, push e e-mail), também com a
+  preferência “só menções”; quem desligou as notificações da sala ou está Ocupado não recebe.
 - **Ocultar a lista de membros**: só donos e moderadores veem quem está no canal (inclusive pela lista do time e pelas
   confirmações de leitura).
 

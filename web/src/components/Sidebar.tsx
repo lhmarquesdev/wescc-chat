@@ -591,7 +591,7 @@ export function ForYouCard({ item }: { item: ForYouItem }) {
   return (
     <button type="button" className="for-you-card" onClick={() => navigate(item.to)}>
       <span className={`for-you-icon ${item.kind}`}>
-        <Icon name={item.kind === 'mention' ? 'mention' : 'call-missed'} size={20} />
+        <Icon name={item.kind === 'mention' ? 'mention' : item.kind === 'scheduled' ? 'schedule' : 'call-missed'} size={20} />
       </span>
       <span className="for-you-text">
         <span className="for-you-name">{item.title}</span>

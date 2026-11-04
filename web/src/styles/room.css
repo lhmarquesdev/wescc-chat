@@ -1503,6 +1503,15 @@ a.att-title {
   font-weight: var(--fw-medium);
   color: var(--fg);
 }
+/* Agendada que não saiu: em destaque até a pessoa resolver. */
+.composer-bar.scheduled.failed {
+  background: var(--danger-soft);
+}
+.composer-bar.scheduled.failed > .icon,
+.composer-bar.scheduled.failed .composer-bar-text {
+  color: var(--danger);
+  font-weight: var(--fw-medium);
+}
 .composer-bar-hint {
   font-size: var(--fs-12);
   color: var(--fg-muted);

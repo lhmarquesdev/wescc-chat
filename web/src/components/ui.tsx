@@ -971,7 +971,8 @@ function Toast({ t }: { t: ToastItem }) {
   const start = useCallback(() => {
     since.current = Date.now();
     clearTimeout(timer.current);
-    timer.current = setTimeout(leave, left.current);
+    // duration Infinity: fica até a pessoa fechar (setTimeout com Infinity dispararia na hora).
+    if (Number.isFinite(left.current)) timer.current = setTimeout(leave, left.current);
   }, [leave]);
   const pause = () => {
     clearTimeout(timer.current);

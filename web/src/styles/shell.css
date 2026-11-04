@@ -892,7 +892,8 @@ button.side-item {
   background: var(--accent-soft);
   color: var(--accent-text);
 }
-.for-you-icon.missed {
+.for-you-icon.missed,
+.for-you-icon.scheduled {
   background: var(--danger-soft);
   color: var(--danger);
 }
