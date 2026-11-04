@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Message, Subscription } from '@shared/index';
-import { FORWARD_MAX_TARGETS } from '@shared/messages';
+import { encryptedContent, FORWARD_MAX_TARGETS } from '@shared/messages';
 import { foldText } from '@shared/search';
 import { messagePreviewText } from '@shared/stickers';
 import { api, errorMessage } from '../lib/api';
@@ -63,7 +63,7 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
   // Motivo de não poder enviar a uma inscrição (o mesmo que o servidor diria).
   const roomReason = (s: Subscription): string | undefined => {
     const room = rooms[s.rid];
-    if (room?.encrypted) return 'Não dá para encaminhar para uma sala criptografada.';
+    if (encryptedContent(room)) return 'Não dá para encaminhar para uma sala criptografada.';
     if (room?.archived) return 'Esta sala está arquivada.';
     if (s.notice && !canWithRoles('post-readonly', [...me.roles, ...s.roles])) return 'Só os publicadores enviam aqui.';
     if (room?.ro && !s.notice && !canWithRoles('post-readonly', [...me.roles, ...s.roles])) return 'Esta sala é somente leitura.';

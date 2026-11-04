@@ -3,14 +3,15 @@
 // (server/test/web-rules.test.ts).
 import type { Message } from '@shared/index';
 import type { MessageForward, MessagePoll } from '@shared/messages';
-import { messageLink } from '@shared/messages';
+import { encryptedContent, messageLink } from '@shared/messages';
 import { whenText } from './messageTimes';
 
 // O tipo aceita edição: nem mensagem de sistema, nem figurinha, nem enquete, nem encaminhada (o servidor recusa no chat.update).
 export const editableKind = (m: Message) => !m.t && !m.sticker && !m.poll && !m.forward;
 
-// Dá para encaminhar: nem mensagem de sistema, nem enquete, nem figurinha removida (o servidor também confere a sala).
-export const forwardableKind = (m: Message) => !m.t && !m.poll && !m.sticker?.removed;
+// Dá para encaminhar: nem mensagem de sistema, nem enquete, nem figurinha removida, nem mensagem cifrada (o servidor
+// também confere a sala; encryptedContent é o lugar único que o E2E ajusta).
+export const forwardableKind = (m: Message) => !m.t && !m.poll && !m.sticker?.removed && !encryptedContent(null, m);
 
 // /channel/<rid>?msg=<id>; resposta de tópico abre o tópico: /channel/<rid>/thread/<tmid>. O mesmo do push do lembrete.
 export { messageLink };

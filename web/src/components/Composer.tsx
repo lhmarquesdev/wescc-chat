@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Message } from '@shared/index';
+import { encryptedContent } from '@shared/messages';
 import { mediaTypeAllowed, stickerPreviewText } from '@shared/stickers';
 import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
 import { slashCommands } from '../lib/commands';
@@ -401,7 +402,7 @@ function ComposerView({
   // Itens do "+": vídeo (upload permitido e o tipo aceito), enquete (create-poll). Sala criptografada: nenhum dos dois
   // (o servidor não lê o conteúdo), nem agendar.
   const roles = [...me.roles, ...(sub?.roles ?? [])];
-  const encrypted = !!room?.encrypted;
+  const encrypted = encryptedContent(room);
   const videoOn = uploadsHere && !encrypted && !editing && (mediaTypeAllowed('video/mp4', whiteList, blackList) || mediaTypeAllowed('video/webm', whiteList, blackList));
   const pollOn = !encrypted && !editing && canWithRoles('create-poll', roles);
   const canSchedule = !encrypted && canWithRoles('schedule-message', roles);

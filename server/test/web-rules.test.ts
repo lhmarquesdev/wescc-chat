@@ -333,6 +333,8 @@ describe('encaminhar e editar: tipos de mensagem', () => {
     expect(forwardableKind(msg({ t: 'uj' }))).toBe(false);
     expect(forwardableKind(msg({ poll: { question: 'Q', options: [], voters: 0, multiple: false, anonymous: false, closesAt: null, closedAt: null } }))).toBe(false);
     expect(forwardableKind(msg({ sticker: { fileId: 'f1', removed: true } }))).toBe(false);
+    // Mensagem cifrada (messages.e2e, do grupo da criptografia): nunca encaminhada.
+    expect(forwardableKind({ ...msg(), e2e: { v: 1 } } as any)).toBe(false);
   });
 });
 

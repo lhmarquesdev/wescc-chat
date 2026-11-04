@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
+import { encryptedContent } from '@shared/messages';
 import { api, ApiError, errorMessage } from '../lib/api';
 import { nameList, roomDisplayName, roomIconName, roomPath, STATUS_LABEL } from '../lib/format';
 import { namesIn } from '../lib/names';
@@ -361,7 +362,7 @@ export function RoomPage() {
   // Vale para a lista e para a thread (que monta as próprias ações).
   const canPin = room?.t === 'd' || canWithRoles('pin-message', roles);
   // Encaminhar a partir de sala criptografada o servidor recusa (o texto não sai da sala).
-  const canForwardFrom = !room?.encrypted;
+  const canForwardFrom = !encryptedContent(room);
   // Votar: as mesmas recusas do servidor (membro, sala arquivada, silêncio, DM bloqueada). Somente leitura não barra.
   const voteBlocked = !room
     ? ''

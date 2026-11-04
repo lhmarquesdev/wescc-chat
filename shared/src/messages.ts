@@ -21,8 +21,9 @@ export const AHEAD_MAX_DAYS = 365;
 // Até a criptografia ponta a ponta definir como recifrar no cliente, encaminhar, criar enquete, agendar e gravar vídeo
 // ficam fora das salas criptografadas, e o aviso do lembrete nunca leva o conteúdo. Um lugar só para o E2E ajustar:
 // a sala (rooms.encrypted) ou a própria mensagem cifrada (messages.e2e, isEncryptedMessage).
-export function encryptedContent(room: { encrypted?: boolean | null } | null | undefined, m?: { e2e?: unknown } | null): boolean {
-  return !!room?.encrypted || (!!m && isEncryptedMessage(m));
+// m: qualquer mensagem (linha do banco ou Message da web); o campo e2e chega com o grupo da criptografia.
+export function encryptedContent(room: { encrypted?: boolean | null } | null | undefined, m?: object | null): boolean {
+  return !!room?.encrypted || (!!m && isEncryptedMessage(m as { e2e?: unknown }));
 }
 
 // ---------- Tipos ----------
