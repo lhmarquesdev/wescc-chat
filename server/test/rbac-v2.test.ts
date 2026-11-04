@@ -608,6 +608,52 @@ describe('nome de papel: nenhum papel criado se passa por outro', () => {
     const list = (await api('GET', 'roles.list', undefined, mano)).roles as { _id: string; description: string }[];
     expect(list.filter((r) => r.description === 'Administrador').map((r) => r._id)).toEqual(['admin']);
   });
+
+  // Sobras da validação final: o "Administrador" com letras de outro alfabeto, de largura total ou com invisíveis
+  // passava, e o "Dono da sala" (a descrição do papel padrão) também. Nas rotas novas e nas antigas, ao criar e ao
+  // renomear.
+  it('letras parecidas, largura total, invisíveis e controles de direção não passam em rbac.* nem em roles.*', async () => {
+    const mano = await newUser(A);
+    const papel = uniq('so-papeis-2');
+    await roleWith(papel, ['manage-roles']);
+    expect((await api('POST', 'roles.addUserToRole', { roleName: papel, userId: mano.userId }, A)).success).toBe(true);
+    const lookAlikes = [
+      '\u0410dmin', // A cirílico
+      '\u0410dministrador',
+      'Administr\u0430dor', // a cirílico no meio
+      'Administrad\u03bfr', // ο grego
+      '\uff21\uff44\uff4d\uff49\uff4e', // Ａｄｍｉｎ
+      'Ad\u200bmin', // largura zero
+      '\u200fAdministrador\u200e', // marcas de direção
+      'Dono da sala',
+      'D\u043eno da s\u0430la',
+      'Moderador da sala',
+    ];
+    const turno = uniq('turno-b');
+    expect((await api('POST', 'rbac.roles.create', { name: turno, description: 'Chefe de turno B' }, mano)).success).toBe(true);
+    for (const description of lookAlikes) {
+      const novo = await api('POST', 'rbac.roles.create', { name: uniq('falso'), description }, mano);
+      expect(novo.status, description).toBe(400);
+      expect(['RBAC_DUPLICATE_ROLE_LABEL', 'RBAC_INVALID_ROLE_LABEL'], description).toContain(novo.errorType);
+      expect((await api('POST', 'roles.create', { name: uniq('falso'), description }, mano)).errorType, description).toBe(novo.errorType);
+      expect((await api('POST', 'rbac.roles.update', { roleId: turno, description }, mano)).errorType, description).toBe(novo.errorType);
+      expect((await api('POST', 'roles.update', { roleId: turno, description }, mano)).errorType, description).toBe(novo.errorType);
+    }
+    // RLO: "\u202EnimdA" aparece "Admin"; recusado de vez, com o motivo em português.
+    const rlo = await api('POST', 'rbac.roles.create', { name: uniq('falso'), description: '\u202enimdA' }, mano);
+    expect(rlo).toMatchObject({ status: 400, errorType: 'RBAC_INVALID_ROLE_LABEL', error: expect.stringContaining('caracteres invisíveis') });
+    // O identificador também (o nome exibido vazio vira o identificador).
+    for (const name of ['Adm1n', 'administrator', 'Administradora']) {
+      expect((await api('POST', 'rbac.roles.create', { name, description: 'Turno' }, mano)).errorType, name).toBe('RBAC_RESERVED_ROLE_NAME');
+      expect((await api('POST', 'roles.create', { name, description: 'Turno' }, mano)).errorType, name).toBe('RBAC_RESERVED_ROLE_NAME');
+    }
+    // Nada disso ficou gravado; o nome que só acrescenta palavras passa.
+    const list = (await api('GET', 'roles.list', undefined, mano)).roles as { _id: string; description: string }[];
+    expect(list.find((r) => r._id === turno)?.description).toBe('Chefe de turno B');
+    expect(list.filter((r) => /^falso-/.test(r._id))).toEqual([]);
+    expect((await api('POST', 'rbac.roles.create', { name: uniq('adm-noc'), description: 'Administrador do NOC' }, mano)).success).toBe(true);
+    expect((await api('POST', 'roles.update', { roleId: turno, description: 'Moderador de turno' }, mano)).success).toBe(true);
+  });
 });
 
 describe('users.setStatus de outra pessoa', () => {

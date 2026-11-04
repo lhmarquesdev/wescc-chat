@@ -181,10 +181,10 @@ export function CreateRole({ source, roles, grant, onClose, onCreated }: { sourc
             </select>
           </Field>
         )}
-        <Field label="Identificador" hint="Sem acentos, ex.: supervisor. Não muda depois." error={problem && problem.code !== 'RBAC_DUPLICATE_ROLE_LABEL' ? problem.error : undefined}>
+        <Field label="Identificador" hint="Sem acentos, ex.: supervisor. Não muda depois." error={problem?.field === 'id' ? problem.error : undefined}>
           <input value={name} autoFocus={start === 'blank'} maxLength={60} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="Nome exibido" hint={`Até ${NAME_MAX} caracteres. ${label.length}/${NAME_MAX}`} error={problem?.code === 'RBAC_DUPLICATE_ROLE_LABEL' ? problem.error : undefined}>
+        <Field label="Nome exibido" hint={`Até ${NAME_MAX} caracteres. ${label.length}/${NAME_MAX}`} error={problem?.field === 'label' ? problem.error : undefined}>
           <input value={label} maxLength={NAME_MAX} placeholder="Supervisor de operação" onChange={(e) => setLabel(e.target.value)} />
         </Field>
         <Field label="Para que serve" hint={`Uma frase simples. Aparece embaixo do nome. ${purpose.length}/${PURPOSE_MAX}`}>

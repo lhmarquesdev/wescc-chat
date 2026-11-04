@@ -19,7 +19,7 @@ import type { SpotlightUser, Subscription } from '@shared/index';
 import { foldText, parseSpotlightQuery, spotlightReady } from '@shared/search';
 import { compileHighlights, findHighlight, normalizeHighlights, splitHighlights } from '@shared/highlights';
 import { normalizeStatusName, presenceLabel, selfUserPatch, shownCustomStatus, silencesNotifications, sortStatuses, statusLine, type CustomUserStatus } from '@shared/status';
-import { RBAC_AREAS, foldRoleName, roleNameProblem, screenGapWarning, screenGaps } from '@shared/rbac';
+import { RBAC_AREAS, roleNameKey, roleNameProblem, screenGapWarning, screenGaps } from '@shared/rbac';
 import { ROLE_LABEL } from '@shared/messageText';
 import { readableError } from '../../web/src/lib/errorText';
 import { deviceLabel } from '@shared/devices';
@@ -808,7 +808,7 @@ describe('nome de papel (Novo papel e o editor, iguais ao servidor)', () => {
   ];
   const check = (id: string, d: string, isNew = true) => roleNameProblem(id, d, roles, ROLE_LABEL, { isNew, displayName: roleDisplayName })?.code ?? null;
   it('o identificador não imita outro e começa e termina com letra ou número', () => {
-    expect(foldRoleName('Admin. ')).toBe('admin');
+    expect(roleNameKey('Admin. ')).toBe('admin');
     expect(check('admin ', 'X')).toBe('error-invalid-role-name');
     expect(check('admin.', 'X')).toBe('error-invalid-role-name');
     expect(check('Ad-min', 'X')).toBe('RBAC_RESERVED_ROLE_NAME');
@@ -828,6 +828,63 @@ describe('nome de papel (Novo papel e o editor, iguais ao servidor)', () => {
     expect(check('operacao', 'Operação', false)).toBeNull();
     expect(check('operacao', 'Auditor', false)).toBe('RBAC_DUPLICATE_ROLE_LABEL');
     expect(check('admin', 'Qualquer', false)).toBeNull();
+  });
+  // Sobras da validação final: letras de outros alfabetos, largura total, invisíveis e controles de direção.
+  it('letras parecidas, de largura total e invisíveis não fazem outro "Administrador"', () => {
+    const lookAlikes = [
+      '\u0410dmin', // A cirílico
+      '\u0410dministrador',
+      'Administr\u0430dor', // a cirílico no meio
+      'Administrad\u03bfr', // ο grego
+      'Adm\u0456n', // і cirílico
+      '\u0391DMIN', // Α grego
+      '\uff21\uff44\uff4d\uff49\uff4e', // Ａｄｍｉｎ
+      '\ud835\udc00\ud835\udc1d\ud835\udc26\ud835\udc22\ud835\udc27', // 𝐀𝐝𝐦𝐢𝐧
+      'Ad\u200bmin', // espaço de largura zero
+      'Admin\u2060istrador', // junção invisível
+      '\u1d00\u1d05\u1d0d\u026a\u0274', // versaletes
+      'Adrninistrador', // rn no lugar de m
+      'Admln', // l no lugar de i
+      'Adm1n',
+      'Administrad0r',
+      '\u2605 Administrador \u2605',
+      'Administradora',
+      '\u0410d\u043c\u0456\u043d', // Аdмін: м, і e н cirílicos
+    ];
+    for (const d of lookAlikes) expect(check('falso', d), JSON.stringify(d)).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    // O motivo diz com qual papel se confunde.
+    expect(roleNameProblem('falso', '\u0410dmin', roles, ROLE_LABEL, { isNew: true, displayName: roleDisplayName })?.error).toBe(
+      'Esse nome se confunde com o do papel “Administrador”. Escolha outro nome de exibição.',
+    );
+    // Controle de direção: "\u202EnimdA" aparece como "Admin"; o nome com ele é recusado de vez.
+    expect(check('falso', '\u202enimdA')).toBe('RBAC_INVALID_ROLE_LABEL');
+    expect(check('falso', 'Chefe\u2066 de turno')).toBe('RBAC_INVALID_ROLE_LABEL');
+    expect(roleNameProblem('falso', '\u202enimdA', roles, ROLE_LABEL, { isNew: true, displayName: roleDisplayName })?.field).toBe('label');
+    // O identificador também: "Adm1n" e "administrator" são do Administrador.
+    expect(check('Adm1n', 'X')).toBe('RBAC_RESERVED_ROLE_NAME');
+    expect(check('administrator', 'X')).toBe('RBAC_RESERVED_ROLE_NAME');
+  });
+  it('os nomes de todos os papéis padrão ficam reservados, também o que só aparece na descrição ("Dono da sala")', () => {
+    for (const d of ['Dono da sala', 'Dono', 'D\u043eno', 'Moderador', 'Moderador da sala', 'M\u043ederador', 'Líder', 'Lider da sala', 'Usuário', 'Usu\u0430rio', 'Bot', 'Convidado', 'Operação', 'Operacao', 'Anônimo', 'App', 'Publicador', 'Auditor de logs']) {
+      expect(check('falso', d), d).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    }
+    // Os identificadores também, ainda que a linha não exista (o Operação pode ser excluído).
+    const semOperacao = roles.filter((r) => r.id !== 'operacao');
+    const novo = (id: string, d: string) => roleNameProblem(id, d, semOperacao, ROLE_LABEL, { isNew: true, displayName: roleDisplayName })?.code ?? null;
+    expect(novo('Operacao', 'Turno')).toBe('error-duplicate-role-names-not-allowed');
+    expect(novo('moderador', 'Turno')).toBe('error-duplicate-role-names-not-allowed');
+    expect(novo('falso', 'Operação')).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    // Só o próprio Operação volta com o nome dele.
+    expect(novo('operacao', 'Operação')).toBeNull();
+  });
+  it('só o nome inteiro conta: um nome que acrescenta palavras passa', () => {
+    for (const d of ['Administrador do NOC', 'Moderador de turno', 'Administrador 2', 'Dono do processo', 'Chefe de turno', 'Dev 👨‍💻', 'Supervisão']) {
+      expect(check('falso', d), d).toBeNull();
+    }
+    // A forma de comparação: acentos, maiúsculas, pontuação e invisíveis não contam; a tabela vale nos dois lados.
+    expect(roleNameKey('  Ａdm\u200bin! ')).toBe('admin');
+    expect(roleNameKey('\u0410\u0434min')).not.toBe('admin'); // д cirílico não parece d: fica
+    expect(roleNameKey('Operação')).toBe(roleNameKey('OPERACAO'));
   });
 });
 

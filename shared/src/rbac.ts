@@ -836,19 +836,98 @@ export function templatePlan(t: RbacTemplate, ctx: GrantContext, roles: RoleInfo
 
 // ---------- Nome de papel ----------
 
-// Um papel criado não pode se passar por outro (o Administrador, sobretudo). O identificador começa e termina com letra
-// ou número; nem ele (sem maiúsculas, acentos, espaços e pontuação: "admin.", "Admin " e "ad-min" viram "admin") nem o
-// nome de exibição (a descrição curta, ver roleDisplayName) repetem os de outro papel ou os dos papéis padrão.
+// Um papel criado não pode se passar por outro (o Administrador, sobretudo): quem tem "Criar e editar papéis" criaria
+// um "Аdministrador" (com A cirílico) e um supervisor com "Dar e tirar papéis" o daria a alguém; todo mundo veria o
+// selo. O identificador começa e termina com letra ou número; nem ele nem o nome de exibição (a descrição curta, ver
+// roleDisplayName) podem, depois de reduzidos à "forma de comparação" (roleNameKey), repetir a de outro papel ou a de
+// um papel padrão.
+//
+// A forma de comparação é a do que se vê, não a do que se digita:
+// - NFKC: letras de largura total (Ａｄｍｉｎ), negrito matemático (𝐀𝐝𝐦𝐢𝐧) e afins viram as letras comuns;
+// - caracteres invisíveis (espaço de largura zero, junção, seletores de variação, preenchimentos) saem;
+// - acentos e maiúsculas não contam;
+// - letras de outros alfabetos que se confundem com as latinas viram a latina (tabela abaixo, só as que importam);
+// - "rn" vale "m", "vv" vale "w", "cl" vale "d"; "l", "1" e "|" valem "i"; "0" vale "o";
+// - espaço, pontuação, símbolos e emoji não contam ("★ Administrador ★", "Admin." e "Ad-min" são o mesmo nome).
+// Os controles de direção (RLO e afins) não saem: eles mudam a ordem do que aparece ("\u202EnimdA" aparece "Admin"),
+// então o nome de exibição com eles é recusado.
+//
+// Só a forma inteira conta, não uma palavra dentro dela: "Administrador do NOC", "Moderador de turno" e
+// "Administrador 2" passam, porque se leem como outro papel (e o selo do Administrador tem a coroa, que nenhum papel
+// criado recebe). Recusar a palavra "Administrador" em qualquer lugar barraria nomes legítimos sem fechar nada.
+
 export const ROLE_NAME_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9 _.-]*[a-zA-Z0-9])?$/;
-export const foldRoleName = (s: string) => foldText(s).replace(/[^a-z0-9]/g, '');
+
+// Letras de outros alfabetos (cirílico, grego, armênio, cherokee, versaletes latinas e afins) que se confundem com
+// as latinas. Maiúscula e minúscula separadas: o "Н" cirílico parece H, mas o "н", entre minúsculas, passa por n
+// (como o "η" grego).
+const CONFUSABLE: Record<string, string> = {
+  // Cirílico
+  А: 'A', В: 'B', Е: 'E', Ѐ: 'E', Ё: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X',
+  І: 'I', Ї: 'I', Ј: 'J', Ѕ: 'S', Ү: 'Y', Һ: 'H', Ԛ: 'Q', Ԝ: 'W', Ӏ: 'I', Ԍ: 'G', Ꙇ: 'I',
+  а: 'a', в: 'b', е: 'e', ѐ: 'e', ё: 'e', к: 'k', м: 'm', н: 'n', о: 'o', р: 'p', с: 'c', т: 't', у: 'y', х: 'x',
+  і: 'i', ї: 'i', ј: 'j', ѕ: 's', ү: 'y', һ: 'h', ԛ: 'q', ԝ: 'w', ӏ: 'i', ԁ: 'd', ь: 'b', п: 'n', г: 'r', ꙇ: 'i',
+  // Grego
+  Α: 'A', Β: 'B', Ε: 'E', Ζ: 'Z', Η: 'H', Ι: 'I', Κ: 'K', Μ: 'M', Ν: 'N', Ο: 'O', Ρ: 'P', Τ: 'T', Υ: 'Y', Χ: 'X',
+  Ϲ: 'C', Ϳ: 'J',
+  α: 'a', β: 'b', γ: 'y', ε: 'e', η: 'n', ι: 'i', κ: 'k', μ: 'u', ν: 'v', ο: 'o', ρ: 'p', τ: 't', υ: 'u', χ: 'x',
+  ω: 'w', ϲ: 'c', ϳ: 'j', ς: 'c',
+  // Armênio
+  Օ: 'O', Ս: 'U', Լ: 'L', Տ: 'S', Ց: 'G', Ւ: 'L',
+  օ: 'o', ս: 'u', ո: 'n', հ: 'h', ց: 'g', զ: 'q', ա: 'w', ռ: 'n', ւ: 'i',
+  // Cherokee (as maiúsculas, que parecem latinas)
+  Ꭺ: 'A', Ᏼ: 'B', Ꮯ: 'C', Ꭰ: 'D', Ꭼ: 'E', Ꮐ: 'G', Ꮋ: 'H', Ꭵ: 'I', Ꭻ: 'J', Ꮶ: 'K', Ꮮ: 'L', Ꮇ: 'M', Ꮲ: 'P',
+  Ꮢ: 'R', Ꮪ: 'S', Ꮤ: 'W', Ꮃ: 'W', Ꮩ: 'V', Ꮓ: 'Z',
+  // Latinas que a decomposição não separa, e versaletes
+  ı: 'i', ȷ: 'j', ɩ: 'i', ɑ: 'a', ɡ: 'g', ɢ: 'g', ø: 'o', Ø: 'O', ł: 'l', Ł: 'L', đ: 'd', Đ: 'D', ħ: 'h', Ħ: 'H',
+  ŧ: 't', Ŧ: 'T', ƀ: 'b', ɨ: 'i', ǀ: 'i', ᴀ: 'a', ʙ: 'b', ᴄ: 'c', ᴅ: 'd', ᴇ: 'e', ɪ: 'i', ᴊ: 'j', ᴋ: 'k',
+  ʟ: 'l', ᴍ: 'm', ɴ: 'n', ᴏ: 'o', ᴘ: 'p', ʀ: 'r', ꜱ: 's', ᴛ: 't', ᴜ: 'u', ᴠ: 'v', ᴡ: 'w', ʏ: 'y', ᴢ: 'z',
+  '0': 'o',
+};
+const CONFUSABLE_RE = new RegExp(`[${Object.keys(CONFUSABLE).join('')}]`, 'gu');
+const unconfuse = (s: string) => s.replace(CONFUSABLE_RE, (c) => CONFUSABLE[c]);
+const dropMarks = (s: string) => s.normalize('NFD').replace(/\p{M}+/gu, '');
+// Invisíveis que somem sem mudar o que se vê (largura zero, junção, hífen suave, seletores de variação…).
+const INVISIBLE_RE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
+// Controles de direção: mudam a ordem do que aparece, por isso o nome com eles é recusado (não basta tirar).
+export const BIDI_CONTROL_RE = /\p{Bidi_Control}/u;
+
+export function roleNameKey(s: string): string {
+  let k = s.normalize('NFKC').replace(INVISIBLE_RE, '');
+  k = unconfuse(dropMarks(k));
+  k = unconfuse(dropMarks(k.toLowerCase()));
+  k = k.replace(/[^\p{L}\p{N}]/gu, '');
+  return k.replace(/rn/g, 'm').replace(/vv/g, 'w').replace(/cl/g, 'd').replace(/[l1|]/g, 'i');
+}
+// Papéis padrão e os nomes com que aparecem (ROLE_LABEL, a descrição gravada, o feminino e o nome em inglês).
+// Valem mesmo se a linha sumir: o Operação pode ser excluído, e um papel novo não fica com o nome dele (só ele mesmo,
+// recriado com o identificador operacao).
+export const RESERVED_ROLE_NAMES: Record<string, string[]> = {
+  admin: ['Administrador', 'Administradora', 'Administrator', 'Admin', 'Adm', 'Superadmin', 'Super administrador', 'Root'],
+  owner: ['Dono', 'Dona', 'Dono da sala', 'Dona da sala', 'Owner'],
+  moderator: ['Moderador', 'Moderadora', 'Moderador da sala', 'Moderadora da sala', 'Moderator'],
+  leader: ['Líder', 'Líder da sala', 'Leader'],
+  publisher: ['Publicador', 'Publicadora', 'Publicador da sala', 'Publisher'],
+  user: ['Usuário', 'Usuária', 'User'],
+  bot: ['Bot'],
+  app: ['App'],
+  guest: ['Convidado', 'Convidada', 'Guest'],
+  anonymous: ['Anônimo', 'Anônima', 'Anonymous'],
+  auditor: ['Auditor', 'Auditora'],
+  'auditor-log': ['Auditor de logs', 'Auditora de logs'],
+  operacao: ['Operação'],
+};
+const ADMIN_KEYS = new Set(['admin', ...RESERVED_ROLE_NAMES.admin].map(roleNameKey));
 
 export interface RoleNameProblem {
-  code: 'error-invalid-role-name' | 'RBAC_RESERVED_ROLE_NAME' | 'error-duplicate-role-names-not-allowed' | 'RBAC_DUPLICATE_ROLE_LABEL';
+  code: 'error-invalid-role-name' | 'RBAC_RESERVED_ROLE_NAME' | 'error-duplicate-role-names-not-allowed' | 'RBAC_DUPLICATE_ROLE_LABEL' | 'RBAC_INVALID_ROLE_LABEL';
+  // Campo da tela que mostra o motivo: o identificador ou o nome exibido.
+  field: 'id' | 'label';
   error: string;
 }
 
 // id: o identificador (num papel novo, conferido inteiro; ao editar, só o nome de exibição muda). roles: os papéis que
-// existem, com a descrição. builtin: os nomes dos papéis padrão (ROLE_LABEL), que valem mesmo se a linha sumir.
+// existem, com a descrição. builtin: os nomes dos papéis padrão (ROLE_LABEL); somam-se a RESERVED_ROLE_NAMES.
 export function roleNameProblem(
   id: string,
   description: string | null | undefined,
@@ -856,21 +935,45 @@ export function roleNameProblem(
   builtin: Record<string, string>,
   opts: { isNew: boolean; displayName: (id: string, description?: string | null) => string },
 ): RoleNameProblem | null {
-  const others = roles.filter((r) => r.id !== id);
+  const reserved = new Map<string, string[]>(Object.entries(RESERVED_ROLE_NAMES));
+  for (const [rid, label] of Object.entries(builtin)) reserved.set(rid, [label, ...(reserved.get(rid) ?? [])]);
   if (opts.isNew) {
-    if (!ROLE_NAME_RE.test(id)) return { code: 'error-invalid-role-name', error: 'Use letras, números, espaço, ponto, hífen ou _, começando e terminando com letra ou número.' };
-    const f = foldRoleName(id);
-    if (f === 'admin' || f === foldRoleName(builtin.admin ?? 'Administrador')) return { code: 'RBAC_RESERVED_ROLE_NAME', error: 'Esse nome é do papel Administrador. Escolha outro.' };
-    const ids = new Set([...Object.keys(builtin), ...others.map((r) => r.id)].map(foldRoleName));
-    if (ids.has(f)) return { code: 'error-duplicate-role-names-not-allowed', error: 'Já existe um papel com esse nome.' };
+    if (!ROLE_NAME_RE.test(id)) return { code: 'error-invalid-role-name', field: 'id', error: 'Use letras, números, espaço, ponto, hífen ou _, começando e terminando com letra ou número.' };
+    const f = roleNameKey(id);
+    if (ADMIN_KEYS.has(f)) return { code: 'RBAC_RESERVED_ROLE_NAME', field: 'id', error: 'Esse nome é do papel Administrador. Escolha outro.' };
+    // Um papel padrão excluído (o Operação) pode voltar com o próprio identificador; nenhum outro fica com o
+    // identificador ou os nomes dele.
+    const reservedNames = [...reserved].filter(([rid]) => rid !== id).flatMap(([rid, names]) => [rid, ...names]);
+    if ([...roles.map((r) => r.id), ...reservedNames].some((x) => roleNameKey(x) === f)) {
+      return { code: 'error-duplicate-role-names-not-allowed', field: 'id', error: 'Já existe um papel com esse nome.' };
+    }
   }
   if (builtin[id]) return null;
-  const shown = foldRoleName(opts.displayName(id, description));
-  const taken = new Set<string>();
-  for (const [k, label] of Object.entries(builtin)) taken.add(foldRoleName(k)).add(foldRoleName(label));
-  for (const r of others) taken.add(foldRoleName(r.id)).add(foldRoleName(opts.displayName(r.id, r.description)));
-  if (shown && taken.has(shown)) return { code: 'RBAC_DUPLICATE_ROLE_LABEL', error: `Já existe um papel que aparece como “${opts.displayName(id, description)}”. Escolha outro nome de exibição.` };
-  return null;
+  if (description && BIDI_CONTROL_RE.test(description)) {
+    return { code: 'RBAC_INVALID_ROLE_LABEL', field: 'label', error: 'O nome exibido tem caracteres invisíveis que mudam a ordem do texto. Apague e digite de novo.' };
+  }
+  const shownText = opts.displayName(id, description);
+  const shown = roleNameKey(shownText);
+  if (!shown) return null;
+  // Forma de comparação → o nome do papel com que ela se confunde (para dizer qual).
+  const taken = new Map<string, string>();
+  for (const [rid, names] of reserved) {
+    if (rid === id) continue;
+    const label = builtin[rid] ?? names[0];
+    for (const n of [rid, ...names]) if (!taken.has(roleNameKey(n))) taken.set(roleNameKey(n), label);
+  }
+  for (const r of roles) {
+    if (r.id === id) continue;
+    const label = opts.displayName(r.id, r.description);
+    for (const n of [r.id, label]) if (!taken.has(roleNameKey(n))) taken.set(roleNameKey(n), label);
+  }
+  const clash = taken.get(shown);
+  if (clash === undefined) return null;
+  const error =
+    clash === shownText.trim()
+      ? `Já existe um papel que aparece como “${clash}”. Escolha outro nome de exibição.`
+      : `Esse nome se confunde com o do papel “${clash}”. Escolha outro nome de exibição.`;
+  return { code: 'RBAC_DUPLICATE_ROLE_LABEL', field: 'label', error };
 }
 
 // ---------- Permissão sem tela ----------
