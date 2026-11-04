@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type Rea
 import { useNavigate } from 'react-router-dom';
 import type { Message, Room, Subscription } from '@shared/index';
 import { stickerPreviewText } from '@shared/stickers';
+import { statusLine } from '@shared/status';
 import { api, errorMessage } from '../lib/api';
 import { partyOf, useDirect } from '../lib/direct';
 import { formatBytes, formatDateTime, formatRelative, formatWhen, plural, roleLabel, roomDisplayName, roomIconName, roomPath } from '../lib/format';
@@ -706,7 +707,8 @@ function MemberRow({ m, muted, onClick }: { m: any; muted: boolean; onClick: () 
   const roles = [...(m.roles as string[])].sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b));
   // A presença ao vivo vale por cima da lista; o rótulo diz o status personalizado ("Em reunião").
   const pres = useUserPresence(m.username, { status: m.status, statusCustom: m.statusCustom });
-  const statusText = m.statusText || (pres.status !== 'offline' ? pres.label : '');
+  // Com mensagem, o status personalizado continua à vista ("Em atendimento · até as 15h"), como no cartão e na DM.
+  const statusText = m.statusText ? statusLine(pres.label, pres.custom, m.statusText) : pres.status !== 'offline' ? pres.label : '';
   return (
     <button type="button" className="member" onClick={onClick}>
       <UserAvatar username={m.username} size={32} status={pres.status} statusCustom={pres.statusCustom} />

@@ -140,17 +140,24 @@ function PersonResult({ u, big, state, onDone }: { u: SpotlightUser; big?: boole
       useStore.getState().toast(errorMessage(e), 'error');
     }
   };
+  const name = u.name || u.username;
+  const hint = state.kind === 'view' ? 'Ver conversa' : `@${u.username}`;
+  // O title tem tudo: o @usuário (que sai da linha quando a pílula entra) e o motivo de não abrir.
+  const title = [name, `@${u.username}`, state.kind === 'open' ? '' : state.text].filter(Boolean).join(' · ');
   return (
-    <button type="button" className={blocked ? 'side-item spot-item blocked' : 'side-item spot-item'} title={state.kind === 'open' ? undefined : state.text} onClick={() => void open()}>
+    <button type="button" className={blocked ? 'side-item spot-item blocked' : 'side-item spot-item'} title={title} onClick={() => void open()}>
       <UserAvatar username={u.username} size={big ? 24 : 20} status={u.status} statusCustom={u.statusCustom} />
-      <span className="side-name">{u.name || u.username}</span>
-      <span className="side-hint">{state.kind === 'view' ? 'Ver conversa' : `@${u.username}`}</span>
-      {blocked && (
-        <span className="pill blocked">
-          <Icon name="direct-blocked" size={12} />
-          <span className="pill-label">Sem conversa direta</span>
-        </span>
-      )}
+      <span className="spot-text">
+        <span className="side-name">{name}</span>
+        {blocked ? (
+          <span className="pill blocked">
+            <Icon name="direct-blocked" size={12} />
+            Sem conversa direta
+          </span>
+        ) : (
+          <span className="side-hint">{hint}</span>
+        )}
+      </span>
     </button>
   );
 }
@@ -175,12 +182,19 @@ function RoomResult({ r, big, onDone }: { r: SpotlightRoom; big?: boolean; onDon
   return (
     <div className="spot-room">
       {/* Abre a prévia da sala ("Entrar no canal" e o código de acesso ficam lá). */}
-      <button type="button" className="side-item spot-item" title={r.teamName ? `Canal do time ${r.teamName}` : undefined} onClick={() => (navigate(path), onDone())}>
+      <button
+        type="button"
+        className="side-item spot-item"
+        title={`${r.fname || r.name} · ${r.teamName && !r.teamMain ? `canal do time ${r.teamName} · ${members}` : hint}`}
+        onClick={() => (navigate(path), onDone())}
+      >
         <span className="side-icon">
           <Icon name={roomIconName({ t: 'c', teamMain: r.teamMain, notice: r.notice })} size={big ? 18 : 16} />
         </span>
-        <span className="side-name">{r.fname || r.name}</span>
-        <span className="side-hint">{hint}</span>
+        <span className="spot-text">
+          <span className="side-name">{r.fname || r.name}</span>
+          <span className="side-hint">{hint}</span>
+        </span>
       </button>
       {r.joinCodeRequired ? (
         <span className="spot-code">
@@ -195,8 +209,9 @@ function RoomResult({ r, big, onDone }: { r: SpotlightRoom; big?: boolean; onDon
   );
 }
 
-// Grupos "Pessoas" e "Canais e times", o carregamento, o erro e a contagem para o leitor de tela.
-export function SpotlightResults({ spot, localCount, big, onDone }: { spot: SpotlightState; localCount: number; big?: boolean; onDone: () => void }) {
+// Grupos "Pessoas" e "Canais e times para entrar", o carregamento, o erro e a contagem para o leitor de tela.
+// hint: a busca é curta demais para ir ao servidor; diz o que falta no lugar dos grupos.
+export function SpotlightResults({ spot, localCount, big, onDone, hint }: { spot: SpotlightState; localCount: number; big?: boolean; onDone: () => void; hint?: string }) {
   const { people, rooms, direct } = useSpotlightRows(spot);
   const settled = spot.settledFor === spot.key && !!spot.key;
   return (
@@ -216,8 +231,9 @@ export function SpotlightResults({ spot, localCount, big, onDone }: { spot: Spot
       {rooms.length > 0 && (
         <div className="side-group spot-group" role="group" aria-labelledby="spot-rooms">
           <div className="side-group-head">
+            {/* Diz para que serve: as salas em que a pessoa já está ficam nos grupos de cima (Canais, Times). */}
             <span className="side-group-title static" id="spot-rooms">
-              Canais e times
+              Canais e times para entrar
             </span>
           </div>
           {rooms.map((r) => (
@@ -225,6 +241,7 @@ export function SpotlightResults({ spot, localCount, big, onDone }: { spot: Spot
           ))}
         </div>
       )}
+      {hint && <div className="spot-status">{hint}</div>}
       {spot.loading && <Loading key={spot.key} />}
       {spot.error && (
         <div className="spot-status">

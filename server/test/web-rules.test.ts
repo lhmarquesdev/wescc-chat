@@ -14,9 +14,9 @@ import { ADMIN_MENU_PERMS, ADMIN_SECTIONS, SETTINGS_GROUP, settingsPath } from '
 import type { SpotlightUser, Subscription } from '@shared/index';
 import { foldText, parseSpotlightQuery, spotlightReady } from '@shared/search';
 import { compileHighlights, findHighlight, normalizeHighlights, splitHighlights } from '@shared/highlights';
-import { normalizeStatusName, presenceLabel, silencesNotifications, sortStatuses, type CustomUserStatus } from '@shared/status';
+import { normalizeStatusName, presenceLabel, selfUserPatch, shownCustomStatus, silencesNotifications, sortStatuses, statusLine, type CustomUserStatus } from '@shared/status';
 import { RBAC_AREAS } from '@shared/rbac';
-import { dedupePeople, dedupeRooms, matchesLocal, orderPeople, resultCountText } from '../../web/src/lib/spotlightRules';
+import { dedupePeople, dedupeRooms, matchesLocal, orderPeople, resultCountText, spotlightHint } from '../../web/src/lib/spotlightRules';
 
 // Regras puras do chat web que mais de uma tela usa (seta para cima, agrupamento, nome do autor, menu da
 // Administração): os casos que já divergiram entre as telas depois de juntar figurinhas, chamadas e Jira.
@@ -388,6 +388,14 @@ describe('busca da barra lateral', () => {
     expect(resultCountText(1)).toBe('1 resultado');
     expect(resultCountText(7)).toBe('7 resultados');
   });
+
+  // Revisão: "a" ou "@" sozinhos diziam "Nada encontrado… Confira a grafia" sem o servidor ter sido perguntado.
+  it('spotlightHint: o que falta para a busca ir ao servidor', () => {
+    expect(spotlightHint(parseSpotlightQuery('a'))).toBe('Digite pelo menos 2 letras para buscar pessoas e canais.');
+    expect(spotlightHint(parseSpotlightQuery('@'))).toBe('Digite um nome depois do @ para buscar pessoas.');
+    expect(spotlightHint(parseSpotlightQuery('# '))).toBe('Digite um nome depois do # para buscar canais e times.');
+    expect(spotlightHint(parseSpotlightQuery('@a'))).toBe('Digite pelo menos 2 letras para buscar pessoas.');
+  });
 });
 
 describe('palavras destacadas', () => {
@@ -442,6 +450,35 @@ describe('palavras destacadas', () => {
     expect(splitHighlights('', m)).toEqual([]);
     expect(splitHighlights('sem lista', null)).toEqual([{ text: 'sem lista', hit: false }]);
   });
+
+  // Revisão: marcas fora dos acentos latinos (U+20D7) ficavam no padrão logo depois de um \p{M}*, e a flag i fazia o
+  // "ι" grego casar com a marca U+0345: uma fila de marcas numa mensagem travava o servidor por segundos (ReDoS).
+  it('palavra com sinais combinantes: não passa na validação e não trava a busca', () => {
+    const arrows = 'a' + '⃗'.repeat(16);
+    expect(normalizeHighlights([arrows])).toMatchObject({ ok: false, error: expect.stringContaining('pelo menos 2 letras ou números') });
+    expect(normalizeHighlights(['ͅͅ'])).toMatchObject({ ok: false });
+    expect(foldText('a⃗bͅİ')).toBe('abi');
+    const marks = (m: string) => m.repeat(3000);
+    const cases: [string, string][] = [
+      // Já gravadas antes da correção: compilam sem as marcas e continuam rápidas.
+      [arrows, 'a' + marks('⃗') + 'b'],
+      ['a' + '⃗'.repeat(30) + 'b', 'a' + marks('⃗') + 'b'],
+      ['ι'.repeat(40), 'ι' + marks('ͅ') + 'x'],
+      ['ι'.repeat(40), 'ι'.repeat(3000) + 'x'],
+      ['a a a a a a a a a a a a a', ('a' + '́'.repeat(40) + ' ').repeat(80) + 'b'],
+    ];
+    for (const [word, text] of cases) {
+      const m = compileHighlights([word]);
+      const t0 = performance.now();
+      findHighlight(text, m);
+      splitHighlights(text, m);
+      expect(performance.now() - t0, word.slice(0, 4)).toBeLessThan(250);
+    }
+    // As marcas do texto continuam valendo como acento: "ab" com sinais em cima ainda é "ab".
+    expect(findHighlight('veja a⃗⃗b agora', compileHighlights(['ab']))).toBe('ab');
+    expect(findHighlight('PLANTÃO hoje', compileHighlights(['plantão']))).toBe('plantão');
+    expect(findHighlight('ΙΙ ok', compileHighlights(['ιι']))).toBe('ιι');
+  });
 });
 
 describe('status personalizados', () => {
@@ -474,6 +511,26 @@ describe('status personalizados', () => {
     expect(silencesNotifications(undefined)).toBe(false);
     const sorted = sortStatuses([...list, { _id: 'st-pausa', name: 'Em pausa', statusType: 'away' }]);
     expect(sorted.map((s) => s.name)).toEqual(['Almoço', 'Em pausa', 'Em reunião']);
+  });
+
+  // Revisão: em Membros, a mensagem de status escondia o personalizado ("Em atendimento" virava só "até as 15h").
+  it('statusLine: com mensagem, o personalizado continua à vista; o de base dá lugar à mensagem', () => {
+    expect(shownCustomStatus({ status: 'busy', statusCustom: 'st-reuniao' }, list)?.name).toBe('Em reunião');
+    expect(shownCustomStatus({ status: 'away', statusCustom: 'st-reuniao' }, list)).toBeUndefined();
+    expect(statusLine('Em reunião', true, 'até as 15h')).toBe('Em reunião · até as 15h');
+    expect(statusLine('Ocupado', false, 'até as 15h')).toBe('até as 15h');
+    expect(statusLine('Em reunião', true, '')).toBe('Em reunião');
+  });
+
+  // Revisão: editar o perfil manda a todos um "user" com statusCustom null (a pessoa invisível não se revela); a própria
+  // aba juntava esse null ao me e perdia o personalizado escolhido até recarregar.
+  it('selfUserPatch: o evento para todos não apaga o personalizado da própria aba', () => {
+    const me = { _id: 'u1', name: 'Bruno', bio: '', status: 'offline', statusDefault: 'offline', statusCustom: 'st-fora' };
+    const broadcast = { _id: 'u1', name: 'Bruno', bio: 'nova bio', status: 'offline', statusCustom: null };
+    expect({ ...me, ...selfUserPatch(broadcast) }).toMatchObject({ bio: 'nova bio', statusCustom: 'st-fora', statusDefault: 'offline' });
+    // O evento da própria escolha (com statusDefault) troca, inclusive para nenhum.
+    expect({ ...me, ...selfUserPatch({ _id: 'u1', statusDefault: 'busy', statusCustom: null }) }).toMatchObject({ statusDefault: 'busy', statusCustom: null });
+    expect({ ...me, ...selfUserPatch({ _id: 'u1', statusDefault: 'busy', statusCustom: 'st-reuniao' }) }.statusCustom).toBe('st-reuniao');
   });
 
   it('a seção da Administração existe e toda área do RBAC aponta para uma seção que existe', () => {

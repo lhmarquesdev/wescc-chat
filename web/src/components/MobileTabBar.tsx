@@ -50,7 +50,7 @@ export function MobileTabBar() {
   const calendarOn = useSetting<boolean>('Calendar_Enabled') !== false;
   const filesOn = useFilesTab(); // Arquivos
   const mentions = useMentionTotal();
-  const { status } = useMyStatus();
+  const { status, silenced } = useMyStatus();
   const { pathname } = useLocation();
   const meActive = pathname.startsWith('/account') || pathname.startsWith('/admin');
   return (
@@ -62,9 +62,20 @@ export function MobileTabBar() {
       <Tab to="/directory" icon="nav-directory" label="Diretório" />
       <UserMenu
         trigger={
-          <button type="button" className={meActive ? 'tab me-btn active' : 'tab me-btn'} aria-current={meActive ? 'page' : undefined}>
+          <button
+            type="button"
+            className={meActive ? 'tab me-btn active' : 'tab me-btn'}
+            aria-current={meActive ? 'page' : undefined}
+            aria-label={silenced ? 'Você · notificações silenciadas' : undefined}
+          >
             <span className="tab-icon">
               <UserAvatar username={me.username} size={24} status={status} />
+              {/* Ocupado silencia também o push do celular: o sino cortado fica sempre à vista, como no rodapé do computador. */}
+              {silenced && (
+                <span className="tab-silenced" title="Notificações silenciadas">
+                  <Icon name="notify-silenced" size={12} />
+                </span>
+              )}
             </span>
             <span className="tab-label">Você</span>
           </button>

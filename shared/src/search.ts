@@ -1,7 +1,9 @@
 // Busca sem acento e sem diferença de maiúsculas: "Permissão" acha "permissao" e vice-versa. Um só lugar para dobrar
 // texto (Papéis e permissões, encaminhar, busca): quem precisar de outra regra estende aqui. No banco, a mesma ideia
 // é a função wescc_fold (migração 030).
-export const foldText = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+// Toda marca combinante sai (\p{M}, não só os acentos latinos), depois das minúsculas: "İ" vira "i" + ponto, e o
+// ponto sai também. O texto dobrado nunca tem marca (as palavras destacadas dependem disso).
+export const foldText = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{M}+/gu, '');
 
 // Todas as palavras do termo aparecem no texto (em qualquer ordem), já dobradas.
 export function foldMatches(haystack: string, term: string): boolean {

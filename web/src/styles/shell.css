@@ -707,6 +707,26 @@ button.side-item {
 .user-menu .menu-note {
   contain: inline-size;
 }
+/* "Personalizados" com muitos status: abre e fecha no próprio menu; a seta gira e o número fica à direita. */
+.menu .menu-disclosure {
+  color: var(--fg-muted);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-medium);
+}
+.menu-disclosure .icon {
+  transform: rotate(-90deg);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.menu-disclosure[aria-expanded='true'] .icon {
+  transform: none;
+}
+.menu-count {
+  margin-left: auto;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-muted);
+}
 .menu-theme {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -947,6 +967,21 @@ button.side-item {
   top: -5px;
   left: 14px;
   box-shadow: 0 0 0 2px var(--bg-raised);
+}
+/* Ocupado no celular: o sino cortado no canto do avatar da aba Você (no computador, ele fica no rodapé). */
+.tab-silenced {
+  position: absolute;
+  top: -7px;
+  right: -12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 1px var(--border);
+  color: var(--fg-2);
 }
 .tab-label {
   max-width: 100%;
@@ -1679,7 +1714,7 @@ button.side-item {
 }
 
 /* ---------- Busca da barra lateral (pessoas e canais do servidor) ---------- */
-/* Texto curto à direita da linha: @usuário, "Oculta", "N membros". */
+/* Texto curto e apagado: "Oculta" à direita da conversa; nas linhas do servidor, a segunda linha. */
 .side-hint {
   flex-shrink: 1;
   min-width: 0;
@@ -1691,17 +1726,37 @@ button.side-item {
   line-height: var(--lh-12);
   color: var(--side-fg-muted);
 }
-/* Resultado do servidor: o nome fica inteiro enquanto couber; o texto à direita é que encolhe (com reticências). */
-.spot-item .side-name {
-  flex: 0 1 auto;
+/* Resultado do servidor: o nome em cima e o detalhe (@usuário, time e membros, "Sem conversa direta") embaixo, cada
+   um com a largura toda da linha. Lado a lado, na barra de 272px o detalhe virava "c…" ou sumia; o title da linha
+   tem o texto todo. */
+.side-item.spot-item {
+  height: auto;
+  min-height: 40px;
+  padding-block: var(--space-1);
 }
-.spot-item .side-hint {
-  flex: 1 1 0;
-  max-width: none;
-  text-align: right;
+.spot-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
-/* Título de grupo que não recolhe (Pessoas, Canais e times). */
+.spot-text > .side-name {
+  flex: none;
+  max-width: 100%;
+}
+.spot-text > .side-hint {
+  max-width: 100%;
+}
+@media (pointer: coarse) {
+  .side-item.spot-item {
+    min-height: var(--touch);
+  }
+}
+/* Título de grupo que não recolhe (Pessoas, Canais e times para entrar): o texto na mesma coluna dos títulos que
+   recolhem (eles têm a seta de 12px antes). */
 .side-group-title.static {
+  padding-left: calc(var(--space-2) + 12px + var(--space-1-5));
   cursor: default;
 }
 @media (hover: hover) {
@@ -1709,29 +1764,16 @@ button.side-item {
     color: var(--side-fg-muted);
   }
 }
-/* Pessoa sem conversa direta: a pílula explica, o @usuário sai para caber. */
+/* Pessoa sem conversa direta: nome apagado e a pílula com o motivo na segunda linha (o @usuário fica no title). */
 .side-item.blocked {
   --item-name: var(--side-fg-muted);
 }
-.side-item.blocked .side-hint {
-  display: none;
-}
-.side-item .pill.blocked {
-  flex-shrink: 0;
-  margin-left: auto;
-}
-/* Na barra estreita do computador o nome tem prioridade: a pílula fica só com o ícone (o texto continua para
-   leitores de tela e no title da linha), como as pílulas do cabeçalho estreito da sala. */
-.sidebar[data-mode='side'] .side-item .pill.blocked {
+.spot-text > .pill.blocked {
+  height: 18px;
+  margin-top: 2px;
   padding: 0 6px;
-}
-.sidebar[data-mode='side'] .side-item .pill.blocked .pill-label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
+  max-width: 100%;
   overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
 }
 /* Canal: a linha abre a prévia; "Entrar" (ou a chave do código de acesso) fica ao lado. */
 .spot-room {

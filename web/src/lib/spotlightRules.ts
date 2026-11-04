@@ -1,6 +1,6 @@
 // Regras puras da busca da barra lateral (sem React nem store: server/test/web-rules.test.ts testa direto).
 import type { SpotlightRoom, SpotlightUser, Subscription } from '@shared/index';
-import { foldText, type SpotlightScope } from '@shared/search';
+import { foldText, SPOTLIGHT_MIN, type SpotlightScope } from '@shared/search';
 
 const isPair = (s: Subscription) => s.t === 'd' && !s.name.includes(',');
 
@@ -34,3 +34,10 @@ export function orderPeople<T>(list: T[], blocked: (x: T) => boolean): T[] {
 
 // "Nenhum resultado", "1 resultado", "N resultados" (para o leitor de tela).
 export const resultCountText = (n: number) => (n === 0 ? 'Nenhum resultado' : n === 1 ? '1 resultado' : `${n} resultados`);
+
+// Busca curta demais para ir ao servidor (menos de 2 letras, ou só "@"/"#"): o que dizer no lugar de "Nada encontrado".
+export function spotlightHint(q: { text: string; scope: SpotlightScope }): string {
+  const what = q.scope === 'users' ? 'pessoas' : q.scope === 'rooms' ? 'canais e times' : 'pessoas e canais';
+  if (!q.text.trim() && q.scope !== 'all') return `Digite um nome depois do ${q.scope === 'users' ? '@' : '#'} para buscar ${what}.`;
+  return `Digite pelo menos ${SPOTLIGHT_MIN} letras para buscar ${what}.`;
+}

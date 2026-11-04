@@ -98,7 +98,8 @@ export function AdminUserStatus() {
             <tbody>
               {rows.map((s) => (
                 <tr key={s._id}>
-                  <td data-label="Nome">
+                  {/* Sem rótulo: no celular o nome é o título do cartão (como em Usuários). */}
+                  <td>
                     <span className="user-status-name">
                       <span className={`status-dot ${s.statusType}`} aria-hidden="true" />
                       <strong>{s.name}</strong>
@@ -115,20 +116,23 @@ export function AdminUserStatus() {
                     {s.usersCount ? plural(s.usersCount, 'pessoa', 'pessoas') : <span className="muted">—</span>}
                   </td>
                   <td className="actions-col">
-                    <RowMenu label={`Ações de “${s.name}”`}>
-                      {(close) => (
-                        <>
-                          <button type="button" onClick={() => (close(), void edit(s))}>
-                            <Icon name="edit" />
-                            Editar
-                          </button>
-                          <button type="button" className="danger" onClick={() => (close(), void remove(s))}>
-                            <Icon name="delete" />
-                            Excluir
-                          </button>
-                        </>
-                      )}
-                    </RowMenu>
+                    {/* Dentro de .row-actions o ⋯ vai para o canto do cartão no celular. */}
+                    <div className="row-actions">
+                      <RowMenu label={`Ações de “${s.name}”`}>
+                        {(close) => (
+                          <>
+                            <button type="button" onClick={() => (close(), void edit(s))}>
+                              <Icon name="edit" />
+                              Editar
+                            </button>
+                            <button type="button" className="danger" onClick={() => (close(), void remove(s))}>
+                              <Icon name="delete" />
+                              Excluir
+                            </button>
+                          </>
+                        )}
+                      </RowMenu>
+                    </div>
                   </td>
                 </tr>
               ))}

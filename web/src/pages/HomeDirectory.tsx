@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Subscription } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
 import { useAcks } from '../lib/acks';
@@ -158,10 +158,19 @@ export function DirectoryPage() {
   const { tab } = useParams();
   const type: DirType = tab === 'users' || tab === 'teams' ? tab : 'channels';
   const meta = DIR_TABS.find((t) => t.id === type)!;
-  const [text, setText] = useState('');
-  const [q, setQ] = useState('');
+  // ?q= vem da busca da barra lateral ("Abrir diretório"): o texto já chega no campo.
+  const [params] = useSearchParams();
+  const fromUrl = params.get('q');
+  const [text, setText] = useState(() => fromUrl ?? '');
+  const [q, setQ] = useState(() => fromUrl?.trim() ?? '');
   const [offset, setOffset] = useState(0);
   const navigate = useNavigate();
+  useEffect(() => {
+    if (fromUrl === null) return;
+    setText(fromUrl);
+    setQ(fromUrl.trim());
+    setOffset(0);
+  }, [fromUrl]);
   const subs = useStore((s) => s.subscriptions);
   const meId = useStore((s) => s.me?._id);
   useEffect(() => {

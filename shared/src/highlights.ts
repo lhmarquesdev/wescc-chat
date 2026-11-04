@@ -21,7 +21,10 @@ export function normalizeHighlights(input: unknown): { ok: true; words: string[]
     const len = [...w].length;
     if (len < HIGHLIGHT_MIN || len > HIGHLIGHT_MAX) return { ok: false, error: `“${w.slice(0, 60)}”: cada palavra destacada precisa ter de ${HIGHLIGHT_MIN} a ${HIGHLIGHT_MAX} caracteres.` };
     if (!/[\p{L}\p{N}]/u.test(w)) return { ok: false, error: `“${w}”: use letras ou números.` };
+    // Acentos e outros sinais sobre as letras não contam: "a" com dez sinais em cima é só "a".
     const key = foldText(w);
+    if ([...key].length < HIGHLIGHT_MIN || !/[\p{L}\p{N}]/u.test(key))
+      return { ok: false, error: `“${w.slice(0, 60)}”: use pelo menos ${HIGHLIGHT_MIN} letras ou números (acentos e sinais sozinhos não contam).` };
     if (seen.has(key)) continue;
     seen.add(key);
     words.push(w);
@@ -38,45 +41,61 @@ export interface HighlightMatcher {
 
 // Letra sem acento → a letra com os acentos do português (e vizinhos); \p{M}* aceita o acento separado (texto em NFD).
 const VARIANTS: Record<string, string> = {
-  a: '[aáàâãäå]',
-  e: '[eéèêë]',
-  i: '[iíìîï]',
-  o: '[oóòôõö]',
-  u: '[uúùûü]',
-  c: '[cç]',
-  n: '[nñ]',
-  y: '[yýÿ]',
+  a: 'aáàâãäå',
+  e: 'eéèêë',
+  i: 'iíìîï',
+  o: 'oóòôõö',
+  u: 'uúùûü',
+  c: 'cç',
+  n: 'nñ',
+  y: 'yýÿ',
 };
-// Só os caracteres de sintaxe levam barra: no modo u, "\-" e "\:" são erro.
-const SYNTAX = /[\\^$.*+?()[\]{}|/]/;
+// Dentro de [...] no modo u, só estes levam barra ("\:" seria erro).
+const CLASS_SYNTAX = /[\\^$.*+?()[\]{}|/-]/;
 const BEFORE = '(?<![\\p{L}\\p{M}\\p{N}_])';
 const AFTER = '(?![\\p{L}\\p{M}\\p{N}_])';
 
+// Um caractere da palavra (já sem acento e minúsculo): as variantes, em minúscula e maiúscula, numa classe.
+// Nada da classe é marca nem espaço. Por isso as expressões não usam a flag i: com ela, maiúsculas e minúsculas se
+// misturam com as marcas (o "ι" grego casa com a marca U+0345) e um \p{M}* seguido de algo que também casa com uma
+// marca faz o motor testar todas as divisões possíveis de uma fila de marcas: uma mensagem trava o servidor (ReDoS).
+function charClass(ch: string): string {
+  const out = new Set<string>();
+  for (const v of VARIANTS[ch] ?? ch)
+    for (const x of [v, v.toLowerCase(), v.toUpperCase()]) if ([...x].length === 1 && !/[\p{M}\s]/u.test(x)) out.add(x);
+  return out.size ? `[${[...out].map((x) => (CLASS_SYNTAX.test(x) ? `\\${x}` : x)).join('')}]` : '';
+}
+
+// Cada caractere vira "classe + \p{M}*"; espaços viram \s+. Cada trecho do texto só tem um jeito de casar.
 function wordPattern(word: string): string {
   let out = '';
   let space = false;
   for (const ch of foldText(word.normalize('NFC'))) {
     if (/\s/u.test(ch)) {
-      if (!space) out += '\\s+';
+      if (out && !space) out += '\\s+';
       space = true;
       continue;
     }
+    const cls = charClass(ch);
+    if (!cls) continue;
     space = false;
-    out += (VARIANTS[ch] ?? (SYNTAX.test(ch) ? `\\${ch}` : ch)) + '\\p{M}*';
+    out += cls + '\\p{M}*';
   }
-  return out;
+  return out.replace(/\\s\+$/, '');
 }
 
 export function compileHighlights(words: string[] | undefined | null): HighlightMatcher | null {
-  const list = (Array.isArray(words) ? words : []).filter((w): w is string => typeof w === 'string' && w.trim().length > 0);
-  if (!list.length) return null;
-  const parts = list.map(wordPattern);
+  const pairs = (Array.isArray(words) ? words : [])
+    .filter((w): w is string => typeof w === 'string' && w.trim().length > 0)
+    .map((w) => ({ w, p: wordPattern(w) }))
+    .filter((x) => x.p);
+  if (!pairs.length) return null;
   try {
-    const each = parts.map((p) => new RegExp(`${BEFORE}(?:${p})${AFTER}`, 'iu'));
+    const each = pairs.map((x) => new RegExp(`${BEFORE}(?:${x.p})${AFTER}`, 'u'));
     // A expressão mais longa primeiro: "servidor fora" ganha de "servidor".
-    const sorted = [...parts].sort((a, b) => b.length - a.length);
-    const any = new RegExp(`${BEFORE}(?:${sorted.join('|')})${AFTER}`, 'giu');
-    return { words: list, each, any };
+    const sorted = pairs.map((x) => x.p).sort((a, b) => b.length - a.length);
+    const any = new RegExp(`${BEFORE}(?:${sorted.join('|')})${AFTER}`, 'gu');
+    return { words: pairs.map((x) => x.w), each, any };
   } catch {
     return null;
   }

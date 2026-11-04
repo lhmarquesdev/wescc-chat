@@ -88,6 +88,20 @@ describe('status personalizados: cadastro', () => {
       for (const id of created) await remove(A, id);
     }
   });
+
+  // Revisão: contar e inserir eram passos soltos; 40 pedidos ao mesmo tempo deixavam 34 status na tabela.
+  it('pedidos ao mesmo tempo não passam do limite de 30', async () => {
+    const have = (await list(A)).statuses.length;
+    const tag = Date.now();
+    const res = await Promise.all(Array.from({ length: 40 }, (_, i) => create(A, `Paralelo ${tag} ${i}`, 'online')));
+    try {
+      expect(res.filter((r) => r.success)).toHaveLength(30 - have);
+      expect(res.filter((r) => !r.success).every((r) => r.status === 400 && r.errorType === 'error-too-many-statuses')).toBe(true);
+      expect((await pool.query('SELECT count(*)::int AS n FROM custom_user_statuses')).rows[0].n).toBe(30);
+    } finally {
+      for (const r of res) if (r.success) await remove(A, r.customUserStatus._id);
+    }
+  });
 });
 
 describe('status personalizados: escolher', () => {

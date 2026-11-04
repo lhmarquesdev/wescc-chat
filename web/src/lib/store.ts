@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { CustomUserStatus, Message, Room, ServerEvent, Subscription, User, UserStatus } from '@shared/index';
+import { selfUserPatch } from '@shared/status';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
 export interface ToastItem {
@@ -240,7 +241,8 @@ export function applyEvent(ev: ServerEvent) {
       st.markReads(ev.rid, ev.messageIds);
       break;
     case 'user':
-      if (st.me && ev.user._id === st.me._id) st.setMe({ ...st.me, ...ev.user } as Me);
+      // Só o evento da própria escolha muda o status personalizado (o do perfil chega como os outros o veem).
+      if (st.me && ev.user._id === st.me._id) st.setMe({ ...st.me, ...selfUserPatch(ev.user) } as Me);
       if (ev.user.roles) useStore.setState({ userRoles: { ...st.userRoles, [ev.user._id]: ev.user.roles } });
       if (ev.user.avatarETag !== undefined && ev.user.username) avatarBust[ev.user.username] = String(ev.user.avatarETag ?? Date.now());
       break;

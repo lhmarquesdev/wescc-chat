@@ -3,10 +3,10 @@ import { useFilesTab } from '../lib/files';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { Subscription, UserStatus } from '@shared/index';
 import { parseSpotlightQuery } from '@shared/search';
-import { presenceLabel, silencesNotifications } from '@shared/status';
+import { presenceLabel, shownCustomStatus, silencesNotifications, statusLine } from '@shared/status';
 import { api, errorMessage } from '../lib/api';
 import { badgeCount, MY_STATUS_LABEL, roomIconName, roomPath } from '../lib/format';
-import { matchesLocal } from '../lib/spotlightRules';
+import { matchesLocal, spotlightHint } from '../lib/spotlightRules';
 import { useInstallPrompt } from '../lib/install';
 import { logout } from '../lib/session';
 import { usePermission, useSetting, useStore } from '../lib/store';
@@ -56,7 +56,8 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 
 // ---------- Item de sala ----------
 
-function SidebarItem({ s, big }: { s: Subscription; big?: boolean }) {
+// onPick: na busca, abrir uma conversa termina a busca (como o Enter e as linhas de Pessoas e Canais).
+function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPick?: () => void }) {
   const typing = useStore((st) => Object.keys(st.typing[s.rid] ?? {}).length > 0);
   const dmUser = s.t === 'd' && !s.name.includes(',') ? s.name : null;
   const silenced = !!s.notifications?.disableNotifications;
@@ -72,7 +73,10 @@ function SidebarItem({ s, big }: { s: Subscription; big?: boolean }) {
     <NavLink
       to={roomPath(s)}
       className={({ isActive }) => ['side-item', isActive && 'active', (s.alert || s.unread) && 'unread', silenced && 'silenced'].filter(Boolean).join(' ')}
-      onClick={hidden ? () => void api.post('rooms.open', { roomId: s.rid }).catch(() => {}) : undefined}
+      onClick={() => {
+        if (hidden) void api.post('rooms.open', { roomId: s.rid }).catch(() => {});
+        onPick?.();
+      }}
     >
       {dmUser ? (
         <UserAvatar username={dmUser} size={big ? 24 : 20} />
@@ -118,6 +122,7 @@ function SideGroup({
   sort,
   onSort,
   add,
+  onPick,
 }: {
   title: string;
   items: Subscription[];
@@ -126,6 +131,7 @@ function SideGroup({
   sort: SortMode;
   onSort: (s: SortMode) => void;
   add?: { label: string; onClick: () => void };
+  onPick?: () => void;
 }) {
   const key = `side.collapsed.${title}`;
   const [collapsed, setCollapsed] = useState(() => local.get(key) === '1');
@@ -178,7 +184,7 @@ function SideGroup({
         </div>
       </div>
       {shown.map((s) => (
-        <SidebarItem key={s.rid} s={s} big={big} />
+        <SidebarItem key={s.rid} s={s} big={big} onPick={onPick} />
       ))}
     </div>
   );
@@ -252,10 +258,10 @@ export function useMyStatus() {
   const status = (live?.status ?? me.status ?? 'offline') as UserStatus;
   const text = (live ? live.statusText : me.statusText) || '';
   // O personalizado de quem está invisível só a própria pessoa sabe (a presença chega sem ele): vem de me.
-  const custom = !!me.statusCustom && list.some((x) => x._id === me.statusCustom && x.statusType === status);
+  const custom = !!shownCustomStatus({ status, statusCustom: me.statusCustom }, list);
   const label = presenceLabel({ status, statusCustom: me.statusCustom }, list);
   const silenced = silencesNotifications(me.statusDefault);
-  return { status, text, label, custom, silenced, line: text ? (custom ? `${label} · ${text}` : text) : label };
+  return { status, text, label, custom, silenced, line: statusLine(label, custom, text) };
 }
 
 function StatusTextModal({ onClose }: { onClose: () => void }) {
@@ -305,6 +311,38 @@ function StatusTextModal({ onClose }: { onClose: () => void }) {
         </Field>
       </form>
     </Modal>
+  );
+}
+
+// Até este tanto, os personalizados aparecem direto no menu; mais que isso, ficam atrás de "Personalizados" (com 20 ou
+// 30, Minha conta, Tema e Sair saíam da tela). O escolhido continua à vista com o grupo fechado.
+const CUSTOM_INLINE = 5;
+
+function CustomStatusItems({ chosen, close }: { chosen: string | null; close: () => void }) {
+  const statuses = useStore((s) => s.userStatuses);
+  const [open, setOpen] = useState(false);
+  if (!statuses.length) return null;
+  const many = statuses.length > CUSTOM_INLINE;
+  const shown = !many || open ? statuses : statuses.filter((x) => x._id === chosen);
+  return (
+    <>
+      {many ? (
+        <button type="button" className="menu-disclosure" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <Icon name="chevron-down" />
+          <span className="menu-text">Personalizados</span>
+          <span className="menu-count">{statuses.length}</span>
+        </button>
+      ) : (
+        <div className="menu-label">Personalizados</div>
+      )}
+      {shown.map((x) => (
+        <button key={x._id} role="menuitemradio" aria-checked={chosen === x._id} onClick={() => (void setStatus({ statusId: x._id }), close())}>
+          <span className={`status-dot ${x.statusType}`} aria-hidden="true" />
+          <span className="menu-text">{x.name}</span>
+          {chosen === x._id && <Icon name="check" className="menu-check" />}
+        </button>
+      ))}
+    </>
   );
 }
 
@@ -373,24 +411,14 @@ export function UserMenu({ trigger, placement }: { trigger: ReactNode; placement
                 {!chosenCustom && chosen === s && <Icon name="check" className="menu-check" />}
               </button>
             ))}
-            {statuses.length > 0 && (
-              <>
-                <div className="menu-label">Personalizados</div>
-                {statuses.map((x) => (
-                  <button key={x._id} role="menuitemradio" aria-checked={chosenCustom === x._id} onClick={() => (void setStatus({ statusId: x._id }), close())}>
-                    <span className={`status-dot ${x.statusType}`} aria-hidden="true" />
-                    <span className="menu-text">{x.name}</span>
-                    {chosenCustom === x._id && <Icon name="check" className="menu-check" />}
-                  </button>
-                ))}
-              </>
-            )}
+            {/* Logo abaixo de "Ocupado": quem acabou de escolher vê o aviso sem rolar. */}
             {silenced && (
               <div className="menu-note">
                 <Icon name="notify-silenced" />
                 <span>Notificações silenciadas enquanto você estiver ocupado. Chamadas continuam tocando.</span>
               </div>
             )}
+            <CustomStatusItems chosen={chosenCustom} close={close} />
             <button onClick={() => (setEditStatus(true), close())}>
               <Icon name="edit" />
               <span className="menu-text">
@@ -656,14 +684,20 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
     finishSearch();
     onNavigate?.();
   };
-  // Enter abre o primeiro resultado, na ordem da tela: conversas, depois Pessoas, depois Canais e times.
+  // Enter abre o primeiro resultado, na ordem da tela: conversas, depois Pessoas, depois Canais e times (cada linha
+  // termina a busca ao abrir).
   const openFirst = () => {
     const first = listRef.current?.querySelector<HTMLElement>('.side-item');
     if (!first) return false;
     first.click();
-    // Conversa da lista é um link: a busca termina aqui (as linhas do servidor terminam pelo spotDone).
-    if (first.tagName === 'A') finishSearch();
     return true;
+  };
+  // "Abrir diretório" leva o texto da busca (com @, na aba Pessoas) e termina a busca daqui.
+  const openDirectory = () => {
+    const q = parseSpotlightQuery(filter);
+    navigate(`/directory${q.scope === 'users' ? '/users' : ''}${q.text ? `?q=${encodeURIComponent(q.text)}` : ''}`);
+    finishSearch();
+    onNavigate?.();
   };
   useEffect(() => {
     if (!pendingEnter) return;
@@ -692,17 +726,19 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
   };
 
   let empty: ReactNode = null;
+  // Curta demais (uma letra, só "@" ou "#"): o servidor não foi perguntado; no lugar de "Nada encontrado", a dica.
+  const spotIdle = searching && !onlyUnread && !spot.key;
   // A busca só diz "nada encontrado" quando o servidor também respondeu sem nada (ou quando nem foi perguntado).
   const spotSettledEmpty = !spot.key || (spot.settledFor === spot.key && !spot.error && spotCount === 0);
   if (!groups.length) {
     if (searching) {
-      if (spotSettledEmpty)
+      if (spotSettledEmpty && !spotIdle)
         empty = (
           <Empty
             icon="search"
             title={`Nada encontrado para “${filter.trim()}”`}
             action={
-              <button type="button" className="btn small" onClick={() => (navigate('/directory'), onNavigate?.())}>
+              <button type="button" className="btn small" onClick={openDirectory}>
                 Abrir diretório
               </button>
             }
@@ -819,9 +855,21 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
       <nav className="side-list" aria-label="Conversas" ref={listRef} onKeyDown={onListKey}>
         {list && !searching && !onlyUnread && <ForYou />}
         {groups.map((g) => (
-          <SideGroup key={g.title} title={g.title} items={g.items} searching={searching} big={list} sort={sortOf(g.title)} onSort={(m) => setSort(g.title, m)} add={g.add} />
+          <SideGroup
+            key={g.title}
+            title={g.title}
+            items={g.items}
+            searching={searching}
+            big={list}
+            sort={sortOf(g.title)}
+            onSort={(m) => setSort(g.title, m)}
+            add={g.add}
+            onPick={searching ? finishSearch : undefined}
+          />
         ))}
-        {searching && !onlyUnread && <SpotlightResults spot={spot} localCount={localCount} big={list} onDone={spotDone} />}
+        {searching && !onlyUnread && (
+          <SpotlightResults spot={spot} localCount={localCount} big={list} onDone={spotDone} hint={spotIdle ? spotlightHint(parseSpotlightQuery(filter)) : undefined} />
+        )}
         {empty}
       </nav>
       {!list && !phone && <SideFoot />}

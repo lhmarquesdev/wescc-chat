@@ -63,14 +63,16 @@ function mapUnique(e: any): never {
 
 export async function createCustomStatus(ctx: Ctx, input: { name?: unknown; statusType?: unknown }) {
   const v = validate(input);
-  const n = await one('SELECT count(*)::int AS n FROM custom_user_statuses');
-  if (n.n >= MAX_CUSTOM_STATUSES) throw badRequest('error-too-many-statuses', `Limite de ${MAX_CUSTOM_STATUSES} status personalizados.`);
   await assertNameFree(v.name);
   const id = newId();
-  const row = await one(
-    'INSERT INTO custom_user_statuses (id, name, status_type, created_by) VALUES ($1,$2,$3,$4) RETURNING *',
-    [id, v.name, v.statusType, ctx.userId],
-  ).catch(mapUnique);
+  // Contar e inserir sob a mesma trava: dois pedidos ao mesmo tempo contavam 29, inseriam os dois e passavam do
+  // limite. SHARE ROW EXCLUSIVE trava contra si mesma e contra gravações (a leitura da lista segue livre).
+  const row = await tx(async (db) => {
+    await db.query('LOCK TABLE custom_user_statuses IN SHARE ROW EXCLUSIVE MODE');
+    const n = await one('SELECT count(*)::int AS n FROM custom_user_statuses', [], db);
+    if (n.n >= MAX_CUSTOM_STATUSES) throw badRequest('error-too-many-statuses', `Limite de ${MAX_CUSTOM_STATUSES} status personalizados.`);
+    return one('INSERT INTO custom_user_statuses (id, name, status_type, created_by) VALUES ($1,$2,$3,$4) RETURNING *', [id, v.name, v.statusType, ctx.userId], db);
+  }).catch(mapUnique);
   await audit(actorOf(ctx), 'user-status.created', { id, name: v.name }, { statusType: v.statusType });
   await broadcastStatuses();
   return mapStatus(row);

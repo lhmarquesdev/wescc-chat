@@ -7,12 +7,13 @@
 //
 // Variáveis de ambiente:
 //   CHAT_URL           endereço do chat com a web compilada. Obrigatória (localhost: as chamadas pedem contexto seguro).
-//   STEPS              passos a rodar, por exemplo 1,4 (padrão: todos). O 2 e o 3 usam o que o 1 cria; o 6 usa o 5.
+//   STEPS              passos a rodar, por exemplo 1,4 (padrão: todos). O 2 e o 3 usam o que o 1 cria; o 6 usa o 5;
+//                      o 7 (achados da revisão) roda sozinho.
 //   PLAYWRIGHT_CORE, CHROMIUM_PATH, ADMIN_USER, ADMIN_PASSWORD   como em scripts/visual/lib.mjs.
 //
 // Cria (ou reaproveita) e2e.ana e e2e.bruno (Usuário) e e2e.op1 e e2e.op2 (Operação), com uma senha nova a cada
-// execução; os canais #e2e-suporte, #e2e-suporte-noite e #e2e-codigo (com código de acesso) e o time privado
-// e2e-interno com um canal público. No fim devolve o limite de requisições e os status de fábrica (recria
+// execução; os canais #e2e-suporte, #e2e-suporte-noite e #e2e-codigo (com código de acesso), o time privado
+// e2e-interno com um canal público e o time público e2e-publico com o canal e2e-publico-vendas. No fim devolve o limite de requisições e os status de fábrica (recria
 // "Em reunião" e tira "Plantão").
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -27,7 +28,7 @@ process.env.BASE = CHAT_URL;
 const lib = await import('../visual/lib.mjs');
 
 const OUT = lib.outDir();
-const STEPS = new Set((process.env.STEPS ?? '1,2,3,4,5,6').split(',').map((s) => Number(s.trim())));
+const STEPS = new Set((process.env.STEPS ?? '1,2,3,4,5,6,7').split(',').map((s) => Number(s.trim())));
 const PASSWORD = `E2e-${crypto.randomBytes(6).toString('hex')}!`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -110,6 +111,11 @@ ok('joinCode', await admin.call('POST', 'rooms.saveRoomSettings', { rid: ROOMS.c
   if (!teams.some((t) => t.name === 'e2e-interno')) {
     const team = ok('teams.create', await admin.call('POST', 'teams.create', { name: 'e2e-interno', type: 1 })).team;
     ok('teams.createRoom', await admin.call('POST', 'teams.createRoom', { teamId: team._id, name: 'e2e-interno-canal', type: 'c' }));
+  }
+  // Time público: o canal dele aparece na busca com "e2e-publico · N membros".
+  if (!teams.some((t) => t.name === 'e2e-publico')) {
+    const team = ok('teams.create', await admin.call('POST', 'teams.create', { name: 'e2e-publico', type: 0 })).team;
+    ok('teams.createRoom', await admin.call('POST', 'teams.createRoom', { teamId: team._id, name: 'e2e-publico-vendas', type: 'c' }));
   }
 }
 // A conversa direta Ana–Bruno nasce no passo 1.
@@ -367,7 +373,14 @@ await step(2, 'Operação: "Sem conversa direta" e Enter só explica', async () 
   const row = people(p).locator('.side-item', { hasText: 'Olga Operadora' });
   await expectVisible(row, 'Olga em Pessoas');
   await expectVisible(row.locator('.pill.blocked', { hasText: 'Sem conversa direta' }), 'pílula "Sem conversa direta"');
+  // Revisão: no computador a pílula ficava só com o ícone; agora o texto aparece inteiro, e o nome também.
+  const pill = await row.locator('.pill.blocked').evaluate((el) => ({ w: el.getBoundingClientRect().width, cut: el.scrollWidth > el.clientWidth + 1 }));
+  assert(pill.w > 100 && !pill.cut, `pílula sem o texto inteiro: ${JSON.stringify(pill)}`);
+  assert(await row.locator('.side-name').evaluate((el) => el.scrollWidth <= el.clientWidth + 1), 'nome cortado na linha bloqueada');
+  assert((await row.getAttribute('title'))?.includes('@e2e.op2'), 'o @usuário saiu também do title');
   await shot(p, 'operacao-sem-conversa');
+  await shotScheme(p, 'operacao-sem-conversa-escuro', 'dark');
+  await p.emulateMedia({ colorScheme: 'light' });
   const before = p.url();
   await p.keyboard.press('Enter');
   await expectVisible(p.locator('.toast'), 'aviso da regra');
@@ -603,6 +616,181 @@ await step(6, 'Palavras destacadas: chips, marca na mensagem, selo de menção e
   });
   await shot(m, 'celular-palavras-vazia');
   await m.context().close();
+});
+
+// ---------- 7. Achados da revisão ----------
+// Onde começa o texto de um título de grupo (depois da seta, nos que recolhem).
+const titleTextLeft = (loc) =>
+  loc.evaluate((el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = walker.nextNode())) if (n.textContent.trim()) break;
+    const r = document.createRange();
+    r.selectNodeContents(n);
+    return r.getBoundingClientRect().left;
+  });
+
+await step(7, 'Revisão: detalhe inteiro, títulos alinhados, busca curta, fim da busca, diretório, menu longo, Membros e celular', async () => {
+  const p = anaPage;
+  await p.goto(`${CHAT_URL}/home`);
+  await p.waitForSelector('.sidebar');
+  ok('Ana em #e2e-suporte-noite', await ana.api.call('POST', 'channels.join', { roomId: ROOMS.noite }));
+
+  // Canais para entrar: o time e os membros aparecem inteiros (antes: "c…", "Time · 1 m…").
+  await search(p, 'e2e-publico');
+  await expectVisible(roomsGroup(p).locator('.spot-room', { hasText: 'e2e-publico-vendas' }), 'canal do time público');
+  await expectText(roomsGroup(p), 'Canais e times para entrar');
+  const hints = await roomsGroup(p)
+    .locator('.side-hint')
+    .evaluateAll((els) => els.map((el) => ({ text: el.textContent, cut: el.scrollWidth > el.clientWidth + 1, w: Math.round(el.getBoundingClientRect().width) })));
+  assert(hints.length >= 2 && hints.every((h) => !h.cut && h.w > 40), `detalhe cortado: ${JSON.stringify(hints)}`);
+  assert(hints.some((h) => h.text.startsWith('e2e-publico · ')) && hints.some((h) => h.text.startsWith('Time · ')), `sem o time: ${JSON.stringify(hints)}`);
+  await shot(p, 'revisao-canais-para-entrar');
+  await shotScheme(p, 'revisao-canais-para-entrar-escuro', 'dark');
+  await p.emulateMedia({ colorScheme: 'light' });
+
+  // Títulos fixos (Pessoas, Canais e times para entrar) na coluna dos que recolhem.
+  await search(p, 'e2e');
+  await expectVisible(people(p), 'Pessoas');
+  const local = await titleTextLeft(p.locator('.side-group:not(.spot-group) .side-group-title').first());
+  const fixed = await titleTextLeft(people(p).locator('.side-group-title'));
+  assert(Math.abs(local - fixed) <= 1, `títulos desalinhados: ${local} e ${fixed}`);
+  await shot(p, 'revisao-titulos');
+
+  // Curta demais: a dica no lugar de "Nada encontrado".
+  for (const [q, hint] of [
+    ['a', 'Digite pelo menos 2 letras para buscar pessoas e canais.'],
+    ['@', 'Digite um nome depois do @ para buscar pessoas.'],
+    ['#z', 'Digite pelo menos 2 letras para buscar canais e times.'],
+  ]) {
+    await search(p, q);
+    await expectText(p.locator('.side-list'), hint);
+    assert(!(await p.getByText('Nada encontrado').count()), `"Nada encontrado" com “${q}”`);
+    await shot(p, `revisao-busca-curta-${q === 'a' ? 'letra' : q === '@' ? 'arroba' : 'cerquilha'}`);
+  }
+
+  // Conversa da lista aberta pela busca: a busca termina, como no Enter.
+  await search(p, 'e2e-suporte-noite');
+  await p.locator('.side-group:not(.spot-group) a.side-item', { hasText: 'e2e-suporte-noite' }).click();
+  await p.waitForURL(new RegExp(`/channel/${ROOMS.noite}`), { timeout: 10000 });
+  assert((await p.locator('#sidebar-filter').inputValue()) === '', 'a busca continuou depois de abrir uma conversa da lista');
+
+  // "Abrir diretório" leva o texto; com @, na aba Pessoas.
+  await search(p, 'zzzz');
+  await p.getByRole('button', { name: 'Abrir diretório' }).click();
+  await p.waitForURL(/\/directory\?q=zzzz$/, { timeout: 10000 });
+  await waitFor('texto no diretório', async () => (await p.locator('.directory-search input, input.directory-search').first().inputValue()) === 'zzzz' || null);
+  assert((await p.locator('#sidebar-filter').inputValue()) === '', 'a busca da barra lateral continuou');
+  await shot(p, 'revisao-diretorio-com-texto');
+  await search(p, '@zzzz');
+  await p.getByRole('button', { name: 'Abrir diretório' }).click();
+  await p.waitForURL(/\/directory\/users\?q=zzzz$/, { timeout: 10000 });
+  await waitFor('texto em Pessoas', async () => (await p.locator('.directory-search input, input.directory-search').first().inputValue()) === 'zzzz' || null);
+
+  // Menu com muitos status: os personalizados ficam atrás de "Personalizados"; Sair à vista; o escolhido marcado.
+  const extra = [];
+  try {
+    for (let i = 1; i <= 14; i++)
+      extra.push(ok('create', await admin.call('POST', 'custom-user-status.create', { name: `E2E status ${String(i).padStart(2, '0')}`, statusType: ['online', 'away', 'busy'][i % 3] })).customUserStatus._id);
+    const ghost = ok('create', await admin.call('POST', 'custom-user-status.create', { name: 'E2E fora do ar', statusType: 'offline' })).customUserStatus._id;
+    extra.push(ghost);
+    const b = brunoPage;
+    await b.emulateMedia({ colorScheme: 'dark' });
+    await b.goto(`${CHAT_URL}/home`);
+    await b.waitForSelector('.sidebar');
+    ok('status 03', await bruno.api.call('POST', 'users.setStatus', { statusId: extra[2], message: '' }));
+    await waitFor('rodapé "E2E status 03"', async () => (await b.locator('.side-foot .me-status-text').innerText()) === 'E2E status 03' || null);
+    // Fechar e reabrir antes de a saída terminar (clique duplo no gatilho): o menu aparecia invisível.
+    await b.locator('.side-foot .me-btn').click();
+    await b.locator('.side-foot .me-btn').dblclick();
+    await expectVisible(b.getByRole('menu'), 'menu reaberto pelo clique duplo', 3000);
+    await b.keyboard.press('Escape');
+    await sleep(200);
+    await b.locator('.side-foot .me-btn').click();
+    const menu = b.locator('.menu.user-menu');
+    const disc = menu.locator('.menu-disclosure');
+    await expectVisible(disc, '"Personalizados" recolhido');
+    assert((await disc.getAttribute('aria-expanded')) === 'false', 'grupo aberto de início');
+    assert((await menu.getByRole('menuitemradio', { name: 'E2E status 03' }).getAttribute('aria-checked')) === 'true', 'o escolhido sumiu com o grupo fechado');
+    assert(await menu.evaluate((el) => el.scrollHeight <= el.clientHeight + 1), 'o menu ainda precisa rolar com o grupo fechado');
+    await expectVisible(menu.getByRole('menuitem', { name: 'Sair' }), 'Sair à vista');
+    await shot(b, 'revisao-menu-muitos-escuro');
+    await disc.click();
+    await expectVisible(menu.getByRole('menuitemradio', { name: 'E2E status 14' }), 'lista aberta');
+    await shot(b, 'revisao-menu-muitos-aberto-escuro');
+    await b.keyboard.press('Escape');
+    // O painel sai em 80 ms; reaberto antes disso, é o mesmo (com o grupo ainda aberto).
+    await sleep(200);
+
+    // Ocupado: o aviso logo abaixo dos status de base.
+    await pickStatus(b, 'Ocupado');
+    await sleep(200);
+    await b.locator('.side-foot .me-btn').click();
+    assert((await menu.locator('.menu-disclosure').getAttribute('aria-expanded')) === 'false', 'o grupo voltou aberto');
+    const noteAfterBase = await menu.evaluate((el) => {
+      const inv = [...el.querySelectorAll('[role="menuitemradio"]')].find((x) => x.textContent.trim() === 'Invisível');
+      return !!inv?.nextElementSibling?.classList.contains('menu-note');
+    });
+    assert(noteAfterBase, 'o aviso de silêncio não está logo abaixo de Invisível');
+    await shot(b, 'revisao-menu-ocupado-escuro');
+    await shotScheme(b, 'revisao-menu-ocupado-claro', 'light');
+    await b.keyboard.press('Escape');
+    await sleep(200);
+
+    // Celular ocupado: o sino cortado na aba Você e o aviso logo abaixo de Invisível na folha.
+    const m = await open(bruno, { phone: true });
+    await expectVisible(m.locator('.tabbar .tab-silenced'), 'sino cortado na aba Você');
+    await shot(m, 'revisao-celular-ocupado');
+    await m.locator('.tabbar .me-btn').tap();
+    await expectVisible(m.locator('.menu .menu-note', { hasText: 'Notificações silenciadas' }), 'aviso na folha');
+    await expectVisible(m.locator('.menu .menu-disclosure'), '"Personalizados" na folha');
+    await shot(m, 'revisao-celular-folha-ocupado');
+    await m.context().close();
+
+    // Invisível personalizado: editar o perfil não apaga a escolha nas abas abertas.
+    await pickStatus(b, 'Disponível');
+    ok('fora do ar', await bruno.api.call('POST', 'users.setStatus', { statusId: ghost, message: '' }));
+    await waitFor('rodapé "E2E fora do ar"', async () => (await b.locator('.side-foot .me-status-text').innerText()) === 'E2E fora do ar' || null);
+    ok('bio', await bruno.api.call('POST', 'users.updateOwnBasicInfo', { data: { bio: `Bio ${Date.now()}` } }));
+    await sleep(1000);
+    assert((await b.locator('.side-foot .me-status-text').innerText()) === 'E2E fora do ar', 'o rodapé perdeu o personalizado depois de editar o perfil');
+    await b.locator('.side-foot .me-btn').click();
+    assert((await menu.getByRole('menuitemradio', { name: 'E2E fora do ar' }).getAttribute('aria-checked')) === 'true', 'o menu perdeu a marca do personalizado');
+    assert((await menu.getByRole('menuitemradio', { name: 'Invisível', exact: true }).getAttribute('aria-checked')) === 'false', '"Invisível" marcado no lugar do personalizado');
+    await b.keyboard.press('Escape');
+  } finally {
+    for (const id of extra) await admin.call('POST', 'custom-user-status.delete', { customUserStatusId: id }).catch(() => {});
+  }
+
+  // Membros: o personalizado continua à vista com a mensagem ("Em atendimento · …").
+  const atendimento = ok('list', await admin.call('GET', 'custom-user-status.list')).statuses.find((x) => x.name === 'Em atendimento');
+  ok('em atendimento', await bruno.api.call('POST', 'users.setStatus', { statusId: atendimento._id, message: 'até as 15h com o cliente' }));
+  await p.goto(`${CHAT_URL}/channel/${ROOMS.suporte}`);
+  await p.locator('.room-actions button[title="Membros"]').click();
+  const member = p.locator('.member', { hasText: 'Bruno Conceição' });
+  await expectVisible(member, 'Bruno em Membros');
+  await waitFor('linha "Em atendimento · …"', async () => (await member.locator('.member-sub').innerText()).includes('Em atendimento · até as 15h com o cliente') || null);
+  await shot(p, 'revisao-membros-personalizado');
+  ok('volta', await bruno.api.call('POST', 'users.setStatus', { status: 'online', message: '' }));
+
+  // Administração › Status do usuário no celular: o nome é o título do cartão e o ⋯ fica no canto.
+  const a = await open(ADMIN, { phone: true, url: '/admin/user-status' });
+  const first = a.locator('table.user-status-table tbody tr').first();
+  await expectVisible(first, 'cartão no celular');
+  const card = await first.evaluate((tr) => {
+    const actions = tr.querySelector('td.actions-col');
+    const name = tr.querySelector('td');
+    return {
+      corner: getComputedStyle(actions).position === 'absolute' && actions.getBoundingClientRect().top - tr.getBoundingClientRect().top < 24,
+      label: getComputedStyle(name, '::before').content,
+    };
+  });
+  assert(card.corner, 'o ⋯ não está no canto do cartão');
+  assert(card.label === 'none' || card.label === 'normal' || card.label === '""', `o nome ainda tem rótulo: ${card.label}`);
+  assert(await noHScroll(a), 'rolagem horizontal na tabela do celular');
+  await shot(a, 'revisao-celular-admin-status');
+  await a.context().close();
+  await noOops(p);
 });
 
 // ---------- Fim ----------

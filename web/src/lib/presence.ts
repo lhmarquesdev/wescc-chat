@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { compileHighlights, type HighlightMatcher } from '@shared/highlights';
 import type { UserStatus } from '@shared/index';
-import { presenceLabel } from '@shared/status';
+import { presenceLabel, shownCustomStatus } from '@shared/status';
 import { useStore } from './store';
 
 // Presença de uma pessoa com o rótulo pronto: o nome do status personalizado ("Em reunião") enquanto o status real é
@@ -12,7 +12,7 @@ export function useUserPresence(username?: string, fallback?: { status?: UserSta
   const list = useStore((s) => s.userStatuses);
   const status = (live?.status ?? fallback?.status ?? 'offline') as UserStatus;
   const statusCustom = live ? live.statusCustom ?? null : fallback?.statusCustom ?? null;
-  return { status, statusCustom, label: presenceLabel({ status, statusCustom }, list) };
+  return { status, statusCustom, label: presenceLabel({ status, statusCustom }, list), custom: !!shownCustomStatus({ status, statusCustom }, list) };
 }
 
 // As palavras destacadas de quem está usando, compiladas uma vez por lista.
