@@ -79,6 +79,7 @@ export function AdminRooms() {
                           {r.default && <span className="pill tag">Padrão</span>}
                           {r.featured && <span className="pill accent tag">Destaque</span>}
                           {r.archived && <span className="pill tag">Arquivada</span>}
+                          {r.encrypted && <span className="pill tag">Criptografada</span>}
                         </>
                       }
                       sub={r.teamMain ? 'Time' : r.prid ? 'Discussão' : TYPE_LABEL[r.t]}

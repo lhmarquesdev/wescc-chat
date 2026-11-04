@@ -22,6 +22,8 @@ import { useIntegrationsMe } from '../lib/integrations';
 import { ConnectedAccounts } from './account/ConnectedAccounts';
 // Meus dados (LGPD): cópia dos próprios dados num .zip.
 import { MyDataSection } from './account/MyDataSection';
+// Criptografia de ponta a ponta
+import { E2eCard } from '../components/e2e/E2eCard';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -570,6 +572,7 @@ function Security() {
           </div>
         )}
         {twoFA && <TwoFactorCard />}
+        <E2eCard />
       </div>
     </>
   );

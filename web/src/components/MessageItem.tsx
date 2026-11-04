@@ -45,6 +45,10 @@ import { Avatar, confirmDialog, Empty, Field, Menu, Modal, SkeletonList, useAsyn
 import { jiraApi, jiraCreateAvailable, openIntegrationModal, useIntegrations } from '../lib/integrations';
 import { JiraCard } from './integrations/JiraCard';
 import { MeetingCard } from './integrations/MeetingCard';
+// Criptografia de ponta a ponta
+import { E2E_PLACEHOLDER, type E2eViewState } from '../lib/e2e/client';
+import { useE2eMessage } from '../lib/e2e/hooks';
+import { E2eFile } from './e2e/E2eFile';
 
 export interface MessageActions {
   onReplyThread?: (m: Message) => void;
@@ -190,7 +194,8 @@ function attachmentColor(c?: string) {
 
 // ---------- Imagens e visualizador ----------
 
-function Lightbox({ src, title, download, m, onClose }: { src: string; title?: string; download?: string; m?: Message; onClose: () => void }) {
+// blobName: imagem decifrada no navegador (blob:): baixa com o nome real e não abre em nova aba.
+function Lightbox({ src, title, download, m, blobName, onClose }: { src: string; title?: string; download?: string; m?: Message; blobName?: string; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEscape(true, onClose);
   useScrollLock(true);
@@ -225,13 +230,15 @@ function Lightbox({ src, title, download, m, onClose }: { src: string; title?: s
           <div className="lightbox-file">{title}</div>
           <div className="lightbox-actions">
             {download && (
-              <a className="lightbox-btn" href={`${download}?download`} title="Baixar" aria-label="Baixar">
+              <a className="lightbox-btn" href={blobName ? download : `${download}?download`} download={blobName} title="Baixar" aria-label="Baixar">
                 <Icon name="download" size={20} />
               </a>
             )}
-            <a className="lightbox-btn" href={src} target="_blank" rel="noreferrer" title="Abrir em nova aba" aria-label="Abrir em nova aba">
-              <Icon name="open-external" size={20} />
-            </a>
+            {!blobName && (
+              <a className="lightbox-btn" href={src} target="_blank" rel="noreferrer" title="Abrir em nova aba" aria-label="Abrir em nova aba">
+                <Icon name="open-external" size={20} />
+              </a>
+            )}
             <button type="button" className="lightbox-btn" onClick={onClose} title="Fechar" aria-label="Fechar">
               <Icon name="close" size={20} />
             </button>
@@ -243,7 +250,23 @@ function Lightbox({ src, title, download, m, onClose }: { src: string; title?: s
 }
 
 // Imagem do anexo: caixa reservada (esqueleto até carregar), ampliar e baixar no hover, abre no visualizador.
-function ImageView({ src, title, download, m, thumb, onCreateSticker }: { src: string; title?: string; download?: string; m?: Message; thumb?: boolean; onCreateSticker?: () => void }) {
+export function ImageView({
+  src,
+  title,
+  download,
+  m,
+  thumb,
+  onCreateSticker,
+  blobName,
+}: {
+  src: string;
+  title?: string;
+  download?: string;
+  m?: Message;
+  thumb?: boolean;
+  onCreateSticker?: () => void;
+  blobName?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const done = () => setLoaded(true);
@@ -258,7 +281,7 @@ function ImageView({ src, title, download, m, thumb, onCreateSticker }: { src: s
             <Icon name="expand" size={16} />
           </button>
           {download && (
-            <a className="glass-btn" href={`${download}?download`} title="Baixar" aria-label="Baixar">
+            <a className="glass-btn" href={blobName ? download : `${download}?download`} download={blobName} title="Baixar" aria-label="Baixar">
               <Icon name="download" size={16} />
             </a>
           )}
@@ -269,7 +292,7 @@ function ImageView({ src, title, download, m, thumb, onCreateSticker }: { src: s
           )}
         </span>
       )}
-      {open && <Lightbox src={src} title={title} download={download} m={m} onClose={() => setOpen(false)} />}
+      {open && <Lightbox src={src} title={title} download={download} m={m} blobName={blobName} onClose={() => setOpen(false)} />}
     </span>
   );
 }
@@ -516,6 +539,7 @@ function ReadReceipts({ m, onClose }: { m: Message; onClose: () => void }) {
 
 function ReportModal({ m, onClose }: { m: Message; onClose: () => void }) {
   const [text, setText] = useState('');
+  const encrypted = useStore((s) => !!m.e2e || !!s.rooms[m.rid]?.encrypted);
   const [busy, setBusy] = useState(false);
   const send = () => {
     setBusy(true);
@@ -540,7 +564,7 @@ function ReportModal({ m, onClose }: { m: Message; onClose: () => void }) {
         </>
       }
     >
-      <Field label="Motivo">
+      <Field label="Motivo" hint={encrypted ? 'Esta conversa é criptografada: a moderação não vê a mensagem. Descreva o problema no motivo.' : undefined}>
         <textarea rows={4} placeholder="Descreva o motivo" value={text} onChange={(e) => setText(e.target.value)} />
       </Field>
     </Modal>
@@ -591,6 +615,15 @@ function SystemMessage({ m }: { m: Message & Record<string, any> }) {
 function PinnedNote({ m }: { m: Message & Record<string, any> }) {
   const nameOf = useNames();
   const text = systemText(m, nameOf);
+  // Criptografia: o servidor guarda a citação vazia; o texto sai da mensagem fixada, se ela estiver carregada.
+  const encrypted = useStore((s) => !!s.rooms[m.rid]?.encrypted || !!s.rooms[m.rid]?.e2eKeyId);
+  const pinnedId = m.attachments?.[0]?.message_link?.match(/[?&]msg=([^&]+)/)?.[1];
+  const pinned = useStore((s) => (encrypted && pinnedId ? s.messages[m.rid]?.list.find((x) => x._id === pinnedId) : undefined));
+  const pinnedView = useE2eMessage(pinned ?? m);
+  const attachments =
+    encrypted && m.attachments?.length && !m.attachments[0].text
+      ? [{ ...m.attachments[0], text: pinned?.e2e ? pinnedView.msg || E2E_PLACEHOLDER.pending : pinned ? pinned.msg : E2E_PLACEHOLDER.pending }, ...m.attachments.slice(1)]
+      : m.attachments;
   return (
     <div className="msg system pinned-note" id={`msg-${m._id}`}>
       <div className="msg-left">
@@ -603,11 +636,22 @@ function PinnedNote({ m }: { m: Message & Record<string, any> }) {
           </span>
           <SysTime ts={m.ts} />
         </div>
-        {m.attachments?.map((a, i) => (
+        {attachments?.map((a, i) => (
           <AttachmentView key={i} a={a} m={m} />
         ))}
       </div>
     </div>
+  );
+}
+
+// Corpo da mensagem cifrada que ainda não dá para ler (cinza, itálico, com o cadeado).
+const E2E_ICON: Record<Exclude<E2eViewState, 'ok'>, IconName> = { pending: 'encrypted', waiting: 'e2e-waiting', locked: 'encrypted', 'old-key': 'encrypted', failed: 'e2e-warning' };
+function E2ePlaceholder({ state }: { state: Exclude<E2eViewState, 'ok'> }) {
+  return (
+    <span className={`msg-e2e ${state}`}>
+      <Icon name={E2E_ICON[state]} size={14} />
+      {E2E_PLACEHOLDER[state]}
+    </span>
   );
 }
 
@@ -768,7 +812,12 @@ interface MenuItem {
 // Itens que são componentes (os das figurinhas): recebem o close do menu e o papel da folha.
 type MenuEntry = MenuItem | { key: string; el: (close: () => void, sheetRole?: boolean) => ReactNode };
 
-function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highlight, footer }: MessageItemProps) {
+function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, highlight, footer }: MessageItemProps) {
+  // Criptografia: daqui em diante m.msg é o texto decifrado (editar, copiar, citar e a thread usam o mesmo).
+  const m = useE2eMessage(raw);
+  const e2eView = m.e2eView;
+  const e2eContent = e2eView?.state === 'ok' ? e2eView.content : undefined;
+  const roomEncrypted = useStore((s) => !!s.rooms[m.rid]?.encrypted);
   const me = useStore((s) => s.me)!;
   const navigate = useNavigate();
   const [picker, setPicker] = useState<{ anchor: HTMLElement | null; bar?: boolean } | null>(null);
@@ -781,7 +830,8 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   const [reminding, setReminding] = useState(false);
   const reminder = useStore((s) => (m.t ? undefined : s.reminders.find((r) => r.messageId === m._id)));
   const stickerGone = useStickers((st) => !!m.sticker && (m.sticker.removed || st.removed.has(m.sticker.fileId)));
-  const createSticker = useCreateSticker(m, inThread);
+  const createStickerRaw = useCreateSticker(m, inThread);
+  const createSticker = m.e2e ? null : createStickerRaw;
   const editing = useIsEditing(m._id);
   const coarse = useMedia('(hover: none)');
   const press = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
@@ -828,7 +878,9 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
 
   // Itens do "Mais" (e da folha do toque longo), em grupos separados por linha.
   // editableKind: a mesma regra da seta para cima no compositor (RoomPage.editLast).
-  const canEdit = editableKind(m) && canReply && ((own && allowEdit) || (!own && perms.includes('edit-message') && canModerate));
+  // Mensagem cifrada: só com a criptografia ligada (o texto novo vai cifrado) e depois de decifrar.
+  const e2eEditable = !m.e2e || (roomEncrypted && !!e2eContent);
+  const canEdit = editableKind(m) && e2eEditable && canReply && ((own && allowEdit) || (!own && perms.includes('edit-message') && canModerate));
   const opt = (on: unknown, item: MenuEntry) => (on ? item : null);
   const groups = [
     [
@@ -851,7 +903,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
       }),
       opt(!m.t, { key: 'remind', icon: 'remind', label: reminder ? 'Alterar lembrete' : 'Lembrar-me', run: () => setReminding(true) }),
       { key: 'link', icon: 'copy-link', label: 'Copiar link', run: copyLink } as MenuItem,
-      opt(!m.sticker, { key: 'text', icon: 'copy', label: 'Copiar texto', run: () => copyText(m.msg, 'Texto copiado.') }),
+      opt(!m.sticker && (!m.e2e || !!e2eContent), { key: 'text', icon: 'copy', label: 'Copiar texto', run: () => copyText(m.msg, 'Texto copiado.') }),
       opt(!own, { key: 'unread', icon: 'mark-unread', label: 'Marcar como não lida', run: () => void api.post('subscriptions.unread', { firstUnreadMessage: { _id: m._id } }).catch(fail) }),
       opt(showReceipts, { key: 'receipts', icon: 'receipts', label: 'Confirmações de leitura', run: () => setReceipts(true) }),
       opt(m.sticker, { key: 'sticker', el: (close, sheetRole) => <StickerMenuItems message={m} close={close} sheetRole={sheetRole} /> }),
@@ -859,13 +911,13 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
     ],
     // Integrações (Jira): grupo "Integrações" entre o 2 e o Denunciar (some quando não tem itens)
     [
-      opt(jiraCreateAvailable(integrations) && !m.t, {
+      opt(jiraCreateAvailable(integrations) && !m.t && !m.e2e, {
         key: 'jira-create',
         icon: 'jira-create',
         label: 'Criar issue no Jira',
         run: () => openIntegrationModal({ modal: 'jira-create', rid: m.rid, tmid: m.tmid ?? null, messageId: m._id }),
       }),
-      opt(m.jira?.kind === 'preview' && (own || canModerate), { key: 'jira-preview', icon: 'close', label: 'Remover prévia', run: () => void jiraApi.removePreview(m._id).catch(fail) }),
+      opt(m.jira?.kind === 'preview' && !m.e2e && (own || canModerate), { key: 'jira-preview', icon: 'close', label: 'Remover prévia', run: () => void jiraApi.removePreview(m._id).catch(fail) }),
     ],
     [opt(!own, { key: 'report', icon: 'report', label: 'Denunciar', run: () => setReport(true) })],
     [
@@ -957,6 +1009,8 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   const body =
     m.t === 'rm' ? (
       <em className="muted">Mensagem removida</em>
+    ) : e2eView && e2eView.state !== 'ok' ? (
+      <E2ePlaceholder state={e2eView.state} />
     ) : m.t === 'discussion-created' || call ? null : (
       withCopy(renderMarkdown(text, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick, highlights: own ? null : hlm }))
     );
@@ -981,10 +1035,22 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   // Figurinha: no lugar do texto, sem o emoji grande; a imagem de reserva (anexo 'sticker') é para outros clientes.
   const sticker = m.sticker && m.t !== 'rm' ? m.sticker : null;
   // Integrações (Jira): o anexo de reserva do Jira e da reunião some quando o cartão existe
-  const attachments = m.attachments?.map((a, i) =>
+  const plainAttachments = m.attachments?.map((a, i) =>
     (sticker && a.type === 'sticker') || (a.type === 'jira' && m.jira) || (a.type === 'meeting' && m.meeting) ? null : (
       <AttachmentView key={i} a={a} m={m} createSticker={createSticker ?? undefined} />
     ),
+  );
+  // Mensagem cifrada: a citação e o arquivo vêm de dentro da cifra; anexos do servidor (aviso de retenção) continuam.
+  const attachments = e2eContent ? (
+    <>
+      {e2eContent.quote && (
+        <QuoteAttachment a={{ text: e2eContent.quote.text, author_name: e2eContent.quote.author, ts: e2eContent.quote.ts, message_link: `?msg=${e2eContent.quote.mid}` }} />
+      )}
+      {e2eContent.file && <E2eFile m={m} file={e2eContent.file} />}
+      {plainAttachments}
+    </>
+  ) : (
+    plainAttachments
   );
   const stickerView = sticker && <StickerView sticker={sticker} size="message" playbackKey={m._id} onOpen={setStickerCard} />;
   const forward = m.forward && m.t !== 'rm' ? m.forward : null;
@@ -1010,7 +1076,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   ) : (
     <>
       {stickerView ||
-        (!call && (text || !lifted) && (
+        (!call && (text || !lifted) && !(e2eContent && !text) && (
           <div className={`msg-body ${isEmojiOnly(text) ? 'big-emoji' : ''}`}>
             {body}
             {grouped && edited}

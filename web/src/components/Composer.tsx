@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import type { Message } from '@shared/index';
 import { encryptedContent } from '@shared/messages';
 import { mediaTypeAllowed, stickerPreviewText } from '@shared/stickers';
+import { localCommandText } from '@shared/e2e';
+import { editEncrypted, quoteOf, sendEncrypted, sendEncryptedFile, type E2eFileMeta } from '../lib/e2e/client';
 import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
 import { slashCommands } from '../lib/commands';
 import { EMOJI, searchEmoji } from '../lib/emoji';
@@ -148,8 +150,14 @@ function ComposerView({
     setPicker(true);
   }, [pickerRequest, rid, tmid, disabled]);
 
+  // Rascunho de conversa criptografada não fica no navegador.
+  const noDraft = !!room?.encrypted;
   const readDraft = () => {
     try {
+      if (noDraft) {
+        localStorage.removeItem(draftKey);
+        return '';
+      }
       return localStorage.getItem(draftKey) ?? '';
     } catch {
       return '';
@@ -159,6 +167,11 @@ function ComposerView({
     setText(readDraft());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey]);
+  // A conversa passou a ser criptografada: o rascunho que já estava guardado sai do navegador.
+  useEffect(() => {
+    if (noDraft) readDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noDraft]);
 
   const wasEditing = useRef(false);
   useEffect(() => {
@@ -234,7 +247,7 @@ function ComposerView({
 
   const saveDraft = (v: string) => {
     // O texto de uma edição não é rascunho de mensagem nova: depois de uma recarga, o Enter publicaria uma cópia.
-    if (editing) return;
+    if (editing || noDraft) return;
     try {
       if (v) localStorage.setItem(draftKey, v);
       else localStorage.removeItem(draftKey);
@@ -358,7 +371,9 @@ function ComposerView({
     if (msg.length > maxSize) return useStore.getState().toast(`A mensagem excede ${maxSize} caracteres.`, 'error');
     sendTyping(false);
     try {
-      if (editing) {
+      if (room?.encrypted) {
+        if (!(await sendE2e(msg))) return;
+      } else if (editing) {
         await api.post('chat.update', { roomId: rid, msgId: editing._id, text: msg });
         setEditing(null);
       } else {
@@ -376,14 +391,76 @@ function ComposerView({
     }
   };
 
+  // Conversa criptografada: o texto vai cifrado. Comandos que só publicam texto (/me, /shrug…) saem montados aqui; os
+  // outros comandos conhecidos vão para commands.run (o servidor recusa os que publicariam texto aberto).
+  const sendE2e = async (msg: string): Promise<boolean> => {
+    if (!room) return false;
+    if (editing) {
+      await editEncrypted(room, editing, msg);
+      setEditing(null);
+      return true;
+    }
+    const cmd = msg.match(/^\/([a-z0-9-]+)(?:\s+([\s\S]*))?$/i);
+    let text = msg;
+    if (cmd) {
+      const name = cmd[1].toLowerCase();
+      const args = (cmd[2] ?? '').trim();
+      const local = localCommandText(name, args);
+      if (local !== null) text = local;
+      else if ((await slashCommands(me._id)).some((c) => c.command === name)) {
+        await api.post('commands.run', { roomId: rid, command: name, params: args, tmid });
+        return true;
+      }
+    }
+    const ackRequired = ackOption && askAck && !tmid ? true : undefined;
+    await sendEncrypted(room, { msg: text, quote: quoting ? quoteOf(quoting) : undefined, tmid, tshow: tmid ? alsoChannel || undefined : undefined, ackRequired });
+    if (quoting) setQuoting(null);
+    return true;
+  };
+
+  // Arquivo de conversa criptografada: o servidor não vê o tipo nem o tamanho real, então a lista de tipos e o limite
+  // (com os 16 bytes da cifra) são conferidos aqui, com os mesmos textos do servidor.
+  const maxFile = useSetting<number>('FileUpload_MaxFileSize') ?? 0;
+  const e2eFileProblem = (f: File) => {
+    if (!mediaTypeAllowed(f.type || 'application/octet-stream', whiteList, blackList)) return 'Tipo de arquivo não permitido.';
+    if (maxFile > 0 && f.size + 16 > maxFile) {
+      const limit = maxFile >= 1048576 ? `${Math.round(maxFile / 1048576)} MB` : `${Math.max(1, Math.round(maxFile / 1024))} KB`;
+      return `Arquivo maior que o permitido (${limit}).`;
+    }
+    return null;
+  };
+  const e2eMeta = async (f: File, extra: Record<string, string>): Promise<E2eFileMeta> => {
+    if (extra.voice) return { voice: true, duration: Number(extra.duration) || undefined, waveform: extra.waveform ? extra.waveform.split(',').map(Number) : undefined };
+    if (extra.video) return { video: true, duration: Number(extra.duration) || undefined };
+    if (f.type.startsWith('image/') && typeof createImageBitmap === 'function') {
+      try {
+        const bmp = await createImageBitmap(f);
+        const size = { width: bmp.width, height: bmp.height };
+        bmp.close();
+        return size;
+      } catch {
+        // tipo que o navegador não abre: sem tamanho
+      }
+    }
+    return {};
+  };
+
   const doUpload = async (files: File[], description: string, extra: Record<string, string> = {}, label?: string) => {
     for (const f of files) {
+      if (room?.encrypted) {
+        const problem = e2eFileProblem(f);
+        if (problem) {
+          useStore.getState().toast(problem, 'error');
+          continue;
+        }
+      }
       const id = ++uploadSeq.current;
       const abort = new AbortController();
       setUploads((u) => [...u, { id, name: label ?? f.name, progress: 0, abort }]);
       try {
         const progress = (p: number) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, progress: p } : x)));
-        await uploadTo(`rooms.upload/${rid}`, f, { description, tmid: tmid ?? '', ...extra }, progress, abort.signal);
+        if (room?.encrypted) await sendEncryptedFile(room, f, { msg: description, tmid, meta: await e2eMeta(f, extra), onProgress: progress, signal: abort.signal });
+        else await uploadTo(`rooms.upload/${rid}`, f, { description, tmid: tmid ?? '', ...extra }, progress, abort.signal);
       } catch (e) {
         // Cancelado por quem enviou: a barra some e basta.
         if (!(e instanceof ApiError && e.errorType === 'aborted')) useStore.getState().toast(errorMessage(e), 'error');

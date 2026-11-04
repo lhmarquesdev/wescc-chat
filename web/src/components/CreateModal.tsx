@@ -1,9 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, errorMessage } from '../lib/api';
+import type { Room } from '@shared/index';
+import { api, ApiError, errorMessage } from '../lib/api';
 import { partyOf, useDirect, type DirectState } from '../lib/direct';
 import { roomPath } from '../lib/format';
-import { usePermission } from '../lib/store';
+import { usePermission, useSetting, useStore } from '../lib/store';
+import { sendEncrypted } from '../lib/e2e/client';
+import { requireE2eReady } from './e2e/E2eDialogs';
 import { Icon } from './Icon';
 import { RoomPicker, UserPicker, type PickedRoom, type PickedUser } from './Pickers';
 import { Field, Modal, Segmented, Toggle } from './ui';
@@ -42,6 +45,10 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
   const [members, setMembers] = useState<PickedUser[]>([]);
   const [parentRoom, setParentRoom] = useState<PickedRoom | null>(parent ?? null);
   const [reply, setReply] = useState('');
+  // Criptografia de ponta a ponta: grupo privado criado já cifrado (com E2E_Enable).
+  const [encrypted, setEncrypted] = useState(false);
+  const e2eOn = !!useSetting<boolean>('E2E_Enable');
+  const e2eHere = e2eOn && kind === 'channel' && isPrivate;
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const canPublic = usePermission('create-c');
@@ -67,7 +74,10 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
         navigate(roomPath({ _id: r.room._id, t: 'd' }));
       } else if (kind === 'channel') {
         const prefix = isPrivate ? 'groups' : 'channels';
-        const extraData = { topic, notice, noticeAck: notice && ack, reactWhenReadOnly: notice && reactions, broadcast: notice && hideMembers };
+        const e2e = e2eHere && encrypted;
+        // A chave da conversa nasce neste navegador: a senha da criptografia vem antes.
+        if (e2e && !(await requireE2eReady())) return;
+        const extraData = { topic, notice, noticeAck: notice && ack, reactWhenReadOnly: notice && reactions, broadcast: notice && hideMembers, encrypted: e2e || undefined };
         const r = await api.post(`${prefix}.create`, { name, members: usernames, extraData });
         const room = r.channel ?? r.group;
         navigate(roomPath(room));
@@ -76,7 +86,19 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
         navigate(roomPath({ _id: r.team.roomId, t: isPrivate ? 'p' : 'c' }));
       } else {
         if (!parentRoom) throw new Error('Escolha a sala de origem.');
-        const r = await api.post('rooms.createDiscussion', { prid: parentRoom._id, pmid, t_name: name, users: usernames, reply: reply || undefined });
+        const create = (first?: string) => api.post('rooms.createDiscussion', { prid: parentRoom._id, pmid, t_name: name, users: usernames, reply: first || undefined });
+        // Discussão de conversa criptografada nasce criptografada: a primeira mensagem vai cifrada, depois de criar.
+        const parentEncrypted = !!useStore.getState().rooms[parentRoom._id]?.encrypted;
+        let r: { discussion: Room };
+        let later = parentEncrypted ? reply.trim() : '';
+        try {
+          r = await create(later ? undefined : reply);
+        } catch (e) {
+          if (!(e instanceof ApiError && e.errorType === 'error-e2e-reply')) throw e;
+          later = reply.trim();
+          r = await create();
+        }
+        if (later && (await requireE2eReady())) await sendEncrypted(r.discussion, { msg: later }).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
         navigate(roomPath(r.discussion));
       }
       onClose();
@@ -141,6 +163,14 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
               <span className="field-hint">{isPrivate ? 'Só quem for convidado entra.' : 'Qualquer pessoa da empresa encontra no diretório e entra.'}</span>
             </div>
             {kind === 'team' && <Toggle checked={readOnly} onChange={setReadOnly} label="Somente leitura" description="Só donos e moderadores escrevem na sala principal do time." />}
+            {e2eHere && (
+              <Toggle
+                checked={encrypted}
+                onChange={setEncrypted}
+                label="Criptografar de ponta a ponta"
+                description="Só quem participa lê. Busca, figurinhas, bots e integrações deixam de funcionar."
+              />
+            )}
           </>
         )}
         {kind === 'channel' && (

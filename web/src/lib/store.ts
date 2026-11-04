@@ -13,7 +13,8 @@ export interface ToastItem {
   key?: string; // um aviso por chave: o novo troca o anterior, e dismissToastKey tira (ex.: a falha de uma agendada)
 }
 
-export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean };
+// e2eKeys: impressão da chave pública da criptografia de ponta a ponta (null sem chaves).
+export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean; e2eKeys?: string | null };
 
 interface RoomMessages {
   list: Message[];

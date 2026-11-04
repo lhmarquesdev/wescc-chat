@@ -271,6 +271,9 @@ import { FileDown as ExportFileDown, FolderDown as ExportFolderDown } from 'luci
 // Busca e status
 import { BellOff as StatusBellOff, CircleDotDashed as StatusCircleDotDashed, Highlighter as StatusHighlighter, KeyRound as SearchKeyRound } from 'lucide-react';
 
+// Criptografia de ponta a ponta
+import { Hourglass as E2eHourglass, KeyRound as E2eKeyRound, LockKeyholeOpen as E2eLockOpen, RefreshCw as E2eRefresh, ShieldAlert as E2eShieldAlert } from 'lucide-react';
+
 export const ICONS = {
   // ---------- Dono 1: comuns ----------
   close: X,
@@ -671,6 +674,12 @@ export const ICONS = {
   'video-message': Video, // "Gravar vídeo"
   'record-start': Circle, // começar a gravar
   'record-stop': Square, // parar
+  // ---------- Criptografia de ponta a ponta ----------
+  'e2e-key': E2eKeyRound, // senha da criptografia, "Redefinir criptografia"
+  'e2e-open': E2eLockOpen, // "Desligar criptografia"
+  'e2e-rotate': E2eRefresh, // "Gerar chave nova"
+  'e2e-waiting': E2eHourglass, // esperando a chave da conversa
+  'e2e-warning': E2eShieldAlert, // não deu para decifrar
 } as const;
 
 export type IconName = keyof typeof ICONS;

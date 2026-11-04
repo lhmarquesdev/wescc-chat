@@ -110,13 +110,16 @@ export async function exportPkcs8WithPassword(blob: string, pass: string): Promi
 }
 
 // A chave privada pronta para uso, não exportável (é assim que fica guardada no navegador).
-export async function decryptPrivateKey(blob: string, pass: string): Promise<CryptoKey> {
-  const pkcs8 = await exportPkcs8WithPassword(blob, pass);
+export async function importPrivateKey(pkcs8: ArrayBuffer): Promise<CryptoKey> {
   try {
     return await subtle().importKey('pkcs8', pkcs8, RSA, false, ['unwrapKey', 'decrypt']);
   } catch {
     throw new E2eError('invalid-key');
   }
+}
+
+export async function decryptPrivateKey(blob: string, pass: string): Promise<CryptoKey> {
+  return importPrivateKey(await exportPkcs8WithPassword(blob, pass));
 }
 
 export async function importPublicKey(text: string): Promise<CryptoKey> {

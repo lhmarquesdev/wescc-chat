@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Message, Room, Subscription } from '@shared/index';
 import { stickerPreviewText } from '@shared/stickers';
@@ -10,7 +10,7 @@ import { useUserPresence } from '../lib/presence';
 import { renderMarkdown } from '../lib/markdown';
 import { authorName } from '../lib/messageRules';
 import { useNames } from '../lib/names';
-import { canWithRoles, useStore } from '../lib/store';
+import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { Icon, type IconName } from './Icon';
 import { FileTile } from './MessageItem';
 import { useEscape, useIsPhone } from './overlay';
@@ -19,6 +19,11 @@ import { StickerView } from './stickers/StickerView';
 import { Avatar, Empty, Field, GroupAvatar, Menu, Segmented, SearchInput, SkeletonList, Toggle, UserAvatar, confirmDialog, useAsync } from './ui';
 // Chamadas em grupo: "Em chamada" ao lado da presença.
 import { InCallBadge } from './call/LiveIndicators';
+// Criptografia de ponta a ponta
+import { foldText } from '@shared/search';
+import { E2E_PLACEHOLDER, plainOf, useE2e } from '../lib/e2e/client';
+import { useE2eMessage } from '../lib/e2e/hooks';
+import { openE2eDialog, requireE2eReady } from './e2e/E2eDialogs';
 // Permissões do canal: quem fala e o que cada pessoa pode fazer nele.
 import { RoomAccessPanel } from './RoomAccessPanel';
 // Exportar mensagens: período, formato e arquivos, com tíquete de download de uso único.
@@ -147,7 +152,11 @@ export function RoomPanel(p: Props) {
 const hasPerm = (perm: string, roles: string[]) => canWithRoles(perm, roles);
 
 // Corpo de um resultado com as menções destacadas como na conversa (sem links de canal: o resultado já é um botão).
-function resultBody(m: Message) {
+// Mensagem cifrada: o texto decifrado (useE2eMessage), o arquivo ou o aviso de que ainda não dá para ler.
+function resultBody(m: ReturnType<typeof useE2eMessage<Message>>) {
+  const v = m.e2eView;
+  if (v && v.state !== 'ok') return <em className="msg-e2e">{E2E_PLACEHOLDER[v.state]}</em>;
+  if (v?.content?.file && !m.msg) return `📎 ${v.content.file.name}`;
   return renderMarkdown(m.msg, { me: useStore.getState().me?.username, mentions: m.mentions });
 }
 
@@ -166,7 +175,8 @@ function ResultHead({ m }: { m: Message }) {
   );
 }
 
-function MessageResult({ m }: { m: Message }) {
+function MessageResult({ m: raw }: { m: Message }) {
+  const m = useE2eMessage(raw);
   const navigate = useNavigate();
   return (
     <button type="button" className="result" onClick={() => navigate(`${location.pathname.split('/thread/')[0]}?msg=${m._id}`)}>
@@ -213,6 +223,8 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   const canSetReact = hasPerm('set-react-when-readonly', roles);
   const isAdmin = useStore((s) => s.me?.permissions.includes('view-room-administration'));
   const canRetention = useStore((s) => s.me?.permissions.includes('edit-room-retention-policy'));
+  const canToggleE2e = hasPerm('toggle-room-e2e-encryption', roles);
+  const e2eSetting = !!useSetting<boolean>('E2E_Enable');
   useEffect(() => {
     setF(roomForm(room));
   }, [room, edit]);
@@ -231,6 +243,20 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
         delete body.featured;
       }
       if (!body.joinCode) delete body.joinCode;
+      // Ligar ou desligar a criptografia pede a mesma confirmação do menu da conversa (e a senha, para ligar).
+      if ('encrypted' in body) {
+        if (body.encrypted && !(await requireE2eReady())) return;
+        const yes = await confirmDialog(
+          body.encrypted
+            ? {
+                title: 'Ligar a criptografia de ponta a ponta?',
+                body: 'As próximas mensagens e arquivos ficam cifrados: só quem participa consegue ler. Busca, prévias do Jira, figurinhas, bots e integrações deixam de funcionar aqui. As mensagens antigas continuam como estão.',
+                confirmLabel: 'Ligar criptografia',
+              }
+            : { title: 'Desligar a criptografia?', body: 'As próximas mensagens ficam legíveis no servidor. As mensagens criptografadas continuam cifradas.', confirmLabel: 'Desligar', danger: true },
+        );
+        if (!yes) return;
+      }
       await api.post('rooms.saveRoomSettings', body);
       setEdit(false);
       onChanged();
@@ -296,7 +322,15 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
                 )}
               </>
             )}
-            <Toggle checked={f.encrypted} onChange={(v) => setF({ ...f, encrypted: v })} label="Criptografada" />
+            {/* Criptografia de ponta a ponta: só grupo privado, com a configuração do chat ligada (ou já criptografado). */}
+            {room.t === 'p' && f.roomType === 'p' && canToggleE2e && (e2eSetting || room.encrypted) && (
+              <Toggle
+                checked={f.encrypted}
+                onChange={(v) => setF({ ...f, encrypted: v })}
+                label="Criptografia de ponta a ponta"
+                description="Só quem participa lê. Busca, figurinhas, bots e integrações deixam de funcionar."
+              />
+            )}
             {f.roomType === 'c' && (
               <Field label="Código de acesso" hint="Deixe vazio para não exigir código.">
                 <input value={f.joinCode} onChange={(e) => setF({ ...f, joinCode: e.target.value })} placeholder="(sem alteração)" />
@@ -436,6 +470,15 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
           {dm ? 'Conversa iniciada' : 'Criada'} em {formatDateTime(room.ts)}
           {dm ? '' : ` · ${plural(room.usersCount ?? 0, 'membro', 'membros')}`} · {plural(room.msgs ?? 0, 'mensagem', 'mensagens')}
         </p>
+        {room.encrypted && (
+          <p className="info-retention info-e2e">
+            <Icon name="encrypted" size={14} />
+            <span>Criptografia de ponta a ponta: ligada</span>
+            <button type="button" className="link" onClick={() => void openE2eDialog('info')}>
+              Saiba mais
+            </button>
+          </p>
+        )}
         {room.retention?.overrideGlobal && room.retention.enabled && (
           <p className="info-retention">
             <Icon name="retention" size={14} />
@@ -565,19 +608,25 @@ function ThreadsPanel({ room }: Props) {
           {THREAD_EMPTY[type][1]}
         </Empty>
       ) : (
-        data.threads.map((m: Message) => (
-          <button key={m._id} type="button" className="result thread-row" onClick={() => navigate(`${roomPath(room)}/thread/${m._id}`)}>
-            <ResultHead m={m} />
-            <div className="result-body clamp">{!m.msg && m.sticker ? stickerPreviewText(m.sticker) : resultBody(m)}</div>
-            <div className="result-foot">
-              <Icon name="panel-threads" size={14} />
-              <span className="result-count">{plural(m.tcount ?? 0, 'resposta', 'respostas')}</span>
-              {m.tlm && <span className="muted">· última {formatRelative(m.tlm)}</span>}
-            </div>
-          </button>
-        ))
+        data.threads.map((m: Message) => <ThreadRow key={m._id} m={m} onOpen={() => navigate(`${roomPath(room)}/thread/${m._id}`)} />)
       )}
     </>
+  );
+}
+
+// Linha da lista de tópicos (a mensagem de origem cifrada decifra como na conversa).
+function ThreadRow({ m: raw, onOpen }: { m: Message; onOpen: () => void }) {
+  const m = useE2eMessage(raw);
+  return (
+    <button type="button" className="result thread-row" onClick={onOpen}>
+      <ResultHead m={m} />
+      <div className="result-body clamp">{!m.msg && m.sticker ? stickerPreviewText(m.sticker) : resultBody(m)}</div>
+      <div className="result-foot">
+        <Icon name="panel-threads" size={14} />
+        <span className="result-count">{plural(m.tcount ?? 0, 'resposta', 'respostas')}</span>
+        {m.tlm && <span className="muted">· última {formatRelative(m.tlm)}</span>}
+      </div>
+    </button>
   );
 }
 
@@ -878,7 +927,52 @@ const SEARCH_TIPS: [string, string][] = [
   ['"frase exata"', 'Exatamente estas palavras'],
 ];
 
-function SearchPanel({ room }: Props) {
+// Conversa criptografada: o servidor não acha nada; a busca filtra as mensagens já carregadas e decifradas.
+function SearchPanel(p: Props) {
+  return p.room.encrypted ? <E2eSearchPanel {...p} /> : <ServerSearchPanel {...p} />;
+}
+
+function E2eSearchPanel({ room }: Props) {
+  const [text, setText] = useState('');
+  const loaded = useStore((s) => s.messages[room._id]?.list);
+  const version = useE2e((s) => s.version);
+  const q = foldText(text.trim());
+  const found = useMemo(
+    () => (q && loaded ? loaded.filter((m) => !m.t && foldText(plainOf(m)).includes(q)).reverse().slice(0, 50) : []),
+    // version: mensagens decifradas depois da busca entram no resultado
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [q, loaded, version],
+  );
+  return (
+    <>
+      <div className="panel-filters">
+        <SearchInput autoFocus value={text} onChange={setText} placeholder="Buscar mensagens" />
+        <p className="muted small e2e-search-hint">
+          <Icon name="encrypted" size={14} />
+          <span>A busca procura só nas mensagens já carregadas (a conversa é criptografada).</span>
+        </p>
+      </div>
+      {!q ? (
+        <Empty icon="search" title="Buscar nesta sala">
+          Digite acima para procurar nas mensagens carregadas.
+        </Empty>
+      ) : found.length ? (
+        <div className="results">
+          <p className="results-count">{plural(found.length, 'resultado', 'resultados')}</p>
+          {found.map((m) => (
+            <MessageResult key={m._id} m={m} />
+          ))}
+        </div>
+      ) : (
+        <Empty icon="search" title={`Nada encontrado para "${text.trim()}"`}>
+          Role a conversa para carregar mensagens mais antigas e tente de novo.
+        </Empty>
+      )}
+    </>
+  );
+}
+
+function ServerSearchPanel({ room }: Props) {
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
   const list = useRef<HTMLDivElement>(null);
@@ -977,7 +1071,23 @@ function FilesPanel({ room }: Props) {
           </Empty>
         )
       ) : (
-        data.files.map((f: any) => (
+        data.files.map((f: any) =>
+          f.e2e ? (
+            <div key={f._id} className="file-row">
+              <a className="file-row-main" href={`${location.pathname.split('/thread/')[0]}?msg=${f.messageId}`}>
+                <FileTile name="" mime="application/octet-stream" />
+                <span className="file-row-text">
+                  <span className="file-row-name">Arquivo criptografado</span>
+                  <span className="file-row-meta">
+                    {[f.user?.name || (f.user?.username ? nameOf(f.user.username) : ''), f.uploadedAt ? formatWhen(f.uploadedAt) : ''].filter(Boolean).join(' · ')}
+                  </span>
+                </span>
+              </a>
+              <a className="btn small ghost" href={`${location.pathname.split('/thread/')[0]}?msg=${f.messageId}`}>
+                Ver na conversa
+              </a>
+            </div>
+          ) : (
           <div key={f._id} className="file-row">
             <a className="file-row-main" href={f.url} target="_blank" rel="noreferrer">
               {f.type?.startsWith('image/') ? <img src={f.url} alt="" loading="lazy" /> : <FileTile name={f.name} mime={f.type} />}
@@ -992,7 +1102,8 @@ function FilesPanel({ room }: Props) {
               <Icon name="download" />
             </a>
           </div>
-        ))
+          ),
+        )
       )}
     </>
   );

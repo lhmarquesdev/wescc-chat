@@ -66,6 +66,7 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
     sessions: usePermission('view-device-management'),
     logout: usePermission('logout-other-user'),
     remove: usePermission('delete-user'),
+    e2e: usePermission('edit-other-user-e2ee'),
   };
 
   useEffect(() => {
@@ -346,6 +347,25 @@ function Security({
               <Icon name="image-remove" />
               Remover avatar
             </button>
+            {/* Criptografia de ponta a ponta: a pessoa esqueceu a senha e não consegue redefinir sozinha. */}
+            {can.e2e && !self && (
+              <button
+                className="btn small"
+                disabled={readOnly}
+                onClick={async () => {
+                  const ok = await confirmDialog({
+                    title: `Redefinir a criptografia de ${user.name || user.username}?`,
+                    body: 'A pessoa sai de todas as sessões, cria uma senha nova no próximo acesso e deixa de ler as mensagens criptografadas antigas.',
+                    confirmLabel: 'Redefinir',
+                    danger: true,
+                  });
+                  if (ok) api.post('users.resetE2EKey', { userId: id }).then(() => rbacOk('Criptografia redefinida.')).catch(fail);
+                }}
+              >
+                <Icon name="e2e-key" />
+                Redefinir criptografia
+              </button>
+            )}
           </div>
         </Section>
       </div>
