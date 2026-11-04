@@ -574,7 +574,7 @@ export const RBAC_TEMPLATES: RbacTemplate[] = [
   },
   {
     id: 'auditor-mensagens',
-    label: 'Auditor',
+    label: 'Auditor de mensagens',
     description: 'Busca mensagens de qualquer conversa e vê o registro de auditoria. Não altera nada.',
     scope: 'Users',
     mandatory2fa: true,
@@ -847,10 +847,15 @@ export function templatePlan(t: RbacTemplate, ctx: GrantContext, roles: RoleInfo
 // - caracteres invisíveis (espaço de largura zero, junção, seletores de variação, preenchimentos) saem;
 // - acentos e maiúsculas não contam;
 // - letras de outros alfabetos que se confundem com as latinas viram a latina (tabela abaixo, só as que importam);
-// - "rn" vale "m", "vv" vale "w", "cl" vale "d"; "l", "1" e "|" valem "i"; "0" vale "o";
-// - espaço, pontuação, símbolos e emoji não contam ("★ Administrador ★", "Admin." e "Ad-min" são o mesmo nome).
+// - "rn" vale "m", "vv" vale "w", "cl" vale "d"; "l" e "1" valem "i"; "0" vale "o";
+// - espaço, pontuação, símbolos, emoji e modificadores (ʼ, ꓸ) não contam ("★ Administrador ★", "Admin." e "Ad-min"
+//   são o mesmo nome);
+// - traços como "|", "!" e "¡" entre letras se leem "i" ("Adm|n") ou não contam ("Ad|min"): valem as duas leituras;
+// - letras em quadrado ou círculo cheio (🅰, 🅐) e os indicadores regionais (🇦) contam como letra e como símbolo.
+// Por isso um nome tem mais de uma forma de comparação (roleNameKeys); basta uma repetir a de outro papel.
 // Os controles de direção (RLO e afins) não saem: eles mudam a ordem do que aparece ("\u202EnimdA" aparece "Admin"),
-// então o nome de exibição com eles é recusado.
+// então o nome de exibição com eles é recusado. E o nome exibido não mistura alfabetos (mixedScripts): um "Admin" com
+// uma letra parecida que a tabela não conhece também não passa.
 //
 // Só a forma inteira conta, não uma palavra dentro dela: "Administrador do NOC", "Moderador de turno" e
 // "Administrador 2" passam, porque se leem como outro papel (e o selo do Administrador tem a coroa, que nenhum papel
@@ -858,9 +863,10 @@ export function templatePlan(t: RbacTemplate, ctx: GrantContext, roles: RoleInfo
 
 export const ROLE_NAME_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9 _.-]*[a-zA-Z0-9])?$/;
 
-// Letras de outros alfabetos (cirílico, grego, armênio, cherokee, versaletes latinas e afins) que se confundem com
-// as latinas. Maiúscula e minúscula separadas: o "Н" cirílico parece H, mas o "н", entre minúsculas, passa por n
-// (como o "η" grego).
+// Letras de outros alfabetos (cirílico, grego, armênio, cherokee, copta, lisu, silabário canadense, versaletes
+// latinas e afins) que se confundem com as latinas. Maiúscula e minúscula separadas: o "Н" cirílico parece H, mas o
+// "н", entre minúsculas, passa por n (como o "η" grego). As minúsculas do cherokee são versaletes das maiúsculas:
+// viram a maiúscula antes da tabela (CHEROKEE_SMALL_RE).
 const CONFUSABLE: Record<string, string> = {
   // Cirílico
   А: 'A', В: 'B', Е: 'E', Ѐ: 'E', Ё: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X',
@@ -875,29 +881,107 @@ const CONFUSABLE: Record<string, string> = {
   // Armênio
   Օ: 'O', Ս: 'U', Լ: 'L', Տ: 'S', Ց: 'G', Ւ: 'L',
   օ: 'o', ս: 'u', ո: 'n', հ: 'h', ց: 'g', զ: 'q', ա: 'w', ռ: 'n', ւ: 'i',
-  // Cherokee (as maiúsculas, que parecem latinas)
+  // Cherokee (as maiúsculas; as minúsculas chegam aqui já como maiúsculas)
   Ꭺ: 'A', Ᏼ: 'B', Ꮯ: 'C', Ꭰ: 'D', Ꭼ: 'E', Ꮐ: 'G', Ꮋ: 'H', Ꭵ: 'I', Ꭻ: 'J', Ꮶ: 'K', Ꮮ: 'L', Ꮇ: 'M', Ꮲ: 'P',
-  Ꮢ: 'R', Ꮪ: 'S', Ꮤ: 'W', Ꮃ: 'W', Ꮩ: 'V', Ꮓ: 'Z',
+  Ꮢ: 'R', Ꮪ: 'S', Ꮤ: 'W', Ꮃ: 'W', Ꮩ: 'V', Ꮓ: 'Z', Ꭲ: 'T', Ꭹ: 'Y', Ꮟ: 'b', Ꮒ: 'h',
+  // Copta
+  Ⲁ: 'A', Ⲃ: 'B', Ⲉ: 'E', Ⲍ: 'Z', Ⲏ: 'H', Ⲓ: 'I', Ⲕ: 'K', Ⲙ: 'M', Ⲛ: 'N', Ⲟ: 'O', Ⲣ: 'P', Ⲥ: 'C', Ⲧ: 'T',
+  Ⲩ: 'Y', Ⲭ: 'X', Ⲱ: 'W',
+  ⲁ: 'a', ⲃ: 'b', ⲅ: 'r', ⲉ: 'e', ⲍ: 'z', ⲏ: 'n', ⲓ: 'i', ⲕ: 'k', ⲙ: 'm', ⲛ: 'n', ⲟ: 'o', ⲡ: 'n', ⲣ: 'p',
+  ⲥ: 'c', ⲧ: 't', ⲩ: 'y', ⲭ: 'x', ⲱ: 'w',
+  // Lisu (maiúsculas latinas, algumas viradas; das viradas, só a que parece "d")
+  ꓐ: 'B', ꓑ: 'P', ꓒ: 'd', ꓓ: 'D', ꓔ: 'T', ꓖ: 'G', ꓗ: 'K', ꓙ: 'J', ꓚ: 'C', ꓜ: 'Z', ꓝ: 'F', ꓟ: 'M', ꓠ: 'N',
+  ꓡ: 'L', ꓢ: 'S', ꓣ: 'R', ꓦ: 'V', ꓧ: 'H', ꓪ: 'W', ꓫ: 'X', ꓬ: 'Y', ꓮ: 'A', ꓰ: 'E', ꓲ: 'I', ꓳ: 'O', ꓴ: 'U',
+  // Silabário canadense, rúnico e tifinagh (os das "letras estilizadas")
+  ᗩ: 'A', ᗅ: 'A', ᗷ: 'B', ᗸ: 'B', ᑕ: 'C', ᑢ: 'C', ᗪ: 'D', ᗞ: 'D', ᗴ: 'E', ᕮ: 'E', ᖴ: 'F', ᘜ: 'G', ᕼ: 'H',
+  ᒍ: 'J', ᒪ: 'L', ᗰ: 'M', ᑎ: 'N', ᑭ: 'P', ᑫ: 'Q', ᖇ: 'R', ᔕ: 'S', ᑌ: 'U', ᐯ: 'V', ᐺ: 'V', ᗯ: 'W', '᙭': 'X',
+  ᘔ: 'Z', ᑲ: 'b', ᑯ: 'd', ᕷ: 'p', ᛁ: 'I', ⵏ: 'I', ⵔ: 'O',
   // Latinas que a decomposição não separa, e versaletes
   ı: 'i', ȷ: 'j', ɩ: 'i', ɑ: 'a', ɡ: 'g', ɢ: 'g', ø: 'o', Ø: 'O', ł: 'l', Ł: 'L', đ: 'd', Đ: 'D', ħ: 'h', Ħ: 'H',
-  ŧ: 't', Ŧ: 'T', ƀ: 'b', ɨ: 'i', ǀ: 'i', ᴀ: 'a', ʙ: 'b', ᴄ: 'c', ᴅ: 'd', ᴇ: 'e', ɪ: 'i', ᴊ: 'j', ᴋ: 'k',
+  ŧ: 't', Ŧ: 'T', ƀ: 'b', ɨ: 'i', ᴀ: 'a', ʙ: 'b', ᴄ: 'c', ᴅ: 'd', ᴇ: 'e', ɪ: 'i', Ɪ: 'I', ᴊ: 'j', ᴋ: 'k',
   ʟ: 'l', ᴍ: 'm', ɴ: 'n', ᴏ: 'o', ᴘ: 'p', ʀ: 'r', ꜱ: 's', ᴛ: 't', ᴜ: 'u', ᴠ: 'v', ᴡ: 'w', ʏ: 'y', ᴢ: 'z',
+  // O saltillo (ꞌ) parece um apóstrofo: não conta, como a pontuação
+  ꞌ: '', Ꞌ: '',
   '0': 'o',
 };
 const CONFUSABLE_RE = new RegExp(`[${Object.keys(CONFUSABLE).join('')}]`, 'gu');
 const unconfuse = (s: string) => s.replace(CONFUSABLE_RE, (c) => CONFUSABLE[c]);
 const dropMarks = (s: string) => s.normalize('NFD').replace(/\p{M}+/gu, '');
+// Minúsculas do cherokee (versaletes das maiúsculas).
+const CHEROKEE_SMALL_RE = /[\u{AB70}-\u{ABBF}\u{13F8}-\u{13FD}]/gu;
+// Traços e sinais que se leem "i" entre letras (o "ǀ" e o "ǃ" são letras de clique, mas aparecem como "|" e "!").
+const I_MARKS = '|¡!ǀǃ∣│❘⏐׀';
+const I_MARK_INNER_RE = new RegExp(`([\\p{L}\\p{N}])([${I_MARKS}]+)(?=[\\p{L}\\p{N}])`, 'gu');
+const I_MARK_RE = new RegExp(`[${I_MARKS}]`, 'gu');
+// Letras em círculo e quadrado cheios e indicadores regionais: símbolos sem decomposição que se leem como letra.
+const BOXED_RE = /[\u{1F150}-\u{1F169}\u{1F170}-\u{1F189}\u{1F1E6}-\u{1F1FF}]/gu;
+const unbox = (s: string) =>
+  s.replace(BOXED_RE, (c) => {
+    const cp = c.codePointAt(0)!;
+    return String.fromCharCode(65 + cp - (cp >= 0x1f1e6 ? 0x1f1e6 : cp >= 0x1f170 ? 0x1f170 : 0x1f150));
+  });
 // Invisíveis que somem sem mudar o que se vê (largura zero, junção, hífen suave, seletores de variação…).
 const INVISIBLE_RE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 // Controles de direção: mudam a ordem do que aparece, por isso o nome com eles é recusado (não basta tirar).
 export const BIDI_CONTROL_RE = /\p{Bidi_Control}/u;
 
-export function roleNameKey(s: string): string {
+function nameKey(s: string, opts: { iMarks: 'i' | 'drop'; boxed: boolean }): string {
   let k = s.normalize('NFKC').replace(INVISIBLE_RE, '');
+  if (opts.boxed) k = unbox(k);
+  if (opts.iMarks === 'i') k = k.replace(I_MARK_INNER_RE, (_, before: string, marks: string) => before + 'i'.repeat([...marks].length));
+  k = k.replace(I_MARK_RE, '').replace(CHEROKEE_SMALL_RE, (c) => c.toUpperCase());
   k = unconfuse(dropMarks(k));
   k = unconfuse(dropMarks(k.toLowerCase()));
-  k = k.replace(/[^\p{L}\p{N}]/gu, '');
-  return k.replace(/rn/g, 'm').replace(/vv/g, 'w').replace(/cl/g, 'd').replace(/[l1|]/g, 'i');
+  k = k.replace(/[^\p{L}\p{N}]|\p{Lm}/gu, '');
+  return k.replace(/rn/g, 'm').replace(/vv/g, 'w').replace(/cl/g, 'd').replace(/[l1]/g, 'i');
+}
+
+// A forma de comparação principal: traço entre letras vale "i", letra em quadrado cheio não conta.
+export function roleNameKey(s: string): string {
+  return nameKey(s, { iMarks: 'i', boxed: false });
+}
+
+// Todas as formas de comparação de um nome (as leituras possíveis do traço e da letra em quadrado), sem as vazias.
+const keysCache = new Map<string, string[]>();
+export function roleNameKeys(s: string): string[] {
+  const hit = keysCache.get(s);
+  if (hit) return hit;
+  const out = new Set<string>();
+  for (const iMarks of ['i', 'drop'] as const) for (const boxed of [false, true]) out.add(nameKey(s, { iMarks, boxed }));
+  out.delete('');
+  const keys = [...out];
+  if (keysCache.size > 2000) keysCache.clear();
+  keysCache.set(s, keys);
+  return keys;
+}
+
+// Alfabetos das letras de um nome. Os de chinês, japonês e coreano andam juntos (e com o latino); um alfabeto que não
+// está na lista conta como "outro".
+const SCRIPTS = [
+  'Latin', 'Greek', 'Cyrillic', 'Armenian', 'Georgian', 'Hebrew', 'Arabic', 'Syriac', 'Thaana', 'Nko', 'Cherokee',
+  'Canadian_Aboriginal', 'Coptic', 'Lisu', 'Tifinagh', 'Runic', 'Ogham', 'Vai', 'Bamum', 'Ethiopic', 'Glagolitic',
+  'Gothic', 'Old_Italic', 'Deseret', 'Osage', 'Adlam', 'Devanagari', 'Bengali', 'Gurmukhi', 'Gujarati', 'Oriya', 'Tamil',
+  'Telugu', 'Kannada', 'Malayalam', 'Sinhala', 'Thai', 'Lao', 'Tibetan', 'Myanmar', 'Khmer', 'Mongolian', 'Yi',
+  'Han', 'Hiragana', 'Katakana', 'Hangul', 'Bopomofo',
+].flatMap((name): [string, RegExp][] => {
+  try {
+    return [[name, new RegExp(`\\p{Script=${name}}`, 'u')]];
+  } catch {
+    return []; // navegador com uma tabela Unicode mais antiga: o alfabeto conta como "outro"
+  }
+});
+const CJK = new Set(['Han', 'Hiragana', 'Katakana', 'Hangul', 'Bopomofo']);
+const SCRIPT_LETTER_RE = /(?![\p{Lm}\p{Script=Common}\p{Script=Inherited}])\p{L}/gu;
+
+// O nome mistura alfabetos ("Аdmin" com A cirílico, "Equipe Δ")? Só o latino com chinês, japonês ou coreano passa.
+export function mixedScripts(s: string): boolean {
+  const found = new Set<string>();
+  for (const [c] of s.normalize('NFKC').replace(INVISIBLE_RE, '').matchAll(SCRIPT_LETTER_RE)) {
+    const name = SCRIPTS.find(([, re]) => re.test(c))?.[0] ?? 'outro';
+    found.add(CJK.has(name) ? 'CJK' : name);
+  }
+  if (found.size <= 1) return false;
+  return !(found.size === 2 && found.has('Latin') && found.has('CJK'));
 }
 // Papéis padrão e os nomes com que aparecem (ROLE_LABEL, a descrição gravada, o feminino e o nome em inglês).
 // Valem mesmo se a linha sumir: o Operação pode ser excluído, e um papel novo não fica com o nome dele (só ele mesmo,
@@ -944,7 +1028,7 @@ export function roleNameProblem(
     // Um papel padrão excluído (o Operação) pode voltar com o próprio identificador; nenhum outro fica com o
     // identificador ou os nomes dele.
     const reservedNames = [...reserved].filter(([rid]) => rid !== id).flatMap(([rid, names]) => [rid, ...names]);
-    if ([...roles.map((r) => r.id), ...reservedNames].some((x) => roleNameKey(x) === f)) {
+    if ([...roles.map((r) => r.id), ...reservedNames].some((x) => roleNameKeys(x).includes(f))) {
       return { code: 'error-duplicate-role-names-not-allowed', field: 'id', error: 'Já existe um papel com esse nome.' };
     }
   }
@@ -953,27 +1037,36 @@ export function roleNameProblem(
     return { code: 'RBAC_INVALID_ROLE_LABEL', field: 'label', error: 'O nome exibido tem caracteres invisíveis que mudam a ordem do texto. Apague e digite de novo.' };
   }
   const shownText = opts.displayName(id, description);
-  const shown = roleNameKey(shownText);
-  if (!shown) return null;
+  const shown = roleNameKeys(shownText);
   // Forma de comparação → o nome do papel com que ela se confunde (para dizer qual).
   const taken = new Map<string, string>();
+  const take = (n: string, label: string) => roleNameKeys(n).forEach((k) => taken.has(k) || taken.set(k, label));
   for (const [rid, names] of reserved) {
     if (rid === id) continue;
     const label = builtin[rid] ?? names[0];
-    for (const n of [rid, ...names]) if (!taken.has(roleNameKey(n))) taken.set(roleNameKey(n), label);
+    for (const n of [rid, ...names]) take(n, label);
   }
   for (const r of roles) {
     if (r.id === id) continue;
     const label = opts.displayName(r.id, r.description);
-    for (const n of [r.id, label]) if (!taken.has(roleNameKey(n))) taken.set(roleNameKey(n), label);
+    for (const n of [r.id, label]) take(n, label);
   }
-  const clash = taken.get(shown);
-  if (clash === undefined) return null;
-  const error =
-    clash === shownText.trim()
-      ? `Já existe um papel que aparece como “${clash}”. Escolha outro nome de exibição.`
-      : `Esse nome se confunde com o do papel “${clash}”. Escolha outro nome de exibição.`;
-  return { code: 'RBAC_DUPLICATE_ROLE_LABEL', field: 'label', error };
+  const clash = shown.map((k) => taken.get(k)).find((x) => x !== undefined);
+  if (clash !== undefined) {
+    const error =
+      clash === shownText.trim()
+        ? `Já existe um papel que aparece como “${clash}”. Escolha outro nome de exibição.`
+        : `Esse nome se confunde com o do papel “${clash}”. Escolha outro nome de exibição.`;
+    return { code: 'RBAC_DUPLICATE_ROLE_LABEL', field: 'label', error };
+  }
+  if (mixedScripts(shownText)) {
+    return {
+      code: 'RBAC_INVALID_ROLE_LABEL',
+      field: 'label',
+      error: 'O nome exibido mistura letras de alfabetos diferentes (como o latino e o cirílico), e assim pode se passar por outro nome. Use letras de um alfabeto só.',
+    };
+  }
+  return null;
 }
 
 // ---------- Permissão sem tela ----------

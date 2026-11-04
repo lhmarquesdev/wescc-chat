@@ -212,8 +212,17 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
     <span className="rbac-status custom">Personalizado</span>
   );
 
+  const nameEditable = canEditRole && !role.root && !ROLE_LABEL[role._id];
+  // O nome exibido novo não pode ser o de outro papel (a mesma regra do servidor): o erro fica sob o campo, Salvar
+  // desliga e, nas outras abas (o nome também se edita no cabeçalho), um aviso diz o motivo.
+  const labelProblem =
+    nameEditable && draft.description !== initial.description
+      ? roleNameProblem(role._id, draft.description, roles.map((r) => ({ id: r._id, description: r.description })), ROLE_LABEL, { isNew: false, displayName: roleDisplayName })
+      : null;
+
   const notices = (
     <>
+      {labelProblem && tab !== 'summary' && <Notice kind="warn">Nome exibido: {labelProblem.error}</Notice>}
       {changedBy !== null && dirty && (
         <Notice kind="warn">
           {changedBy === 'me'
@@ -261,13 +270,6 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
     </Menu>
   );
 
-  const nameEditable = canEditRole && !role.root && !ROLE_LABEL[role._id];
-  // O nome exibido novo não pode ser o de outro papel (a mesma regra do servidor).
-  const labelProblem =
-    nameEditable && draft.description !== initial.description
-      ? roleNameProblem(role._id, draft.description, roles.map((r) => ({ id: r._id, description: r.description })), ROLE_LABEL, { isNew: false, displayName: roleDisplayName })
-      : null;
-
   return (
     <>
       <EditorShell<Tab>
@@ -281,6 +283,7 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
             <input
               className="rbac-title-input"
               aria-label="Nome exibido do papel"
+              aria-invalid={labelProblem ? true : undefined}
               value={draft.description}
               placeholder={roleLabel(role._id)}
               maxLength={NAME_MAX}
@@ -297,6 +300,7 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
         saving={saving}
         onRevert={revert}
         onSave={() => setReview(true)}
+        saveBlocked={labelProblem ? `Nome exibido: ${labelProblem.error}` : null}
         extraActions={compareMenu()}
         notices={notices}
         tabs={tabs}

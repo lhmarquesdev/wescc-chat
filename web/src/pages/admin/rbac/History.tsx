@@ -2,7 +2,8 @@
 // ações em massa agrupadas e "Reverter" com prévia e substituição do que não existe mais.
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { diffPermissions, levelText, RBAC_AREAS, rbacLabel } from '@shared/rbac';
+import { diffPermissions, levelText, RBAC_AREAS, rbacLabel, roleNameProblem } from '@shared/rbac';
+import { ROLE_LABEL, roleDisplayName } from '@shared/messageText';
 import { api } from '../../../lib/api';
 import { formatDateTime, nameList, roleLabel } from '../../../lib/format';
 import { Icon } from '../../../components/Icon';
@@ -278,22 +279,34 @@ function EventRow({ r, nested, onRevert }: { r: Row; nested?: boolean; onRevert:
   );
 }
 
+const NAME_MAX = 32;
+
 function RevertDialog({ row, onClose, onDone }: { row: Row; onClose: () => void; onDone: () => void }) {
   const preview = useAsync(() => api.get('rbac.history.preview', { id: row._id }), [row._id]);
-  const roles = useAsync(() => api.get('roles.list').then((r) => r.roles as { _id: string; scope: string }[]), []);
+  const roles = useAsync(() => api.get('roles.list').then((r) => r.roles as { _id: string; scope: string; description?: string | null }[]), []);
   const [replace, setReplace] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const p = preview.data;
+  // O nome exibido de antes se confunde agora com o de outro papel (a prévia diz): a pessoa escolhe outro, com a mesma
+  // regra do servidor, e a reversão leva esse nome.
+  const [label, setLabel] = useState<string | null>(null);
+  const askLabel = !!p && !p.blocked && !!p.labelProblem;
+  const newLabel = label ?? String(p?.next?.description ?? '');
+  const labelProblem = askLabel
+    ? (label === null
+        ? { error: p.labelProblem as string }
+        : roleNameProblem(row.entityId, newLabel.trim(), (roles.data ?? []).map((r) => ({ id: r._id, description: r.description })), ROLE_LABEL, { isNew: false, displayName: roleDisplayName }))
+    : null;
   const changes: Change[] = useMemo(() => {
     if (!p || p.blocked) return [];
     if (p.kind === 'delete-role') return [];
-    return Object.keys(p.next).map((f) => ({ field: f, before: p.current ? p.current[f] : null, after: p.next[f] }));
-  }, [p]);
+    return Object.keys(p.next).map((f) => ({ field: f, before: p.current ? p.current[f] : null, after: f === 'description' && askLabel ? newLabel.trim() : p.next[f] }));
+  }, [p, askLabel, newLabel]);
   const go = async () => {
     setBusy(true);
     try {
       const rep = Object.fromEntries((p?.missing ?? []).map((m: string) => [m, replace[m] || null]));
-      await api.post('rbac.history.rollback', { id: row._id, replace: rep });
+      await api.post('rbac.history.rollback', { id: row._id, replace: rep, ...(askLabel ? { description: newLabel.trim() } : {}) });
       rbacOk('Alteração revertida.');
       onDone();
     } catch (e) {
@@ -312,7 +325,7 @@ function RevertDialog({ row, onClose, onDone }: { row: Row; onClose: () => void;
           <button className="btn" onClick={onClose}>
             Cancelar
           </button>
-          <button className="btn primary" disabled={busy || !p || !!p.blocked} aria-busy={busy || undefined} onClick={() => void go()}>
+          <button className="btn primary" disabled={busy || !p || !!p.blocked || !!labelProblem} aria-busy={busy || undefined} onClick={() => void go()}>
             <Icon name="rbac-revert" />
             Reverter
           </button>
@@ -341,6 +354,17 @@ function RevertDialog({ row, onClose, onDone }: { row: Row; onClose: () => void;
             </div>
           ) : (
             <ChangeList changes={changes} entityType={row.entityType} />
+          )}
+          {askLabel && (
+            <div className="rbac-missing">
+              <div className="callout warn">
+                <Icon name="warning" />
+                <span>O nome exibido de antes, “{String(p.next.description ?? '')}”, agora se confunde com o de outro papel. Escolha outro nome para reverter.</span>
+              </div>
+              <Field label="Novo nome exibido" hint={`Até ${NAME_MAX} caracteres. ${newLabel.length}/${NAME_MAX}`} error={labelProblem?.error}>
+                <input value={newLabel} maxLength={NAME_MAX} onChange={(e) => setLabel(e.target.value)} />
+              </Field>
+            </div>
           )}
           {p.missing.length > 0 && (
             <div className="rbac-missing">

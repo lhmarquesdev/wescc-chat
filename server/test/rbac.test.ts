@@ -199,6 +199,48 @@ describe('histórico e reversão', () => {
     expect((await pool.query(`SELECT description FROM roles WHERE id='temporario'`)).rows[0].description).toBe('Temp');
   });
 
+  // Revisão final: um papel de antes da regra de nomes (o modelo "Auditor" de mensagens) com o nome de um papel padrão.
+  // A prévia avisa e a reversão pede outro nome, em vez de oferecer uma reversão que falharia.
+  it('o nome de antes que agora se confunde com outro papel: a prévia avisa e a reversão leva o nome novo', async () => {
+    await pool.query(`INSERT INTO roles (id, description, scope) VALUES ('auditor-msgs-antigo', 'Auditor', 'Users')`);
+    await loadPermissions();
+    expect((await api('POST', 'rbac.roles.delete', { roleId: 'auditor-msgs-antigo' }, A)).success).toBe(true);
+    const del = await lastHistory('auditor-msgs-antigo');
+    const preview = await api('GET', 'rbac.history.preview', { id: del.id }, A);
+    expect(preview).toMatchObject({ kind: 'recreate-role', missing: [], labelProblem: 'Já existe um papel que aparece como “Auditor”. Escolha outro nome de exibição.' });
+    expect(preview.blocked).toBeUndefined();
+    // Sem nome novo, a recusa é a da regra de nomes; um nome que ainda se confunde também.
+    expect((await api('POST', 'rbac.history.rollback', { id: del.id }, A)).errorType).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    expect((await api('POST', 'rbac.history.rollback', { id: del.id, description: 'Auditora' }, A)).errorType).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+    expect((await api('POST', 'rbac.history.rollback', { id: del.id, description: 'Auditor de mensagens (antigo)' }, A)).success).toBe(true);
+    expect((await pool.query(`SELECT description FROM roles WHERE id='auditor-msgs-antigo'`)).rows[0].description).toBe('Auditor de mensagens (antigo)');
+    expect(await lastHistory('auditor-msgs-antigo')).toMatchObject({ action: 'rollback', reverts_id: del.id });
+
+    // Renomeado e depois outro papel ficou com o nome de antes: reverter o nome também pede outro.
+    expect((await api('POST', 'rbac.roles.update', { roleId: 'auditor-msgs-antigo', description: 'Auditoria interna' }, A)).success).toBe(true);
+    const rename = await lastHistory('auditor-msgs-antigo');
+    expect((await api('POST', 'rbac.roles.create', { name: 'auditor-msgs-novo', description: 'Auditor de mensagens (antigo)' }, A)).success).toBe(true);
+    const p2 = await api('GET', 'rbac.history.preview', { id: rename.id }, A);
+    expect(p2).toMatchObject({ kind: 'restore-role', next: { description: 'Auditor de mensagens (antigo)' }, labelProblem: expect.stringContaining('Auditor de mensagens (antigo)') });
+    expect((await api('POST', 'rbac.history.rollback', { id: rename.id, description: 'Auditoria antiga' }, A)).success).toBe(true);
+    expect((await pool.query(`SELECT description FROM roles WHERE id='auditor-msgs-antigo'`)).rows[0].description).toBe('Auditoria antiga');
+
+    // Sem conflito, o nome volta como estava e não se troca na reversão.
+    expect((await api('POST', 'rbac.roles.update', { roleId: 'auditor-msgs-novo', description: 'Auditoria de mensagens' }, A)).success).toBe(true);
+    const plainRename = await lastHistory('auditor-msgs-novo');
+    expect((await api('GET', 'rbac.history.preview', { id: plainRename.id }, A)).labelProblem).toBeUndefined();
+    expect((await api('POST', 'rbac.history.rollback', { id: plainRename.id, description: 'Outro nome' }, A)).errorType).toBe('RBAC_ROLLBACK_INVALID');
+
+    // O identificador de antes que não vale mais (ou que se confunde com o do Administrador) bloqueia a prévia.
+    await pool.query(`INSERT INTO roles (id, description, scope) VALUES ('Adm1n', 'Turno antigo', 'Users')`);
+    await loadPermissions();
+    expect((await api('POST', 'rbac.roles.delete', { roleId: 'Adm1n' }, A)).success).toBe(true);
+    const delId = await lastHistory('Adm1n');
+    const p3 = await api('GET', 'rbac.history.preview', { id: delId.id }, A);
+    expect(p3.blocked).toBe('Não dá para recriar este papel: o identificador se confunde com o do Administrador. Crie um papel novo com essas permissões.');
+    expect((await api('POST', 'rbac.history.rollback', { id: delId.id }, A)).errorType).toBe('RBAC_ROLLBACK_BLOCKED');
+  });
+
   it('papéis de uma pessoa: troca, ação em massa num lote só, e reversão', async () => {
     const p2 = await newUser(A, { roles: ['user'] });
     const bulk = await api('POST', 'rbac.users.bulkRoles', { userIds: [plain.userId, p2.userId], add: ['leitor'] }, A);

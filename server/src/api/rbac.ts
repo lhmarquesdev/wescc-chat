@@ -16,6 +16,7 @@ import {
   grantContext,
   publishUserRoles,
   rbacError,
+  roleNameCheck,
   updateRole,
   writeUserRoles,
   type RoleInput,
@@ -305,8 +306,14 @@ export function registerRbac(app: FastifyInstance) {
     const extra = Object.keys(replace).filter((k) => !missing.has(k));
     if (extra.length) throw badRequest('RBAC_ROLLBACK_INVALID', 'Só dá para substituir o que a prévia apontou como inexistente.', { keys: extra });
     const swap = (list: string[]) => [...new Set(list.map((x) => (missing.has(x) ? (replace[x] ?? null) : x)).filter((x): x is string => !!x))];
+    // O nome exibido de antes que agora se confunde com o de outro papel: a pessoa escolhe outro (conferido de novo ao
+    // gravar, como qualquer nome). Sem a prévia apontar o conflito, o nome volta como estava.
+    const description = typeof body.description === 'string' ? body.description.trim().slice(0, 500) : undefined;
+    if (description !== undefined && !plan.labelProblem) {
+      throw badRequest('RBAC_ROLLBACK_INVALID', 'Só dá para trocar o nome exibido quando a prévia aponta que ele se confunde com o de outro papel.');
+    }
     try {
-      await applyRollback(ctx, h, plan, swap);
+      await applyRollback(ctx, h, description === undefined ? plan : { ...plan, next: { ...plan.next, description } }, swap);
     } catch (e: any) {
       if (e?.statusCode === 403) throw rbacError(403, 'RBAC_ROLLBACK_FORBIDDEN', `Reversão recusada: ${e.message}`, e.details);
       throw e;
@@ -334,7 +341,18 @@ interface RollbackPlan {
   // Referências (papéis) que não existem mais: a pessoa escolhe substituto ou nenhum.
   missing: string[];
   blocked?: string;
+  // O nome exibido que a reversão traria de volta se confunde agora com o de outro papel (roleNameProblem): a tela pede
+  // outro nome (description no rollback) em vez de oferecer uma reversão que falharia.
+  labelProblem?: string;
 }
+
+// O identificador de um papel excluído que não vale mais (regra de nomes mais nova, ou outro papel ficou com um
+// identificador que se confunde com ele): a reversão não tem como trocá-lo.
+const ID_BLOCKED: Record<string, string> = {
+  'error-invalid-role-name': 'o identificador não segue mais a regra de nomes (letras, números, espaço, ponto, hífen ou _)',
+  RBAC_RESERVED_ROLE_NAME: 'o identificador se confunde com o do Administrador',
+  'error-duplicate-role-names-not-allowed': 'outro papel já tem um identificador que se confunde com este',
+};
 
 const field = (h: HistoryRow, f: string) => h.changes.find((c) => c.field === f);
 const arr = (v: unknown) => (Array.isArray(v) ? (v as string[]) : []);
@@ -367,7 +385,11 @@ async function planRollback(h: HistoryRow): Promise<RollbackPlan> {
   if (h.action === 'delete' || h.changes.every((c) => c.after === null)) {
     if (exists) return { kind: 'recreate-role', current: null, next: {}, missing: [], blocked: 'Já existe um papel com esse nome.' };
     const next = Object.fromEntries(h.changes.map((c) => [c.field, c.before]));
-    return { kind: 'recreate-role', current: null, next, missing: arr(next.delegable).filter((r) => !roleIds.has(r)) };
+    const name = await roleNameCheck(h.entityId, String(next.description ?? ''), true);
+    if (name?.field === 'id') {
+      return { kind: 'recreate-role', current: null, next: {}, missing: [], blocked: `Não dá para recriar este papel: ${ID_BLOCKED[name.code] ?? name.error}. Crie um papel novo com essas permissões.` };
+    }
+    return { kind: 'recreate-role', current: null, next, missing: arr(next.delegable).filter((r) => !roleIds.has(r)), ...(name ? { labelProblem: name.error } : {}) };
   }
   if (!exists) return { kind: 'restore-role', current: null, next: {}, missing: [], blocked: 'O papel foi excluído depois desta versão.' };
   const info = roleInfos().find((r) => r.id === h.entityId)!;
@@ -386,7 +408,8 @@ async function planRollback(h: HistoryRow): Promise<RollbackPlan> {
     if (c.field === 'permissions' || c.field === 'delegable') next[c.field] = invert(arr(current[c.field]), c.before, c.after);
     else next[c.field] = c.before;
   }
-  return { kind: 'restore-role', current, next, missing: arr(next.delegable).filter((r) => !roleIds.has(r)) };
+  const name = 'description' in next && next.description !== current.description ? await roleNameCheck(h.entityId, String(next.description ?? ''), false) : null;
+  return { kind: 'restore-role', current, next, missing: arr(next.delegable).filter((r) => !roleIds.has(r)), ...(name ? { labelProblem: name.error } : {}) };
 }
 
 async function applyRollback(ctx: Ctx, h: HistoryRow, plan: RollbackPlan, swap: (l: string[]) => string[]) {

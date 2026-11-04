@@ -19,7 +19,7 @@ import type { SpotlightUser, Subscription } from '@shared/index';
 import { foldText, parseSpotlightQuery, spotlightReady } from '@shared/search';
 import { compileHighlights, findHighlight, normalizeHighlights, splitHighlights } from '@shared/highlights';
 import { normalizeStatusName, presenceLabel, selfUserPatch, shownCustomStatus, silencesNotifications, sortStatuses, statusLine, type CustomUserStatus } from '@shared/status';
-import { RBAC_AREAS, roleNameKey, roleNameProblem, screenGapWarning, screenGaps } from '@shared/rbac';
+import { mixedScripts, RBAC_AREAS, roleNameKey, roleNameKeys, roleNameProblem, screenGapWarning, screenGaps } from '@shared/rbac';
 import { ROLE_LABEL } from '@shared/messageText';
 import { readableError } from '../../web/src/lib/errorText';
 import { deviceLabel } from '@shared/devices';
@@ -850,6 +850,22 @@ describe('nome de papel (Novo papel e o editor, iguais ao servidor)', () => {
       '\u2605 Administrador \u2605',
       'Administradora',
       '\u0410d\u043c\u0456\u043d', // Аdмін: м, і e н cirílicos
+      // Revisão final: traço no lugar do i, cherokee minúsculo, lisu, copta, letras em quadrado e modificadores.
+      'Adm|n',
+      'Adm\u00a1n', // ¡
+      'Adm!n',
+      'Ad|min', // o traço também pode não contar, como o hífen de "Ad-min"
+      '| Administrador |',
+      'Admin\u01c3', // ǃ (letra de clique, aparece como "!")
+      '\uab7admin', // ꭺ cherokee minúsculo
+      'Adm\uab75n', // ꭵ cherokee minúsculo
+      '\ua4ee\ua4d3\ua4df\ua4f2\ua4e0', // ꓮꓓꓟꓲꓠ (lisu)
+      '\u2c80dmin', // Ⲁ copta
+      'Administrad\u2c9fr', // ⲟ copta
+      '\ud83c\udd70\ud83c\udd73\ud83c\udd7c\ud83c\udd78\ud83c\udd7d', // 🅰🅳🅼🅸🅽
+      '\ud83c\udde6\ud83c\udde9\ud83c\uddf2\ud83c\uddee\ud83c\uddf3', // indicadores regionais A D M I N
+      'Admin \ua4f8', // ꓸ (tom do lisu, aparece como ponto)
+      '\u15e9\u15ea\u15f0\u0399\u144e', // ᗩᗪᗰΙᑎ (silabário canadense com Ι grego)
     ];
     for (const d of lookAlikes) expect(check('falso', d), JSON.stringify(d)).toBe('RBAC_DUPLICATE_ROLE_LABEL');
     // O motivo diz com qual papel se confunde.
@@ -865,7 +881,7 @@ describe('nome de papel (Novo papel e o editor, iguais ao servidor)', () => {
     expect(check('administrator', 'X')).toBe('RBAC_RESERVED_ROLE_NAME');
   });
   it('os nomes de todos os papéis padrão ficam reservados, também o que só aparece na descrição ("Dono da sala")', () => {
-    for (const d of ['Dono da sala', 'Dono', 'D\u043eno', 'Moderador', 'Moderador da sala', 'M\u043ederador', 'Líder', 'Lider da sala', 'Usuário', 'Usu\u0430rio', 'Bot', 'Convidado', 'Operação', 'Operacao', 'Anônimo', 'App', 'Publicador', 'Auditor de logs']) {
+    for (const d of ['Dono da sala', 'Dono', 'D\u043eno', '\u15ea\u2d54\u144e\u2d54' /* ᗪⵔᑎⵔ */, '\u2c82\u2c9e\u2ca6' /* ⲂⲞⲦ (copta) */, 'Moderador', 'Moderador da sala', 'M\u043ederador', 'Líder', 'Lider da sala', 'Usuário', 'Usu\u0430rio', 'Bot', 'Convidado', 'Operação', 'Operacao', 'Anônimo', 'App', 'Publicador', 'Auditor de logs']) {
       expect(check('falso', d), d).toBe('RBAC_DUPLICATE_ROLE_LABEL');
     }
     // Os identificadores também, ainda que a linha não exista (o Operação pode ser excluído).
@@ -885,6 +901,28 @@ describe('nome de papel (Novo papel e o editor, iguais ao servidor)', () => {
     expect(roleNameKey('  Ａdm\u200bin! ')).toBe('admin');
     expect(roleNameKey('\u0410\u0434min')).not.toBe('admin'); // д cirílico não parece d: fica
     expect(roleNameKey('Operação')).toBe(roleNameKey('OPERACAO'));
+    // Traço entre letras: as duas leituras ("i" e nada); nas pontas, só pontuação. Bandeira não some do nome.
+    expect(roleNameKeys('Adm|n').sort()).toEqual(['admin', 'admn']);
+    expect(roleNameKeys('| Turno |')).toEqual(['tumo']);
+    for (const d of ['Equipe A|B', 'São João | Turno', '\ud83c\udde7\ud83c\uddf7 Equipe', 'Rock\u2019n\u2019roll']) expect(check('falso', d), d).toBeNull();
+    expect(check('falso', '\ud83c\udde7\ud83c\uddf7 Administrador')).toBe('RBAC_DUPLICATE_ROLE_LABEL');
+  });
+  it('o nome exibido não mistura alfabetos (uma letra parecida que a tabela não conhece também não passa)', () => {
+    const mixed = (d: string) => roleNameProblem('falso', d, roles, ROLE_LABEL, { isNew: true, displayName: roleDisplayName });
+    for (const d of ['Chefe d\u0435 turno' /* е cirílico */, 'Admin\u10e5' /* ქ georgiano */, 'Equipe \u0394', 'Super\u2c85isor']) {
+      expect(mixed(d)?.code, d).toBe('RBAC_INVALID_ROLE_LABEL');
+      expect(mixed(d)?.field).toBe('label');
+    }
+    expect(mixed('Chefe d\u0435 turno')?.error).toBe(
+      'O nome exibido mistura letras de alfabetos diferentes (como o latino e o cirílico), e assim pode se passar por outro nome. Use letras de um alfabeto só.',
+    );
+    // Um alfabeto só, ou latino com chinês, japonês ou coreano, passa; emoji e símbolos não contam.
+    for (const d of ['\u041c\u043e\u0434\u0435\u0440\u0430\u0442\u043e\u0440 \u0447\u0430\u0442\u0430', '\u039f\u03bc\u03ac\u03b4\u03b1', 'Equipe \u6771\u4eac', '\u7ba1\u7406\u3057\u3083', 'Dev \ud83d\udc68\u200d\ud83d\udcbb', '1\u00ba turno']) {
+      expect(mixedScripts(d), d).toBe(false);
+      expect(mixed(d), d).toBeNull();
+    }
+    // A letra parecida conhecida diz com qual papel se confunde (vem antes da mistura).
+    expect(mixed('\u0410dmin')?.code).toBe('RBAC_DUPLICATE_ROLE_LABEL');
   });
 });
 

@@ -1049,6 +1049,10 @@
   box-shadow: var(--focus-ring-input);
   outline: none;
 }
+/* Nome exibido que se passa por outro papel: a borda avisa também no cabeçalho. */
+.rbac-title-input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
 .rbac-status {
   flex: none;
   display: inline-flex;

@@ -269,10 +269,15 @@ async function assertKnownKeys(keys: string[]) {
   if (bad.length) throw badRequest('error-invalid-permission', `Permissão inexistente: ${bad.join(', ')}`);
 }
 
-// Nome e nome de exibição: um papel não se passa por outro (ver roleNameProblem).
-async function assertRoleName(id: string, description: string | undefined, isNew: boolean) {
+// Nome e nome de exibição: um papel não se passa por outro (ver roleNameProblem), contra os papéis de agora. A prévia
+// da reversão também confere (o nome de antes pode se confundir com o de um papel criado depois).
+export async function roleNameCheck(id: string, description: string | undefined, isNew: boolean) {
   const roles = await many<{ id: string; description: string | null }>('SELECT id, description FROM roles');
-  const p = roleNameProblem(id, description, roles, ROLE_LABEL, { isNew, displayName: roleDisplayName });
+  return roleNameProblem(id, description, roles, ROLE_LABEL, { isNew, displayName: roleDisplayName });
+}
+
+async function assertRoleName(id: string, description: string | undefined, isNew: boolean) {
+  const p = await roleNameCheck(id, description, isNew);
   if (p) throw rbacError(400, p.code, p.error);
 }
 

@@ -2,7 +2,9 @@
 // sensível, matriz, concorrência, Quem pode…?, supervisor com delegação, papel inicial, simulação do acesso, papéis
 // de sala, celular e o buraco do Admin › Salas fechado. Os passos 14 a 19 conferem os achados da revisão (lista sem
 // rolagem lateral, rótulos e filtros da aba Permissões, sair da matriz, Quem pode…?, lote com 2FA, textos do
-// supervisor, plano do modelo e o celular). Tira print de cada passo e sai com código 1 se algo falhar.
+// supervisor, plano do modelo e o celular). O passo 20 confere a revisão final (nome exibido que se passa por outro
+// papel no editor, reverter com outro nome e o modelo Auditor de mensagens). Tira print de cada passo e sai com código
+// 1 se algo falhar.
 //
 // Uso:
 //   CHAT_URL=http://localhost:3104 PLAYWRIGHT_CORE=/caminho/playwright-core ADMIN_USER=admin ADMIN_PASSWORD=... \
@@ -31,7 +33,7 @@ process.env.BASE = CHAT_URL;
 const lib = await import('../visual/lib.mjs');
 
 const OUT = lib.outDir();
-const STEPS = new Set((process.env.STEPS ?? '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19').split(',').map((s) => Number(s.trim())));
+const STEPS = new Set((process.env.STEPS ?? '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20').split(',').map((s) => Number(s.trim())));
 const PASSWORD = `E2e-${crypto.randomBytes(6).toString('hex')}!`;
 const RUN = Date.now().toString(36);
 const SUP = 'supervisor-operacao';
@@ -756,6 +758,69 @@ await step(19, 'Supervisor: textos de quem só dá o papel e o e-mail no editor;
   assert(title && gb && gb.y >= title.y + title.height && gb.width >= 300 && title.height <= 30, `celular: título ${Math.round(title?.height)}px de altura, botão ${Math.round(gb?.width)}px`);
   await shot(m, 'celular-pessoas-acao');
   await m.context().close();
+});
+
+// ---------- 20. Revisão final: nome exibido ----------
+await step(20, 'Nome que se passa por outro papel: Salvar desliga no editor; reverter pede outro nome; modelo Auditor de mensagens', async () => {
+  const p = adminPage;
+  // Editor: o nome no cabeçalho, editado em outra aba, avisa e desliga Salvar (antes só o campo do Resumo avisava).
+  const turno = `turno-e2e-${RUN}`;
+  ok('rbac.roles.create', await admin.call('POST', 'rbac.roles.create', { name: turno, description: `Turno ${RUN}` }));
+  await p.goto(`${CHAT_URL}/admin/permissions/role/${turno}?tab=perms`);
+  const title = p.getByRole('textbox', { name: 'Nome exibido do papel' });
+  await expectVisible(title, 'nome no cabeçalho');
+  const save = p.locator('.rbac-editor-actions').getByRole('button', { name: 'Salvar' });
+  for (const fake of ['Adm|n', '\ua4ee\ua4d3\ua4df\ua4f2\ua4e0', '\u2c80dmin']) {
+    await title.fill(fake);
+    await expectText(p.locator('.rbac-notice.warn'), 'Nome exibido: Esse nome se confunde com o do papel “Administrador”.');
+    assert(await save.isDisabled(), `Salvar ligado com o nome ${JSON.stringify(fake)}`);
+    assert((await title.getAttribute('aria-invalid')) === 'true', 'o nome no cabeçalho não ficou marcado como inválido');
+  }
+  assert(((await save.getAttribute('title')) ?? '').startsWith('Nome exibido: Esse nome se confunde'), 'Salvar sem o motivo no título');
+  await shot(p, 'editor-nome-falso-permissoes');
+  await p.getByRole('tab', { name: 'Resumo' }).click();
+  await expectText(p.locator('.field-error'), 'Esse nome se confunde com o do papel “Administrador”.');
+  assert(!(await p.locator('.rbac-notice.warn', { hasText: 'Nome exibido:' }).count()), 'o aviso repetiu no Resumo, que já mostra o erro no campo');
+  await shot(p, 'editor-nome-falso-resumo');
+  await title.fill(`Turno ${RUN} noite`);
+  await expectVisible(save.and(p.locator(':enabled')), 'Salvar ligado com um nome livre');
+  await p.locator('.rbac-editor-actions').getByRole('button', { name: 'Reverter' }).click();
+
+  // Reverter a exclusão de um papel cujo nome outro papel pegou depois: a prévia avisa e pede outro nome.
+  const velho = `velho-e2e-${RUN}`;
+  const nome = `Plantão ${RUN}`;
+  ok('rbac.roles.create', await admin.call('POST', 'rbac.roles.create', { name: velho, description: nome }));
+  ok('rbac.roles.delete', await admin.call('POST', 'rbac.roles.delete', { roleId: velho }));
+  ok('rbac.roles.create', await admin.call('POST', 'rbac.roles.create', { name: `novo-e2e-${RUN}`, description: nome }));
+  await p.goto(`${CHAT_URL}/admin/permissions/history?entity=${velho}`);
+  await p.locator('.rbac-event').first().getByRole('button', { name: 'Reverter' }).click();
+  const dlg = p.getByRole('dialog');
+  await expectText(dlg, `O nome exibido de antes, “${nome}”, agora se confunde com o de outro papel.`);
+  const field = dlg.getByLabel('Novo nome exibido');
+  assert((await field.inputValue()) === nome, `nome sugerido: "${await field.inputValue()}"`);
+  const go = dlg.getByRole('button', { name: 'Reverter' });
+  assert(await go.isDisabled(), 'Reverter ligado com o nome que se confunde');
+  await expectText(dlg.locator('.field-error'), `Já existe um papel que aparece como “${nome}”.`);
+  await shot(p, 'reverter-pede-outro-nome');
+  await field.fill(`${nome} antigo`);
+  await expectVisible(go.and(p.locator(':enabled')), 'Reverter ligado com um nome livre');
+  await shot(p, 'reverter-nome-novo');
+  await go.click();
+  await toast(p, 'Alteração revertida.');
+  assert((await roleOf(velho))?.description === `${nome} antigo`, 'o papel não voltou com o nome novo');
+
+  // Modelo: o "Auditor de mensagens" não colide com o Auditor padrão (antes virava "Auditor 2").
+  await p.goto(`${CHAT_URL}/admin/permissions`);
+  await p.getByRole('button', { name: 'Novo papel' }).click();
+  const nova = p.getByRole('dialog');
+  await nova.getByRole('radio', { name: 'Modelo' }).click();
+  await nova.locator('.rbac-template-card', { hasText: 'Auditor de mensagens' }).click();
+  const label = nova.getByLabel('Nome exibido');
+  assert((await label.inputValue()) === 'Auditor de mensagens', `nome exibido do modelo: "${await label.inputValue()}"`);
+  await shot(p, 'novo-papel-auditor-de-mensagens');
+  await nova.getByRole('button', { name: 'Cancelar' }).click();
+  // Os papéis do passo saem: a lista do Comparar com… (passo 14) precisa caber sem rolar na próxima execução.
+  for (const id of [turno, velho, `novo-e2e-${RUN}`]) await dropRole(id);
 });
 
 // ---------- Fim ----------

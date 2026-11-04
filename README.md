@@ -737,15 +737,19 @@ Em Administração › Papéis e permissões, três visões na mesma faixa:
 - **Quem pode…?**: parte da ação (busca pelo que ela faz) e mostra os papéis globais que a dão, os papéis de sala em
   que ela vale e as pessoas, com o papel de onde vem.
 
-- **Novo papel**: em branco, a partir de um **modelo** (Operador, Supervisor de operação, Auditor, Moderador de
-  conteúdo, Gestor de pessoas) ou copiando outro papel. Modelo e cópia levam só as permissões que quem cria tem.
+- **Novo papel**: em branco, a partir de um **modelo** (Operador, Supervisor de operação, Auditor de mensagens,
+  Moderador de conteúdo, Gestor de pessoas) ou copiando outro papel. Modelo e cópia levam só as permissões que quem
+  cria tem.
 - Um papel criado não se passa por outro: o identificador e o nome exibido não podem repetir, nem com letras de outro
-  alfabeto (o "А" cirílico), de largura total, invisíveis ou com outra pontuação, o nome de um papel padrão
-  (Administrador, Dono da sala, Moderador, Usuário, Operação…) ou de outro papel. Nomes que só acrescentam palavras
-  ("Administrador do NOC") passam; o selo do Administrador tem a coroa, que nenhum papel criado recebe.
+  alfabeto (o "А" cirílico, o lisu, o copta, o cherokee), de largura total, em quadrado, invisíveis, com "|" no lugar
+  do "i" ou com outra pontuação, o nome de um papel padrão (Administrador, Dono da sala, Moderador, Usuário,
+  Operação…) ou de outro papel. O nome exibido também não mistura alfabetos (latino com cirílico, por exemplo). Nomes
+  que só acrescentam palavras ("Administrador do NOC") passam; o selo do Administrador tem a coroa, que nenhum papel
+  criado recebe.
 - **Revisar alterações** mostra, antes de gravar, o que muda em linguagem de gestor e quantas pessoas ativas são
   afetadas; com permissão sensível entrando (marcada na lista), salvar pede "Entendi".
-- **Histórico**: quem mudou o quê, com o antes e o depois, e **Reverter** com prévia.
+- **Histórico**: quem mudou o quê, com o antes e o depois, e **Reverter** com prévia. Se o nome exibido de antes
+  agora se confunde com o de outro papel, a prévia avisa e pede outro nome para reverter.
 - Ninguém dá o que não tem: só as permissões e os papéis que cabem no que a pessoa tem (ou que o administrador
   delegou ao papel dela). Dar o papel Administrador pede `assign-admin-role`.
 - **Papéis em lote**, em Administração › Usuários: selecione as pessoas (até 500 por vez), escolha dar ou tirar papéis

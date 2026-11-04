@@ -121,6 +121,7 @@ export function EditorShell<T extends string>({
   onRevert,
   onSave,
   saveLabel = 'Salvar',
+  saveBlocked,
   extraActions,
   notices,
   tabs,
@@ -142,6 +143,8 @@ export function EditorShell<T extends string>({
   onRevert?: () => void;
   onSave?: () => void;
   saveLabel?: string;
+  // Motivo para não salvar ainda (o nome exibido que se passa por outro papel): Salvar fica desligado, com o motivo.
+  saveBlocked?: string | null;
   // Botões antes de Reverter e Salvar (Comparar com…).
   extraActions?: ReactNode;
   notices?: ReactNode;
@@ -202,7 +205,14 @@ export function EditorShell<T extends string>({
             </button>
           )}
           {canWrite && onSave && (
-            <button type="button" className="btn primary" disabled={!dirty || saving} aria-busy={saving || undefined} onClick={onSave}>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!dirty || saving || !!saveBlocked}
+              aria-busy={saving || undefined}
+              title={dirty && saveBlocked ? saveBlocked : undefined}
+              onClick={onSave}
+            >
               <Icon name={saving ? 'loading' : 'check'} className={saving ? 'spin' : undefined} />
               {saveLabel}
             </button>

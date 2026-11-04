@@ -628,6 +628,13 @@ describe('nome de papel: nenhum papel criado se passa por outro', () => {
       'Dono da sala',
       'D\u043eno da s\u0430la',
       'Moderador da sala',
+      // Revisão final: traço no lugar do i, lisu, copta, cherokee minúsculo e mistura de alfabetos.
+      'Adm|n',
+      '\ua4ee\ua4d3\ua4df\ua4f2\ua4e0', // ꓮꓓꓟꓲꓠ
+      '\u2c80dmin', // Ⲁdmin
+      'Administrad\u2c9fr', // ⲟ copta
+      '\uab7admin', // ꭺdmin
+      'Chefe d\u0435 turno', // е cirílico, sem imitar ninguém: mistura alfabetos
     ];
     const turno = uniq('turno-b');
     expect((await api('POST', 'rbac.roles.create', { name: turno, description: 'Chefe de turno B' }, mano)).success).toBe(true);
