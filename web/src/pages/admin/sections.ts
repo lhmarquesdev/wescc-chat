@@ -23,6 +23,8 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   { id: 'integrations', icon: 'admin-integrations', label: 'Integrações', perm: ['manage-integrations', 'manage-own-integrations', 'manage-jira'] },
   { id: 'oauth', icon: 'tokens', label: 'OAuth', perm: ['manage-oauth-apps'] },
   { id: 'emoji', icon: 'emoji', label: 'Emojis', perm: ['manage-emoji'] },
+  // Status personalizados que as pessoas escolhem no menu.
+  { id: 'user-status', icon: 'user-status', label: 'Status do usuário', perm: ['manage-user-status'] },
   // Figurinhas: curadoria (gestores) e removidas (moderação).
   { id: 'stickers', icon: 'sticker', label: 'Figurinhas', perm: ['manage-sticker-packs', 'view-moderation-console', 'manage-moderation-actions'] },
   { id: 'invites', icon: 'panel-invite', label: 'Convites', perm: ['view-room-administration'] },

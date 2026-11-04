@@ -1,9 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { useFilesTab } from '../lib/files';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import type { Subscription } from '@shared/index';
+import type { Subscription, UserStatus } from '@shared/index';
+import { parseSpotlightQuery } from '@shared/search';
+import { presenceLabel, shownCustomStatus, silencesNotifications, statusLine } from '@shared/status';
 import { api, errorMessage } from '../lib/api';
-import { badgeCount, MY_STATUS_LABEL, roomIconName, roomPath, STATUS_LABEL } from '../lib/format';
+import { badgeCount, MY_STATUS_LABEL, roomIconName, roomPath } from '../lib/format';
+import { matchesLocal, spotlightHint } from '../lib/spotlightRules';
 import { useInstallPrompt } from '../lib/install';
 import { logout } from '../lib/session';
 import { usePermission, useSetting, useStore } from '../lib/store';
@@ -17,6 +20,7 @@ import { isMentionBadge, useForYou, type ForYouItem } from './navState';
 import { CallsNavBadge, InCallBadge, RoomLiveDot } from './call/LiveIndicators';
 import { useDirectPeer } from '../lib/roomcall';
 import { useIsPhone, type Placement } from './overlay';
+import { SpotlightResults, useSpotlight, useSpotlightRows } from './Spotlight';
 import { Empty, Field, GroupAvatar, Menu, Modal, UserAvatar } from './ui';
 
 // Preferências da barra lateral, só neste navegador (grupos recolhidos e ordem).
@@ -52,7 +56,8 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 
 // ---------- Item de sala ----------
 
-function SidebarItem({ s, big }: { s: Subscription; big?: boolean }) {
+// onPick: na busca, abrir uma conversa termina a busca (como o Enter e as linhas de Pessoas e Canais).
+function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPick?: () => void }) {
   const typing = useStore((st) => Object.keys(st.typing[s.rid] ?? {}).length > 0);
   const dmUser = s.t === 'd' && !s.name.includes(',') ? s.name : null;
   const silenced = !!s.notifications?.disableNotifications;
@@ -62,10 +67,16 @@ function SidebarItem({ s, big }: { s: Subscription; big?: boolean }) {
   const kind = mention ? 'mention' : s.groupMentions > 0 ? 'group' : '';
   // Chamadas em grupo: a outra pessoa da conversa a dois, para o "Em chamada".
   const otherId = useDirectPeer(s.rid, !!dmUser);
+  // Conversa oculta (só aparece na busca): abrir volta a mostrá-la na lista.
+  const hidden = !s.open;
   return (
     <NavLink
       to={roomPath(s)}
       className={({ isActive }) => ['side-item', isActive && 'active', (s.alert || s.unread) && 'unread', silenced && 'silenced'].filter(Boolean).join(' ')}
+      onClick={() => {
+        if (hidden) void api.post('rooms.open', { roomId: s.rid }).catch(() => {});
+        onPick?.();
+      }}
     >
       {dmUser ? (
         <UserAvatar username={dmUser} size={big ? 24 : 20} />
@@ -77,6 +88,7 @@ function SidebarItem({ s, big }: { s: Subscription; big?: boolean }) {
         </span>
       )}
       <span className="side-name">{s.fname || s.name}</span>
+      {hidden && <span className="side-hint">Oculta</span>}
       {/* Chamadas em grupo: */}
       {dmUser ? <InCallBadge userId={otherId} /> : <RoomLiveDot rid={s.rid} />}
       {typing ? (
@@ -110,6 +122,7 @@ function SideGroup({
   sort,
   onSort,
   add,
+  onPick,
 }: {
   title: string;
   items: Subscription[];
@@ -118,6 +131,7 @@ function SideGroup({
   sort: SortMode;
   onSort: (s: SortMode) => void;
   add?: { label: string; onClick: () => void };
+  onPick?: () => void;
 }) {
   const key = `side.collapsed.${title}`;
   const [collapsed, setCollapsed] = useState(() => local.get(key) === '1');
@@ -170,7 +184,7 @@ function SideGroup({
         </div>
       </div>
       {shown.map((s) => (
-        <SidebarItem key={s.rid} s={s} big={big} />
+        <SidebarItem key={s.rid} s={s} big={big} onPick={onPick} />
       ))}
     </div>
   );
@@ -235,12 +249,19 @@ const THEMES: { id: Theme; label: string; icon: IconName }[] = [
   { id: 'auto', label: 'Automático', icon: 'theme-auto' },
 ];
 
+// O próprio status: o real (ao vivo), a mensagem, o rótulo (o personalizado, como "Em reunião", ou o de base),
+// se a pessoa escolheu um personalizado e se as notificações estão silenciadas (Ocupado).
 export function useMyStatus() {
   const me = useStore((s) => s.me)!;
   const live = useStore((s) => s.presence[me.username]);
-  const status = live?.status ?? me.status ?? 'offline';
+  const list = useStore((s) => s.userStatuses);
+  const status = (live?.status ?? me.status ?? 'offline') as UserStatus;
   const text = (live ? live.statusText : me.statusText) || '';
-  return { status, text, line: text || STATUS_LABEL[status] || status };
+  // O personalizado de quem está invisível só a própria pessoa sabe (a presença chega sem ele): vem de me.
+  const custom = !!shownCustomStatus({ status, statusCustom: me.statusCustom }, list);
+  const label = presenceLabel({ status, statusCustom: me.statusCustom }, list);
+  const silenced = silencesNotifications(me.statusDefault);
+  return { status, text, label, custom, silenced, line: statusLine(label, custom, text) };
 }
 
 function StatusTextModal({ onClose }: { onClose: () => void }) {
@@ -293,9 +314,46 @@ function StatusTextModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-async function setStatus(status: string) {
+// Até este tanto, os personalizados aparecem direto no menu; mais que isso, ficam atrás de "Personalizados" (com 20 ou
+// 30, Minha conta, Tema e Sair saíam da tela). O escolhido continua à vista com o grupo fechado.
+const CUSTOM_INLINE = 5;
+
+function CustomStatusItems({ chosen, close }: { chosen: string | null; close: () => void }) {
+  const statuses = useStore((s) => s.userStatuses);
+  const [open, setOpen] = useState(false);
+  if (!statuses.length) return null;
+  const many = statuses.length > CUSTOM_INLINE;
+  const shown = !many || open ? statuses : statuses.filter((x) => x._id === chosen);
+  return (
+    <>
+      {many ? (
+        <button type="button" className="menu-disclosure" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <Icon name="chevron-down" />
+          <span className="menu-text">Personalizados</span>
+          <span className="menu-count">{statuses.length}</span>
+        </button>
+      ) : (
+        <div className="menu-label">Personalizados</div>
+      )}
+      {shown.map((x) => (
+        <button key={x._id} role="menuitemradio" aria-checked={chosen === x._id} onClick={() => (void setStatus({ statusId: x._id }), close())}>
+          <span className={`status-dot ${x.statusType}`} aria-hidden="true" />
+          <span className="menu-text">{x.name}</span>
+          {chosen === x._id && <Icon name="check" className="menu-check" />}
+        </button>
+      ))}
+    </>
+  );
+}
+
+// Status de base ou personalizado. A marca no menu muda já (as outras abas recebem pelo evento "user").
+async function setStatus(choice: { status?: UserStatus; statusId?: string }) {
   try {
-    await api.post('users.setStatus', { status });
+    await api.post('users.setStatus', choice);
+    const st = useStore.getState();
+    const custom = choice.statusId ? st.userStatuses.find((x) => x._id === choice.statusId) : undefined;
+    const statusDefault = custom?.statusType ?? choice.status;
+    if (st.me && statusDefault) st.setMe({ ...st.me, statusDefault, statusCustom: custom?._id ?? null });
   } catch (e) {
     useStore.getState().toast(errorMessage(e), 'error');
   }
@@ -331,9 +389,11 @@ export function UserMenu({ trigger, placement }: { trigger: ReactNode; placement
   const adminHome = useAdminHome();
   const install = useInstallPrompt();
   const [editStatus, setEditStatus] = useState(false);
-  const { status, text } = useMyStatus();
+  const { status, text, silenced } = useMyStatus();
+  const statuses = useStore((s) => s.userStatuses);
   const theme = String(me.preferences?.theme ?? 'auto');
   const chosen = me.statusDefault ?? status;
+  const chosenCustom = me.statusCustom && statuses.some((x) => x._id === me.statusCustom) ? me.statusCustom : null;
   return (
     <>
       <Menu align="left" placement={placement} label="Menu do usuário" className="user-menu" trigger={trigger}>
@@ -345,12 +405,20 @@ export function UserMenu({ trigger, placement }: { trigger: ReactNode; placement
               <span>@{me.username}</span>
             </div>
             {(['online', 'away', 'busy', 'offline'] as const).map((s) => (
-              <button key={s} role="menuitemradio" aria-checked={chosen === s} onClick={() => (void setStatus(s), close())}>
+              <button key={s} role="menuitemradio" aria-checked={!chosenCustom && chosen === s} onClick={() => (void setStatus({ status: s }), close())}>
                 <span className={`status-dot ${s}`} aria-hidden="true" />
                 {MY_STATUS_LABEL[s]}
-                {chosen === s && <Icon name="check" className="menu-check" />}
+                {!chosenCustom && chosen === s && <Icon name="check" className="menu-check" />}
               </button>
             ))}
+            {/* Logo abaixo de "Ocupado": quem acabou de escolher vê o aviso sem rolar. */}
+            {silenced && (
+              <div className="menu-note">
+                <Icon name="notify-silenced" />
+                <span>Notificações silenciadas enquanto você estiver ocupado. Chamadas continuam tocando.</span>
+              </div>
+            )}
+            <CustomStatusItems chosen={chosenCustom} close={close} />
             <button onClick={() => (setEditStatus(true), close())}>
               <Icon name="edit" />
               <span className="menu-text">
@@ -408,7 +476,7 @@ export function UserMenu({ trigger, placement }: { trigger: ReactNode; placement
 // Rodapé com a pessoa e o status: abre o menu do usuário para cima. Também usado pela navegação da administração.
 export function SideFoot() {
   const me = useStore((s) => s.me)!;
-  const { status, line } = useMyStatus();
+  const { status, line, silenced } = useMyStatus();
   return (
     <div className="side-foot">
       <UserMenu
@@ -418,7 +486,10 @@ export function SideFoot() {
             <UserAvatar username={me.username} size={32} status={status} />
             <span className="me-text">
               <span className="me-name">{me.name}</span>
-              <span className="me-status">{line}</span>
+              <span className="me-status">
+                <span className="me-status-text">{line}</span>
+                {silenced && <Icon name="notify-silenced" size={12} className="me-silenced" label="Notificações silenciadas" />}
+              </span>
             </span>
             <Icon name="me-menu" className="me-chevron" />
           </button>
@@ -576,11 +647,13 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const searching = filter.trim().length > 0;
   const all = useMemo(() => Object.values(subs).filter((s) => s.open || s.unread > 0 || s.alert), [subs]);
   const groups = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    const list = all
-      .filter((s) => !q || (s.fname || s.name).toLowerCase().includes(q))
+    // Na busca entram também as conversas ocultas; sem acento, pelo nome de exibição ou pelo usuário da DM, com @ e #.
+    const q = parseSpotlightQuery(filter);
+    const list = (searching ? Object.values(subs) : all)
+      .filter((s) => !searching || matchesLocal(s, q))
       .filter((s) => !onlyUnread || s.unread > 0 || s.alert || s.tunread.length);
     return [
       { title: 'Favoritos', items: list.filter((s) => s.f) },
@@ -592,10 +665,57 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
       .map((g) => ({ ...g, items: g.items.sort(sortOf(g.title) === 'az' ? byName : byRecent) }))
       .filter((g) => g.items.length);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [all, filter, onlyUnread, sorts, canChannel, canDm]);
+  }, [all, subs, filter, searching, onlyUnread, sorts, canChannel, canDm]);
+  const localCount = groups.reduce((n, g) => n + g.items.length, 0);
 
-  // Setas para cima e para baixo andam pelas conversas; da primeira, para cima volta à busca.
+  // Pessoas e canais do servidor depois das conversas (não com "Somente não lidas": ali só contam as da lista).
+  const spot = useSpotlight(filter, searching && !onlyUnread);
+  const spotRows = useSpotlightRows(spot);
+  const spotCount = spotRows.people.length + spotRows.rooms.length;
+  // Enter antes de a resposta chegar: abre o primeiro resultado quando ela vier (se o texto não mudar).
+  const [pendingEnter, setPendingEnter] = useState<string | null>(null);
+  const finishSearch = () => {
+    setFilter('');
+    setPendingEnter(null);
+    // Sai do campo (no celular, fecha o teclado).
+    (document.getElementById('sidebar-filter') as HTMLInputElement | null)?.blur();
+  };
+  const spotDone = () => {
+    finishSearch();
+    onNavigate?.();
+  };
+  // Enter abre o primeiro resultado, na ordem da tela: conversas, depois Pessoas, depois Canais e times (cada linha
+  // termina a busca ao abrir).
+  const openFirst = () => {
+    const first = listRef.current?.querySelector<HTMLElement>('.side-item');
+    if (!first) return false;
+    first.click();
+    return true;
+  };
+  // "Abrir diretório" leva o texto da busca (com @, na aba Pessoas) e termina a busca daqui.
+  const openDirectory = () => {
+    const q = parseSpotlightQuery(filter);
+    navigate(`/directory${q.scope === 'users' ? '/users' : ''}${q.text ? `?q=${encodeURIComponent(q.text)}` : ''}`);
+    finishSearch();
+    onNavigate?.();
+  };
+  useEffect(() => {
+    if (!pendingEnter) return;
+    if (spot.key !== pendingEnter) return setPendingEnter(null);
+    if (spot.settledFor === pendingEnter) {
+      setPendingEnter(null);
+      openFirst();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingEnter, spot.key, spot.settledFor]);
+
+  // Setas para cima e para baixo andam pelas conversas; da primeira, para cima volta à busca. Esc numa linha volta à busca.
   const onListKey = (e: ReactKeyboardEvent) => {
+    if (e.key === 'Escape' && (e.target as HTMLElement).closest('.side-item')) {
+      e.preventDefault();
+      document.getElementById('sidebar-filter')?.focus();
+      return;
+    }
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     const items = [...(listRef.current?.querySelectorAll<HTMLElement>('.side-item') ?? [])];
     const i = items.indexOf(document.activeElement as HTMLElement);
@@ -605,15 +725,28 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
     else items[e.key === 'ArrowDown' ? Math.min(i + 1, items.length - 1) : i - 1]?.focus();
   };
 
-  const searching = filter.trim().length > 0;
   let empty: ReactNode = null;
+  // Curta demais (uma letra, só "@" ou "#"): o servidor não foi perguntado; no lugar de "Nada encontrado", a dica.
+  const spotIdle = searching && !onlyUnread && !spot.key;
+  // A busca só diz "nada encontrado" quando o servidor também respondeu sem nada (ou quando nem foi perguntado).
+  const spotSettledEmpty = !spot.key || (spot.settledFor === spot.key && !spot.error && spotCount === 0);
   if (!groups.length) {
-    if (searching)
-      empty = (
-        <Empty icon="search" title={`Nada encontrado para “${filter.trim()}”`}>
-          Confira a grafia ou busque por outro nome.
-        </Empty>
-      );
+    if (searching) {
+      if (spotSettledEmpty && !spotIdle)
+        empty = (
+          <Empty
+            icon="search"
+            title={`Nada encontrado para “${filter.trim()}”`}
+            action={
+              <button type="button" className="btn small" onClick={openDirectory}>
+                Abrir diretório
+              </button>
+            }
+          >
+            Confira a grafia ou procure no diretório.
+          </Empty>
+        );
+    }
     else if (onlyUnread && all.length)
       empty = (
         <Empty
@@ -675,21 +808,22 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
           <input
             id="sidebar-filter"
             placeholder="Buscar"
-            aria-label="Buscar conversas"
+            aria-label="Buscar conversas, pessoas e canais"
             autoComplete="off"
+            enterKeyHint="go"
             value={filter}
-            onChange={(e) => setFilter(e.target.value)}
+            onChange={(e) => {
+              setFilter(e.target.value);
+              setPendingEnter(null);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Escape' && filter) {
                 e.preventDefault();
                 setFilter('');
-              } else if (e.key === 'Enter' && searching && groups.length) {
-                // Enter abre o primeiro resultado, na ordem em que aparece.
+                setPendingEnter(null);
+              } else if (e.key === 'Enter' && searching) {
                 e.preventDefault();
-                navigate(roomPath(groups[0].items[0]));
-                setFilter('');
-                e.currentTarget.blur();
-                onNavigate?.();
+                if (!openFirst() && spot.loading && spot.key) setPendingEnter(spot.key);
               } else if (e.key === 'ArrowDown') {
                 const first = listRef.current?.querySelector<HTMLElement>('.side-item');
                 if (first) {
@@ -721,8 +855,21 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
       <nav className="side-list" aria-label="Conversas" ref={listRef} onKeyDown={onListKey}>
         {list && !searching && !onlyUnread && <ForYou />}
         {groups.map((g) => (
-          <SideGroup key={g.title} title={g.title} items={g.items} searching={searching} big={list} sort={sortOf(g.title)} onSort={(m) => setSort(g.title, m)} add={g.add} />
+          <SideGroup
+            key={g.title}
+            title={g.title}
+            items={g.items}
+            searching={searching}
+            big={list}
+            sort={sortOf(g.title)}
+            onSort={(m) => setSort(g.title, m)}
+            add={g.add}
+            onPick={searching ? finishSearch : undefined}
+          />
         ))}
+        {searching && !onlyUnread && (
+          <SpotlightResults spot={spot} localCount={localCount} big={list} onDone={spotDone} hint={spotIdle ? spotlightHint(parseSpotlightQuery(filter)) : undefined} />
+        )}
         {empty}
       </nav>
       {!list && !phone && <SideFoot />}

@@ -17,7 +17,7 @@ import {
 } from 'react';
 import { createRoot } from 'react-dom/client';
 import { avatarBust, useStore, type ToastItem } from '../lib/store';
-import { STATUS_LABEL } from '../lib/format';
+import { useUserPresence } from '../lib/presence';
 import { Icon, type IconName } from './Icon';
 import { Portal, Sheet, focusables, useAnchored, useEscape, useFocusTrap, useIsPhone, useScrollLock, useSheetDrag, type Placement } from './overlay';
 
@@ -79,11 +79,10 @@ export function Avatar({ username, size = 32, rid, etag }: { username?: string; 
   );
 }
 
-export function StatusDot({ username, status }: { username?: string; status?: string }) {
-  const live = useStore((s) => (username ? s.presence[username]?.status : undefined));
-  const st = live ?? status ?? 'offline';
-  const label = STATUS_LABEL[st] ?? st;
-  return <span className={`status-dot ${st}`} title={label} role="img" aria-label={label} />;
+// O rótulo (título e leitor de tela) diz o status personalizado, como "Em reunião", quando houver.
+export function StatusDot({ username, status, statusCustom }: { username?: string; status?: string; statusCustom?: string | null }) {
+  const p = useUserPresence(username, { status, statusCustom });
+  return <span className={`status-dot ${p.status}`} title={p.label} role="img" aria-label={p.label} />;
 }
 
 // Tamanho do ponto de presença pelo tamanho do avatar (8 / 10 / 12 / 16 px).
@@ -94,12 +93,12 @@ function dotSize(size: number) {
   return 16;
 }
 
-export function UserAvatar({ username, size = 32, status }: { username: string; size?: number; status?: string }) {
+export function UserAvatar({ username, size = 32, status, statusCustom }: { username: string; size?: number; status?: string; statusCustom?: string | null }) {
   const style = { width: size, height: size, '--dot': `${dotSize(size)}px` } as CSSProperties;
   return (
     <span className="avatar-wrap" style={style} data-big={size >= 96 ? '' : undefined}>
       <Avatar username={username} size={size} />
-      <StatusDot username={username} status={status} />
+      <StatusDot username={username} status={status} statusCustom={statusCustom} />
     </span>
   );
 }

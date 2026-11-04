@@ -2412,3 +2412,11 @@ a.att-title {
     animation: none;
   }
 }
+
+/* Palavra destacada (Minha conta › Preferências): as cores da menção a você. */
+mark.hl-word {
+  background: var(--mention-me-bg);
+  color: var(--mention-me-fg);
+  border-radius: 3px;
+  padding: 0 2px;
+}

@@ -1,3 +1,4 @@
+import { normalizeHighlights } from '@shared/highlights';
 import type { UserPreferences, UserStatus } from '@shared/index';
 import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound, unauthorized } from '../lib/errors';
@@ -7,7 +8,7 @@ import { generateSecret, otpauthUrl, verifyTotp } from '../lib/totp';
 import { bus } from '../realtime/bus';
 import { audit, type Actor } from './audit';
 import { announceNewDevice, deviceCookieHeader, rememberLoginDevice } from './loginDevices';
-import { mapUser } from './mappers';
+import { mapUser, presenceEvent } from './mappers';
 import { getSetting } from './settings';
 import { recordActivity } from './stats';
 
@@ -563,23 +564,42 @@ async function renameInReactions(oldU: string, newU: string | null, db?: Queryab
   );
 }
 
+// Preferências da pessoa (merge no jsonb). As palavras destacadas são validadas e normalizadas aqui. Qualquer mudança
+// vai para as outras abas da pessoa pelo evento "user" (só para ela: os outros nunca veem preferences).
 export async function setPreferences(ctx: Ctx, prefs: UserPreferences) {
-  const row = await one(`UPDATE users SET preferences = preferences || $2::jsonb, updated_at = now() WHERE id = $1 RETURNING *`, [ctx.userId, JSON.stringify(prefs)]);
+  if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) throw badRequest('error-invalid-params', 'Preferências inválidas.');
+  const data: Record<string, unknown> = { ...prefs };
+  if ('highlights' in data) {
+    const r = normalizeHighlights(data.highlights);
+    if (!r.ok) throw badRequest('error-invalid-highlights', r.error);
+    data.highlights = r.words;
+  }
+  const before = await one('SELECT preferences FROM users WHERE id = $1', [ctx.userId]);
+  const row = await one(`UPDATE users SET preferences = preferences || $2::jsonb, updated_at = now() WHERE id = $1 RETURNING *`, [ctx.userId, JSON.stringify(data)]);
+  if (row && JSON.stringify(before?.preferences ?? {}) !== JSON.stringify(row.preferences ?? {})) {
+    bus.publish({ user: row.id }, { type: 'user', action: 'updated', user: { _id: row.id, preferences: row.preferences } });
+  }
   return row;
 }
 
-export async function setStatus(userId: string, status: UserStatus | undefined, statusText?: string) {
+// Status escolhido. customId: o status personalizado (o tipo dele vem em status); escolher um status de base limpa o
+// personalizado. Todos recebem a presença; só a própria pessoa recebe a escolha (statusDefault diria "escolheu
+// Invisível" aos outros), para as outras abas marcarem o item certo no menu.
+export async function setStatus(userId: string, status: UserStatus | undefined, statusText?: string, customId: string | null = null) {
   const sets: string[] = [];
   const params: unknown[] = [userId];
   if (status) {
     sets.push(`status_default = $${params.push(status)}`);
     // Status real só muda se o usuário estiver conectado; offline continua offline.
     sets.push(`status = CASE WHEN EXISTS (SELECT 1 FROM presence_connections WHERE user_id = $1) THEN $${params.length} ELSE 'offline' END`);
+    sets.push(`status_custom = $${params.push(customId)}`);
   }
   if (statusText !== undefined) sets.push(`status_text = $${params.push(statusText.slice(0, 120))}`);
   if (!sets.length) return;
-  const row = await one(`UPDATE users SET ${sets.join(', ')} WHERE id = $1 RETURNING id, username, status, status_text`, params);
-  if (row) bus.publish({ all: true }, { type: 'presence', userId: row.id, username: row.username, status: row.status, statusText: row.status_text });
+  const row = await one(`UPDATE users SET ${sets.join(', ')} WHERE id = $1 RETURNING id, username, status, status_text, status_default, status_custom`, params);
+  if (!row) return;
+  bus.publish({ all: true }, presenceEvent(row));
+  if (status) bus.publish({ user: row.id }, { type: 'user', action: 'updated', user: { _id: row.id, statusDefault: row.status_default, statusCustom: row.status_custom } });
 }
 
 export async function deleteUser(actor: Ctx, userId: string, opts: { confirmRelinquish?: boolean } = {}) {

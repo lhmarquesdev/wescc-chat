@@ -6,7 +6,7 @@ import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
 import { assertCanBringIn, assertCanStartDirect } from './direct';
-import { mapRoom, mapSubscription } from './mappers';
+import { mapRoom, mapSubscription, visibleStatusCustom } from './mappers';
 import { sendSystemMessage } from './messages';
 import { hasPermission, rolesHavePermission, getUserRoles, roleInfos } from './permissions';
 import { getSetting } from './settings';
@@ -220,7 +220,7 @@ export async function listMembers(rid: string, opts: { offset?: number; count?: 
   if (opts.filter) w += ` AND (u.username ILIKE $${params.push(`%${opts.filter}%`)} OR u.name ILIKE $${params.length})`;
   if (opts.status?.length) w += ` AND u.status = ANY($${params.push(opts.status)})`;
   const rows = await many(
-    `SELECT u.id, u.username, u.name, u.status, u.status_text, u.avatar_etag, s.roles AS room_roles, count(*) OVER() AS total
+    `SELECT u.id, u.username, u.name, u.status, u.status_text, u.status_custom, u.avatar_etag, s.roles AS room_roles, count(*) OVER() AS total
      FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.room_id = $1 ${w}
      ORDER BY ${opts.orderByRole ? `CASE WHEN 'owner' = ANY(s.roles) THEN 0 WHEN 'moderator' = ANY(s.roles) THEN 1 WHEN 'leader' = ANY(s.roles) THEN 2 WHEN 'publisher' = ANY(s.roles) THEN 3 ELSE 4 END,` : ''}
        (u.status <> 'offline') DESC, u.username LIMIT ${Math.min(opts.count ?? 50, 500)} OFFSET ${Number(opts.offset ?? 0)}`,
@@ -234,6 +234,7 @@ export async function listMembers(rid: string, opts: { offset?: number; count?: 
       name: r.name,
       status: r.status,
       statusText: r.status_text,
+      statusCustom: visibleStatusCustom(r),
       avatarETag: r.avatar_etag,
       roles: r.room_roles,
     })),
@@ -702,7 +703,7 @@ export async function directory(ctx: Ctx, opts: { type: 'channels' | 'users' | '
   const text = `%${opts.text ?? ''}%`;
   if (opts.type === 'users') {
     const rows = await many(
-      `SELECT id, username, name, status, status_text, avatar_etag, bio, roles, created_at, count(*) OVER() AS total FROM users
+      `SELECT id, username, name, status, status_text, status_custom, avatar_etag, bio, roles, created_at, count(*) OVER() AS total FROM users
        WHERE active AND type = 'user' AND (username ILIKE $1 OR name ILIKE $1)
        ORDER BY username LIMIT ${count} OFFSET ${offset}`,
       [text],
@@ -715,6 +716,7 @@ export async function directory(ctx: Ctx, opts: { type: 'channels' | 'users' | '
         name: r.name,
         status: r.status,
         statusText: r.status_text,
+        statusCustom: visibleStatusCustom(r),
         avatarETag: r.avatar_etag,
         roles: r.roles,
         createdAt: r.created_at,

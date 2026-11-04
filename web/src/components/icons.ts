@@ -262,6 +262,9 @@ import {
 // Exportar mensagens e Meus dados (LGPD)
 import { FileDown as ExportFileDown, FolderDown as ExportFolderDown } from 'lucide-react';
 
+// Busca e status
+import { BellOff as StatusBellOff, CircleDotDashed as StatusCircleDotDashed, Highlighter as StatusHighlighter, KeyRound as SearchKeyRound } from 'lucide-react';
+
 export const ICONS = {
   // ---------- Dono 1: comuns ----------
   close: X,
@@ -646,6 +649,11 @@ export const ICONS = {
   // ---------- Exportar mensagens e Meus dados (LGPD) ----------
   'panel-export': ExportFileDown,
   'my-data': ExportFolderDown,
+  // ---------- Busca e status ----------
+  'user-status': StatusCircleDotDashed,
+  'notify-silenced': StatusBellOff,
+  highlight: StatusHighlighter,
+  'join-code': SearchKeyRound,
 } as const;
 
 export type IconName = keyof typeof ICONS;

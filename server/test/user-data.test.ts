@@ -152,6 +152,17 @@ describe('meus dados', () => {
     }
   });
 
+  it('o perfil traz o status personalizado escolhido', async () => {
+    const ana = await newUser(A);
+    expect((await api('POST', 'users.setStatus', { statusId: 'status-em-atendimento', message: 'fila 2' }, ana)).success).toBe(true);
+    const { json, byName } = await readyZip(ana);
+    expect(json('perfil.json').perfil).toMatchObject({ statusText: 'fila 2', statusPersonalizado: { id: 'status-em-atendimento', nome: 'Em atendimento', tipo: 'busy' } });
+    expect(byName.get('meus-dados.html')!.toString('utf8')).toContain('Em atendimento · fila 2');
+    // Sem personalizado, null.
+    const bia = await newUser(A);
+    expect((await readyZip(bia)).json('perfil.json').perfil.statusPersonalizado).toBeNull();
+  });
+
   it('um pedido a cada 24 horas; falha não conta', async () => {
     const carla = await newUser(A);
     const first = (await ask(carla)).request;

@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
 import { startCall } from '../lib/calls';
 import { partyOf, useDirect, type DirectState } from '../lib/direct';
-import { formatDateTime, roleLabel, roomPath, STATUS_LABEL } from '../lib/format';
+import { formatDateTime, roleLabel, roomPath } from '../lib/format';
+import { useUserPresence } from '../lib/presence';
 import { renderMarkdown } from '../lib/markdown';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { Icon } from './Icon';
@@ -108,6 +109,8 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
 
   const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
   const direct = useDirect();
+  // Rótulo da presença com o status personalizado ("Em reunião"); a presença ao vivo vale por cima da busca.
+  const pres = useUserPresence(username, { status: data?.u.status, statusCustom: data?.u.statusCustom });
 
   const openDm = async () => {
     const r = await api.post('im.create', { username });
@@ -163,7 +166,7 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
   const self = data.u._id === me._id;
   // Abrir, só ver o histórico (bloqueada) ou nada (não dá para começar).
   const dmState = !self ? direct.state([partyOf(data.u)]) : null;
-  const status = presence?.status ?? data.u.status;
+  const status = pres.status;
   const statusText = presence?.statusText ?? data.u.statusText;
   const has = (r: string) => data.roles.includes(r);
   const moderate = !!rid && data.inRoom && !self;
@@ -195,12 +198,12 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
   return (
     <div className="user-card">
       <div className="user-card-head">
-        <UserAvatar username={username} size={64} status={status} />
+        <UserAvatar username={username} size={64} status={status} statusCustom={pres.statusCustom} />
         <div className="user-card-who">
           <h2>{data.u.name || data.u.username}</h2>
           <div className="user-card-handle">@{data.u.username}</div>
           <div className="user-card-status">
-            {STATUS_LABEL[status] ?? status}
+            {pres.label}
             {statusText && <span> · {statusText}</span>}
             {/* Chamadas em grupo: "Em chamada" ao lado da presença, escrito. */}
             <InCallBadge userId={data.u._id} label />

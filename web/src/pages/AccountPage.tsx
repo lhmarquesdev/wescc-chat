@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
+import { normalizeHighlights } from '@shared/highlights';
 import { formatDateTime } from '../lib/format';
 import { disablePushHere, enablePushHere, pushEnabledHere, pushSupported, syncPushSubscription } from '../lib/push';
 import { endSession, startSession } from '../lib/session';
@@ -268,7 +269,9 @@ function Preferences() {
     setP(next);
     try {
       await api.post('users.setPreferences', { data: patch });
-      useStore.getState().setMe({ ...me, preferences: next });
+      // Junta com o que está na store agora (as palavras destacadas mudam por fora deste formulário).
+      const cur = useStore.getState().me ?? me;
+      useStore.getState().setMe({ ...cur, preferences: { ...cur.preferences, ...patch } });
       if (patch.theme) applyTheme(String(patch.theme));
     } catch (e) {
       fail(e);
@@ -341,6 +344,8 @@ function Preferences() {
             )}
           </div>
         </div>
+        {/* Também no celular: fora do bloco do teclado físico. */}
+        <HighlightsCard />
         {/* No teclado de toque não há Shift: lá o Enter sempre quebra a linha e o botão envia. */}
         {!coarse && (
           <div className="card">
@@ -356,6 +361,134 @@ function Preferences() {
     </>
   );
 }
+
+// Palavras destacadas: as mensagens com elas ficam marcadas e avisam como uma menção. Cada mudança é salva na hora;
+// se o servidor recusar, a lista volta ao que era.
+// (Não usa <Field>: ele é um <label> e o clique no rótulo apertaria o X do primeiro chip.)
+function HighlightsCard() {
+  const words = useStore((s) => {
+    const w = s.me?.preferences?.highlights;
+    return Array.isArray(w) ? (w as string[]) : EMPTY_WORDS;
+  });
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const id = 'account-highlights';
+  const save = async (next: string[]) => {
+    const r = normalizeHighlights(next);
+    if (!r.ok) {
+      setError(r.error);
+      return false;
+    }
+    setError('');
+    const st = useStore.getState();
+    const me = st.me!;
+    const before = me.preferences ?? {};
+    st.setMe({ ...me, preferences: { ...before, highlights: r.words } });
+    try {
+      await api.post('users.setPreferences', { data: { highlights: r.words } });
+      return true;
+    } catch (e) {
+      // Volta só as palavras: outra preferência pode ter mudado nesse meio tempo.
+      const now = useStore.getState().me;
+      if (now) useStore.getState().setMe({ ...now, preferences: { ...now.preferences, highlights: before.highlights ?? [] } });
+      fail(e);
+      return false;
+    }
+  };
+  const add = async () => {
+    const parts = draft
+      .split(',')
+      .map((w) => w.trim())
+      .filter(Boolean);
+    if (!parts.length) return;
+    if (await save([...words, ...parts])) setDraft('');
+  };
+  const remove = (w: string) => {
+    void save(words.filter((x) => x !== w));
+    inputRef.current?.focus();
+  };
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div>
+          <h2>Palavras destacadas</h2>
+          <p className="card-desc">Mensagens com estas palavras ficam marcadas e avisam você como uma menção. Maiúsculas e acentos não importam.</p>
+        </div>
+      </div>
+      <div className="form">
+        <div className="field">
+          <label className="field-label" htmlFor={id}>
+            Palavra ou expressão
+          </label>
+          <div className="hl-add">
+            <div className="picker">
+              {/* Clicar no vão da caixa leva ao campo, como num campo comum. */}
+              <div className="chips" onMouseDown={(e) => e.target === e.currentTarget && (e.preventDefault(), inputRef.current?.focus())}>
+                {words.map((w) => (
+                  <span key={w} className="chip">
+                    {w}
+                    <button type="button" aria-label={`Remover “${w}”`} onClick={() => remove(w)}>
+                      <Icon name="close" size={14} />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  id={id}
+                  ref={inputRef}
+                  value={draft}
+                  maxLength={400}
+                  autoComplete="off"
+                  enterKeyHint="done"
+                  placeholder="Ex.: plantão, servidor fora"
+                  aria-describedby={error ? `${id}-hint ${id}-err` : `${id}-hint`}
+                  aria-invalid={error ? true : undefined}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setError('');
+                    // A vírgula fecha a palavra (também quando ela chega colada no meio do texto).
+                    if (v.includes(',')) {
+                      const parts = v.split(',');
+                      const rest = parts.pop() ?? '';
+                      const done = parts.map((w) => w.trim()).filter(Boolean);
+                      setDraft(rest);
+                      if (done.length) void save([...words, ...done]).then((ok2) => !ok2 && setDraft(v.replace(/,\s*$/, '')));
+                      return;
+                    }
+                    setDraft(v);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void add();
+                    } else if (e.key === 'Backspace' && !draft && words.length) {
+                      e.preventDefault();
+                      void save(words.slice(0, -1));
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            <button type="button" className="btn small" disabled={!draft.trim()} onClick={() => void add()}>
+              Adicionar
+            </button>
+          </div>
+          <span className="field-hint" id={`${id}-hint`}>
+            Até 20, de 2 a 40 caracteres cada. Enter ou vírgula também adiciona.
+          </span>
+          {error && (
+            <span className="field-error" id={`${id}-err`} role="alert">
+              <Icon name="error" size={14} />
+              {error}
+            </span>
+          )}
+        </div>
+        {words.length === 0 && <p className="muted hl-empty">Nenhuma palavra ainda.</p>}
+      </div>
+    </div>
+  );
+}
+const EMPTY_WORDS: string[] = [];
 
 // Push neste navegador: chega mesmo com o chat fechado (no celular, com o app instalado na tela inicial).
 function PushToggle() {

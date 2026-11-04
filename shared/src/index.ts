@@ -5,6 +5,9 @@ import type { MessageSticker } from './stickers';
 import type { EphemeralMessage, IntegrationAlert, MessageJira, MessageMeeting } from './integrations';
 // Agenda
 import type { CalendarEvent } from './calendar';
+// Status personalizados (Administração › Status do usuário)
+import type { CustomUserStatus } from './status';
+export type { CustomUserStatus } from './status';
 
 export type UserStatus = 'online' | 'away' | 'busy' | 'offline';
 export type RoomType = 'c' | 'p' | 'd';
@@ -24,6 +27,8 @@ export interface User {
   status: UserStatus;
   statusText?: string;
   statusDefault?: UserStatus;
+  // Status personalizado escolhido (o tipo dele está em statusDefault). Para os outros, null quando a pessoa está offline.
+  statusCustom?: string | null;
   active: boolean;
   type: 'user' | 'bot' | 'app';
   roles: string[];
@@ -52,6 +57,7 @@ export interface UserPreferences {
   stickerSuggestions?: boolean; // ausente = true
   stickerTabSeen?: boolean; // já abriu a aba Figurinhas (some o ponto de novidade)
   stickerHintSeen?: boolean; // já enviou uma figurinha pelo seletor (some a dica de Shift+clique)
+  highlights?: string[]; // palavras destacadas: avisam como uma menção (shared/highlights.ts)
   [key: string]: unknown;
 }
 
@@ -387,7 +393,8 @@ export type ServerEvent =
   | { type: 'typing'; rid: string; tmid?: string | null; username: string; typing: boolean; activity?: 'recording' }
   | { type: 'subscription'; action: 'inserted' | 'updated' | 'removed'; subscription: Subscription }
   | { type: 'room'; action: 'inserted' | 'updated' | 'removed'; room: Room }
-  | { type: 'presence'; userId: string; username: string; status: UserStatus; statusText?: string }
+  // statusCustom: o status personalizado; null quando status é offline (um personalizado invisível não se revela)
+  | { type: 'presence'; userId: string; username: string; status: UserStatus; statusText?: string; statusCustom?: string | null }
   | { type: 'notification'; rid: string; title: string; text: string; messageId: string; sender: UserRef; tmid?: string | null }
   | { type: 'reads'; rid: string; messageIds: string[] }
   | { type: 'user'; action: 'updated'; user: Partial<User> & { _id: string } }
@@ -419,7 +426,36 @@ export type ServerEvent =
   | { type: 'calendar.reminder'; event: CalendarEvent }
   // Meus dados (LGPD): o pedido da pessoa mudou de estado (na fila, preparando, pronto, falhou, expirou)
   | { type: 'userdata.changed'; request: UserDataRequest }
+  // Status personalizados criados, editados ou excluídos: a lista nova inteira (sem usersCount)
+  | { type: 'userStatus.changed'; statuses: CustomUserStatus[] }
   | { type: 'pong' };
+
+// ---------- Busca da barra lateral (GET spotlight) ----------
+
+export interface SpotlightUser {
+  _id: string;
+  username: string;
+  name: string;
+  status: UserStatus;
+  statusText?: string;
+  statusCustom?: string | null;
+  roles: string[]; // a web decide antes do clique se dá para abrir uma conversa direta
+  avatarETag?: string | null;
+}
+
+export interface SpotlightRoom {
+  _id: string;
+  t: 'c';
+  name: string;
+  fname: string;
+  topic?: string;
+  usersCount: number;
+  teamId?: string | null;
+  teamMain: boolean;
+  teamName?: string; // canal de um time (não vem na sala principal)
+  notice: boolean;
+  joinCodeRequired: boolean; // pede o código de acesso para quem pergunta
+}
 
 // ---------- Exportar mensagens e Meus dados (LGPD) ----------
 

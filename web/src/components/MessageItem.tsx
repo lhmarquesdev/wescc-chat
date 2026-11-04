@@ -20,6 +20,8 @@ import { api, errorMessage } from '../lib/api';
 import { formatBytes, formatDateTime, formatRelative, formatTime, formatWhen, nameList, plural, roomPath, systemIcon, systemText } from '../lib/format';
 import { resolveEmoji } from '../lib/emoji';
 import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
+import { useHighlights } from '../lib/presence';
+import { findHighlight } from '@shared/highlights';
 import { authorName, editableKind } from '../lib/messageRules';
 import { canRemoveEverywhere, useStickers } from '../lib/stickers';
 import { useNames } from '../lib/names';
@@ -775,6 +777,8 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   const closePicker = useCallback(() => setPicker(null), []);
   // Integrações (Jira): integrations.me (carregado no login) para o grupo "Integrações" do Mais
   const integrations = useIntegrations((s) => s.me);
+  // Palavras destacadas de quem lê (Minha conta › Preferências).
+  const hlm = useHighlights();
   const own = m.u._id === me._id;
   const perms = me.permissions;
   const gate = useContext(MessageGateContext);
@@ -935,10 +939,12 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
     m.t === 'rm' ? (
       <em className="muted">Mensagem removida</em>
     ) : m.t === 'discussion-created' || call ? null : (
-      withCopy(renderMarkdown(text, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick }))
+      withCopy(renderMarkdown(text, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick, highlights: own ? null : hlm }))
     );
   const name = authorName(m);
   const mentioned = m.mentions?.some((x) => x._id === me._id || x._id === 'all' || x._id === 'here');
+  // Palavra destacada: a linha fica marcada como uma menção (nunca nas próprias mensagens).
+  const highlighted = !own && !m.t && !!m.msg && !!findHighlight(m.msg, hlm);
   const edited =
     m.editedAt && showEdited && m.t !== 'rm' ? (
       <span className="edited" title={`Editada por ${m.editedBy?.username} em ${formatDateTime(m.editedAt)}`}>
@@ -978,7 +984,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
   const cls = [
     'msg',
     grouped && 'grouped',
-    mentioned && !own && 'mentioned',
+    (mentioned || highlighted) && !own && 'mentioned',
     m.pinned && 'pinned',
     arrive && 'arrive',
     highlight && 'highlight',
@@ -1064,7 +1070,7 @@ function MessageView({ m, grouped, actions, inThread, canModerate, arrive, highl
               </span>
               <span className="notice-card-titles">
                 <span className="notice-card-title">
-                  {lifted ? renderMarkdown(lifted.title, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick }) : 'Aviso'}
+                  {lifted ? renderMarkdown(lifted.title, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick, highlights: own ? null : hlm }) : 'Aviso'}
                 </span>
                 <span className="notice-card-meta">Leitura obrigatória</span>
               </span>

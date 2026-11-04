@@ -1,10 +1,11 @@
-import type { Role, UserStatus } from '@shared/index';
+import type { CustomUserStatus, Role, UserStatus } from '@shared/index';
+import { silencesNotifications } from '@shared/status';
 import { api, getCredentials, setCredentials, setSignedOutElsewhereHandler, setUnauthorizedHandler } from './api';
 import { setCustomEmoji } from './emoji';
 import { syncPushSubscription, unsubscribeOnLogout } from './push';
 import { realtime } from './realtime';
 import { handleStickerEvent, initStickers, invalidateStickers, resetStickers } from './stickers';
-import { useStore, type Me } from './store';
+import { useStore, type Me, type Presence } from './store';
 import { roomPath, setRoleDescriptions } from './format';
 // Integração com o Jira
 import { clearEphemeral, pushEphemeral } from './ephemeral';
@@ -40,11 +41,17 @@ let started = false;
 
 // Quem já está online ao abrir o chat (depois disso, os eventos de presença mantêm o mapa em dia).
 async function loadPresence() {
-  const r = (await api.get('users.presence').catch(() => null)) as { users: { username: string; status: UserStatus; statusText?: string }[] } | null;
+  const r = (await api.get('users.presence').catch(() => null)) as { users: { username: string; status: UserStatus; statusText?: string; statusCustom?: string | null }[] } | null;
   if (!r) return;
-  const presence: Record<string, { status: UserStatus; statusText?: string }> = {};
-  for (const u of r.users) presence[u.username] = { status: u.status, statusText: u.statusText };
+  const presence: Record<string, Presence> = {};
+  for (const u of r.users) presence[u.username] = { status: u.status, statusText: u.statusText, statusCustom: u.statusCustom ?? null };
   useStore.setState({ presence });
+}
+
+// Status personalizados para o menu e os rótulos de presença (userStatus.changed mantém em dia).
+async function loadUserStatuses() {
+  const r = (await api.get('custom-user-status.list').catch(() => null)) as { statuses: CustomUserStatus[] } | null;
+  if (r) useStore.setState({ userStatuses: r.statuses });
 }
 
 export async function startSession() {
@@ -60,6 +67,7 @@ export async function startSession() {
   // Comandos de barra: a lista é por pessoa e pode ter mudado desde a última sessão nesta aba.
   invalidateSlashCommands();
   void loadPresence();
+  void loadUserStatuses();
   void syncPushSubscription();
   if (!started) {
     started = true;
@@ -69,6 +77,7 @@ export async function startSession() {
       useStore.setState({ userRoles: {} });
       void loadSubscriptions();
       void loadPresence();
+      void loadUserStatuses();
       void api.get('me').then((m) => useStore.getState().setMe(m));
       // Eventos de figurinha podem ter se perdido na queda.
       invalidateStickers('org');
@@ -233,6 +242,8 @@ function showNotification(ev: { rid: string; title: string; text: string; messag
     st.toast(ev.text);
     return;
   }
+  // Ocupado: sem som, sem notificação e sem aviso na tela (o servidor já não manda; vale contra a corrida com outro aparelho).
+  if (silencesNotifications(st.me?.statusDefault)) return;
   const focusedHere = document.hasFocus() && currentRoomId() === ev.rid;
   if (focusedHere) return;
   const prefs = st.me?.preferences ?? {};

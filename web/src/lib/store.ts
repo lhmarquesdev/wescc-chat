@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { Message, Room, ServerEvent, Subscription, User, UserStatus } from '@shared/index';
+import type { CustomUserStatus, Message, Room, ServerEvent, Subscription, User, UserStatus } from '@shared/index';
+import { selfUserPatch } from '@shared/status';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
 export interface ToastItem {
@@ -26,7 +27,8 @@ interface State {
   rooms: Record<string, Room>;
   messages: Record<string, RoomMessages>;
   threads: Record<string, Message[]>;
-  presence: Record<string, { status: UserStatus; statusText?: string }>;
+  presence: Record<string, Presence>;
+  userStatuses: CustomUserStatus[]; // status personalizados (Administração › Status do usuário)
   typing: Record<string, Record<string, number>>;
   recording: Record<string, Record<string, boolean>>; // quem do typing está gravando áudio
   connected: boolean;
@@ -48,12 +50,18 @@ interface State {
   removeMessage(rid: string, id: string, tmid?: string | null): void;
   setThread(tmid: string, list: Message[]): void;
   markReads(rid: string, ids: string[]): void;
-  setPresence(username: string, status: UserStatus, statusText?: string): void;
+  setPresence(username: string, status: UserStatus, statusText?: string, statusCustom?: string | null): void;
   setTyping(rid: string, username: string, typing: boolean, recording?: boolean): void;
   setConnected(c: boolean): void;
   toast(text: string, kind?: ToastKind, opts?: { action?: ToastItem['action']; duration?: number; icon?: string }): void;
   dismissToast(id: number): void;
   reset(): void;
+}
+
+export interface Presence {
+  status: UserStatus;
+  statusText?: string;
+  statusCustom?: string | null; // id do status personalizado (null quando a pessoa aparece offline)
 }
 
 let toastSeq = 0;
@@ -79,6 +87,7 @@ const initial = {
   messages: {},
   threads: {},
   presence: {},
+  userStatuses: [],
   typing: {},
   recording: {},
   connected: false,
@@ -138,7 +147,7 @@ export const useStore = create<State>((set, get) => ({
     const s = new Set(ids);
     set({ messages: { ...get().messages, [rid]: { ...cur, list: cur.list.map((m) => (s.has(m._id) ? { ...m, unread: false } : m)) } } });
   },
-  setPresence: (username, status, statusText) => set({ presence: { ...get().presence, [username]: { status, statusText } } }),
+  setPresence: (username, status, statusText, statusCustom = null) => set({ presence: { ...get().presence, [username]: { status, statusText, statusCustom } } }),
   setTyping: (rid, username, typing, recording = false) => {
     const room = { ...(get().typing[rid] ?? {}) };
     const rec = { ...(get().recording[rid] ?? {}) };
@@ -218,8 +227,12 @@ export function applyEvent(ev: ServerEvent) {
       if (ev.action !== 'removed') st.upsertRoom(ev.room);
       break;
     case 'presence':
-      st.setPresence(ev.username, ev.status, ev.statusText);
-      if (st.me && ev.userId === st.me._id) st.setMe({ ...st.me, status: ev.status, statusText: ev.statusText });
+      st.setPresence(ev.username, ev.status, ev.statusText, ev.statusCustom ?? null);
+      // O próprio status personalizado chega pelo evento "user" (aqui vem null quando a pessoa está invisível).
+      if (st.me && ev.userId === st.me._id) st.setMe({ ...st.me, status: ev.status, statusText: ev.statusText, ...(ev.statusCustom ? { statusCustom: ev.statusCustom } : {}) });
+      break;
+    case 'userStatus.changed':
+      useStore.setState({ userStatuses: ev.statuses });
       break;
     case 'typing':
       if (ev.username !== st.me?.username) st.setTyping(ev.tmid ? `${ev.rid}:${ev.tmid}` : ev.rid, ev.username, ev.typing, ev.activity === 'recording');
@@ -228,7 +241,8 @@ export function applyEvent(ev: ServerEvent) {
       st.markReads(ev.rid, ev.messageIds);
       break;
     case 'user':
-      if (st.me && ev.user._id === st.me._id) st.setMe({ ...st.me, ...ev.user } as Me);
+      // Só o evento da própria escolha muda o status personalizado (o do perfil chega como os outros o veem).
+      if (st.me && ev.user._id === st.me._id) st.setMe({ ...st.me, ...selfUserPatch(ev.user) } as Me);
       if (ev.user.roles) useStore.setState({ userRoles: { ...st.userRoles, [ev.user._id]: ev.user.roles } });
       if (ev.user.avatarETag !== undefined && ev.user.username) avatarBust[ev.user.username] = String(ev.user.avatarETag ?? Date.now());
       break;

@@ -56,6 +56,7 @@ import {
   teamRooms,
   updateTeamRoom,
 } from '../services/teams';
+import { spotlight } from '../services/spotlight';
 import { actorOf } from '../services/users';
 import { b, bool, paging, q, route, str, strArray } from './http';
 import { resolveUserParam } from './users';
@@ -390,6 +391,8 @@ export function roomsRoutes(app: FastifyInstance) {
     );
     return { items: rows.map(mapRoom) };
   });
+  // Busca da barra lateral (Ctrl+K): pessoas e canais públicos que ainda não estão na lista de quem pergunta.
+  route(app, 'GET', 'spotlight', {}, async (req, _rep, ctx) => spotlight(ctx, str(q(req).query, 'query', { optional: true, max: 200 }) ?? ''));
 
   // ---------- Admin de salas ----------
   route(app, 'GET', 'rooms.adminRooms', { permissions: ['view-room-administration'] }, async (req) => {

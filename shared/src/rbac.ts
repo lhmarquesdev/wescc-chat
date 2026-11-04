@@ -159,6 +159,7 @@ export const RBAC_KEYS: Record<string, RbacKey> = {
   'manage-oauth-apps': { label: 'Gerenciar provedores OAuth', defaults: [A], description: 'Configurar o login com Google, Microsoft e outros provedores.', sensitive: 'Muda como as pessoas entram no chat.' },
   'manage-emoji': { label: 'Gerenciar emojis personalizados', defaults: [A], description: 'Adicionar e apagar emojis personalizados.' },
   'manage-sticker-packs': { label: 'Gerenciar os pacotes de figurinhas da empresa', defaults: [A], description: 'Criar e organizar os pacotes oficiais de figurinhas.' },
+  'manage-user-status': { label: 'Gerenciar status personalizados', defaults: [A], description: 'Criar, editar e excluir os status que as pessoas escolhem no menu.' },
   'view-import-operations': { label: 'Ver importações', defaults: [A], description: 'Ver as importações já feitas e o resultado delas.' },
   'run-import': { label: 'Importar dados', defaults: [A], description: 'Trazer usuários, salas e mensagens do Slack, de CSV e de outras fontes.', sensitive: 'Cria contas e mensagens em massa.' },
   'manage-calls': { label: 'Gerenciar o servidor de chamadas e as chamadas em andamento', defaults: [A], description: 'Configurar o servidor de chamadas e encerrar chamadas em andamento.' },
@@ -374,6 +375,14 @@ export const RBAC_GROUPS: RbacGroup[] = [
       },
       { id: 'admin-oauth', label: 'OAuth', description: 'Login com provedores externos.', levels: [{ label: MANAGE, keys: ['manage-oauth-apps'] }], extras: [], adminSection: 'oauth' },
       { id: 'admin-emoji', label: 'Emojis', description: 'Emojis personalizados.', levels: [{ label: MANAGE, keys: ['manage-emoji'] }], extras: [], adminSection: 'emoji' },
+      {
+        id: 'admin-user-status',
+        label: 'Status do usuário',
+        description: 'Status personalizados que as pessoas escolhem no menu.',
+        levels: [{ label: MANAGE, keys: ['manage-user-status'] }],
+        extras: [],
+        adminSection: 'user-status',
+      },
       { id: 'admin-stickers', label: 'Figurinhas da empresa', description: 'Pacotes oficiais de figurinhas.', levels: [{ label: MANAGE, keys: ['manage-sticker-packs'] }], extras: [], adminSection: 'stickers' },
       {
         id: 'admin-import',

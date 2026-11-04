@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { splitHighlights, type HighlightMatcher } from '@shared/highlights';
 import type { Message } from '@shared/index';
 import { resolveEmoji } from './emoji';
 
@@ -12,6 +13,21 @@ interface Opts {
   mentions?: Message['mentions'];
   channels?: Message['channels'];
   onUserClick?: (username: string) => void;
+  highlights?: HighlightMatcher | null; // palavras destacadas de quem lê (só no texto comum; nunca em código, link ou menção)
+}
+
+// Texto comum com as palavras destacadas marcadas.
+function hl(text: string, o: Opts, key: string): ReactNode[] {
+  if (!o.highlights || !text) return [text];
+  return splitHighlights(text, o.highlights).map((p, j) =>
+    p.hit ? (
+      <mark key={`${key}-h${j}`} className="hl-word">
+        {p.text}
+      </mark>
+    ) : (
+      p.text
+    ),
+  );
 }
 
 // Cada alternativa, quando falha, só percorre texto onde ela mesma não pode começar de novo, então a busca é linear:
@@ -52,8 +68,8 @@ function inline(text: string, o: Opts, keyBase: string): ReactNode[] {
   let i = 0;
   for (const m of text.matchAll(INLINE)) {
     const idx = m.index ?? 0;
-    if (idx > last) out.push(text.slice(last, idx));
     const k = `${keyBase}-${i++}`;
+    if (idx > last) out.push(...hl(text.slice(last, idx), o, `${k}t`));
     const [all, code, mdLink, url, bold, italic, strike, mention, channel, emoji] = m;
     if (code) out.push(<code key={k} className="md-code">{code.slice(1, -1)}</code>);
     else if (mdLink) {
@@ -81,7 +97,7 @@ function inline(text: string, o: Opts, keyBase: string): ReactNode[] {
     } else if (mention) {
       const name = trimDots(mention.slice(1));
       const known = name === 'all' || name === 'here' || o.mentions?.some((x) => x.username.toLowerCase() === name.toLowerCase());
-      if (!known) out.push(mention);
+      if (!known) out.push(...hl(mention, o, k));
       else {
         const cls = name === o.me ? 'mention me' : name === 'all' || name === 'here' ? `mention group ${name}` : 'mention';
         out.push(
@@ -101,7 +117,7 @@ function inline(text: string, o: Opts, keyBase: string): ReactNode[] {
             {channel}
           </Link>,
         );
-      else out.push(channel);
+      else out.push(...hl(channel, o, k));
     } else if (emoji) {
       const e = resolveEmoji(emoji);
       if (e?.unicode) out.push(<span key={k} className="emoji" title={emoji}>{e.unicode}</span>);
@@ -110,7 +126,7 @@ function inline(text: string, o: Opts, keyBase: string): ReactNode[] {
     } else out.push(all);
     last = idx + all.length;
   }
-  if (last < text.length) out.push(text.slice(last));
+  if (last < text.length) out.push(...hl(text.slice(last), o, `${keyBase}-end`));
   return out;
 }
 

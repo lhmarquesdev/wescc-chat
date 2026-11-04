@@ -205,6 +205,13 @@ export function useAnchored({
       hide(),
     ],
   });
+  // Reaberto antes de a saída terminar (painel ainda montado, como num clique duplo no gatilho): o autoUpdate só
+  // recalcula quando algo muda de tamanho ou rola, e o painel ficava invisível (isPositioned volta a false ao fechar).
+  const { update } = f;
+  const { reference: refEl, floating: floatEl } = f.elements;
+  useLayoutEffect(() => {
+    if (open && refEl && floatEl && hasBox(refEl)) update();
+  }, [open, refEl, floatEl, update]);
   const hidden = !!f.middlewareData.hide?.referenceHidden;
   const hiddenCb = useRef(onHidden);
   useLayoutEffect(() => {

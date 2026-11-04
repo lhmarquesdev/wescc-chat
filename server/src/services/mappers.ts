@@ -1,4 +1,13 @@
-import type { Message, Room, Subscription, Team, User } from '@shared/index';
+import type { Message, Room, ServerEvent, Subscription, Team, User } from '@shared/index';
+
+// Status personalizado que os outros veem: nada enquanto a pessoa aparece offline (um personalizado do tipo
+// invisível revelaria que ela está conectada). Só a própria pessoa (full) vê o valor real.
+export const visibleStatusCustom = (r: { status?: string; status_custom?: string | null }) => (r.status !== 'offline' ? r.status_custom ?? null : null);
+
+// Evento de presença para todos, a partir de uma linha de users (id, username, status, status_text, status_custom).
+export function presenceEvent(r: any): Extract<ServerEvent, { type: 'presence' }> {
+  return { type: 'presence', userId: r.id, username: r.username, status: r.status, statusText: r.status_text, statusCustom: visibleStatusCustom(r) };
+}
 
 export function mapUser(r: any, opts: { full?: boolean } = {}): User {
   const u: User = {
@@ -7,6 +16,7 @@ export function mapUser(r: any, opts: { full?: boolean } = {}): User {
     name: r.name,
     status: r.status,
     statusText: r.status_text || undefined,
+    statusCustom: opts.full ? r.status_custom ?? null : visibleStatusCustom(r),
     active: r.active,
     type: r.type,
     roles: r.roles,

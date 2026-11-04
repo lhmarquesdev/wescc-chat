@@ -1,5 +1,6 @@
 import type { UserRef } from '@shared/index';
 import { messagePreviewText } from '@shared/stickers';
+import { silencesNotifications } from '@shared/status';
 import { many } from '../db/pool';
 import { truncate } from '../lib/text';
 import { bus } from '../realtime/bus';
@@ -26,10 +27,11 @@ async function groupDmLabel(uids: string[]) {
   return names.length > 1 ? `${names.slice(0, -1).join(', ')} e ${names[names.length - 1]}` : names.join('');
 }
 
-// Decide quem recebe notificação (desktop/in-app e e-mail) para uma nova mensagem.
-export async function dispatchNotifications(ctx: Ctx, room: any, row: any, mentions: UserRef[], parent: any) {
+// Decide quem recebe notificação (desktop/in-app, push e e-mail) para uma nova mensagem.
+// highlights: quem tem palavra destacada na mensagem (userId -> palavra), avisado como numa menção.
+export async function dispatchNotifications(ctx: Ctx, room: any, row: any, mentions: UserRef[], parent: any, highlights: Map<string, string> = new Map()) {
   const members = await many(
-    `SELECT s.user_id, s.notifications, u.username, u.name, u.email, u.status, u.preferences
+    `SELECT s.user_id, s.notifications, u.username, u.name, u.email, u.status, u.status_default, u.preferences
      FROM subscriptions s JOIN users u ON u.id = s.user_id
      WHERE s.room_id = $1 AND s.user_id <> $2 AND u.active`,
     [room.id, ctx.userId],
@@ -59,11 +61,22 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
   const pushTargets: string[] = [];
   const title = isDM ? (groupDM ? `${senderName} em ${roomName}` : senderName) : `#${roomName}`;
   const body = hidePush ? 'Você tem uma nova mensagem' : `${isDM ? '' : `${senderName}: `}${text}`.slice(0, 300);
+  // Quem tem o chat aberto em algum lugar (uma consulta só): o push e o e-mail vão para quem não tem. Pela conexão, não
+  // pelo status: quem está invisível com o chat aberto aparece offline, mas já recebe pelo WebSocket.
+  const pushOn = !!getSetting('Push_enable');
+  const connected =
+    emailEnabled || pushOn
+      ? new Set((await many('SELECT DISTINCT user_id FROM presence_connections WHERE user_id = ANY($1)', [members.map((m) => m.user_id)])).map((r) => r.user_id))
+      : new Set<string>();
 
   for (const m of members) {
     const prefs = m.notifications ?? {};
     if (prefs.disableNotifications) continue;
-    const mentioned = ids.has(m.user_id) || teamMembers.has(m.user_id) || (!prefs.muteGroupMentions && (all || (here && m.status !== 'offline')));
+    // Ocupado (escolhido, mesmo com o chat fechado): sem notificação, som, push nem e-mail. Os contadores já subiram.
+    if (silencesNotifications(m.status_default)) continue;
+    const direct = ids.has(m.user_id) || teamMembers.has(m.user_id) || (!prefs.muteGroupMentions && (all || (here && m.status !== 'offline')));
+    const word = highlights.get(m.user_id);
+    const mentioned = direct || !!word;
     const following = followers.has(m.user_id);
     let desktop: string = prefs.desktop && prefs.desktop !== 'default' ? prefs.desktop : m.preferences?.desktopNotifications ?? (isDM ? 'all' : 'mentions');
     if (isDM && (!prefs.desktop || prefs.desktop === 'default')) desktop = 'all';
@@ -75,23 +88,23 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
       );
       pushTargets.push(m.user_id);
     }
-    // E-mail para quem está offline e foi mencionado (ou recebeu DM).
+    // E-mail para quem está sem o chat aberto e foi mencionado (ou recebeu DM, ou tem a palavra destacada).
     const emailPref = prefs.email && prefs.email !== 'default' ? prefs.email : m.preferences?.emailNotificationMode ?? 'mentions';
-    if (emailEnabled && m.email && m.status === 'offline' && emailPref !== 'nothing' && (mentioned || isDM)) {
+    if (emailEnabled && m.email && !connected.has(m.user_id) && emailPref !== 'nothing' && (mentioned || isDM)) {
       const site = getSetting<string>('Site_Name');
       const url = `${getSetting<string>('Site_Url')}/${isDM ? 'direct' : room.t === 'p' ? 'group' : 'channel'}/${room.id}`;
+      const subject = isDM ? `Mensagem direta de ${senderName}` : !direct && word ? `“${word}” em #${roomName}` : `Você foi mencionado em #${roomName}`;
       void sendMail({
         to: m.email,
-        subject: `[${site}] ${isDM ? `Mensagem direta de ${senderName}` : `Você foi mencionado em #${roomName}`}`,
+        subject: `[${site}] ${subject}`,
         text: `${senderName}: ${hidePush ? '(conteúdo oculto)' : text}\n\nAbrir: ${url}`,
       });
     }
   }
 
   // Push só para quem não está com o chat aberto em nenhum lugar (quem está recebe a notificação pelo WebSocket).
-  if (pushTargets.length && getSetting('Push_enable')) {
-    const online = new Set((await many('SELECT DISTINCT user_id FROM presence_connections WHERE user_id = ANY($1)', [pushTargets])).map((r) => r.user_id));
-    const offline = pushTargets.filter((id) => !online.has(id));
+  if (pushTargets.length && pushOn) {
+    const offline = pushTargets.filter((id) => !connected.has(id));
     if (offline.length) {
       const { sendPush } = await import('./push');
       const base = isDM ? 'direct' : room.t === 'p' ? 'group' : 'channel';
