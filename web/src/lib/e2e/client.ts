@@ -37,11 +37,12 @@ export interface E2eView {
 interface E2eStore {
   status: E2eStatus;
   rooms: Record<string, E2eRoomState>;
+  returned: Record<string, string>; // conversas para as quais a pessoa voltou (rid → quando voltou)
   version: number; // sobe quando chega uma chave ou uma mensagem é decifrada (as mensagens desenham de novo)
   waitUntil: number; // muitas senhas erradas: espera até este momento
 }
 
-export const useE2e = create<E2eStore>(() => ({ status: 'loading', rooms: {}, version: 0, waitUntil: 0 }));
+export const useE2e = create<E2eStore>(() => ({ status: 'loading', rooms: {}, returned: {}, version: 0, waitUntil: 0 }));
 
 // ---------- Textos ----------
 
@@ -50,6 +51,9 @@ export const E2E_UI = {
   none: 'Para ler e escrever aqui, configure a criptografia.',
   locked: 'Digite a senha da criptografia para ler e escrever nesta conversa.',
   waiting: 'Esperando a chave desta conversa. Ela chega quando outra pessoa da conversa estiver com o chat aberto.',
+  // Quem saiu e voltou: a conversa troca de chave, e a pessoa espera a nova (a de quando estava fora não vem).
+  waitingNew: 'Esperando a chave nova desta conversa. Ela chega quando outra pessoa da conversa estiver com o chat aberto.',
+  returned: 'Você voltou para esta conversa: as mensagens criptografadas de antes da sua volta não podem ser lidas.',
   preparing: 'Preparando a criptografia…',
   unsupported: 'A criptografia só funciona com o chat aberto em https.',
   error: 'Não foi possível preparar a criptografia desta conversa. Tente de novo.',
@@ -79,7 +83,8 @@ let myId: string | null = null;
 let privateKey: CryptoKey | null = null;
 let myPublic: { text: string; key: CryptoKey } | null = null;
 const roomKeys = new Map<string, Map<string, CryptoKey>>();
-const current = new Map<string, { keyID: string | null; rotate: boolean }>();
+// beforeReturn: a pessoa voltou para a conversa e a geração atual é de antes da volta (não vem para ela).
+const current = new Map<string, { keyID: string | null; rotate: boolean; beforeReturn?: boolean }>();
 const loading = new Map<string, Promise<void>>();
 const ensuring = new Map<string, Promise<E2eRoomState | null>>();
 const requestedAt = new Map<string, number>();
@@ -133,7 +138,7 @@ function forgetMemory() {
   cache.clear();
   decrypting.clear();
   failures = 0;
-  useE2e.setState((s) => ({ rooms: {}, version: s.version + 1, waitUntil: 0 }));
+  useE2e.setState((s) => ({ rooms: {}, returned: {}, version: s.version + 1, waitUntil: 0 }));
 }
 
 export function e2eSupported() {
@@ -333,7 +338,13 @@ function loadRoomKeys(rid: string, force = false): Promise<void> {
   if (!force && current.has(rid)) return Promise.resolve();
   const my = epoch;
   const p = (async () => {
-    const r = await api.get<{ keyID: string | null; rotate: boolean; keys: { keyID: string; key: string; providedBy: string | null }[] }>('e2e.fetchRoomKeys', { rid });
+    const r = await api.get<{
+      keyID: string | null;
+      rotate: boolean;
+      keys: { keyID: string; key: string; providedBy: string | null }[];
+      returnedAt?: string | null;
+      beforeReturn?: boolean;
+    }>('e2e.fetchRoomKeys', { rid });
     if (my !== epoch || !privateKey) return;
     let added = false;
     for (const k of r.keys) {
@@ -347,7 +358,8 @@ function loadRoomKeys(rid: string, force = false): Promise<void> {
         if (k.providedBy && k.providedBy !== myId) void api.post('e2e.rejectSuggestedGroupKey', { rid, keyID: k.keyID }).catch(() => {});
       }
     }
-    current.set(rid, { keyID: r.keyID, rotate: r.rotate });
+    current.set(rid, { keyID: r.keyID, rotate: r.rotate, beforeReturn: !!r.beforeReturn });
+    setReturned(rid, r.returnedAt ?? null);
     loadFailedAt.delete(rid);
     if (added) for (const id of [...cache.keys()]) if (cache.get(id) === 'failed') cache.delete(id);
   })()
@@ -362,6 +374,16 @@ function loadRoomKeys(rid: string, force = false): Promise<void> {
     });
   loading.set(rid, p);
   return p;
+}
+
+function setReturned(rid: string, at: string | null) {
+  useE2e.setState((s) => {
+    if ((s.returned[rid] ?? null) === at) return s;
+    const returned = { ...s.returned };
+    if (at) returned[rid] = at;
+    else delete returned[rid];
+    return { returned };
+  });
 }
 
 const encryptedRoom = (room: Pick<Room, 'encrypted' | 'e2eKeyId'> | null | undefined) => !!room && (room.encrypted || !!room.e2eKeyId);
@@ -639,7 +661,8 @@ export function viewOf(m: Message): E2eView | null {
     return { state: 'pending' };
   }
   if (loading.has(m.rid)) return { state: 'pending' };
-  return { state: env.kid === known.keyID ? 'waiting' : 'old-key' };
+  // A geração atual é de antes da volta: ela não vem, como uma chave antiga.
+  return { state: env.kid === known.keyID && !known.beforeReturn ? 'waiting' : 'old-key' };
 }
 
 // Texto para editar, copiar e citar: o decifrado, ou o msg do servidor quando a mensagem não é cifrada.

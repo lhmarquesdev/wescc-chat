@@ -747,7 +747,8 @@ export function RoomPage() {
             </div>
           </header>
           {room.notice && <NoticeBar room={room} canPost={canPostRO} />}
-          {room.encrypted && sub && <E2eBanner room={room} />}
+          {/* Também na conversa que deixou de ser criptografada: o aviso de quem voltou continua valendo. */}
+          {(room.encrypted || room.e2eKeyId) && sub && <E2eBanner room={room} />}
           {/* Chamadas em grupo: a faixa da chamada viva, depois da faixa de avisos e antes do anúncio. */}
           <CallBanner room={room} />
           {room.announcement && <Announcement text={room.announcement} />}

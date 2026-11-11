@@ -463,6 +463,7 @@ const INFO = [
   'Não funcionam aqui: busca no servidor, prévias do Jira, figurinhas, bots e integrações. Push e e-mail dizem só “Mensagem criptografada”.',
   'Chamadas de voz e vídeo não são cifradas de ponta a ponta.',
   'Esqueceu a senha? Dá para redefinir, mas as mensagens antigas ficam ilegíveis para você.',
+  'Quem sai da conversa e volta só lê o que vier depois da volta. Quem é novo na conversa lê o histórico.',
   'A proteção vale contra quem lê o banco de dados ou os backups. Ela depende de o servidor do chat ser o original.',
 ];
 

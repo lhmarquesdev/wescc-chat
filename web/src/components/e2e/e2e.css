@@ -40,6 +40,13 @@
 .e2e-banner .btn {
   flex-shrink: 0;
 }
+/* Quem voltou para a conversa: a frase inteira, mesmo no celular (quebra a linha se precisar). */
+.e2e-banner.returned > .icon:first-child {
+  color: var(--fg-muted);
+}
+.e2e-banner.returned .e2e-banner-text {
+  white-space: normal;
+}
 .e2e-banner-close {
   flex-shrink: 0;
   margin-right: calc(-1 * var(--space-2));
