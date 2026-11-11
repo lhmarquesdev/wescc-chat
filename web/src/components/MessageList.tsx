@@ -160,6 +160,16 @@ export function MessageList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rid, jumpTo]);
 
+  // As mensagens desta sala saíram da memória com a conversa aberta (a pessoa saiu e voltou): carrega de novo.
+  const hadData = useRef<string | null>(data ? rid : null);
+  useEffect(() => {
+    if (data) hadData.current = rid;
+    else if (hadData.current === rid) {
+      hadData.current = null;
+      void load();
+    }
+  }, [data, rid, load]);
+
   // Depois de cada mudança da lista: preserva a posição (antigas no topo) ou fixa no fim, e conta as novas.
   useLayoutEffect(() => {
     const el = scroller.current;

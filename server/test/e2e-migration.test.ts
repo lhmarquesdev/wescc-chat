@@ -54,6 +54,9 @@ describe('migração 034 (criptografia)', () => {
   });
 });
 
+// Quando a 034 entrou (antes dela, "ligar a criptografia" era só um rótulo).
+const applied034 = (ago: string) => pool.query(`UPDATE schema_migrations SET applied_at = now() - $1::interval WHERE name = '034_e2e.sql'`, [ago]);
+
 // Migração 037 numa instalação com conversas criptografadas: quem saiu antes dela não tem registro de saída, e ele vem
 // do que ficou na sala (mensagens de sistema desde que a criptografia foi ligada, mensagens cifradas, chaves entregues,
 // leituras). Quem está na sala (nunca saiu ou já voltou) não ganha registro, e cada geração conhecida fica registrada.
@@ -64,6 +67,7 @@ describe('migração 037 (quem volta só lê dali para frente)', () => {
 
   it('saídas de antes da atualização vêm do histórico da sala; gerações vêm das chaves, das mensagens e da sala', async () => {
     await migrateUpTo('037');
+    await applied034('8 days 12 hours');
     const users = ['ana', 'bruno', 'carla', 'davi', 'erika', 'fabio', 'gil', 'hugo'];
     for (const u of users) await pool.query('INSERT INTO users (id, username) VALUES ($1, $1)', [u]);
     const K1 = 'AAAAAAAAAAAAAAA1';
@@ -79,7 +83,7 @@ describe('migração 037 (quem volta só lê dali para frente)', () => {
           [room, user, text, t, e2e === null ? null : JSON.stringify(e2e), ago],
         )
       ).rows[0].id as string;
-    // A criptografia foi ligada há 8 dias (a sala existe há 10).
+    // A criptografia foi ligada há 8 dias (a sala existe há 10; a 034 entrou há 8 dias e meio).
     await msg('grupo', 'uj', 'davi', 'davi', '9 days'); // entrou antes da criptografia
     await msg('grupo', 'ul', 'davi', 'davi', '9 days'); // e saiu antes também: volta como alguém novo
     await msg('grupo', 'room_e2e_enabled', 'ana', '', '8 days');
@@ -110,5 +114,67 @@ describe('migração 037 (quem volta só lê dali para frente)', () => {
     await pool.query(`DELETE FROM rooms WHERE id = 'grupo'`);
     expect((await pool.query('SELECT count(*)::int AS n FROM e2e_room_departures')).rows[0].n).toBe(0);
     expect((await pool.query('SELECT count(*)::int AS n FROM e2e_room_generations')).rows[0].n).toBe(0);
+  });
+
+  it('o começo da criptografia vem do que é de verdade: nascer criptografado e desligar e ligar não apaga quem saiu; o rótulo de antes da 034 não conta', async () => {
+    await migrateUpTo('037');
+    await applied034('10 days');
+    for (const u of ['ana', 'carla', 'davi', 'erika', 'gil', 'hugo']) await pool.query('INSERT INTO users (id, username) VALUES ($1, $1)', [u]);
+    const W = 'x'.repeat(342);
+    const room = async (id: string, ago: string, key: string, keyAgo: string) => {
+      await pool.query(`INSERT INTO rooms (id, t, name, encrypted, e2e_key_id, created_at) VALUES ($1, 'p', $1, true, $2, now() - $3::interval)`, [id, key, ago]);
+      await pool.query(`INSERT INTO subscriptions (id, room_id, user_id) VALUES (md5(random()::text), $1, 'ana')`, [id]);
+      await pool.query(`INSERT INTO e2e_room_keys (room_id, user_id, key_id, wrapped_key, provided_by, created_at) VALUES ($1, 'ana', $2, $3, 'ana', now() - $4::interval)`, [
+        id,
+        key,
+        W,
+        keyAgo,
+      ]);
+    };
+    const msg = (rid: string, t: string, user: string, text: string, ago: string) =>
+      pool.query(`INSERT INTO messages (id, room_id, user_id, username, msg, t, created_at) VALUES (md5(random()::text), $1, $2, $2, $3, $4, now() - $5::interval)`, [
+        rid,
+        user,
+        text,
+        t,
+        ago,
+      ]);
+    // Grupo que nasceu criptografado (sem "ligou"): a Carla foi removida, e depois a criptografia foi desligada e ligada.
+    await room('nasceu', '5 days', 'AAAAAAAAAAAAAAA1', '5 days');
+    await msg('nasceu', 'ru', 'ana', 'carla', '4 days');
+    await msg('nasceu', 'room_e2e_disabled', 'ana', '', '3 days');
+    await msg('nasceu', 'room_e2e_enabled', 'ana', '', '2 days');
+    // Grupo do tempo do rótulo: "ligou" e "desligou" antes da 034; o Davi foi removido com a sala aberta; a criptografia
+    // de verdade foi ligada há 7 dias, e a Erika saiu depois.
+    await room('rotulo', '20 days', 'AAAAAAAAAAAAAAA2', '7 days');
+    await msg('rotulo', 'room_e2e_enabled', 'ana', '', '15 days');
+    await msg('rotulo', 'room_e2e_disabled', 'ana', '', '12 days');
+    await msg('rotulo', 'ru', 'ana', 'davi', '9 days');
+    await msg('rotulo', 'room_e2e_enabled', 'ana', '', '7 days');
+    await msg('rotulo', 'ul', 'erika', 'erika', '6 days');
+    // Grupo criado aberto depois da 034 e criptografado depois: quem saiu antes de ligar não conta.
+    await room('depois', '8 days', 'AAAAAAAAAAAAAAA3', '5 days');
+    await msg('depois', 'ul', 'gil', 'gil', '6 days');
+    await msg('depois', 'room_e2e_enabled', 'ana', '', '5 days');
+    await msg('depois', 'ru', 'ana', 'hugo', '4 days');
+
+    // Ivo redefiniu a criptografia ontem e está em dois grupos; só no "rotulo" a troca ainda está pendente.
+    await pool.query(`INSERT INTO users (id, username) VALUES ('ivo', 'ivo')`);
+    for (const r of ['rotulo', 'nasceu']) await pool.query(`INSERT INTO subscriptions (id, room_id, user_id) VALUES (md5(random()::text), $1, 'ivo')`, [r]);
+    await pool.query(`UPDATE rooms SET e2e_rotate = true WHERE id = 'rotulo'`);
+    await pool.query(`INSERT INTO audit_log (id, action, target, created_at) VALUES ('a1', 'user.e2e.reset', '{"userId":"ivo"}', now() - interval '1 day')`);
+
+    await migrate(() => {});
+
+    const deps = (await pool.query(`SELECT room_id, user_id FROM e2e_room_departures ORDER BY room_id, user_id`)).rows;
+    expect(deps).toEqual([
+      { room_id: 'depois', user_id: 'hugo' },
+      { room_id: 'nasceu', user_id: 'carla' },
+      { room_id: 'rotulo', user_id: 'erika' },
+    ]);
+    // A redefinição de antes da atualização vale onde a troca está pendente: a geração de antes não vai para ele.
+    const resets = (await pool.query(`SELECT room_id, user_id, reset_at FROM e2e_room_resets`)).rows;
+    expect(resets.map((r) => [r.room_id, r.user_id])).toEqual([['rotulo', 'ivo']]);
+    expect(Date.now() - new Date(resets[0].reset_at).getTime()).toBeGreaterThan(20 * 3600_000);
   });
 });

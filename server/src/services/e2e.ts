@@ -156,19 +156,60 @@ function keyRequest(rid: string, keyID: string | null) {
 export function resetKeyRequestWindows() {
   lastRoomRequest.clear();
   lastUserRequest.clear();
-  lastRotateNudge.clear();
+  lastRotate.clear();
   for (const t of trailing.values()) clearTimeout(t);
   trailing.clear();
+  for (const x of trailingRotate.values()) clearTimeout(x.t);
+  trailingRotate.clear();
 }
 
-// Lembrete da troca pendente (quem voltou e espera a geração nova): no máximo um por sala a cada 10 s, como o pedido.
-const lastRotateNudge = new Map<string, number>();
-function rotateNudge(rid: string, keyID: string) {
+// Aviso de troca pendente para a volta de alguém, a criptografia ligada de novo e o lembrete de quem voltou e espera: no
+// máximo um por sala a cada 10 s, como o pedido de chave. Um aviso dentro da janela não se perde: sai um só no fim dela,
+// com a geração da sala naquele momento (se a troca ainda estiver pendente). Muitas voltas juntas (convite em lote, time,
+// LDAP) viram um aviso, e não uma troca atrás da outra. room: a sala também atualiza para quem participa (a volta mudou
+// o "troca pendente" dela).
+const lastRotate = new Map<string, number>();
+const trailingRotate = new Map<string, { t: NodeJS.Timeout; room: boolean }>();
+export async function announceRotate(rid: string, opts: { room?: boolean } = {}): Promise<boolean> {
+  const room = opts.room ?? true;
   const now = Date.now();
-  if (now - (lastRotateNudge.get(rid) ?? 0) < ROOM_WINDOW_MS) return false;
-  lastRotateNudge.set(rid, now);
-  bus.publish({ room: rid }, { type: 'e2e.rotate', rid, keyID });
+  const last = lastRotate.get(rid) ?? 0;
+  if (now - last >= ROOM_WINDOW_MS) {
+    lastRotate.set(rid, now);
+    const sent = await publishRotate(rid, room);
+    // Nada saiu (desligada, arquivada ou sem troca pendente): a janela continua livre para o próximo aviso.
+    if (!sent && lastRotate.get(rid) === now) lastRotate.set(rid, last);
+    return sent;
+  }
+  const pending = trailingRotate.get(rid);
+  if (pending) pending.room ||= room;
+  else {
+    const entry = {
+      room,
+      t: setTimeout(
+        () => {
+          trailingRotate.delete(rid);
+          lastRotate.set(rid, Date.now());
+          void publishRotate(rid, entry.room).catch(() => {});
+        },
+        last + ROOM_WINDOW_MS - now,
+      ),
+    };
+    entry.t.unref?.();
+    trailingRotate.set(rid, entry);
+  }
   return true;
+}
+
+// Avisa a troca pendente: quem tem a chave e está online troca. Com a criptografia desligada (ou a sala arquivada) não há
+// troca agora, só a sala atualiza; o aviso sai quando ela for ligada de novo.
+async function publishRotate(rid: string, room: boolean): Promise<boolean> {
+  const r = await one('SELECT e2e_key_id, encrypted, archived FROM rooms WHERE id = $1 AND e2e_rotate AND e2e_key_id IS NOT NULL', [rid]);
+  if (!r) return false;
+  const live = !!r.encrypted && !r.archived;
+  if (live) bus.publish({ room: rid }, { type: 'e2e.rotate', rid, keyID: r.e2e_key_id });
+  if (room) await publishRoom(rid);
+  return live;
 }
 
 // A pessoa precisa da chave atual: quem tem entrega. Quem voltou e a geração atual é de antes da volta não recebe essa;
@@ -177,7 +218,7 @@ async function askForKey(rid: string, keyID: string | null, userId: string) {
   if (!keyID) return false;
   if (!(await blockedFrom(rid, userId, keyID))) return keyRequest(rid, keyID);
   const room = await one('SELECT e2e_rotate, encrypted, archived FROM rooms WHERE id = $1 AND e2e_key_id = $2', [rid, keyID]);
-  return !!room?.e2e_rotate && room.encrypted && !room.archived && rotateNudge(rid, keyID);
+  return !!room?.e2e_rotate && room.encrypted && !room.archived && announceRotate(rid, { room: false });
 }
 
 // Pessoa nova na sala (com chaves): pede a chave para quem já tem. Quem voltou não pede: a volta já pediu a troca.
@@ -253,7 +294,8 @@ async function directOpen(ctx: Ctx, room: any) {
 }
 
 // returnedAt: quando a pessoa voltou para a conversa (só para quem saiu e voltou). beforeReturn: a geração atual é de
-// antes da volta, então não vem para ela; ela recebe a próxima (a volta pediu a troca).
+// antes da volta (ou da redefinição da criptografia da pessoa), então não vem para ela; ela recebe a próxima (a volta e
+// a redefinição pediram a troca).
 export async function roomKeys(ctx: Ctx, rid: string) {
   const room = await memberRoom(ctx, rid);
   const rows = await many(
@@ -266,7 +308,7 @@ export async function roomKeys(ctx: Ctx, rid: string) {
     rotate: !!room.e2e_rotate,
     keys: rows.map((r) => ({ keyID: r.key_id as string, key: r.wrapped_key as string, providedBy: (r.provided_by as string | null) ?? null, ts: r.created_at as string })),
     returnedAt: (back?.returned_at as string | undefined) ?? null,
-    beforeReturn: !!back && !!room.e2e_key_id && (await blockedFrom(rid, ctx.userId, room.e2e_key_id)),
+    beforeReturn: !!room.e2e_key_id && (await blockedFrom(rid, ctx.userId, room.e2e_key_id)),
   };
 }
 
@@ -274,12 +316,14 @@ export async function roomKeys(ctx: Ctx, rid: string) {
 const RECIPIENTS = `SELECT u.id, u.username, k.public_key FROM subscriptions s JOIN users u ON u.id = s.user_id JOIN e2e_user_keys k ON k.user_id = u.id
   WHERE s.room_id = $1 AND u.active`;
 
-// A pessoa saiu da sala e ainda não voltou, ou voltou depois de a geração nascer: essa geração não vai para ela.
-// Geração que o servidor ainda não conhece: 'new' (a troca que vai acontecer, que nasce agora) ou 'old' (recusa).
-const AWAY = (room: string, user: string, key: string, unknown: 'new' | 'old') =>
-  `EXISTS (SELECT 1 FROM e2e_room_departures d WHERE d.room_id = ${room} AND d.user_id = ${user}
-     AND (d.returned_at IS NULL OR d.returned_at >= COALESCE(
-       (SELECT g.created_at FROM e2e_room_generations g WHERE g.room_id = ${room} AND g.key_id = ${key}), '${unknown === 'new' ? 'infinity' : '-infinity'}'::timestamptz)))`;
+// A pessoa saiu da sala e ainda não voltou, voltou depois de a geração nascer, ou redefiniu a criptografia (tendo chave
+// ali) depois de a geração nascer: essa geração não vai para ela. Geração que o servidor ainda não conhece: 'new' (a
+// troca que vai acontecer, que nasce agora) ou 'old' (recusa).
+const AWAY = (room: string, user: string, key: string, unknown: 'new' | 'old') => {
+  const born = `COALESCE((SELECT g.created_at FROM e2e_room_generations g WHERE g.room_id = ${room} AND g.key_id = ${key}), '${unknown === 'new' ? 'infinity' : '-infinity'}'::timestamptz)`;
+  return `(EXISTS (SELECT 1 FROM e2e_room_departures d WHERE d.room_id = ${room} AND d.user_id = ${user} AND (d.returned_at IS NULL OR d.returned_at >= ${born}))
+    OR EXISTS (SELECT 1 FROM e2e_room_resets x WHERE x.room_id = ${room} AND x.user_id = ${user} AND x.reset_at >= ${born}))`;
+};
 
 async function blockedFrom(rid: string, userId: string, keyID: string) {
   return !!(await one(`SELECT ${AWAY('$1', '$2', '$3', 'old')} AS away`, [rid, userId, keyID]))?.away;
@@ -430,57 +474,58 @@ export async function rejectSuggestedKey(ctx: Ctx, rid: string, keyID: string): 
   if (room.encrypted && room.e2e_key_id === keyID) keyRequest(rid, keyID);
 }
 
-// Pede chave nova nas salas (só nas que já têm uma geração) e avisa quem participa.
+// Pede chave nova nas salas (só nas que já têm uma geração) e avisa quem participa, na hora.
 export async function markRotate(rids: string[]): Promise<void> {
   const ids = [...new Set(rids)].filter(Boolean);
   if (!ids.length) return;
-  const rows = await many('UPDATE rooms SET e2e_rotate = true, updated_at = now() WHERE id = ANY($1) AND e2e_key_id IS NOT NULL RETURNING id, e2e_key_id', [ids]);
-  for (const r of rows) {
-    bus.publish({ room: r.id }, { type: 'e2e.rotate', rid: r.id, keyID: r.e2e_key_id });
-    await publishRoom(r.id);
-  }
+  const rows = await many('UPDATE rooms SET e2e_rotate = true, updated_at = now() WHERE id = ANY($1) AND e2e_key_id IS NOT NULL RETURNING id', [ids]);
+  for (const r of rows) await publishRotate(r.id, true);
 }
 
-// A troca pedida antes (a volta de alguém, ou a criptografia ligada de novo com a troca pendente): avisa quem
-// participa. Com a criptografia desligada, só a sala atualiza; o aviso sai quando ela for ligada de novo.
-export async function announceRotate(rid: string): Promise<void> {
-  const r = await one('SELECT e2e_key_id, encrypted, archived FROM rooms WHERE id = $1 AND e2e_rotate AND e2e_key_id IS NOT NULL', [rid]);
-  if (r?.encrypted && !r.archived) bus.publish({ room: rid }, { type: 'e2e.rotate', rid, keyID: r.e2e_key_id });
-  await publishRoom(rid);
-}
+// A troca pedida na saída (forgetRoomKeys): avisa quem ficou na hora, sem a janela das voltas, para a conversa trocar
+// logo. Sai depois de a pessoa deixar a sala: o aviso não chega para ela.
+export const announceDeparture = (rid: string) => publishRotate(rid, true).then(() => undefined);
 
-// Saiu, foi removido ou excluído da sala: as chaves dela saem, e quem fica gera uma chave nova. Sala criptografada (ou
-// que já foi): a saída fica registrada, para a volta não trazer nenhuma geração de quando a pessoa estava fora.
-export async function forgetRoomKeys(rid: string, userId: string) {
-  const gone = await many('DELETE FROM e2e_room_keys WHERE room_id = $1 AND user_id = $2 RETURNING key_id', [rid, userId]);
+// Saiu, foi removido ou excluído da sala, na mesma transação que apaga a inscrição: as chaves dela saem e, sala
+// criptografada (ou que já foi), a saída fica registrada, para a volta não trazer nenhuma geração de quando a pessoa
+// estava fora. Uma volta que corre junto espera esta transação (a inscrição nova esbarra na que está saindo), então
+// sempre vê a saída. Se ela tinha chave, a sala pede chave nova; devolve se pediu (o aviso é announceDeparture).
+export async function forgetRoomKeys(rid: string, userId: string, c: Queryable): Promise<boolean> {
+  const gone = await many('DELETE FROM e2e_room_keys WHERE room_id = $1 AND user_id = $2 RETURNING key_id', [rid, userId], c);
   await query(
     `INSERT INTO e2e_room_departures (room_id, user_id, left_at, left_key_id)
      SELECT r.id, $2, clock_timestamp(), r.e2e_key_id FROM rooms r WHERE r.id = $1 AND (r.encrypted OR r.e2e_key_id IS NOT NULL OR $3)
      ON CONFLICT (room_id, user_id) DO UPDATE SET left_at = EXCLUDED.left_at, left_key_id = EXCLUDED.left_key_id, returned_at = NULL`,
     [rid, userId, gone.length > 0],
+    c,
   );
-  if (gone.length) await markRotate([rid]);
+  if (!gone.length) return false;
+  return !!(await one('UPDATE rooms SET e2e_rotate = true, updated_at = now() WHERE id = $1 AND e2e_key_id IS NOT NULL RETURNING id', [rid], c));
 }
 
-// Voltou para a sala de que tinha saído (logo depois de a inscrição entrar): marca a volta e pede chave nova antes de
-// qualquer entrega. A linha da sala fica travada: uma troca que corre junto fica toda antes da volta (e a sala pede a
+// Voltou para a sala de que tinha saído, na mesma transação que cria a inscrição: marca a volta e pede chave nova antes
+// de qualquer entrega. A linha da sala fica travada: uma troca que corre junto fica toda antes da volta (e a sala pede a
 // próxima) ou toda depois (e essa geração já vale para a pessoa). Devolve se a pessoa voltou.
-export async function noteReturn(rid: string, userId: string, db?: Queryable): Promise<boolean> {
-  if (!(await one('SELECT 1 FROM e2e_room_departures WHERE room_id = $1 AND user_id = $2', [rid, userId], db))) return false;
-  const run = async (c: Queryable) => {
-    const room = await one('SELECT e2e_key_id FROM rooms WHERE id = $1 FOR UPDATE', [rid], c);
-    await c.query('UPDATE e2e_room_departures SET returned_at = clock_timestamp() WHERE room_id = $1 AND user_id = $2', [rid, userId]);
-    if (room?.e2e_key_id) await c.query('UPDATE rooms SET e2e_rotate = true, updated_at = now() WHERE id = $1', [rid]);
-    return true;
-  };
-  return db ? run(db) : tx(run);
+export async function noteReturn(rid: string, userId: string, c: Queryable): Promise<boolean> {
+  if (!(await one('SELECT 1 FROM e2e_room_departures WHERE room_id = $1 AND user_id = $2', [rid, userId], c))) return false;
+  const room = await one('SELECT e2e_key_id FROM rooms WHERE id = $1 FOR UPDATE', [rid], c);
+  await c.query('UPDATE e2e_room_departures SET returned_at = clock_timestamp() WHERE room_id = $1 AND user_id = $2', [rid, userId]);
+  if (room?.e2e_key_id) await c.query('UPDATE rooms SET e2e_rotate = true, updated_at = now() WHERE id = $1', [rid]);
+  return true;
 }
 
-// Esqueceu a senha (self) ou o administrador redefiniu: as chaves somem e as salas em que a pessoa tinha chave trocam.
+// Esqueceu a senha (self) ou o administrador redefiniu: as chaves somem e as salas em que a pessoa tinha chave trocam;
+// nelas, as gerações de antes da redefinição não voltam para a pessoa.
 export async function resetUserKeys(actor: Ctx, userId: string, opts: { self: boolean }): Promise<void> {
   const rooms = await tx(async (c) => {
     const rs = (await c.query('SELECT DISTINCT room_id FROM e2e_room_keys WHERE user_id = $1', [userId])).rows.map((r: any) => r.room_id as string);
     await c.query('DELETE FROM e2e_room_keys WHERE user_id = $1', [userId]);
+    // Nas conversas em que tinha chave, as gerações de antes da redefinição não voltam para ela (nem antes da troca).
+    await c.query(
+      `INSERT INTO e2e_room_resets (room_id, user_id) SELECT unnest($2::text[]), $1
+       ON CONFLICT (room_id, user_id) DO UPDATE SET reset_at = clock_timestamp()`,
+      [userId, rs],
+    );
     const k = await c.query('DELETE FROM e2e_user_keys WHERE user_id = $1 RETURNING user_id', [userId]);
     if (!k.rowCount && !opts.self) throw E2E_ERR.userNoKeys();
     // Pelo administrador: a pessoa fica sabendo o motivo ao entrar de novo (me.e2eResetByAdmin).
@@ -538,7 +583,10 @@ export async function checkE2eInput(
   }
   const max = e2eMaxCiphertext(getSetting<number>('Message_MaxAllowedSize'));
   if (!isEnvelope(input.e2e, max) || input.e2e.by !== ctx.userId || !E2E_MESSAGE_ID.test(input._id ?? '')) throw E2E_ERR.invalid();
-  if (input.e2e.kid !== room.e2e_key_id) throw E2E_ERR.keyOutdated();
+  // Com a troca pendente (alguém saiu, voltou ou redefiniu), a geração atual não recebe mensagem nova: quem saiu e
+  // guardou essa chave não lê o que viria com ela. A web troca a chave antes de mandar (e, com o 409, troca e manda de
+  // novo).
+  if (input.e2e.kid !== room.e2e_key_id || room.e2e_rotate) throw E2E_ERR.keyOutdated();
   const { v, kid, iv, ct, by } = input.e2e;
   return { v, kid, iv, ct, by };
 }

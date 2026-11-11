@@ -895,7 +895,8 @@ describe('criptografia: quem volta só lê dali para frente', () => {
     const back = await departure(g1.rid, carla);
     expect(back.returned_at).toBeTruthy();
     expect(new Date(back.returned_at).getTime()).toBeGreaterThan(new Date(back.left_at).getTime());
-    // Davi é novo: recebe a geração atual e lê o que veio com ela (o histórico).
+    // Davi é novo e chega com a troca da volta pendente: quem troca (o navegador, em rotate()) entrega antes a geração
+    // atual a quem pode recebê-la, e ele lê o que veio com ela (o histórico).
     const davi = await person();
     expect((await invite(g1.rid, ana, davi)).success).toBe(true);
     // Ninguém consegue entregar a geração de quando a Carla estava fora: nem pela lista, nem direto.
@@ -922,6 +923,13 @@ describe('criptografia: quem volta só lê dali para frente', () => {
     expect((await sendE2e(carla, g2, 'com a chave de quando eu estava fora')).errorType).toBe('error-e2e-key-outdated');
     // Pedir de novo não traz a geração antiga: a Carla já tem a atual, e ninguém mais lhe deve nada.
     expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, ana)).rooms).toEqual([]);
+    // A volta, como a saída, troca a chave: quem entra depois dela recebe a nova e lê dali para frente.
+    const erika = await person();
+    expect((await invite(g1.rid, ana, erika)).success).toBe(true);
+    expect(await without(g3, ana)).toEqual([erika.userId]);
+    expect(await offer(g2, ana, [erika])).toMatchObject({ status: 409, errorType: 'error-e2e-key-outdated' });
+    expect(await offer(g3, ana, [erika])).toMatchObject({ inserted: 1, skipped: [] });
+    expect(await heldBy(g1.rid, erika)).toEqual([g3.keyID]);
   });
 
   it('40. volta com a troca da saída ainda pendente (ninguém online): a geração da saída não vem; o pedido dela lembra a troca', async () => {
@@ -933,14 +941,17 @@ describe('criptografia: quem volta só lê dali para frente', () => {
     await sendE2e(ana, g1, 'antes');
     expect((await api('POST', 'groups.leave', { roomId: g1.rid }, carla)).success).toBe(true);
     expect((await roomRow(g1.rid)).e2e_rotate).toBe(true);
-    await sendE2e(bruno, g1, 'ainda com a chave da saída, com a Carla fora');
+    // Com a troca pendente, a chave da saída não leva mensagem nova (quem saiu e guardou a chave não leria).
+    expect((await sendE2e(bruno, g1, 'ainda com a chave da saída, com a Carla fora')).errorType).toBe('error-e2e-key-outdated');
     // Ninguém trocou; a Carla volta.
     expect((await invite(g1.rid, ana, carla)).success).toBe(true);
     expect(await roomRow(g1.rid)).toMatchObject({ e2e_key_id: g1.keyID, e2e_rotate: true });
     expect(await without(g1, bruno)).toEqual([]);
     expect(await offer(g1, ana, [carla])).toMatchObject({ inserted: 0, skipped: [carla.userId] });
     expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, carla)).toMatchObject({ keyID: g1.keyID, rotate: true, keys: [], beforeReturn: true });
-    // A Carla pede a chave com a Ana online: sai o lembrete da troca, não o pedido da geração antiga.
+    // A Carla pede a chave com a Ana online (a janela do aviso da volta já passou): sai o lembrete da troca, não o pedido
+    // da geração antiga.
+    resetKeyRequestWindows();
     const ws = await online(ana);
     try {
       const since = ws.events.length;
@@ -1025,7 +1036,8 @@ describe('criptografia: quem volta só lê dali para frente', () => {
     expect((await api('POST', 'rooms.leave', { roomId: dm }, bruno)).errorType).toBe('error-not-allowed');
     expect((await api('POST', 'groups.kick', { roomId: dm, userId: bruno.userId }, A)).success).toBe(true);
     expect(await departure(dm, bruno)).toMatchObject({ left_key_id: d1.keyID });
-    await sendE2e(ana, d1, 'com o Bruno fora da conversa');
+    // A troca da saída está pendente: a chave que o Bruno tinha não leva mensagem nova.
+    expect((await sendE2e(ana, d1, 'com o Bruno fora da conversa')).errorType).toBe('error-e2e-key-outdated');
     expect((await api('POST', 'im.create', { username: ana.username }, bruno)).room._id).toBe(dm);
     expect((await roomRow(dm)).e2e_rotate).toBe(true);
     expect(await offer(d1, ana, [bruno])).toMatchObject({ inserted: 0, skipped: [bruno.userId] });
@@ -1063,10 +1075,11 @@ describe('criptografia: quem volta só lê dali para frente', () => {
     expect(await heldBy(disc.rid, bruno)).toEqual([disc2.keyID]);
   });
 
-  it('45. redefinir a própria criptografia não é sair: continua recebendo a chave atual; quem voltou e redefine segue sem as de antes da volta', async () => {
+  it('45. redefinir a própria criptografia não é sair: a conversa troca e a pessoa recebe a nova; a geração de antes da redefinição não volta para ela, nem antes da troca', async () => {
     const ana = await person();
     const bruno = await person();
     const carla = await person();
+    const davi = await person();
     const g1 = await encryptedGroup(ana, [bruno, carla]);
     await kick(g1.rid, ana, carla);
     await invite(g1.rid, ana, carla);
@@ -1075,15 +1088,42 @@ describe('criptografia: quem volta só lê dali para frente', () => {
       expect((await api('POST', 'e2e.resetOwnE2EKey', { password: 'senha-forte-1' }, who)).success).toBe(true);
       await withKeys(who);
     }
-    // A redefinição pede a troca (como sempre); até ela, a geração atual pode ir para os dois: ambos estavam na sala.
+    // A redefinição pede a troca (como sempre). Até ela, a geração de antes da redefinição não vai para os dois (as
+    // mensagens antigas ficam ilegíveis para quem redefiniu), mesmo quando quem troca entrega antes a atual a quem é novo.
     expect((await roomRow(g1.rid)).e2e_rotate).toBe(true);
-    expect(await offer(g2, ana, [bruno, carla])).toMatchObject({ inserted: 2, skipped: [] });
-    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, bruno)).toMatchObject({ returnedAt: null, beforeReturn: false });
-    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, carla)).toMatchObject({ beforeReturn: false, keys: [expect.objectContaining({ keyID: g2.keyID })] });
+    expect(await invite(g1.rid, ana, davi)).toMatchObject({ success: true });
+    expect(await without(g2, ana)).toEqual([davi.userId]);
+    expect(await offer(g2, ana, [bruno, carla, davi])).toMatchObject({ inserted: 1, skipped: [bruno.userId, carla.userId] });
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, bruno)).toMatchObject({ returnedAt: null, beforeReturn: true, keys: [] });
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, carla)).toMatchObject({ beforeReturn: true, keys: [] });
     expect((await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, carla)).returnedAt).toBeTruthy();
-    const { room: g3, inserted } = await rotateKey(g2, ana, [bruno, carla]);
-    expect(inserted).toBe(3);
-    expect(await heldBy(g1.rid, carla)).toEqual([g2.keyID, g3.keyID]);
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, davi)).toMatchObject({ returnedAt: null, beforeReturn: false });
+    // A troca: os dois recebem a nova, como todos.
+    const fresh = await generateRoomKey();
+    expect(await without({ ...g2, keyID: fresh.keyID }, ana, fresh.keyID)).toEqual([bruno.userId, carla.userId, davi.userId].sort());
+    const { room: g3, inserted } = await rotateKey(g2, ana, [bruno, carla, davi]);
+    expect(inserted).toBe(4);
+    expect(await heldBy(g1.rid, bruno)).toEqual([g3.keyID]);
+    expect(await heldBy(g1.rid, carla)).toEqual([g3.keyID]);
+    expect(await heldBy(g1.rid, davi)).toEqual([g2.keyID, g3.keyID]);
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, bruno)).toMatchObject({ beforeReturn: false });
+    // Numa conversa em que não tinha chave, a redefinição não muda nada: quem chega depois recebe a atual.
+    const h1 = await encryptedGroup(ana);
+    const erika = await person();
+    await invite(h1.rid, ana, erika);
+    expect((await api('POST', 'e2e.resetOwnE2EKey', { password: 'senha-forte-1' }, erika)).success).toBe(true);
+    await withKeys(erika);
+    expect((await roomRow(h1.rid)).e2e_rotate).toBe(false);
+    expect(await offer(h1, ana, [erika])).toMatchObject({ inserted: 1, skipped: [] });
+    // Pelo administrador, o mesmo: e a linha da redefinição some com a conta.
+    const r = await api('POST', 'users.resetE2EKey', { userId: bruno.userId }, A);
+    expect(r.success).toBe(true);
+    expect((await pool.query('SELECT count(*)::int AS n FROM e2e_room_resets WHERE user_id = $1', [bruno.userId])).rows[0].n).toBe(1);
+    // A redefinição pelo administrador encerra as sessões: o Bruno entra de novo e configura.
+    await withKeys(await login(bruno.username, 'senha-forte-1'));
+    expect(await offer(g3, ana, [bruno])).toMatchObject({ inserted: 0, skipped: [bruno.userId] });
+    expect((await api('POST', 'users.delete', { userId: bruno.userId, confirmRelinquish: true }, A)).success).toBe(true);
+    expect((await pool.query('SELECT count(*)::int AS n FROM e2e_room_resets WHERE user_id = $1', [bruno.userId])).rows[0].n).toBe(0);
   });
 
   it('46. criptografia desligada e ligada de novo: quem voltou com ela desligada não recebe a geração antiga; ligar de novo pede a troca', async () => {
@@ -1171,6 +1211,125 @@ describe('criptografia: quem volta só lê dali para frente', () => {
     expect((await api('POST', 'users.delete', { userId: carla.userId, confirmRelinquish: true }, A)).success).toBe(true);
     expect(await departure(g2.rid, carla)).toBeUndefined();
     expect((await pool.query('SELECT count(*)::int AS n FROM e2e_room_generations WHERE room_id = $1', [g1.rid])).rows[0].n).toBe(0);
+  });
+
+  it('49. muitas voltas juntas: um aviso de troca por sala; outra volta na janela sai no fim dela, com a geração daquele momento; a saída avisa na hora', async () => {
+    resetKeyRequestWindows();
+    const ana = await person();
+    const back = await Promise.all(Array.from({ length: 10 }, () => person()));
+    // Zé está no grupo sem ter configurado a criptografia: a saída dele fica registrada, mas não pede troca.
+    const ze = await newUser(A);
+    const g1 = await encryptedGroup(ana, back);
+    await invite(g1.rid, ana, ze);
+    for (const u of [...back, ze]) expect((await kick(g1.rid, ana, u)).success).toBe(true);
+    const { room: g2 } = await rotateKey(g1, ana);
+    const ws = await online(ana);
+    try {
+      const since = ws.events.length;
+      const isRotate = (e: any) => e.type === 'e2e.rotate' && e.rid === g1.rid;
+      const isRoom = (e: any) => e.type === 'room' && (e.room?._id ?? e.rid) === g1.rid;
+      // As dez voltam num convite só: um aviso, e não dez trocas.
+      expect((await api('POST', 'groups.invite', { roomId: g1.rid, userIds: back.map((u) => u.userId) }, ana)).success).toBe(true);
+      await sleep(500);
+      expect(countSince(ws, since, isRotate)).toBe(1);
+      expect(ws.events.slice(since).find(isRotate)).toMatchObject({ keyID: g2.keyID });
+      expect(countSince(ws, since, isRoom)).toBe(1);
+      expect(await roomRow(g1.rid)).toMatchObject({ e2e_key_id: g2.keyID, e2e_rotate: true });
+      // A Ana troca (uma geração para as dez); o Zé volta ainda na janela: o aviso dele sai no fim dela, com a geração nova.
+      const { room: g3, inserted } = await rotateKey(g2, ana, back);
+      expect(inserted).toBe(11);
+      const late = next(ws, (e) => isRotate(e) && e.keyID === g3.keyID, 12_000);
+      const before = ws.events.length;
+      expect((await invite(g1.rid, ana, ze)).success).toBe(true);
+      await sleep(300);
+      expect(countSince(ws, before, isRotate)).toBe(0);
+      expect(await late()).toMatchObject({ keyID: g3.keyID });
+      expect(countSince(ws, since, isRotate)).toBe(2);
+      // A saída não espera a janela das voltas: a conversa troca logo.
+      await rotateKey(g3, ana, back);
+      const now = ws.events.length;
+      const gone = next(ws, isRotate, 2000);
+      expect((await kick(g1.rid, ana, back[0])).success).toBe(true);
+      expect(await gone()).toBeTruthy();
+      expect(countSince(ws, now, isRotate)).toBe(1);
+    } finally {
+      ws.close();
+      resetKeyRequestWindows();
+    }
+  }, 30_000);
+
+  it('50. sair e voltar ao mesmo tempo: a volta que corre junto com a saída sempre vê a saída (nunca fica de fora para sempre)', async () => {
+    const ana = await person();
+    const carla = await person();
+    const g1 = await encryptedGroup(ana, [carla]);
+    // Segura a gravação da saída: a remoção para no meio, com a inscrição já apagada (sem confirmar).
+    const lock = await pool.connect();
+    let kicked: Promise<any> | null = null;
+    let invited: Promise<any> | null = null;
+    try {
+      await lock.query('BEGIN');
+      await lock.query('LOCK TABLE e2e_room_departures IN EXCLUSIVE MODE');
+      kicked = kick(g1.rid, ana, carla);
+      const waiting = async () =>
+        (await pool.query(`SELECT count(*)::int AS n FROM pg_locks l JOIN pg_class c ON c.oid = l.relation WHERE c.relname = 'e2e_room_departures' AND NOT l.granted`)).rows[0].n;
+      for (let i = 0; i < 100 && !(await waiting()); i++) await sleep(20);
+      expect(await waiting()).toBeGreaterThan(0);
+      // A volta chega bem nesse meio.
+      invited = invite(g1.rid, ana, carla);
+      await sleep(400);
+    } finally {
+      await lock.query('COMMIT').catch(() => {});
+      lock.release();
+    }
+    expect((await kicked).success).toBe(true);
+    expect((await invited).success).toBe(true);
+    const sub = (await pool.query('SELECT 1 FROM subscriptions WHERE room_id = $1 AND user_id = $2', [g1.rid, carla.userId])).rowCount;
+    const dep = await departure(g1.rid, carla);
+    // Ou a volta veio antes de a saída terminar (e não valeu: ela ainda estava na sala), ou depois (e vale como volta).
+    // Nunca: na sala com a saída aberta, que a deixaria sem nenhuma geração, nem as que vierem.
+    if (sub) expect(dep.returned_at).toBeTruthy();
+    else expect(dep).toMatchObject({ left_key_id: g1.keyID, returned_at: null });
+    // Em todo caso, quem está na sala recebe a próxima geração.
+    if (!sub) expect((await invite(g1.rid, ana, carla)).success).toBe(true);
+    const { room: g2 } = await rotateKey(g1, ana, [carla]);
+    expect(await heldBy(g1.rid, carla)).toEqual([g2.keyID]);
+
+    // Várias vezes, sem segurar nada: depois de cada par, quem está na sala nunca fica com a saída aberta.
+    let room = g2;
+    for (let i = 0; i < 6; i++) {
+      await Promise.all([kick(g1.rid, ana, carla), invite(g1.rid, ana, carla)]);
+      const inRoom = (await pool.query('SELECT 1 FROM subscriptions WHERE room_id = $1 AND user_id = $2', [g1.rid, carla.userId])).rowCount;
+      const d = await departure(g1.rid, carla);
+      if (inRoom) expect(d.returned_at).toBeTruthy();
+      else expect(d.returned_at).toBeNull();
+      if (!inRoom) await invite(g1.rid, ana, carla);
+      if ((await roomRow(g1.rid)).e2e_rotate) room = (await rotateKey(room, ana, [carla])).room;
+      expect(await heldBy(g1.rid, carla)).toContain(room.keyID);
+    }
+  });
+
+  it('51. com a troca pendente (saída, volta ou redefinição), a geração atual não leva mensagem nova nem edição; depois da troca, tudo normal', async () => {
+    const ana = await person();
+    const bruno = await person();
+    const carla = await person();
+    const g1 = await encryptedGroup(ana, [bruno, carla]);
+    const sent = (await sendE2e(ana, g1, 'antes')).message;
+    // Volta (Carla saiu e a troca já aconteceu; agora ela volta).
+    await kick(g1.rid, ana, carla);
+    const { room: g2 } = await rotateKey(g1, ana, [bruno]);
+    await invite(g1.rid, ana, carla);
+    expect((await sendE2e(bruno, g2, 'com a volta pendente')).errorType).toBe('error-e2e-key-outdated');
+    const mid = sent._id as string;
+    const edit = await api('POST', 'chat.update', { roomId: g1.rid, msgId: mid, e2e: await envelope(ana, g2, mid, 'editada') }, ana);
+    expect(edit.errorType).toBe('error-e2e-key-outdated');
+    const { room: g3 } = await rotateKey(g2, ana, [bruno, carla]);
+    expect((await sendE2e(bruno, g3, 'depois da troca')).success).toBe(true);
+    expect((await api('POST', 'chat.update', { roomId: g1.rid, msgId: mid, e2e: await envelope(ana, g3, mid, 'editada') }, ana)).success).toBe(true);
+    // Redefinição: a mesma regra até a troca.
+    expect((await api('POST', 'e2e.resetOwnE2EKey', { password: 'senha-forte-1' }, bruno)).success).toBe(true);
+    expect((await sendE2e(ana, g3, 'com a redefinição pendente')).errorType).toBe('error-e2e-key-outdated');
+    const { room: g4 } = await rotateKey(g3, ana, [carla]);
+    expect((await sendE2e(carla, g4, 'depois da redefinição')).success).toBe(true);
   });
 });
 

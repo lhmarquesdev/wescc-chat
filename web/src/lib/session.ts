@@ -12,7 +12,7 @@ import { clearEphemeral, pushEphemeral } from './ephemeral';
 import { loadIntegrationsMe, resetIntegrations } from './integrations';
 import { invalidateSlashCommands } from './commands';
 import { checkBuild } from './call/build';
-import { decryptNotification, handleE2eEvent, initE2e, resetE2e } from './e2e/client';
+import { decryptNotification, forgetE2eRoom, handleE2eEvent, initE2e, resetE2e } from './e2e/client';
 
 export async function loadPublicSettings() {
   const r = await api.get('settings.public');
@@ -112,6 +112,8 @@ export async function startSession() {
     realtime.on((ev) => {
       if (ev.type === 'notification') showNotification(ev);
       if (ev.type.startsWith('e2e.')) handleE2eEvent(ev);
+      // Saiu (ou foi tirada) da conversa com a aba aberta: as chaves dela saem desta aba (quem volta só lê dali para frente).
+      if (ev.type === 'subscription' && ev.action === 'removed') forgetE2eRoom(ev.subscription.rid);
       if (ev.type === 'stickers.changed' || ev.type === 'sticker.removed') handleStickerEvent(ev);
       if (ev.type === 'permissions.changed') {
         void api.get('me').then((m) => useStore.getState().setMe(m));

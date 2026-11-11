@@ -88,13 +88,26 @@ const current = new Map<string, { keyID: string | null; rotate: boolean; beforeR
 const loading = new Map<string, Promise<void>>();
 const ensuring = new Map<string, Promise<E2eRoomState | null>>();
 const requestedAt = new Map<string, number>();
-// Decifradas: chave "id|iv" (a edição troca o iv). LRU de 2000.
+// Decifradas: chave "sala|id|iv" (a edição troca o iv). LRU de 2000.
 const cache = new Map<string, E2EContent | 'failed'>();
 const decrypting = new Set<string>();
+const cacheKey = (rid: string, id: string, iv: string) => `${rid}|${id}|${iv}`;
 const loadFailedAt = new Map<string, number>();
 let failures = 0;
 let settingUp = false; // configurando nesta aba: o aviso e2e.keys "created" é desta aba
 let epoch = 0; // troca a cada sessão ou redefinição: respostas antigas são descartadas
+// Por conversa: troca quando a pessoa sai dela (as respostas que chegam depois são descartadas).
+const roomEpoch = new Map<string, number>();
+const roomEpochOf = (rid: string) => roomEpoch.get(rid) ?? 0;
+// Conversas de que a pessoa saiu com a aba aberta: as mensagens que ficaram na tela não pedem chave ao servidor (ele
+// recusaria). Some quando a inscrição volta.
+const leftRooms = new Set<string>();
+const hasLeft = (rid: string) => {
+  if (!leftRooms.has(rid)) return false;
+  if (!useStore.getState().subscriptions[rid]) return true;
+  leftRooms.delete(rid);
+  return false;
+};
 
 const CACHE_MAX = 2000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -123,6 +136,30 @@ function remember(id: string, v: E2EContent | 'failed') {
   cache.delete(id);
   cache.set(id, v);
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
+}
+
+// O que foi decifrado nesta conversa sai da memória (as mensagens desenham de novo, com as chaves que restam).
+function dropDecrypted(rid: string) {
+  const prefix = `${rid}|`;
+  for (const id of [...cache.keys()]) if (id.startsWith(prefix)) cache.delete(id);
+  for (const id of [...decrypting]) if (id.startsWith(prefix)) decrypting.delete(id);
+}
+
+// A pessoa saiu (ou foi tirada) da conversa com a aba aberta: as chaves e o que foi decifrado dela saem desta aba. Se
+// voltar, a aba fica como uma aberta depois da volta: só as gerações que o servidor entregar para ela.
+export function forgetE2eRoom(rid: string) {
+  roomEpoch.set(rid, roomEpochOf(rid) + 1);
+  leftRooms.add(rid);
+  roomKeys.delete(rid);
+  current.delete(rid);
+  loading.delete(rid);
+  ensuring.delete(rid);
+  requestedAt.delete(rid);
+  loadFailedAt.delete(rid);
+  dropDecrypted(rid);
+  setRoom(rid, null);
+  setReturned(rid, null);
+  bump();
 }
 
 function forgetMemory() {
@@ -323,7 +360,7 @@ async function localReset() {
 // ---------- Chaves das conversas ----------
 
 const keyOf = (rid: string, keyID: string | null | undefined) => (keyID ? (roomKeys.get(rid)?.get(keyID) ?? null) : null);
-export const holdsCurrent = (rid: string) => !!keyOf(rid, current.get(rid)?.keyID);
+export const holdsCurrent = (rid: string) => !!keyOf(rid, current.get(rid)?.keyID) && !current.get(rid)?.beforeReturn;
 
 function putKey(rid: string, keyID: string, key: CryptoKey) {
   let m = roomKeys.get(rid);
@@ -337,6 +374,7 @@ function loadRoomKeys(rid: string, force = false): Promise<void> {
   if (busy) return busy;
   if (!force && current.has(rid)) return Promise.resolve();
   const my = epoch;
+  const mine = roomEpochOf(rid);
   const p = (async () => {
     const r = await api.get<{
       keyID: string | null;
@@ -345,13 +383,25 @@ function loadRoomKeys(rid: string, force = false): Promise<void> {
       returnedAt?: string | null;
       beforeReturn?: boolean;
     }>('e2e.fetchRoomKeys', { rid });
-    if (my !== epoch || !privateKey) return;
+    if (my !== epoch || mine !== roomEpochOf(rid) || !privateKey) return;
+    // Voltou para a conversa desde a última busca (a aba ficou aberta), ou a geração atual é de antes da volta: só valem
+    // as chaves que o servidor ainda lista para a pessoa. As de antes da saída e o que foi decifrado com elas saem da
+    // memória, como numa aba aberta depois da volta.
+    const returnedAt = r.returnedAt ?? null;
+    const cameBack = current.has(rid) && returnedAt !== (useE2e.getState().returned[rid] ?? null);
+    if (cameBack || r.beforeReturn) {
+      const listed = new Set(r.keys.map((k) => k.keyID));
+      const held = roomKeys.get(rid);
+      for (const id of [...(held?.keys() ?? [])]) if (!listed.has(id)) held!.delete(id);
+      dropDecrypted(rid);
+    }
     let added = false;
     for (const k of r.keys) {
       if (keyOf(rid, k.keyID)) continue;
       try {
         const key = await unwrapRoomKey(k.key, privateKey);
         if ((await keyIdOf(key)) !== k.keyID) throw new E2eError('invalid-key');
+        if (my !== epoch || mine !== roomEpochOf(rid)) return;
         putKey(rid, k.keyID, key);
         added = true;
       } catch {
@@ -359,7 +409,7 @@ function loadRoomKeys(rid: string, force = false): Promise<void> {
       }
     }
     current.set(rid, { keyID: r.keyID, rotate: r.rotate, beforeReturn: !!r.beforeReturn });
-    setReturned(rid, r.returnedAt ?? null);
+    setReturned(rid, returnedAt);
     loadFailedAt.delete(rid);
     if (added) for (const id of [...cache.keys()]) if (cache.get(id) === 'failed') cache.delete(id);
   })()
@@ -368,7 +418,7 @@ function loadRoomKeys(rid: string, force = false): Promise<void> {
       throw e;
     })
     .finally(() => {
-      loading.delete(rid);
+      if (loading.get(rid) === p) loading.delete(rid);
       // As mensagens que esperavam a resposta desenham de novo (com a chave ou com o aviso).
       bump();
     });
@@ -394,7 +444,9 @@ export function ensureRoom(room: Room, opts: { refresh?: boolean } = {}): Promis
   const rid = room._id;
   const busy = ensuring.get(rid);
   if (busy) return busy;
-  const p = doEnsure(room, opts).finally(() => ensuring.delete(rid));
+  const p: Promise<E2eRoomState | null> = doEnsure(room, opts).finally(() => {
+    if (ensuring.get(rid) === p) ensuring.delete(rid);
+  });
   ensuring.set(rid, p);
   return p;
 }
@@ -402,20 +454,24 @@ export function ensureRoom(room: Room, opts: { refresh?: boolean } = {}): Promis
 async function doEnsure(room: Room, opts: { refresh?: boolean }): Promise<E2eRoomState | null> {
   const rid = room._id;
   const my = epoch;
+  const mine = roomEpochOf(rid);
+  const gone = () => my !== epoch || mine !== roomEpochOf(rid);
   try {
     const known = current.get(rid);
     await loadRoomKeys(rid, opts.refresh || !known || (room.e2eKeyId ?? null) !== known.keyID || !!room.e2eRotate !== known.rotate);
-    if (my !== epoch) return null;
+    if (gone()) return null;
     let cur = current.get(rid)!;
     if (!cur.keyID) {
       if (!room.encrypted || room.archived) return setRoom(rid, null), null;
       setRoom(rid, 'creating');
       await createFirstKey(rid);
-      if (my !== epoch) return null;
+      if (gone()) return null;
       cur = current.get(rid)!;
     }
-    if (!keyOf(rid, cur.keyID)) {
+    // Quem voltou e a geração atual é de antes da volta: espera a nova (quem tem a chave troca), sem tentar trocar.
+    if (!keyOf(rid, cur.keyID) || cur.beforeReturn) {
       await askForKey(rid);
+      if (gone()) return null;
       setRoom(rid, 'waiting');
       return 'waiting';
     }
@@ -423,10 +479,11 @@ async function doEnsure(room: Room, opts: { refresh?: boolean }): Promise<E2eRoo
       setRoom(rid, 'rotating');
       await rotate(rid, { manual: false, wait: false });
     }
+    if (gone()) return null;
     setRoom(rid, 'ready');
     return 'ready';
   } catch {
-    if (my === epoch) setRoom(rid, 'error');
+    if (!gone()) setRoom(rid, 'error');
     return 'error';
   }
 }
@@ -530,13 +587,19 @@ async function provide(rid: string, keyID: string, opts: { wait: boolean }) {
   await exclusive(`wescc-e2e-${rid}`, async () => {
     const key = keyOf(rid, keyID);
     if (!key || my !== epoch) return;
-    // A chave trocou durante a espera (ou vai trocar): quem troca entrega a nova; a antiga não serve mais.
+    // A chave trocou durante a espera: quem trocou entrega a nova; a antiga não serve mais. Com a troca só pendente, a
+    // atual ainda vai para quem é novo (lê o histórico dela); quem voltou não está na lista do servidor.
     const cur = current.get(rid);
-    if (cur && (cur.keyID !== keyID || cur.rotate)) return;
-    const r = await api.get<{ users: { _id: string; e2e: { public_key: string } }[] }>('e2e.getUsersOfRoomWithoutKey', { rid, keyID });
-    if (!r.users.length || my !== epoch) return;
-    await sendBatches(rid, keyID, await wrapFor(r.users, key));
+    if (cur && cur.keyID !== keyID) return;
+    await giveCurrent(rid, keyID, key, my);
   }).catch(() => {});
+}
+
+// Entrega a geração keyID a quem participa e ainda não tem (o servidor só lista quem pode receber).
+async function giveCurrent(rid: string, keyID: string, key: CryptoKey, my: number) {
+  const r = await api.get<{ users: { _id: string; e2e: { public_key: string } }[] }>('e2e.getUsersOfRoomWithoutKey', { rid, keyID });
+  if (!r.users.length || my !== epoch) return;
+  await sendBatches(rid, keyID, await wrapFor(r.users, key));
 }
 
 // Chave nova: CAS no servidor (quem chega depois recebe 409 e para). Quem participa e tem chaves recebe junto.
@@ -549,7 +612,13 @@ async function rotate(rid: string, opts: { manual: boolean; wait: boolean }) {
     const cur = current.get(rid);
     if (!cur?.keyID || my !== epoch || !myPublic) return;
     if (!opts.manual && !cur.rotate) return;
-    if (!keyOf(rid, cur.keyID)) return;
+    const old = keyOf(rid, cur.keyID);
+    if (!old) return;
+    // Troca pedida (alguém saiu, voltou ou redefiniu): antes, quem é novo e ainda não tem a geração atual recebe essa,
+    // para ler o histórico dela, como se tivesse chegado antes da troca. Quem voltou não recebe (o servidor não o lista).
+    // "Gerar chave nova" não entrega: ela corta o histórico de quem ainda não tem a chave.
+    if (!opts.manual) await giveCurrent(rid, cur.keyID, old, my).catch(() => {});
+    if (my !== epoch) return;
     const { key, keyID } = await generateRoomKey();
     const r = await api.get<{ users: { _id: string; e2e: { public_key: string } }[] }>('e2e.getUsersOfRoomWithoutKey', { rid, keyID });
     const others = await wrapFor(r.users, key);
@@ -619,7 +688,7 @@ export function handleE2eEvent(ev: ServerEvent) {
 
 // ---------- Ler ----------
 
-const cacheId = (m: Pick<Message, '_id'>, env: E2EEnvelope) => `${m._id}|${env.iv}`;
+const cacheId = (m: Pick<Message, '_id' | 'rid'>, env: E2EEnvelope) => cacheKey(m.rid, m._id, env.iv);
 
 // Quem cifrou precisa ser o autor ou quem editou (moderador). Autor removido (u._id vazio): vale o que veio.
 function signerOk(m: Message, env: E2EEnvelope) {
@@ -643,9 +712,11 @@ export function viewOf(m: Message): E2eView | null {
     if (!decrypting.has(id)) {
       decrypting.add(id);
       const my = epoch;
+      const mine = roomEpochOf(m.rid);
+      const still = () => my === epoch && mine === roomEpochOf(m.rid) && decrypting.has(id);
       decryptContent(key, env, m.rid, m._id)
-        .then((c) => my === epoch && remember(id, c))
-        .catch(() => my === epoch && remember(id, 'failed'))
+        .then((c) => still() && remember(id, c))
+        .catch(() => still() && remember(id, 'failed'))
         .finally(() => {
           decrypting.delete(id);
           bump();
@@ -653,6 +724,8 @@ export function viewOf(m: Message): E2eView | null {
     }
     return { state: 'pending' };
   }
+  // Saiu da conversa com a aba aberta: a chave não está mais com a pessoa.
+  if (hasLeft(m.rid)) return { state: 'old-key' };
   const known = current.get(m.rid);
   if (!known) {
     // Sem resposta do servidor (sem acesso, fora do ar): tenta de novo só depois de 30 s.
@@ -690,7 +763,7 @@ export async function decryptNotification(ev: { rid: string; messageId: string; 
     const key = keyOf(ev.rid, ev.e2e.envelope.kid);
     if (!key) return null;
     const c = await decryptContent(key, ev.e2e.envelope, ev.rid, ev.messageId);
-    remember(`${ev.messageId}|${ev.e2e.envelope.iv}`, c);
+    remember(cacheKey(ev.rid, ev.messageId, ev.e2e.envelope.iv), c);
     return ev.e2e.prefix + contentPreview(c).slice(0, 300);
   } catch {
     return null;
@@ -712,7 +785,7 @@ export async function encryptMessage(room: Room, content: E2EContent, mid = newM
   const { key, keyID } = await readyKey(room, refresh);
   const env = await encryptContent(key, keyID, room._id, mid, myId!, content);
   // A própria mensagem aparece já legível, sem decifrar de volta.
-  remember(`${mid}|${env.iv}`, content);
+  remember(cacheKey(room._id, mid, env.iv), content);
   return { _id: mid, e2e: env };
 }
 

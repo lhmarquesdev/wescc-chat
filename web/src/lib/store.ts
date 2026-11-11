@@ -21,6 +21,7 @@ interface RoomMessages {
   list: Message[];
   hasMore: boolean;
   loaded: boolean;
+  stale?: boolean; // a pessoa saiu da sala: o que veio depois não chegou (se voltar, carrega de novo)
 }
 
 interface State {
@@ -135,7 +136,7 @@ export const useStore = create<State>((set, get) => ({
     const cur = get().messages[rid];
     const ids = new Set(cur?.list.map((m) => m._id));
     const merged = [...list.filter((m) => !ids.has(m._id)), ...(cur?.list ?? [])];
-    set({ messages: { ...get().messages, [rid]: { list: merged, hasMore, loaded: true } } });
+    set({ messages: { ...get().messages, [rid]: { ...cur, list: merged, hasMore, loaded: true } } });
   },
   upsertMessage: (m) => {
     const st = get();
@@ -255,13 +256,28 @@ export function applyEvent(ev: ServerEvent) {
       useStore.setState({ messages: { ...st.messages, [ev.rid]: { ...cur, list } } });
       break;
     }
-    case 'subscription':
+    case 'subscription': {
+      const rid = ev.subscription.rid;
       if (ev.action === 'removed') {
-        st.removeSubscription(ev.subscription.rid);
+        st.removeSubscription(rid);
         // Saiu da sala: as agendadas dela já saíram no servidor.
-        if (st.scheduled.some((x) => x.rid === ev.subscription.rid)) st.setScheduled(st.scheduled.filter((x) => x.rid !== ev.subscription.rid));
-      } else st.upsertSubscription(ev.subscription);
+        if (st.scheduled.some((x) => x.rid === rid)) st.setScheduled(st.scheduled.filter((x) => x.rid !== rid));
+        // Fora da sala, as mensagens novas não chegam mais: as carregadas ficam na tela, mas marcadas como velhas.
+        const cur = useStore.getState().messages[rid];
+        if (cur) useStore.setState({ messages: { ...useStore.getState().messages, [rid]: { ...cur, stale: true } } });
+        break;
+      }
+      // Voltou para a sala: as mensagens de quando estava fora (e quem saiu e entrou) vêm do servidor de novo.
+      const back = !st.subscriptions[rid] && !!st.messages[rid]?.stale;
+      st.upsertSubscription(ev.subscription);
+      if (back) {
+        const { messages, threads } = useStore.getState();
+        const rest = { ...messages };
+        delete rest[rid];
+        useStore.setState({ messages: rest, threads: Object.fromEntries(Object.entries(threads).filter(([, list]) => list[0]?.rid !== rid)) });
+      }
       break;
+    }
     case 'room':
       if (ev.action !== 'removed') st.upsertRoom(ev.room);
       break;

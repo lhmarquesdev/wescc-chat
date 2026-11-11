@@ -1,12 +1,12 @@
 import type { RoomRetention, RoomType, Subscription, SubscriptionNotifyPrefs } from '@shared/index';
-import { many, one, query, type Queryable } from '../db/pool';
+import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { LOCK_TEXT } from '@shared/rbac';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
 import { assertCanBringIn, assertCanStartDirect } from './direct';
-import { announceRotate, assertCanToggleE2e, E2E_ERR, e2eOn, forgetRoomKeys, hasUserKeys, noteReturn, requestKeyForNewMember } from './e2e';
+import { announceDeparture, announceRotate, assertCanToggleE2e, E2E_ERR, e2eOn, forgetRoomKeys, hasUserKeys, noteReturn, requestKeyForNewMember } from './e2e';
 import { mapRoom, mapSubscription, visibleStatusCustom } from './mappers';
 import { sendSystemMessage, withExtra } from './messages';
 import { hasPermission, rolesHavePermission, getUserRoles, roleInfos } from './permissions';
@@ -175,15 +175,19 @@ export async function addUserToRoom(
   const user = await one('SELECT id, username, name FROM users WHERE id = $1', [userId], opts.db);
   if (!user) throw notFound('error-invalid-user', 'Usuário não encontrado.');
   if (opts.inviter && opts.inviter.id !== userId) await assertCanBringIn(opts.inviter.id, room, [userId]);
-  const sub = await one(
-    `INSERT INTO subscriptions (id, room_id, user_id, roles, ls) VALUES ($1,$2,$3,$4, now()) ON CONFLICT (room_id, user_id) DO NOTHING RETURNING *`,
-    [newId(), rid, userId, opts.roles ?? []],
-    opts.db,
-  );
-  if (!sub) return getSubscriptionRow(rid, userId);
   // Criptografia: quem volta (tinha saído da sala) não recebe nenhuma geração da chave de quando estava fora. A troca é
-  // pedida aqui, antes de qualquer entrega; a pessoa recebe a geração que nasce depois da volta.
-  const back = await noteReturn(rid, userId, opts.db);
+  // pedida junto com a inscrição, antes de qualquer entrega; a pessoa recebe a geração que nasce depois da volta. Uma
+  // saída que corre junto termina antes (a inscrição nova espera a que está saindo), então a volta sempre a vê.
+  const join = async (c: Queryable) => {
+    const row = await one(
+      `INSERT INTO subscriptions (id, room_id, user_id, roles, ls) VALUES ($1,$2,$3,$4, now()) ON CONFLICT (room_id, user_id) DO NOTHING RETURNING *`,
+      [newId(), rid, userId, opts.roles ?? []],
+      c,
+    );
+    return { sub: row, back: row ? await noteReturn(rid, userId, c) : false };
+  };
+  const { sub, back } = opts.db ? await join(opts.db) : await tx(join);
+  if (!sub) return getSubscriptionRow(rid, userId);
   await query('UPDATE rooms SET users_count = users_count + 1, updated_at = now() WHERE id = $1', [rid], opts.db);
   if (room.team_main && room.team_id) {
     await query(`INSERT INTO team_members (team_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [room.team_id, userId], opts.db);
@@ -213,8 +217,14 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
   const room = await getRoom(rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   const user = await one('SELECT id, username FROM users WHERE id = $1', [userId]);
-  const sub = await one('DELETE FROM subscriptions WHERE room_id = $1 AND user_id = $2 RETURNING *', [rid, userId]);
-  if (!sub) return;
+  // Criptografia: as chaves da pessoa nesta sala saem e a saída fica registrada na mesma transação que tira a inscrição
+  // (uma volta logo em seguida sempre vê a saída); se ela tinha chave, a sala pede chave nova.
+  const left = await tx(async (c) => {
+    const row = await one('DELETE FROM subscriptions WHERE room_id = $1 AND user_id = $2 RETURNING *', [rid, userId], c);
+    return row ? { sub: row, rotate: await forgetRoomKeys(rid, userId, c) } : null;
+  });
+  if (!left) return;
+  const { sub } = left;
   // Envios agendados da pessoa nesta sala: sem a inscrição não sairiam mais.
   const { removeScheduledOfUserInRoom } = await import('./scheduled');
   await removeScheduledOfUserInRoom(rid, userId);
@@ -224,9 +234,9 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
   }
   bus.leaveRoom(userId, rid);
   bus.publish({ user: userId }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(sub, room) });
-  // Criptografia: as chaves da pessoa nesta sala saem, e quem fica gera uma chave nova (ela não lê o que vier depois).
-  // Depois de tirar a pessoa da sala: o pedido de chave nova não chega para ela.
-  await forgetRoomKeys(rid, userId);
+  // Criptografia: quem fica gera uma chave nova (ela não lê o que vier depois). O aviso sai depois de tirar a pessoa da
+  // sala: o pedido de chave nova não chega para ela.
+  if (left.rotate) await announceDeparture(rid);
   if (!opts.silent && user) {
     if (opts.by && opts.by.id !== userId) await sendSystemMessage(rid, 'ru', opts.by, user.username);
     else await sendSystemMessage(rid, 'ul', { id: user.id, username: user.username }, user.username);
@@ -571,7 +581,7 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   await audit(actorOf(ctx), 'room.settings.changed', { rid, name: room.name }, { fields: Object.keys(s) });
   await notifyRoomUpdated(rid);
   // Ligada de novo com a troca pendente (alguém voltou ou saiu enquanto estava desligada): quem tem a chave troca agora.
-  if (s.encrypted === true && !room.encrypted && room.e2e_rotate) await announceRotate(rid);
+  if (s.encrypted === true && !room.encrypted && room.e2e_rotate) await announceRotate(rid, { room: false });
   // Nome, tipo, canal de avisos, somente leitura e criptografia mudam o que as assinaturas mostram.
   const roChanged = s.readOnly !== undefined && s.readOnly !== !!room.ro;
   const e2eChanged = s.encrypted !== undefined && s.encrypted !== !!room.encrypted;

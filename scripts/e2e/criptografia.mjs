@@ -1,6 +1,7 @@
 // Criptografia de ponta a ponta no navegador (spec E §10): conversa direta, grupo privado, troca de chave, quem chega
-// depois da troca, quem sai e volta (só lê dali para frente), redefinir a senha, a regra da Operação e o celular. Tira
-// print de cada passo (computador claro e escuro, celular) e sai com código 1 se algo falhar.
+// depois da troca, quem sai e volta (só lê dali para frente, também na aba que ficou aberta), quem volta junto com
+// alguém novo, redefinir a senha, a regra da Operação e o celular. Tira print de cada passo (computador claro e escuro,
+// celular) e sai com código 1 se algo falhar.
 //
 // Uso:
 //   CHAT_URL=http://localhost:3105 PLAYWRIGHT_CORE=/caminho/playwright ADMIN_USER=admin ADMIN_PASSWORD=... \
@@ -14,7 +15,7 @@
 //   STEPS          passos a rodar, por exemplo 1,2,3 (padrão: todos). Cada passo usa o que os anteriores criaram.
 //   PLAYWRIGHT_CORE, CHROMIUM_PATH, ADMIN_USER, ADMIN_PASSWORD   como em scripts/visual/lib.mjs.
 //
-// Cria (ou reaproveita) e2e.cripto.ana, .bruno, .carla e .davi (Usuário) e e2e.cripto.op1 e .op2 (Operação), com uma
+// Cria (ou reaproveita) e2e.cripto.ana, .bruno, .carla, .davi e .eva (Usuário) e e2e.cripto.op1 e .op2 (Operação), com uma
 // senha nova a cada execução; redefine a criptografia de todos antes de começar e apaga as conversas da execução
 // anterior. Liga E2E_Enable e desliga o limite de requisições durante o roteiro; no fim devolve os dois.
 import { execFileSync } from 'node:child_process';
@@ -33,7 +34,7 @@ const lib = await import('../visual/lib.mjs');
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
 
 const OUT = lib.outDir();
-const STEPS = new Set((process.env.STEPS ?? '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17').split(',').map((s) => Number(s.trim())));
+const STEPS = new Set((process.env.STEPS ?? '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18').split(',').map((s) => Number(s.trim())));
 const PASSWORD = `Cr1pto-${crypto.randomBytes(6).toString('hex')}!`;
 const RUN = Date.now().toString(36);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -54,6 +55,7 @@ const T = {
   on: 'ligou a criptografia de ponta a ponta',
   noRecovery: 'O chat não mostra de novo nem recupera esta senha.',
   resetByAdmin: 'Um administrador redefiniu sua criptografia.',
+  error: 'Não foi possível preparar a criptografia desta conversa.',
 };
 
 // ---------- API ----------
@@ -70,6 +72,7 @@ const PEOPLE = {
   bruno: { username: 'e2e.cripto.bruno', name: 'Bruno Tavares', roles: ['user'] },
   carla: { username: 'e2e.cripto.carla', name: 'Carla Menezes', roles: ['user'] },
   davi: { username: 'e2e.cripto.davi', name: 'Davi Lacerda', roles: ['user'] },
+  eva: { username: 'e2e.cripto.eva', name: 'Eva Prado', roles: ['user'] },
   // A conversa direta dos dois nasce antes de virarem Operação: depois disso ela fica bloqueada.
   op1: { username: 'e2e.cripto.op1', name: 'Otto Operador', roles: ['user'] },
   op2: { username: 'e2e.cripto.op2', name: 'Olívia Operadora', roles: ['user'] },
@@ -101,7 +104,7 @@ const e2eBefore = all.find((x) => x._id === 'E2E_Enable')?.value;
 ok('settings', await admin.call('POST', 'settings', { settings: { [RATE]: false, E2E_Enable: true } }));
 
 for (const p of Object.values(PEOPLE)) await ensurePerson(p);
-const { ana, bruno, carla, davi, op1, op2 } = PEOPLE;
+const { ana, bruno, carla, davi, eva, op1, op2 } = PEOPLE;
 
 // Conversas da execução anterior saem (as diretas entre estas pessoas e os grupos e2e-cripto-*).
 for (const p of [ana, op1]) {
@@ -318,6 +321,7 @@ let anaPage = null;
 let brunoPage = null;
 let carlaPage = null;
 let carlaPass = '';
+let brunoPass2 = ''; // depois de redefinir (passo 8)
 let daviPass = '';
 let group2 = '';
 let daviDesk = null;
@@ -592,7 +596,7 @@ await step(8, 'Bruno esquece a senha: redefine, as antigas ficam ilegíveis, as 
   await reset.getByLabel('Senha de entrar no chat').fill(PASSWORD);
   await visibleButton(reset, 'Redefinir').click();
   // Depois de redefinir, a senha nova na hora.
-  await setupGenerated(brunoPage);
+  brunoPass2 = await setupGenerated(brunoPage);
   // Ana (outro navegador) está online para entregar a chave nova.
   anaPage = await open(ana);
   await openRoom(anaPage, dmRid, 'd');
@@ -1007,6 +1011,98 @@ await step(17, 'Carla volta para o grupo com ninguém online: não lê nada de a
   await expectVisible(bodyWith(carlaPage, 'Bem-vinda de volta, Carla.'), 'Carla lê depois de recarregar', 30000);
   assert(!(await carlaPage.getByText(T.returned).count()), 'o aviso fechado voltou depois de recarregar');
   await expectVisible(placeholders(carlaPage, T.oldKey), 'mensagens de antes da volta continuam fechadas');
+});
+
+// ---------- 18. Aba aberta: tirada e devolvida sem recarregar; quem volta junto com alguém novo ----------
+await step(18, 'Aba aberta da Carla tirada e devolvida sem recarregar não lê nada de antes; Bruno volta junto com a Eva, nova, que lê o histórico', async () => {
+  assert(anaPage && carlaPage, 'o passo 17 deixa as abas da Ana e da Carla abertas no grupo');
+  await openRoom(anaPage, groupRid, 'p');
+  await send(anaPage, 'A1 antes de a Carla sair de novo.');
+  await expectVisible(bodyWith(carlaPage, 'A1 antes de a Carla sair de novo.'), 'Carla lê na aba aberta', 20000);
+  // Ninguém com a chave fica online: a troca pedida pela saída (e depois pela volta) fica pendente.
+  await anaPage.context().close();
+  anaPage = null;
+  const k1 = (await roomInfo(ana, groupRid)).e2eKeyId;
+  ok('tirar a Carla', await ana.api.call('POST', 'groups.kick', { roomId: groupRid, userId: carla.id }));
+  // Fora da conversa, a aba esquece a chave: o que ela tinha lido vira o aviso da chave que ela não tem.
+  await waitFor('aba da Carla esquece o que leu', async () => ((await bodyWith(carlaPage, 'A1 antes de a Carla sair de novo.').count()) === 0 ? true : null), 15000);
+  await shot(carlaPage, 'aba-aberta-removida');
+  ok('Carla volta', await ana.api.call('POST', 'groups.invite', { roomId: groupRid, userId: carla.id }));
+  const pending = await roomInfo(ana, groupRid);
+  assert(pending.e2eRotate === true && pending.e2eKeyId === k1, 'a volta não deixou a troca pedida');
+  // Sem recarregar: espera a chave nova (e não o erro), vê o aviso, e o histórico vem de novo (com o "removeu").
+  await expectVisible(banner(carlaPage).getByText(T.waitingNew), 'aba aberta esperando a chave nova', 20000);
+  await expectVisible(banner(carlaPage).getByText(T.returned), 'aviso de quem voltou na aba aberta', 20000);
+  // O "removeu" do passo 7 já estava na tela; o desta saída só aparece se o histórico vier de novo.
+  const removed = carlaPage.locator('.room-main .msg', { hasText: `removeu ${carla.name}` });
+  await waitFor('"removeu" desta saída no histórico carregado de novo', async () => ((await removed.count()) >= 2 ? true : null), 15000);
+  await expectVisible(placeholders(carlaPage, T.oldKey), 'aviso da chave nas mensagens de antes da volta');
+  await sleep(2000);
+  assert(!(await carlaPage.getByText(T.error).count()), 'erro de preparar a criptografia na aba aberta');
+  assert(!(await bodyWith(carlaPage, 'A1 antes de a Carla sair de novo.').count()), 'a aba aberta decifrou uma mensagem de antes da volta');
+  assert(!(await composer(carlaPage).count()), 'compositor habilitado sem a chave nova');
+  await shot(carlaPage, 'aba-aberta-voltou-esperando');
+  // A Ana abre o chat: troca a chave, e a aba da Carla recebe a nova sem recarregar.
+  anaPage = await open(ana);
+  await openRoom(anaPage, groupRid, 'p');
+  await banner(anaPage).getByRole('button', { name: 'Desbloquear' }).click();
+  await unlock(anaPage, anaPass);
+  const k2 = (
+    await waitFor('chave nova depois da volta', async () => {
+      const r = await roomInfo(ana, groupRid);
+      return r.e2eKeyId && r.e2eKeyId !== k1 && !r.e2eRotate ? r : null;
+    }, 30000)
+  ).e2eKeyId;
+  await waitFor('Carla com a chave nova', async () => (await composer(carlaPage).isEnabled()) || null, 40000);
+  await send(anaPage, 'A2 depois da volta.');
+  await expectVisible(bodyWith(carlaPage, 'A2 depois da volta.'), 'aba aberta lê o que veio depois da volta', 20000);
+  assert(!(await bodyWith(carlaPage, 'A1 antes de a Carla sair de novo.').count()), 'a aba aberta leu o que veio antes da volta');
+  await shot(carlaPage, 'aba-aberta-voltou-lendo');
+
+  // Bruno sai com a Ana online: a troca acontece, e a Ana escreve com a chave nova (o histórico dela).
+  ok('tirar o Bruno', await ana.api.call('POST', 'groups.kick', { roomId: groupRid, userId: bruno.id }));
+  const k3 = (
+    await waitFor('chave nova depois da saída do Bruno', async () => {
+      const r = await roomInfo(ana, groupRid);
+      return r.e2eKeyId && r.e2eKeyId !== k2 && !r.e2eRotate ? r : null;
+    }, 30000)
+  ).e2eKeyId;
+  await send(anaPage, 'H1 histórico da chave atual.');
+  // Eva, que nunca esteve no grupo, configura a criptografia antes de entrar.
+  const evaPage = await open(eva, { url: '/account/security' });
+  await expectVisible(evaPage.locator('.e2e-card'), 'cartão da criptografia da Eva', 15000);
+  await evaPage.locator('.e2e-card').getByRole('button', { name: 'Configurar agora' }).click();
+  await setupGenerated(evaPage);
+  // Bruno (volta) e Eva (nova) entram juntos: quem troca entrega antes a chave atual a quem é novo.
+  ok('Bruno e Eva entram juntos', await ana.api.call('POST', 'groups.invite', { roomId: groupRid, userIds: [bruno.id, eva.id] }));
+  const k4 = (
+    await waitFor('chave nova depois da volta do Bruno', async () => {
+      const r = await roomInfo(ana, groupRid);
+      return r.e2eKeyId && r.e2eKeyId !== k3 && !r.e2eRotate ? r : null;
+    }, 40000)
+  ).e2eKeyId;
+  if (DATABASE_URL) {
+    const held = (uid) => sql(`SELECT string_agg(key_id, ',' ORDER BY created_at) FROM e2e_room_keys WHERE room_id = '${groupRid}' AND user_id = '${uid}'`);
+    await waitFor('chaves da Eva', async () => (held(eva.id) === `${k3},${k4}` ? true : null), 20000).catch(() => {
+      throw new Error(`a Eva, nova, tem ${held(eva.id)}; esperadas a de antes da troca da volta e a nova (${k3},${k4})`);
+    });
+    assert(held(bruno.id) === k4, `o Bruno, que voltou, tem ${held(bruno.id)}; esperada só a nova ${k4}`);
+  }
+  await openRoom(evaPage, groupRid, 'p');
+  await expectVisible(bodyWith(evaPage, 'H1 histórico da chave atual.'), 'Eva, nova, lê o histórico da chave de antes da troca da volta', 40000);
+  assert(!(await evaPage.getByText(T.returned).count()), 'aviso de quem voltou para quem é nova');
+  await send(anaPage, 'H2 depois de os dois entrarem.');
+  await expectVisible(bodyWith(evaPage, 'H2 depois de os dois entrarem.'), 'Eva lê o que veio depois', 20000);
+  await shot(evaPage, 'eva-nova-le-historico');
+  // Bruno, num navegador novo: só o que veio depois da volta, com o aviso.
+  const b = await open(bruno);
+  await openRoom(b, groupRid, 'p');
+  await banner(b).getByRole('button', { name: 'Desbloquear' }).click();
+  await unlock(b, brunoPass2);
+  await expectVisible(bodyWith(b, 'H2 depois de os dois entrarem.'), 'Bruno lê o que veio depois da volta', 30000);
+  await expectVisible(banner(b).getByText(T.returned), 'aviso de quem voltou para o Bruno');
+  assert(!(await bodyWith(b, 'H1 histórico da chave atual.').count()), 'o Bruno leu o que veio enquanto estava fora');
+  await shot(b, 'bruno-voltou-junto-com-a-eva');
 });
 
 // ---------- Fim ----------
