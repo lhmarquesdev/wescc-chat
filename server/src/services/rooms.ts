@@ -6,7 +6,7 @@ import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
 import { assertCanBringIn, assertCanStartDirect } from './direct';
-import { assertCanToggleE2e, E2E_ERR, e2eOn, forgetRoomKeys, hasUserKeys, requestKeyForNewMember } from './e2e';
+import { announceRotate, assertCanToggleE2e, E2E_ERR, e2eOn, forgetRoomKeys, hasUserKeys, noteReturn, requestKeyForNewMember } from './e2e';
 import { mapRoom, mapSubscription, visibleStatusCustom } from './mappers';
 import { sendSystemMessage, withExtra } from './messages';
 import { hasPermission, rolesHavePermission, getUserRoles, roleInfos } from './permissions';
@@ -181,6 +181,9 @@ export async function addUserToRoom(
     opts.db,
   );
   if (!sub) return getSubscriptionRow(rid, userId);
+  // Criptografia: quem volta (tinha saído da sala) não recebe nenhuma geração da chave de quando estava fora. A troca é
+  // pedida aqui, antes de qualquer entrega; a pessoa recebe a geração que nasce depois da volta.
+  const back = await noteReturn(rid, userId, opts.db);
   await query('UPDATE rooms SET users_count = users_count + 1, updated_at = now() WHERE id = $1', [rid], opts.db);
   if (room.team_main && room.team_id) {
     await query(`INSERT INTO team_members (team_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [room.team_id, userId], opts.db);
@@ -195,8 +198,10 @@ export async function addUserToRoom(
         await sendSystemMessage(rid, 'uj', { id: user.id, username: user.username }, user.username);
       }
     }
-    // Conversa criptografada: quem já tem a chave entrega para a pessoa nova (se ela já configurou a criptografia).
-    await requestKeyForNewMember(room, userId);
+    // Conversa criptografada: quem já tem a chave entrega para a pessoa nova (se ela já configurou a criptografia); para
+    // quem voltou, quem tem a chave troca por uma nova.
+    if (back) await announceRotate(rid);
+    else await requestKeyForNewMember(room, userId);
   };
   if (opts.db) setImmediate(() => void after().catch(() => {}));
   else await after();
@@ -565,6 +570,8 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   for (const [t, msg] of sys) await sendSystemMessage(rid, t, me, msg);
   await audit(actorOf(ctx), 'room.settings.changed', { rid, name: room.name }, { fields: Object.keys(s) });
   await notifyRoomUpdated(rid);
+  // Ligada de novo com a troca pendente (alguém voltou ou saiu enquanto estava desligada): quem tem a chave troca agora.
+  if (s.encrypted === true && !room.encrypted && room.e2e_rotate) await announceRotate(rid);
   // Nome, tipo, canal de avisos, somente leitura e criptografia mudam o que as assinaturas mostram.
   const roChanged = s.readOnly !== undefined && s.readOnly !== !!room.ro;
   const e2eChanged = s.encrypted !== undefined && s.encrypted !== !!room.encrypted;

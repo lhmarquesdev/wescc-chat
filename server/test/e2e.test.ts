@@ -843,6 +843,337 @@ describe('criptografia: troca de chave', () => {
   });
 });
 
+// ---------- Quem volta só lê dali para frente ----------
+
+// Chave nova entregue por `by` a ele e a `to` (quem não pode receber volta em skipped).
+async function rotateKey(room: ERoom, by: Auth, to: Auth[] = []) {
+  const fresh = await generateRoomKey();
+  const keys = await Promise.all([by, ...to].map(async (u) => ({ uid: u.userId, key: await wrapFor(fresh.key, u) })));
+  const r = await api('POST', 'e2e.resetRoomKey', { rid: room.rid, prevKeyID: room.keyID, keyID: fresh.keyID, keys }, by);
+  if (!r.success) throw new Error(JSON.stringify(r));
+  return { room: { rid: room.rid, key: fresh.key, keyID: fresh.keyID } as ERoom, inserted: r.inserted as number, skipped: r.skipped as string[] };
+}
+const offer = async (room: ERoom, from: Auth, to: Auth[]) =>
+  api('POST', 'e2e.updateGroupKey', { rid: room.rid, keyID: room.keyID, keys: await Promise.all(to.map(async (u) => ({ uid: u.userId, key: await wrapFor(room.key, u) }))) }, from);
+const heldBy = async (rid: string, who: Auth) =>
+  (await pool.query('SELECT key_id FROM e2e_room_keys WHERE room_id = $1 AND user_id = $2 ORDER BY created_at', [rid, who.userId])).rows.map((r) => r.key_id as string);
+const departure = async (rid: string, who: Auth) =>
+  (await pool.query('SELECT * FROM e2e_room_departures WHERE room_id = $1 AND user_id = $2', [rid, who.userId])).rows[0];
+const without = async (room: ERoom, by: Auth, keyID = room.keyID) =>
+  ((await api('GET', 'e2e.getUsersOfRoomWithoutKey', { rid: room.rid, keyID }, by)).users as { _id: string }[]).map((u) => u._id).sort();
+const invite = (rid: string, by: Auth, who: Auth) => api('POST', 'groups.invite', { roomId: rid, userId: who.userId }, by);
+const kick = (rid: string, by: Auth, who: Auth) => api('POST', 'groups.kick', { roomId: rid, userId: who.userId }, by);
+
+describe('criptografia: quem volta só lê dali para frente', () => {
+  it('39. removida e de volta: a sala troca de chave antes de qualquer entrega; quem voltou só recebe a geração nova; quem é novo lê o histórico da atual', async () => {
+    resetKeyRequestWindows();
+    const ana = await person();
+    const bruno = await person();
+    const carla = await person();
+    const g1 = await encryptedGroup(ana, [bruno, carla]);
+    expect((await sendE2e(ana, g1, 'antes de a Carla sair')).success).toBe(true);
+    expect((await kick(g1.rid, ana, carla)).success).toBe(true);
+    // A saída fica registrada com a geração daquele momento.
+    expect(await departure(g1.rid, carla)).toMatchObject({ left_key_id: g1.keyID, returned_at: null });
+    expect(await heldBy(g1.rid, carla)).toEqual([]);
+    // Ana troca (o pedido da saída); Bruno escreve enquanto a Carla está fora.
+    const { room: g2 } = await rotateKey(g1, ana, [bruno]);
+    const away = (await sendE2e(bruno, g2, 'enquanto a Carla estava fora')).message;
+    const ws = await online(ana);
+    try {
+      const since = ws.events.length;
+      const rotate = next(ws, (e) => e.type === 'e2e.rotate' && e.rid === g1.rid);
+      expect((await invite(g1.rid, ana, carla)).success).toBe(true);
+      // A volta pede a troca, e não a entrega da geração de quando ela estava fora.
+      expect(await rotate()).toMatchObject({ keyID: g2.keyID });
+      await sleep(200);
+      expect(countSince(ws, since, (e) => e.type === 'e2e.keyRequest' && e.rid === g1.rid)).toBe(0);
+    } finally {
+      ws.close();
+    }
+    expect((await info(ana, g1.rid)).e2eRotate).toBe(true);
+    const back = await departure(g1.rid, carla);
+    expect(back.returned_at).toBeTruthy();
+    expect(new Date(back.returned_at).getTime()).toBeGreaterThan(new Date(back.left_at).getTime());
+    // Davi é novo: recebe a geração atual e lê o que veio com ela (o histórico).
+    const davi = await person();
+    expect((await invite(g1.rid, ana, davi)).success).toBe(true);
+    // Ninguém consegue entregar a geração de quando a Carla estava fora: nem pela lista, nem direto.
+    expect(await without(g2, ana)).toEqual([davi.userId]);
+    const give = await offer(g2, ana, [carla, davi]);
+    expect(give).toMatchObject({ inserted: 1, skipped: [carla.userId] });
+    expect(await heldBy(g1.rid, davi)).toEqual([g2.keyID]);
+    expect(away.e2e.kid).toBe(g2.keyID);
+    // A Carla vê por quê: voltou, e a geração atual é de antes da volta.
+    const mine = await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, carla);
+    expect(mine).toMatchObject({ keyID: g2.keyID, rotate: true, keys: [], returnedAt: back.returned_at, beforeReturn: true });
+    // Quem não saiu não tem aviso de volta.
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, davi)).toMatchObject({ returnedAt: null, beforeReturn: false });
+    // Quem tem a chave e abre o chat vê a troca pendente (ninguém entrega à Carla a geração de antes).
+    expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, ana)).rooms).toEqual([{ rid: g1.rid, keyID: g2.keyID, rotate: true }]);
+    // A troca: a lista da chave nova traz a Carla, e ela recebe só essa.
+    const fresh = await generateRoomKey();
+    expect(await without({ ...g2, keyID: fresh.keyID }, ana, fresh.keyID)).toEqual([bruno.userId, carla.userId, davi.userId].sort());
+    const { room: g3, inserted, skipped } = await rotateKey(g2, ana, [bruno, carla, davi]);
+    expect([inserted, skipped]).toEqual([4, []]);
+    expect(await heldBy(g1.rid, carla)).toEqual([g3.keyID]);
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, carla)).toMatchObject({ keyID: g3.keyID, rotate: false, beforeReturn: false, returnedAt: back.returned_at });
+    expect((await sendE2e(carla, g3, 'voltei')).success).toBe(true);
+    expect((await sendE2e(carla, g2, 'com a chave de quando eu estava fora')).errorType).toBe('error-e2e-key-outdated');
+    // Pedir de novo não traz a geração antiga: a Carla já tem a atual, e ninguém mais lhe deve nada.
+    expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, ana)).rooms).toEqual([]);
+  });
+
+  it('40. volta com a troca da saída ainda pendente (ninguém online): a geração da saída não vem; o pedido dela lembra a troca', async () => {
+    resetKeyRequestWindows();
+    const ana = await person();
+    const bruno = await person();
+    const carla = await person();
+    const g1 = await encryptedGroup(ana, [bruno, carla]);
+    await sendE2e(ana, g1, 'antes');
+    expect((await api('POST', 'groups.leave', { roomId: g1.rid }, carla)).success).toBe(true);
+    expect((await roomRow(g1.rid)).e2e_rotate).toBe(true);
+    await sendE2e(bruno, g1, 'ainda com a chave da saída, com a Carla fora');
+    // Ninguém trocou; a Carla volta.
+    expect((await invite(g1.rid, ana, carla)).success).toBe(true);
+    expect(await roomRow(g1.rid)).toMatchObject({ e2e_key_id: g1.keyID, e2e_rotate: true });
+    expect(await without(g1, bruno)).toEqual([]);
+    expect(await offer(g1, ana, [carla])).toMatchObject({ inserted: 0, skipped: [carla.userId] });
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, carla)).toMatchObject({ keyID: g1.keyID, rotate: true, keys: [], beforeReturn: true });
+    // A Carla pede a chave com a Ana online: sai o lembrete da troca, não o pedido da geração antiga.
+    const ws = await online(ana);
+    try {
+      const since = ws.events.length;
+      const rotate = next(ws, (e) => e.type === 'e2e.rotate' && e.rid === g1.rid);
+      expect((await api('POST', 'e2e.requestSubscriptionKeys', { rid: g1.rid }, carla)).requested).toBe(1);
+      expect(await rotate()).toMatchObject({ keyID: g1.keyID });
+      expect(countSince(ws, since, (e) => e.type === 'e2e.keyRequest' && e.rid === g1.rid)).toBe(0);
+    } finally {
+      ws.close();
+      resetKeyRequestWindows();
+    }
+    // A Ana abre o chat: a troca pendente aparece, e a Carla recebe a geração nova.
+    expect((await api('GET', 'e2e.fetchRoomsToProvide', {}, ana)).rooms).toEqual([{ rid: g1.rid, keyID: g1.keyID, rotate: true }]);
+    const { room: g2, inserted } = await rotateKey(g1, ana, [bruno, carla]);
+    expect(inserted).toBe(3);
+    expect(await heldBy(g1.rid, carla)).toEqual([g2.keyID]);
+  });
+
+  it('41. quem estava na sala sem ter configurado a criptografia também volta sem as gerações de antes', async () => {
+    const ana = await person();
+    const erika = await newUser(A);
+    const g1 = await encryptedGroup(ana);
+    expect((await invite(g1.rid, ana, erika)).success).toBe(true);
+    // Sem chaves, ela não tinha a chave da sala: a saída não pede troca, mas fica registrada.
+    expect((await api('POST', 'groups.leave', { roomId: g1.rid }, erika)).success).toBe(true);
+    expect((await roomRow(g1.rid)).e2e_rotate).toBe(false);
+    expect(await departure(g1.rid, erika)).toMatchObject({ left_key_id: g1.keyID });
+    await sendE2e(ana, g1, 'com a Erika fora');
+    expect((await invite(g1.rid, ana, erika)).success).toBe(true);
+    expect((await roomRow(g1.rid)).e2e_rotate).toBe(true);
+    await withKeys(erika);
+    expect(await offer(g1, ana, [erika])).toMatchObject({ inserted: 0, skipped: [erika.userId] });
+    const { room: g2 } = await rotateKey(g1, ana, [erika]);
+    expect(await heldBy(g1.rid, erika)).toEqual([g2.keyID]);
+  });
+
+  it('42. volta duas vezes: cada volta corta o que veio antes dela; uma geração antiga não volta a valer', async () => {
+    const ana = await person();
+    const carla = await person();
+    const g1 = await encryptedGroup(ana, [carla]);
+    await kick(g1.rid, ana, carla);
+    const { room: g2 } = await rotateKey(g1, ana);
+    await invite(g1.rid, ana, carla);
+    const first = (await departure(g1.rid, carla)).returned_at;
+    const { room: g3 } = await rotateKey(g2, ana, [carla]);
+    expect(await heldBy(g1.rid, carla)).toEqual([g3.keyID]);
+    // Convidar quem já está não é uma volta: nada muda.
+    await invite(g1.rid, ana, carla);
+    expect((await roomRow(g1.rid)).e2e_rotate).toBe(false);
+    expect((await departure(g1.rid, carla)).returned_at).toBe(first);
+    // Sai de novo e volta antes de qualquer troca: nem a geração que ela tinha.
+    await api('POST', 'groups.leave', { roomId: g1.rid }, carla);
+    expect(await departure(g1.rid, carla)).toMatchObject({ left_key_id: g3.keyID, returned_at: null });
+    await invite(g1.rid, ana, carla);
+    const second = (await departure(g1.rid, carla)).returned_at;
+    expect(new Date(second).getTime()).toBeGreaterThan(new Date(first).getTime());
+    expect(await heldBy(g1.rid, carla)).toEqual([]);
+    expect(await offer(g3, ana, [carla])).toMatchObject({ inserted: 0, skipped: [carla.userId] });
+    // Trocar de volta para uma geração já usada nesta sala é recusado (ela traria o histórico de antes).
+    const back = await api(
+      'POST',
+      'e2e.resetRoomKey',
+      { rid: g1.rid, prevKeyID: g3.keyID, keyID: g2.keyID, keys: [{ uid: ana.userId, key: await wrapFor(g2.key, ana) }, { uid: carla.userId, key: await wrapFor(g2.key, carla) }] },
+      ana,
+    );
+    expect([back.status, back.errorType]).toEqual([400, 'error-e2e-invalid-key']);
+    expect(await roomRow(g1.rid)).toMatchObject({ e2e_key_id: g3.keyID, e2e_rotate: true });
+    const { room: g4 } = await rotateKey(g3, ana, [carla]);
+    expect(await heldBy(g1.rid, carla)).toEqual([g4.keyID]);
+  });
+
+  it('43. conversa direta e conversa em grupo: quem foi tirado pelo administrador e reabre a conversa só lê dali para frente', async () => {
+    const ana = await person();
+    const bruno = await person();
+    const carla = await person();
+    // Conversa direta.
+    const dm = (await api('POST', 'im.create', { username: bruno.username }, ana)).room._id;
+    expect((await save(ana, dm, { encrypted: true })).success).toBe(true);
+    const d1 = await createKey(ana, dm);
+    await giveKey(d1, ana, [bruno]);
+    // Quem participa não sai de uma conversa direta.
+    expect((await api('POST', 'rooms.leave', { roomId: dm }, bruno)).errorType).toBe('error-not-allowed');
+    expect((await api('POST', 'groups.kick', { roomId: dm, userId: bruno.userId }, A)).success).toBe(true);
+    expect(await departure(dm, bruno)).toMatchObject({ left_key_id: d1.keyID });
+    await sendE2e(ana, d1, 'com o Bruno fora da conversa');
+    expect((await api('POST', 'im.create', { username: ana.username }, bruno)).room._id).toBe(dm);
+    expect((await roomRow(dm)).e2e_rotate).toBe(true);
+    expect(await offer(d1, ana, [bruno])).toMatchObject({ inserted: 0, skipped: [bruno.userId] });
+    const { room: d2 } = await rotateKey(d1, ana, [bruno]);
+    expect(await heldBy(dm, bruno)).toEqual([d2.keyID]);
+    // Conversa em grupo (três pessoas): o mesmo.
+    const gdm = (await api('POST', 'im.create', { usernames: [bruno.username, carla.username] }, ana)).room._id;
+    expect((await save(ana, gdm, { encrypted: true })).success).toBe(true);
+    const x1 = await createKey(ana, gdm);
+    await giveKey(x1, ana, [bruno, carla]);
+    expect((await api('POST', 'groups.kick', { roomId: gdm, userId: carla.userId }, A)).success).toBe(true);
+    expect((await api('POST', 'im.create', { usernames: [ana.username, bruno.username] }, carla)).room._id).toBe(gdm);
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: gdm }, carla)).toMatchObject({ keys: [], beforeReturn: true });
+    expect(await offer(x1, bruno, [carla])).toMatchObject({ inserted: 0, skipped: [carla.userId] });
+    const { room: x2 } = await rotateKey(x1, bruno, [ana, carla]);
+    expect(await heldBy(gdm, carla)).toEqual([x2.keyID]);
+  });
+
+  it('44. discussão de grupo criptografado: sair da discussão e voltar só vale para ela', async () => {
+    const ana = await person();
+    const bruno = await person();
+    const parent = await encryptedGroup(ana, [bruno]);
+    const d = await api('POST', 'rooms.createDiscussion', { prid: parent.rid, t_name: 'Particular', users: [bruno.username] }, ana);
+    expect(d.discussion.encrypted).toBe(true);
+    const disc = await createKey(ana, d.discussion._id);
+    await giveKey(disc, ana, [bruno]);
+    expect((await kick(disc.rid, ana, bruno)).success).toBe(true);
+    expect((await invite(disc.rid, ana, bruno)).success).toBe(true);
+    expect(await offer(disc, ana, [bruno])).toMatchObject({ inserted: 0, skipped: [bruno.userId] });
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: disc.rid }, bruno)).toMatchObject({ beforeReturn: true });
+    // A sala de origem não muda: o Bruno continua com a chave dela.
+    expect(await roomRow(parent.rid)).toMatchObject({ e2e_key_id: parent.keyID, e2e_rotate: false });
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: parent.rid }, bruno)).toMatchObject({ keys: [expect.objectContaining({ keyID: parent.keyID })], returnedAt: null });
+    const { room: disc2 } = await rotateKey(disc, ana, [bruno]);
+    expect(await heldBy(disc.rid, bruno)).toEqual([disc2.keyID]);
+  });
+
+  it('45. redefinir a própria criptografia não é sair: continua recebendo a chave atual; quem voltou e redefine segue sem as de antes da volta', async () => {
+    const ana = await person();
+    const bruno = await person();
+    const carla = await person();
+    const g1 = await encryptedGroup(ana, [bruno, carla]);
+    await kick(g1.rid, ana, carla);
+    await invite(g1.rid, ana, carla);
+    const { room: g2 } = await rotateKey(g1, ana, [bruno, carla]);
+    for (const who of [bruno, carla]) {
+      expect((await api('POST', 'e2e.resetOwnE2EKey', { password: 'senha-forte-1' }, who)).success).toBe(true);
+      await withKeys(who);
+    }
+    // A redefinição pede a troca (como sempre); até ela, a geração atual pode ir para os dois: ambos estavam na sala.
+    expect((await roomRow(g1.rid)).e2e_rotate).toBe(true);
+    expect(await offer(g2, ana, [bruno, carla])).toMatchObject({ inserted: 2, skipped: [] });
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, bruno)).toMatchObject({ returnedAt: null, beforeReturn: false });
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, carla)).toMatchObject({ beforeReturn: false, keys: [expect.objectContaining({ keyID: g2.keyID })] });
+    expect((await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, carla)).returnedAt).toBeTruthy();
+    const { room: g3, inserted } = await rotateKey(g2, ana, [bruno, carla]);
+    expect(inserted).toBe(3);
+    expect(await heldBy(g1.rid, carla)).toEqual([g2.keyID, g3.keyID]);
+  });
+
+  it('46. criptografia desligada e ligada de novo: quem voltou com ela desligada não recebe a geração antiga; ligar de novo pede a troca', async () => {
+    const ana = await person();
+    const bruno = await person();
+    const carla = await person();
+    const g1 = await encryptedGroup(ana, [bruno, carla]);
+    await sendE2e(ana, g1, 'cifrada, antes de desligar');
+    expect((await save(ana, g1.rid, { encrypted: false })).success).toBe(true);
+    // Sai com a criptografia desligada: a sala já teve chave, então a saída conta.
+    await kick(g1.rid, ana, carla);
+    expect(await departure(g1.rid, carla)).toMatchObject({ left_key_id: g1.keyID });
+    const ws = await online(ana);
+    try {
+      let since = ws.events.length;
+      await invite(g1.rid, ana, carla);
+      await sleep(300);
+      // Desligada: nada de troca agora (ela não aconteceria), mas a troca fica pedida.
+      expect(countSince(ws, since, (e) => e.type === 'e2e.rotate' && e.rid === g1.rid)).toBe(0);
+      expect((await roomRow(g1.rid)).e2e_rotate).toBe(true);
+      expect(await offer(g1, ana, [carla])).toMatchObject({ inserted: 0, skipped: [carla.userId] });
+      expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, carla)).toMatchObject({ keyID: g1.keyID, beforeReturn: true });
+      // Ligada de novo: quem tem a chave troca.
+      since = ws.events.length;
+      const rotate = next(ws, (e) => e.type === 'e2e.rotate' && e.rid === g1.rid);
+      expect((await save(ana, g1.rid, { encrypted: true })).success).toBe(true);
+      expect(await rotate()).toMatchObject({ keyID: g1.keyID });
+    } finally {
+      ws.close();
+    }
+    const { room: g2 } = await rotateKey(g1, ana, [bruno, carla]);
+    expect(await heldBy(g1.rid, carla)).toEqual([g2.keyID]);
+
+    // Saiu com a criptografia ligada e voltou com ela desligada (outra sala): o mesmo.
+    const h1 = await encryptedGroup(ana, [carla]);
+    await kick(h1.rid, ana, carla);
+    await save(ana, h1.rid, { encrypted: false });
+    await invite(h1.rid, ana, carla);
+    expect(await offer(h1, ana, [carla])).toMatchObject({ inserted: 0, skipped: [carla.userId] });
+  });
+
+  it('47. pelo time e pelo link de convite: a volta vale igual; quem nunca esteve recebe a chave atual', async () => {
+    const ana = await person();
+    const bruno = await person();
+    const team = (await api('POST', 'teams.create', { name: name('time'), type: 1 }, ana)).team;
+    expect((await save(ana, team.roomId, { encrypted: true })).success).toBe(true);
+    const t1 = await createKey(ana, team.roomId);
+    expect((await api('POST', 'teams.addMembers', { teamId: team._id, members: [{ userId: bruno.userId }] }, ana)).success).toBe(true);
+    // Novo no time: a chave atual chega.
+    expect(await offer(t1, ana, [bruno])).toMatchObject({ inserted: 1 });
+    expect((await api('POST', 'teams.removeMember', { teamId: team._id, userId: bruno.userId }, ana)).success).toBe(true);
+    expect(await departure(team.roomId, bruno)).toBeTruthy();
+    expect((await api('POST', 'teams.addMembers', { teamId: team._id, members: [{ userId: bruno.userId }] }, ana)).success).toBe(true);
+    expect((await roomRow(team.roomId)).e2e_rotate).toBe(true);
+    expect(await offer(t1, ana, [bruno])).toMatchObject({ inserted: 0, skipped: [bruno.userId] });
+    const { room: t2 } = await rotateKey(t1, ana, [bruno]);
+    expect(await heldBy(team.roomId, bruno)).toEqual([t2.keyID]);
+
+    // Link de convite.
+    const carla = await person();
+    const g1 = await encryptedGroup(ana, [carla]);
+    const link = await api('POST', 'findOrCreateInvite', { rid: g1.rid, days: 1, maxUses: 0 }, ana);
+    expect(link.success).toBe(true);
+    await api('POST', 'groups.leave', { roomId: g1.rid }, carla);
+    expect((await api('POST', 'useInviteToken', { token: link._id }, carla)).success).toBe(true);
+    expect(await offer(g1, ana, [carla])).toMatchObject({ inserted: 0, skipped: [carla.userId] });
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, carla)).toMatchObject({ beforeReturn: true });
+    // Quem nunca esteve no grupo entra pelo mesmo link e recebe a chave atual.
+    const davi = await person();
+    expect((await api('POST', 'useInviteToken', { token: link._id }, davi)).success).toBe(true);
+    expect(await offer(g1, ana, [davi])).toMatchObject({ inserted: 1, skipped: [] });
+    expect(await api('GET', 'e2e.fetchRoomKeys', { rid: g1.rid }, davi)).toMatchObject({ returnedAt: null, beforeReturn: false, keys: [expect.objectContaining({ keyID: g1.keyID })] });
+  });
+
+  it('48. a sala ou a conta excluída leva o registro da saída', async () => {
+    const ana = await person();
+    const carla = await person();
+    const g1 = await encryptedGroup(ana, [carla]);
+    const g2 = await encryptedGroup(ana, [carla]);
+    await kick(g1.rid, ana, carla);
+    await kick(g2.rid, ana, carla);
+    expect((await api('POST', 'rooms.delete', { roomId: g1.rid }, A)).success).toBe(true);
+    expect(await departure(g1.rid, carla)).toBeUndefined();
+    expect(await departure(g2.rid, carla)).toBeTruthy();
+    expect((await api('POST', 'users.delete', { userId: carla.userId, confirmRelinquish: true }, A)).success).toBe(true);
+    expect(await departure(g2.rid, carla)).toBeUndefined();
+    expect((await pool.query('SELECT count(*)::int AS n FROM e2e_room_generations WHERE room_id = $1', [g1.rid])).rows[0].n).toBe(0);
+  });
+});
+
 // ---------- Redefinir e excluir ----------
 
 describe('criptografia: redefinir e excluir', () => {
