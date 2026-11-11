@@ -856,11 +856,22 @@ Desligar depois só impede ligar de novo: as conversas já criptografadas contin
   essa senha.** Quem a esqueceu redefine a própria criptografia, ou um administrador redefine em Administração ›
   Usuários (`edit-other-user-e2ee`, que também encerra as sessões da pessoa): nos dois casos, as mensagens
   criptografadas antigas ficam ilegíveis para ela.
-- **Quem entra ou volta** para a conversa recebe a chave atual pelo navegador de quem já participa (com o chat aberto) e
-  lê o histórico cifrado com essa chave, como no Rocket.Chat. Quem sai, é removido ou tem a conta excluída perde as
-  chaves, e a conversa troca de chave sozinha: se voltar, lê o que veio depois dessa troca, inclusive o que foi escrito
-  enquanto estava fora, e nada de antes. **Gerar chave nova** (menu Mais, para quem pode ligar a criptografia) corta o
-  histórico para quem entrar dali em diante.
+- **Quem entra** na conversa recebe a chave atual pelo navegador de quem já participa (com o chat aberto) e lê o
+  histórico cifrado com essa chave, como no Rocket.Chat. **Gerar chave nova** (menu Mais, para quem pode ligar a
+  criptografia) corta o histórico para quem entrar dali em diante.
+- **Quem sai**, é removido ou tem a conta excluída perde as chaves, e a conversa troca de chave sozinha. **Quem volta só
+  lê dali para frente**: na volta, a conversa troca de chave antes de entregar qualquer uma, e a pessoa recebe só a que
+  nasce depois da volta. Nada do que foi escrito enquanto ela estava fora (nem antes de sair) abre para ela; a conversa
+  mostra “Você voltou para esta conversa: as mensagens criptografadas de antes da sua volta não podem ser lidas.” Se
+  ninguém com a chave estiver com o chat aberto, ela espera a chave nova, como quem chega. Vale por qualquer caminho de
+  volta (adicionar, convite, link de convite, time, LDAP, reabrir a conversa direta de que um administrador a tirou),
+  em discussões, para quem estava na conversa sem ter configurado a criptografia e para quem saiu ou voltou com a
+  criptografia desligada (a troca acontece quando ela for ligada de novo). Redefinir a própria criptografia não é sair:
+  a conversa troca de chave, e a pessoa continua recebendo a atual.
+- Quem saiu **antes desta regra** (instalação atualizada) é reconhecido pelo que ficou na conversa desde que a
+  criptografia foi ligada: as mensagens “saiu”, “removeu”, “entrou” e “adicionou”, mensagens cifradas que a pessoa
+  escreveu ou leu e chaves que ela entregou. Quem saiu sem deixar nada disso (removido sem mensagem, como nas outras
+  salas do time ou pelo LDAP, e sem nunca ter escrito ou lido ali) volta como alguém novo.
 - Numa conversa criptografada **não funcionam**: busca no servidor (a busca da sala procura só nas mensagens já
   carregadas), tradução, enquetes, envio agendado, mensagem de vídeo, figurinhas, encaminhar de ou para ela, prévias
   do Jira, bots e integrações. Exportar mensagens e Meus dados trazem “Mensagem criptografada” no lugar do texto, e o

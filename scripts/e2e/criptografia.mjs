@@ -1,6 +1,6 @@
 // Criptografia de ponta a ponta no navegador (spec E §10): conversa direta, grupo privado, troca de chave, quem chega
-// depois da troca, redefinir a senha, a regra da Operação e o celular. Tira print de cada passo (computador claro e
-// escuro, celular) e sai com código 1 se algo falhar.
+// depois da troca, quem sai e volta (só lê dali para frente), redefinir a senha, a regra da Operação e o celular. Tira
+// print de cada passo (computador claro e escuro, celular) e sai com código 1 se algo falhar.
 //
 // Uso:
 //   CHAT_URL=http://localhost:3105 PLAYWRIGHT_CORE=/caminho/playwright ADMIN_USER=admin ADMIN_PASSWORD=... \
@@ -33,7 +33,7 @@ const lib = await import('../visual/lib.mjs');
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
 
 const OUT = lib.outDir();
-const STEPS = new Set((process.env.STEPS ?? '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16').split(',').map((s) => Number(s.trim())));
+const STEPS = new Set((process.env.STEPS ?? '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17').split(',').map((s) => Number(s.trim())));
 const PASSWORD = `Cr1pto-${crypto.randomBytes(6).toString('hex')}!`;
 const RUN = Date.now().toString(36);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -44,6 +44,8 @@ const T = {
   locked: 'Digite a senha da criptografia para ler e escrever nesta conversa.',
   ready: 'Esta conversa é criptografada de ponta a ponta.',
   waiting: 'Esperando a chave desta conversa.',
+  waitingNew: 'Esperando a chave nova desta conversa.',
+  returned: 'Você voltou para esta conversa: as mensagens criptografadas de antes da sua volta não podem ser lidas.',
   wrong: 'Senha incorreta.',
   oldKey: 'Mensagem criptografada com uma chave que você não tem.',
   lockedMsg: 'Mensagem criptografada. Desbloqueie para ler.',
@@ -315,6 +317,7 @@ let keyBefore = '';
 let anaPage = null;
 let brunoPage = null;
 let carlaPage = null;
+let carlaPass = '';
 let daviPass = '';
 let group2 = '';
 let daviDesk = null;
@@ -502,7 +505,7 @@ await step(6, 'Grupo privado criptografado: Ana cria, Carla configura depois e r
   await openRoom(carlaPage, groupRid, 'p');
   await expectVisible(banner(carlaPage).getByText(T.none), 'faixa "configure" na Carla');
   await banner(carlaPage).getByRole('button', { name: 'Configurar' }).click();
-  await setupGenerated(carlaPage);
+  carlaPass = await setupGenerated(carlaPage);
   await expectVisible(bodyWith(carlaPage, 'Primeira do grupo'), 'Carla lê depois de receber a chave', 40000);
   const by = sql(`SELECT provided_by FROM e2e_room_keys WHERE room_id = '${groupRid}' AND user_id = '${carla.id}'`);
   if (by !== null) assert(by === bruno.id, `chave da Carla entregue por ${by}, esperado o Bruno`);
@@ -930,6 +933,80 @@ await step(16, 'Administrador: "Criptografia não configurada" travado; redefini
   await setupGenerated(daviDesk);
   await waitFor('aviso some depois de configurar', async () => ((await daviDesk.getByText(T.resetByAdmin).count()) === 0 ? true : null), 15000);
   await a.close();
+});
+
+// ---------- 17. Carla volta para o grupo: só lê dali para frente ----------
+await step(17, 'Carla volta para o grupo com ninguém online: não lê nada de antes da volta, espera a chave nova e vê o aviso', async () => {
+  // Ninguém com a chave do grupo fica com o chat aberto: a troca pedida pela volta espera alguém voltar.
+  for (const p of [anaPage, brunoPage, daviDesk]) await p?.context().close().catch(() => {});
+  anaPage = brunoPage = daviDesk = null;
+  const before = await roomInfo(ana, groupRid);
+  ok('Carla volta', await ana.api.call('POST', 'groups.invite', { roomId: groupRid, userId: carla.id }));
+  const back = await roomInfo(ana, groupRid);
+  assert(back.e2eRotate === true && back.e2eKeyId === before.e2eKeyId, 'a volta não pediu a troca de chave');
+  if (DATABASE_URL) {
+    assert(sql(`SELECT count(*) FROM e2e_room_keys WHERE room_id = '${groupRid}' AND user_id = '${carla.id}'`) === '0', 'a Carla recebeu uma chave de antes da volta');
+    assert(sql(`SELECT returned_at IS NOT NULL FROM e2e_room_departures WHERE room_id = '${groupRid}' AND user_id = '${carla.id}'`) === 't', 'a volta da Carla não ficou registrada');
+  }
+  carlaPage = await open(carla);
+  await openRoom(carlaPage, groupRid, 'p');
+  await banner(carlaPage).getByRole('button', { name: 'Desbloquear' }).click();
+  await unlock(carlaPage, carlaPass);
+  await expectVisible(banner(carlaPage).getByText(T.waitingNew), 'Carla esperando a chave nova', 20000);
+  await expectVisible(banner(carlaPage).getByText(T.returned), 'aviso de quem voltou', 20000);
+  // O que veio antes da volta (inclusive o que ela já tinha lido) fica com o aviso da chave que ela não tem.
+  await expectVisible(placeholders(carlaPage, T.oldKey), `"${T.oldKey}" nas mensagens de antes da volta`, 20000);
+  assert(!(await placeholders(carlaPage, T.waitingMsg).count()), 'mensagem de antes da volta "esperando a chave" (ela não vem)');
+  for (const text of ['Primeira do grupo', 'Carla chegou e lê tudo.', 'Depois da troca de chave.']) {
+    assert(!(await bodyWith(carlaPage, text).count()), `a Carla leu "${text}", de antes da volta`);
+  }
+  // Sem a chave nova, o compositor dá lugar ao mesmo aviso da faixa.
+  await expectVisible(carlaPage.locator('.room-main .composer-note', { hasText: T.waitingNew }), 'compositor esperando a chave nova');
+  assert(!(await composer(carlaPage).count()), 'compositor habilitado sem a chave nova');
+  await shot(carlaPage, 'carla-voltou-esperando');
+  // Ana abre o chat: troca a chave, e a Carla recebe a nova sem pedir de novo.
+  anaPage = await open(ana);
+  await openRoom(anaPage, groupRid, 'p');
+  await banner(anaPage).getByRole('button', { name: 'Desbloquear' }).click();
+  await unlock(anaPage, anaPass);
+  await expectVisible(bodyWith(anaPage, 'Depois da troca de chave.'), 'Ana lê o grupo', 20000);
+  const fresh = await waitFor('chave nova depois da volta', async () => {
+    const r = await roomInfo(ana, groupRid);
+    return r.e2eKeyId && r.e2eKeyId !== before.e2eKeyId && !r.e2eRotate ? r : null;
+  }, 30000);
+  await waitFor('Carla com a chave nova', async () => (await composer(carlaPage).isEnabled()) || null, 40000);
+  await waitFor('faixa de esperando some', async () => ((await banner(carlaPage).getByText(T.waitingNew).count()) === 0 ? true : null), 15000);
+  await expectVisible(banner(carlaPage).getByText(T.returned), 'o aviso continua depois da chave nova');
+  await send(carlaPage, 'Carla voltou e lê daqui para frente.');
+  await expectVisible(bodyWith(anaPage, 'Carla voltou e lê daqui para frente.'), 'Ana lê a Carla', 20000);
+  await send(anaPage, 'Bem-vinda de volta, Carla.');
+  await expectVisible(bodyWith(carlaPage, 'Bem-vinda de volta, Carla.'), 'Carla lê o que veio depois da volta', 20000);
+  assert(!(await bodyWith(carlaPage, 'Depois da troca de chave.').count()), 'a Carla leu o que veio enquanto estava fora');
+  if (DATABASE_URL) {
+    const held = sql(`SELECT string_agg(key_id, ',') FROM e2e_room_keys WHERE room_id = '${groupRid}' AND user_id = '${carla.id}'`);
+    assert(held === fresh.e2eKeyId, `a Carla tem as gerações ${held}, esperada só a nova ${fresh.e2eKeyId}`);
+  }
+  await shot(carlaPage, 'carla-voltou-lendo');
+  await shotDark(carlaPage, 'carla-voltou-lendo-escuro');
+  // Celular: a frase inteira do aviso (quebra a linha), sem rolagem para o lado.
+  const phone = await open(carla, { phone: true });
+  await openRoom(phone, groupRid, 'p');
+  await banner(phone).getByRole('button', { name: 'Desbloquear' }).click();
+  await unlock(phone, carlaPass);
+  await expectVisible(bodyWith(phone, 'Bem-vinda de volta, Carla.'), 'Carla lê no celular', 30000);
+  const note = phone.locator('.e2e-banner.returned');
+  await expectVisible(note.getByText(T.returned), 'aviso no celular');
+  assert(await note.locator('.e2e-banner-text').evaluate((el) => el.scrollWidth <= el.clientWidth + 1), 'aviso cortado no celular');
+  assert(await phone.evaluate(() => document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth + 1), 'rolagem horizontal no celular');
+  await shot(phone, 'celular-carla-voltou');
+  await phone.context().close();
+  // Fechar o aviso: some, e continua fechado depois de recarregar.
+  await banner(carlaPage).filter({ hasText: T.returned }).getByRole('button', { name: 'Fechar aviso' }).click();
+  await waitFor('aviso fechado', async () => ((await carlaPage.getByText(T.returned).count()) === 0 ? true : null));
+  await carlaPage.reload();
+  await expectVisible(bodyWith(carlaPage, 'Bem-vinda de volta, Carla.'), 'Carla lê depois de recarregar', 30000);
+  assert(!(await carlaPage.getByText(T.returned).count()), 'o aviso fechado voltou depois de recarregar');
+  await expectVisible(placeholders(carlaPage, T.oldKey), 'mensagens de antes da volta continuam fechadas');
 });
 
 // ---------- Fim ----------
