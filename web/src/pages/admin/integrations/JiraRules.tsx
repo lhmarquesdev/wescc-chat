@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { JIRA_EVENT_LABEL, type JiraRule } from '@shared/integrations';
 import { formatDateTime, formatRelative, plural } from '../../../lib/format';
 import { Icon } from '../../../components/Icon';
-import { Empty, Segmented, SkeletonTable, confirmDialog, useAsync } from '../../../components/ui';
+import { Empty, Segmented, SkeletonTable, confirmDialog, useAsync, ThLabel } from '../../../components/ui';
 import { RowMenu, TableWrap } from '../parts';
 import { coreAdmin, jiraAdmin } from './admin-api';
 import type { JiraTabProps } from './JiraAdmin';
@@ -324,11 +324,21 @@ export function JiraRules({ config, onConfig, onDirty }: JiraTabProps) {
               <table className="table stack kv">
                 <thead>
                   <tr>
-                    <th>Regra</th>
-                    <th>Projetos</th>
-                    <th>Avisos</th>
-                    <th>Salas</th>
-                    <th>Situação</th>
+                    <th>
+                      <ThLabel>Regra</ThLabel>
+                    </th>
+                    <th>
+                      <ThLabel>Projetos</ThLabel>
+                    </th>
+                    <th>
+                      <ThLabel>Avisos</ThLabel>
+                    </th>
+                    <th>
+                      <ThLabel>Salas</ThLabel>
+                    </th>
+                    <th>
+                      <ThLabel>Situação</ThLabel>
+                    </th>
                     <th className="actions-col">
                       <span className="visually-hidden">Ações</span>
                     </th>

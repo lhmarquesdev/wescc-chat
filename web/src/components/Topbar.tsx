@@ -3,7 +3,6 @@ import { Link, useLocation } from 'react-router-dom';
 import { useStore } from '../lib/store';
 import { ADMIN_SECTIONS } from '../pages/admin/sections';
 import { Icon } from './Icon';
-import { UserAvatar } from './ui';
 import { UserMenu, setTheme, useMyStatus } from './Sidebar';
 
 // Barra do topo (padrão Atendeti): recolher o menu, trilha "Wescchat › Área › Página", tema e a pessoa.
@@ -56,10 +55,17 @@ export function ThemeToggle() {
   );
 }
 
+/** Duas letras para o avatar da marca (nome e sobrenome, ou as duas primeiras do usuário). */
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const two = parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : (parts[0] ?? '').slice(0, 2);
+  return two.toUpperCase();
+}
+
 export function Topbar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const me = useStore((s) => s.me)!;
   const site = useStore((s) => (s.settings.Site_Name as string | undefined) || 'Wescchat');
-  const { status, line } = useMyStatus();
+  const { line } = useMyStatus();
   const trail = useTrail();
   const toggleLabel = collapsed ? 'Expandir menu' : 'Recolher menu';
   return (
@@ -92,10 +98,12 @@ export function Topbar({ collapsed, onToggle }: { collapsed: boolean; onToggle: 
           placement="bottom-end"
           trigger={
             <button type="button" className="me-btn" title={`${me.name} · ${line}`}>
-              <UserAvatar username={me.username} size={32} status={status} />
+              <span className="me-avatar" aria-hidden="true">
+                {initials(me.name || me.username)}
+              </span>
               <span className="me-text">
                 <span className="me-name">{me.name}</span>
-                <span className="me-status">{line}</span>
+                <span className="me-status">{me.email || `@${me.username}`}</span>
               </span>
               <Icon name="chevron-down" className="me-chevron" />
             </button>

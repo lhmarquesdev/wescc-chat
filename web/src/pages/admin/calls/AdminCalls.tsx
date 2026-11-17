@@ -12,7 +12,7 @@ import { callRoomLabel, useNow } from '../../../lib/roomcall';
 import { usePermission, useStore } from '../../../lib/store';
 import { SelfTest } from '../../../components/call/SelfTest';
 import { Icon } from '../../../components/Icon';
-import { Empty, Skeleton, SkeletonTable, confirmDialog, useAsync } from '../../../components/ui';
+import { Empty, Skeleton, SkeletonTable, confirmDialog, useAsync, ThLabel } from '../../../components/ui';
 import { PageHead, RoomCell, TableWrap, UserCell, num } from '../parts';
 import { SETTINGS_GROUP, settingsPath } from '../sections';
 import '../../../components/callroom.css';
@@ -280,11 +280,21 @@ function ActiveCalls({ onEnded }: { onEnded: () => void }) {
           <table className="table stack kv">
             <thead>
               <tr>
-                <th>Sala</th>
-                <th>Iniciada por</th>
-                <th className="num">Pessoas</th>
-                <th className="num">Duração</th>
-                <th>Tipo</th>
+                <th>
+                  <ThLabel>Sala</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Iniciada por</ThLabel>
+                </th>
+                <th className="num">
+                  <ThLabel>Pessoas</ThLabel>
+                </th>
+                <th className="num">
+                  <ThLabel>Duração</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Tipo</ThLabel>
+                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>

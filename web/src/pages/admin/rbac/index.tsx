@@ -10,7 +10,7 @@ import { plural, roleLabel } from '../../../lib/format';
 import { realtime } from '../../../lib/realtime';
 import { usePermission } from '../../../lib/store';
 import { Icon } from '../../../components/Icon';
-import { Empty, SkeletonTable, Tooltip, confirmDialog, useAsync } from '../../../components/ui';
+import { Empty, SkeletonTable, Tooltip, confirmDialog, useAsync, ThLabel } from '../../../components/ui';
 import { RowMenu } from '../parts';
 import { CreateRole } from './CreateRole';
 import { DirectReportCard } from './DirectReport';
@@ -201,30 +201,32 @@ function RoleList({ roles, grant, loading, error, onChanged }: { roles: RbacRole
                   </th>
                 )}
                 <th>
-                  <span className="th-icon">
+                  <span className="th-label">
                     <Icon name="admin-permissions" size={14} />
                     Papel
                   </span>
                 </th>
                 <th className="col-id">
-                  <span className="th-icon">
+                  <span className="th-label">
                     <Icon name="rbac-id" size={14} />
                     Identificador
                   </span>
                 </th>
                 <th>
-                  <span className="th-icon">
+                  <span className="th-label">
                     <Icon name="rbac-areas" size={14} />
                     Acesso
                   </span>
                 </th>
                 <th className="num">
-                  <span className="th-icon">
+                  <span className="th-label">
                     <Icon name="admin-users" size={14} />
                     Pessoas
                   </span>
                 </th>
-                <th className="col-type">Tipo</th>
+                <th className="col-type">
+                  <ThLabel>Tipo</ThLabel>
+                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>

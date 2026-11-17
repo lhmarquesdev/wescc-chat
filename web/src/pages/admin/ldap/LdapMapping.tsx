@@ -4,7 +4,7 @@ import { api } from '../../../lib/api';
 import { roleLabel, setRoleDescriptions } from '../../../lib/format';
 import { usePermission, useSetting, useStore } from '../../../lib/store';
 import { Icon, type IconName } from '../../../components/Icon';
-import { Empty, Toggle } from '../../../components/ui';
+import { Empty, Toggle, ThLabel } from '../../../components/ui';
 import { UserPicker } from '../../../components/Pickers';
 import type { LdapSettings } from './index';
 import { LdapTest } from './LdapTest';
@@ -310,10 +310,18 @@ function RulesTable({ rows, data, canEdit, onEdit, onRemove }: { rows: MappingRo
       <table className="table ldap-rules">
         <thead>
           <tr>
-            <th>Origem</th>
-            <th>Papéis</th>
-            <th>Canais</th>
-            <th>Times</th>
+            <th>
+              <ThLabel>Origem</ThLabel>
+            </th>
+            <th>
+              <ThLabel>Papéis</ThLabel>
+            </th>
+            <th>
+              <ThLabel>Canais</ThLabel>
+            </th>
+            <th>
+              <ThLabel>Times</ThLabel>
+            </th>
             <th aria-label="Ações" />
           </tr>
         </thead>

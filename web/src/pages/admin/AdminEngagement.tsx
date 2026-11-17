@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 import { useStore } from '../../lib/store';
 import { roomIconName } from '../../lib/format';
 import { Icon } from '../../components/Icon';
-import { Empty, SkeletonStats, SkeletonTable, Tabs, useAsync } from '../../components/ui';
+import { Empty, Kpi, SkeletonStats, SkeletonTable, Tabs, useAsync, ThLabel } from '../../components/ui';
 import { BarChart, LineChart } from './charts';
 import { PageHead, RoomCell, TableWrap, UserCell, num } from './parts';
 
@@ -69,28 +69,10 @@ function UsersTab({ start, end }: { start: string; end: string }) {
   const last = data.daily[data.daily.length - 1];
   return (
     <>
-      <div className="stats">
-        <div className="stat">
-          <div className="stat-value">{num(data.activeUsers)}</div>
-          <div className="stat-label">
-            <Icon name="admin-users" />
-            Ativos no período
-          </div>
-        </div>
-        <div className="stat">
-          <div className="stat-value">{num(newUsers)}</div>
-          <div className="stat-label">
-            <Icon name="add-people" />
-            Novos usuários
-          </div>
-        </div>
-        <div className="stat">
-          <div className="stat-value">{num(last?.dau)}</div>
-          <div className="stat-label">
-            <Icon name="admin-engagement" />
-            Ativos hoje
-          </div>
-        </div>
+      <div className="stats kpis">
+        <Kpi label="Ativos no período" value={num(data.activeUsers)} icon="admin-users" />
+        <Kpi label="Novos usuários" value={num(newUsers)} icon="add-people" />
+        <Kpi label="Ativos hoje" value={num(last?.dau)} icon="admin-engagement" />
       </div>
       <div className="card chart-card">
         <div className="card-head">
@@ -147,14 +129,8 @@ function MessagesTab({ start, end }: { start: string; end: string }) {
   if (loading || !data) return <Loading />;
   return (
     <>
-      <div className="stats">
-        <div className="stat">
-          <div className="stat-value">{num(data.total)}</div>
-          <div className="stat-label">
-            <Icon name="nav-chats" />
-            Mensagens no período
-          </div>
-        </div>
+      <div className="stats kpis">
+        <Kpi label="Mensagens no período" value={num(data.total)} icon="nav-chats" />
         {data.byRoomType.map((t: any) => (
           <div key={t.t} className="stat">
             <div className="stat-value">{num(t.messages)}</div>
@@ -180,8 +156,12 @@ function MessagesTab({ start, end }: { start: string; end: string }) {
             <table className="table rank-table">
               <thead>
                 <tr>
-                  <th>Sala</th>
-                  <th className="num">Mensagens</th>
+                  <th>
+                    <ThLabel>Sala</ThLabel>
+                  </th>
+                  <th className="num">
+                    <ThLabel>Mensagens</ThLabel>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -207,8 +187,12 @@ function MessagesTab({ start, end }: { start: string; end: string }) {
             <table className="table rank-table">
               <thead>
                 <tr>
-                  <th>Pessoa</th>
-                  <th className="num">Mensagens</th>
+                  <th>
+                    <ThLabel>Pessoa</ThLabel>
+                  </th>
+                  <th className="num">
+                    <ThLabel>Mensagens</ThLabel>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -256,11 +240,21 @@ function ChannelsTab({ start, end }: { start: string; end: string }) {
       <table className="table stack kv">
         <thead>
           <tr>
-            <th>Canal</th>
-            <th className="num">Membros</th>
-            <th className="num">Mensagens</th>
-            <th className="num">Período anterior</th>
-            <th className="num">Variação</th>
+            <th>
+              <ThLabel>Canal</ThLabel>
+            </th>
+            <th className="num">
+              <ThLabel>Membros</ThLabel>
+            </th>
+            <th className="num">
+              <ThLabel>Mensagens</ThLabel>
+            </th>
+            <th className="num">
+              <ThLabel>Período anterior</ThLabel>
+            </th>
+            <th className="num">
+              <ThLabel>Variação</ThLabel>
+            </th>
           </tr>
         </thead>
         <tbody>

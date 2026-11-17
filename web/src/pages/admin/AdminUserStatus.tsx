@@ -7,7 +7,7 @@ import { ApiError, api, errorMessage } from '../../lib/api';
 import { plural } from '../../lib/format';
 import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
-import { Empty, Field, Modal, SkeletonTable, confirmDialog, useAsync } from '../../components/ui';
+import { Empty, Field, Modal, SkeletonTable, confirmDialog, useAsync, ThLabel } from '../../components/ui';
 import { PageHead, RowMenu, TableWrap } from './parts';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
@@ -105,9 +105,15 @@ export function AdminUserStatus() {
           <table className="table stack kv user-status-table">
             <thead>
               <tr>
-                <th>Nome</th>
-                <th>Tipo</th>
-                <th className="num">Em uso</th>
+                <th>
+                  <ThLabel>Nome</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Tipo</ThLabel>
+                </th>
+                <th className="num">
+                  <ThLabel>Em uso</ThLabel>
+                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>

@@ -5,7 +5,7 @@ import { renderMarkdown } from '../../lib/markdown';
 import { usePermission, useStore } from '../../lib/store';
 import { RoomPicker, UserPicker, type PickedRoom, type PickedUser } from '../../components/Pickers';
 import { Icon } from '../../components/Icon';
-import { Avatar, Empty, Field, Pager, SearchInput, SkeletonTable, Tabs, useAsync } from '../../components/ui';
+import { Avatar, Empty, Field, Pager, SearchInput, SkeletonTable, Tabs, useAsync, ThLabel } from '../../components/ui';
 import { PageHead, TableWrap } from './parts';
 // Figurinhas: mensagens com figurinha mostram a figurinha no lugar do texto.
 import { StickerView } from '../../components/stickers/StickerView';
@@ -193,12 +193,24 @@ function ActionLog({ fixed }: { fixed?: string }) {
           <table className="table stack kv audit-log">
             <thead>
               <tr>
-                <th>Quando</th>
-                <th>Quem</th>
-                <th>Ação</th>
-                <th>Alvo</th>
-                <th className="col-lg">Detalhes</th>
-                <th className="col-xl">IP</th>
+                <th>
+                  <ThLabel>Quando</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Quem</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Ação</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Alvo</ThLabel>
+                </th>
+                <th className="col-lg">
+                  <ThLabel>Detalhes</ThLabel>
+                </th>
+                <th className="col-xl">
+                  <ThLabel>IP</ThLabel>
+                </th>
               </tr>
             </thead>
             <tbody>

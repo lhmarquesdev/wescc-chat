@@ -11,7 +11,7 @@ import { useSetting, useStore } from '../lib/store';
 import { Icon, type IconName } from '../components/Icon';
 import { useForYou } from '../components/navState';
 import { ForYouCard } from '../components/Sidebar';
-import { Empty, GroupAvatar, Pager, SearchInput, SkeletonTable, Tabs, UserAvatar, useAsync } from '../components/ui';
+import { Empty, GroupAvatar, Pager, SearchInput, SkeletonTable, Tabs, UserAvatar, useAsync, ThLabel } from '../components/ui';
 
 const dayFmt = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
 // Diretório: só a data ("22/10/2026"); a hora não ajuda a escolher um canal ou uma pessoa.
@@ -243,18 +243,28 @@ export function DirectoryPage() {
         <thead>
           {type === 'users' ? (
             <tr>
-              <th>Nome</th>
-              <th className="dir-meta">Desde</th>
+              <th>
+                <ThLabel>Nome</ThLabel>
+              </th>
+              <th className="dir-meta">
+                <ThLabel>Desde</ThLabel>
+              </th>
               <th className="dir-action">
                 <span className="visually-hidden">Ações</span>
               </th>
             </tr>
           ) : (
             <tr>
-              <th>Nome</th>
-              <th className="num dir-meta">Membros</th>
+              <th>
+                <ThLabel>Nome</ThLabel>
+              </th>
+              <th className="num dir-meta">
+                <ThLabel>Membros</ThLabel>
+              </th>
               <th className="dir-meta">{type === 'teams' ? 'Salas' : 'Time'}</th>
-              <th className="dir-meta dir-date">Criado em</th>
+              <th className="dir-meta dir-date">
+                <ThLabel>Criado em</ThLabel>
+              </th>
               <th className="dir-action">
                 <span className="visually-hidden">Ações</span>
               </th>

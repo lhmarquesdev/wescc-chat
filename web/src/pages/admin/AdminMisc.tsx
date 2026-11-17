@@ -3,7 +3,7 @@ import { api, errorMessage } from '../../lib/api';
 import { formatDateTime, plural } from '../../lib/format';
 import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
-import { Empty, Field, FileButton, Modal, Pager, SearchInput, SkeletonList, SkeletonTable, confirmDialog, useAsync } from '../../components/ui';
+import { Empty, Field, FileButton, Modal, Pager, SearchInput, SkeletonList, SkeletonTable, confirmDialog, useAsync, ThLabel } from '../../components/ui';
 import { DeviceCell, NewDevicePill, PageHead, RoomCell, TableWrap, UserCell, deviceLabel, lastSeen } from './parts';
 // Figurinhas: a figurinha denunciada e "Remover figurinha de todas as conversas".
 import { ReportSticker } from './stickers';
@@ -28,10 +28,9 @@ export function AdminDevices() {
   };
   return (
     <>
-      <PageHead title="Dispositivos" count={data && !filter ? data.total : undefined} />
-      <div className="filters admin-filters">
+      <PageHead title="Dispositivos" count={data && !filter ? data.total : undefined}>
         <SearchInput value={filter} onChange={(v) => (setFilter(v), setOffset(0))} placeholder="Filtrar por usuário ou IP" />
-      </div>
+      </PageHead>
       {loading && !data ? (
         <SkeletonTable rows={8} cols={5} />
       ) : !sessions.length ? (
@@ -43,10 +42,18 @@ export function AdminDevices() {
           <table className="table stack kv">
             <thead>
               <tr>
-                <th>Usuário</th>
-                <th>Dispositivo</th>
-                <th className="col-xl">Login</th>
-                <th>Último uso</th>
+                <th>
+                  <ThLabel>Usuário</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Dispositivo</ThLabel>
+                </th>
+                <th className="col-xl">
+                  <ThLabel>Login</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Último uso</ThLabel>
+                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>
@@ -103,9 +110,15 @@ export function AdminModeration() {
           <table className="table stack kv">
             <thead>
               <tr>
-                <th>Usuário denunciado</th>
-                <th className="num">Denúncias</th>
-                <th>Última</th>
+                <th>
+                  <ThLabel>Usuário denunciado</ThLabel>
+                </th>
+                <th className="num">
+                  <ThLabel>Denúncias</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Última</ThLabel>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -333,11 +346,21 @@ export function AdminInvites() {
           <table className="table stack kv">
             <thead>
               <tr>
-                <th>Sala</th>
-                <th className="col-lg">Link</th>
-                <th className="num">Usos</th>
-                <th>Expira</th>
-                <th className="col-xl">Criado</th>
+                <th>
+                  <ThLabel>Sala</ThLabel>
+                </th>
+                <th className="col-lg">
+                  <ThLabel>Link</ThLabel>
+                </th>
+                <th className="num">
+                  <ThLabel>Usos</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Expira</ThLabel>
+                </th>
+                <th className="col-xl">
+                  <ThLabel>Criado</ThLabel>
+                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>

@@ -15,6 +15,8 @@ import './styles/panels.css';
 import './styles/calls.css';
 import './styles/admin.css';
 import './styles/rbac.css';
+import './styles/kpi-folder-card.css';
+import './styles/atendeti.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';

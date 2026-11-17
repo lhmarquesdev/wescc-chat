@@ -5,7 +5,7 @@ import { formatDateTime, roomIconName, roomPath } from '../../lib/format';
 import { useStore } from '../../lib/store';
 import { UserPicker, type PickedUser } from '../../components/Pickers';
 import { Icon } from '../../components/Icon';
-import { Empty, Field, Modal, Pager, SearchInput, SkeletonTable, Toggle, confirmDialog, useAsync } from '../../components/ui';
+import { Empty, Field, Modal, Pager, SearchInput, SkeletonTable, Toggle, confirmDialog, useAsync, ThLabel } from '../../components/ui';
 import { PageHead, RoomCell, TableWrap, num } from './parts';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
@@ -24,8 +24,7 @@ export function AdminRooms() {
   const rooms: any[] = data?.rooms ?? [];
   return (
     <>
-      <PageHead title="Salas" count={data?.total} />
-      <div className="filters admin-filters">
+      <PageHead title="Salas" count={data?.total}>
         <SearchInput value={filter} onChange={(v) => (setFilter(v), setOffset(0))} placeholder="Buscar salas" />
         <div className="chips" role="group" aria-label="Tipo de sala">
           {Object.entries(TYPE_LABEL).map(([t, l]) => (
@@ -35,7 +34,7 @@ export function AdminRooms() {
             </label>
           ))}
         </div>
-      </div>
+      </PageHead>
       {loading && !data ? (
         <SkeletonTable rows={8} cols={5} />
       ) : !rooms.length ? (
@@ -57,11 +56,21 @@ export function AdminRooms() {
           <table className="table stack kv">
             <thead>
               <tr>
-                <th>Nome</th>
-                <th className="num">Membros</th>
-                <th className="num col-md">Mensagens</th>
-                <th className="col-lg">Criada por</th>
-                <th className="col-xl">Criada em</th>
+                <th>
+                  <ThLabel>Nome</ThLabel>
+                </th>
+                <th className="num">
+                  <ThLabel>Membros</ThLabel>
+                </th>
+                <th className="num col-md">
+                  <ThLabel>Mensagens</ThLabel>
+                </th>
+                <th className="col-lg">
+                  <ThLabel>Criada por</ThLabel>
+                </th>
+                <th className="col-xl">
+                  <ThLabel>Criada em</ThLabel>
+                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>

@@ -4,7 +4,7 @@ import { api, ApiError, errorMessage } from '../../../lib/api';
 import { roomIconName } from '../../../lib/format';
 import { usePermission, useSetting } from '../../../lib/store';
 import { Icon } from '../../../components/Icon';
-import { Empty, SkeletonTable } from '../../../components/ui';
+import { Empty, SkeletonTable, ThLabel } from '../../../components/ui';
 import { fail, ImportTitle, isImporting, isReading, isWaiting, num, ok, plural, ProgressBar, ST, Stat, StatusPill, statusLabel, useImportEvents, usePolling, Warnings } from './common';
 import type { ImportFileData, ImportOperation, SelectionChannel, SelectionUser, ShortSelectionPart } from './types';
 
@@ -267,8 +267,12 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
           empty="Nenhum usuário no arquivo."
           head={
             <>
-              <th>Usuário</th>
-              <th className="imp-opt">E-mail</th>
+              <th>
+                <ThLabel>Usuário</ThLabel>
+              </th>
+              <th className="imp-opt">
+                <ThLabel>E-mail</ThLabel>
+              </th>
               <th />
             </>
           }
@@ -316,8 +320,12 @@ function Selection({ data, op, onCancel }: { data: ImportFileData; op: ImportOpe
           empty="Nenhum canal no arquivo."
           head={
             <>
-              <th>Nome</th>
-              <th className="imp-opt num">Membros</th>
+              <th>
+                <ThLabel>Nome</ThLabel>
+              </th>
+              <th className="imp-opt num">
+                <ThLabel>Membros</ThLabel>
+              </th>
               <th />
             </>
           }

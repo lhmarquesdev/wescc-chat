@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { IntegrationActivity, Provider } from '@shared/integrations';
 import { formatDateTime, formatRelative } from '../../../lib/format';
 import { Icon } from '../../../components/Icon';
-import { Empty, Pager, Segmented, SkeletonTable, useAsync } from '../../../components/ui';
+import { Empty, Pager, Segmented, SkeletonTable, useAsync, ThLabel } from '../../../components/ui';
 import { TableWrap } from '../parts';
 import { coreAdmin, jiraAdmin } from './admin-api';
 import { LoadError, done, fail, useIntegrationEvents } from './parts';
@@ -103,10 +103,18 @@ export function Activity({ provider }: { provider: Provider }) {
           <table className="table stack kv">
             <thead>
               <tr>
-                <th>Quando</th>
-                <th>Situação</th>
-                <th>O quê</th>
-                <th>Detalhe</th>
+                <th>
+                  <ThLabel>Quando</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Situação</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>O quê</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Detalhe</ThLabel>
+                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>

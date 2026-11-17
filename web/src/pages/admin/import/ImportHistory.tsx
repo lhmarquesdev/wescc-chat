@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../../lib/api';
 import { formatBytes, formatDateTime } from '../../../lib/format';
 import { Icon } from '../../../components/Icon';
-import { Empty, Modal, Pager, SkeletonTable, useAsync } from '../../../components/ui';
+import { Empty, Modal, Pager, SkeletonTable, useAsync, ThLabel } from '../../../components/ui';
 import { fail, isBusy, isFinal, isImporting, num, ok, operationPath, plural, StatusPill, useImportEvents, Warnings, warningCount } from './common';
 import type { ImportErrorRow, ImportOperation } from './types';
 
@@ -150,16 +150,36 @@ export function ImportHistory({ canRun }: { canRun: boolean }) {
           <table className="table imp-history">
             <thead>
               <tr>
-                <th>Tipo</th>
-                <th className="imp-when">Atualizado em</th>
-                <th>Situação</th>
-                <th className="imp-opt">Arquivo</th>
-                <th className="imp-opt imp-mid">Itens</th>
-                <th className="imp-opt imp-wide num">Usuários</th>
-                <th className="imp-opt imp-wide num">Canais</th>
-                <th className="imp-opt imp-wide num">Mensagens</th>
-                <th className="imp-opt imp-wide num">Total</th>
-                <th className="imp-opt num">Erros</th>
+                <th>
+                  <ThLabel>Tipo</ThLabel>
+                </th>
+                <th className="imp-when">
+                  <ThLabel>Atualizado em</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Situação</ThLabel>
+                </th>
+                <th className="imp-opt">
+                  <ThLabel>Arquivo</ThLabel>
+                </th>
+                <th className="imp-opt imp-mid">
+                  <ThLabel>Itens</ThLabel>
+                </th>
+                <th className="imp-opt imp-wide num">
+                  <ThLabel>Usuários</ThLabel>
+                </th>
+                <th className="imp-opt imp-wide num">
+                  <ThLabel>Canais</ThLabel>
+                </th>
+                <th className="imp-opt imp-wide num">
+                  <ThLabel>Mensagens</ThLabel>
+                </th>
+                <th className="imp-opt imp-wide num">
+                  <ThLabel>Total</ThLabel>
+                </th>
+                <th className="imp-opt num">
+                  <ThLabel>Erros</ThLabel>
+                </th>
               </tr>
             </thead>
             <tbody>

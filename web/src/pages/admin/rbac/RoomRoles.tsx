@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../../lib/api';
 import { roleLabel } from '../../../lib/format';
 import { Icon } from '../../../components/Icon';
-import { Empty, Pager, SkeletonTable, useAsync } from '../../../components/ui';
+import { Empty, Pager, SkeletonTable, useAsync, ThLabel } from '../../../components/ui';
 import { UserCell } from '../parts';
 
 interface Item {
@@ -66,9 +66,15 @@ export function RoomRoles({ role, userId }: { role?: string; userId?: string }) 
       <table className="table stack">
         <thead>
           <tr>
-            <th>Sala</th>
-            <th>Pessoa</th>
-            <th>Papéis nesta sala</th>
+            <th>
+              <ThLabel>Sala</ThLabel>
+            </th>
+            <th>
+              <ThLabel>Pessoa</ThLabel>
+            </th>
+            <th>
+              <ThLabel>Papéis nesta sala</ThLabel>
+            </th>
           </tr>
         </thead>
         <tbody>

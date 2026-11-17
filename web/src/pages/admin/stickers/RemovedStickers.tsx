@@ -5,7 +5,7 @@ import { formatDateTime, formatRelative } from '../../../lib/format';
 import { stickerAdmin, stickerErrorText, useStickerCaps } from '../../../lib/stickers';
 import { useStore } from '../../../lib/store';
 import { Icon } from '../../../components/Icon';
-import { Empty, Pager, SearchInput, SkeletonTable, confirmDialog, useAsync } from '../../../components/ui';
+import { Empty, Pager, SearchInput, SkeletonTable, confirmDialog, useAsync, ThLabel } from '../../../components/ui';
 import { TableWrap } from '../parts';
 
 const PAGE = 25;
@@ -81,12 +81,24 @@ export function RemovedStickers() {
           <table className="table stack kv stk-removed">
             <thead>
               <tr>
-                <th>Figurinha</th>
-                <th>Motivo</th>
-                <th>Removida por</th>
-                <th>Quando</th>
-                <th className="num">Mensagens</th>
-                <th>Cópia para a moderação</th>
+                <th>
+                  <ThLabel>Figurinha</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Motivo</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Removida por</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Quando</ThLabel>
+                </th>
+                <th className="num">
+                  <ThLabel>Mensagens</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Cópia para a moderação</ThLabel>
+                </th>
                 {caps.canModerate && (
                   <th className="actions-col">
                     <span className="visually-hidden">Ações</span>

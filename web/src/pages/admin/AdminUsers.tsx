@@ -4,7 +4,7 @@ import { api, errorMessage } from '../../lib/api';
 import { formatDateTime, plural, roleLabel, setRoleDescriptions } from '../../lib/format';
 import { usePermission, useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
-import { Empty, Field, Menu, Modal, Pager, SkeletonTable, Toggle, Tooltip, confirmDialog, useAsync } from '../../components/ui';
+import { Empty, Field, Menu, Modal, Pager, SkeletonTable, Toggle, Tooltip, confirmDialog, useAsync, ThLabel } from '../../components/ui';
 import { ActivePill, RolePills, RowMenu, UserCell, lastSeen } from './parts';
 import type { LockReason } from '@shared/rbac';
 import { BulkRolesDialog } from './rbac/BulkRoles';
@@ -310,11 +310,21 @@ function UserList() {
                     onChange={toggleAll}
                   />
                 </th>
-                <th>Nome</th>
-                <th className="col-xl">E-mail</th>
-                <th className="col-roles col-md">Papéis</th>
-                <th className="col-status">Status</th>
-                <th className="col-seen col-lg">Último acesso</th>
+                <th>
+                  <ThLabel>Nome</ThLabel>
+                </th>
+                <th className="col-xl">
+                  <ThLabel>E-mail</ThLabel>
+                </th>
+                <th className="col-roles col-md">
+                  <ThLabel>Papéis</ThLabel>
+                </th>
+                <th className="col-status">
+                  <ThLabel>Status</ThLabel>
+                </th>
+                <th className="col-seen col-lg">
+                  <ThLabel>Último acesso</ThLabel>
+                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>

@@ -1,0 +1,296 @@
+/* =====================================================================
+   KpiFolderCard — MetricFolderCard do "Meu Dash" em tamanho compacto
+   (linhas de KPIs simples de todos os painéis). Mesmo desenho: superfície
+   na cor da marca com grade de linhas finas, rótulo em caixa alta, ícone em
+   quadrado translúcido, número grande, apoio e o anel brilhante. As cores
+   seguem a marca aplicada em runtime (--primary / --brand-h / --brand-s).
+   ===================================================================== */
+.kfc {
+  --kfc-bg: hsl(var(--primary));
+  --kfc-fg: hsl(var(--on-color));
+  --kfc-fg-soft: hsl(var(--on-color) / 0.9);
+  --kfc-fg-muted: hsl(var(--on-color) / 0.86);
+  --kfc-value: hsl(var(--on-color));
+  --kfc-light: hsl(var(--brand-h, 196) var(--brand-s, 100%) 80%);
+  --kfc-mid: hsl(var(--brand-h, 196) var(--brand-s, 100%) 62%);
+  --kfc-dark: hsl(var(--brand-h, 196) var(--brand-s, 100%) 24%);
+  --kfc-ring-track: hsl(var(--on-color));
+  --kfc-ring-start: hsl(var(--on-color));
+  --kfc-ring-text: hsl(var(--on-color));
+  --kfc-dot-core: hsl(var(--on-color));
+  --kfc-icon-bg: hsl(var(--on-color) / 0.14);
+  --kfc-icon-fg: hsl(var(--on-color));
+  --kfc-grade: hsl(var(--on-color) / 0.05);
+  --kfc-dot: hsl(var(--on-color) / 0.75);
+  --kfc-pill-bg: hsl(var(--on-color));
+  --kfc-pill-fg: var(--kfc-dark);
+  --kfc-borda: transparent;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 124px;
+  margin: 0;
+  padding: 15px 16px 14px;
+  border: 1px solid var(--kfc-borda);
+  border-radius: 18px;
+  overflow: hidden;
+  background-color: var(--kfc-bg);
+  background-image:
+    linear-gradient(var(--kfc-grade) 1px, transparent 1px),
+    linear-gradient(90deg, var(--kfc-grade) 1px, transparent 1px);
+  background-size: 28px 28px;
+  color: var(--kfc-fg);
+  font: inherit;
+  text-align: left;
+  container-type: inline-size;
+}
+
+/* Card branco com itens na cor da marca. */
+.kfc[data-scheme="brand-light"],
+.kfc[data-scheme="auto"]:nth-child(even of .kfc) {
+  --kfc-bg: hsl(var(--card));
+  --kfc-fg: hsl(var(--foreground));
+  --kfc-fg-soft: hsl(var(--brand-ink));
+  --kfc-fg-muted: hsl(var(--muted-foreground));
+  --kfc-value: hsl(var(--primary));
+  --kfc-light: hsl(var(--brand-h, 196) var(--brand-s, 100%) 62%);
+  --kfc-mid: hsl(var(--primary));
+  --kfc-ring-track: hsl(var(--primary));
+  --kfc-ring-start: hsl(var(--brand-h, 196) var(--brand-s, 100%) 88%);
+  --kfc-ring-text: hsl(var(--brand-ink));
+  --kfc-dot-core: hsl(var(--card));
+  --kfc-icon-bg: hsl(var(--accent));
+  --kfc-icon-fg: hsl(var(--primary));
+  --kfc-grade: hsl(var(--brand-h, 196) var(--brand-s, 100%) 47% / 0.06);
+  --kfc-dot: hsl(var(--primary));
+  --kfc-pill-bg: hsl(var(--primary));
+  --kfc-pill-fg: hsl(var(--primary-foreground));
+  --kfc-borda: hsl(var(--border));
+}
+
+/* Tom do ponto de status (a superfície não muda de cor). */
+.kfc [data-tone="success"] { --kfc-dot: hsl(var(--st-green-line)); }
+.kfc [data-tone="warning"] { --kfc-dot: hsl(var(--st-amber-solid)); }
+.kfc [data-tone="risk"] { --kfc-dot: hsl(var(--st-orange-line)); }
+.kfc [data-tone="danger"] { --kfc-dot: hsl(var(--st-red-line)); }
+.kfc[data-scheme="brand-light"] [data-tone="success"],
+.kfc[data-scheme="auto"]:nth-child(even of .kfc) [data-tone="success"] { --kfc-dot: hsl(var(--st-green-solid)); }
+.kfc[data-scheme="brand-light"] [data-tone="warning"],
+.kfc[data-scheme="auto"]:nth-child(even of .kfc) [data-tone="warning"] { --kfc-dot: hsl(var(--st-amber-solid)); }
+.kfc[data-scheme="brand-light"] [data-tone="risk"],
+.kfc[data-scheme="auto"]:nth-child(even of .kfc) [data-tone="risk"] { --kfc-dot: hsl(var(--st-orange-solid)); }
+.kfc[data-scheme="brand-light"] [data-tone="danger"],
+.kfc[data-scheme="auto"]:nth-child(even of .kfc) [data-tone="danger"] { --kfc-dot: hsl(var(--destructive)); }
+
+.kfc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  margin-bottom: 8px;
+}
+.kfc-head-left { display: flex; align-items: center; gap: 9px; min-width: 0; padding-top: 1px; }
+.kfc-head-right { display: flex; align-items: flex-start; gap: 6px; flex: none; }
+/* Ações pequenas do canto (drill-down etc.): círculo translúcido. */
+.kfc-head-right > a,
+.kfc-head-right > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--kfc-icon-bg);
+  color: var(--kfc-icon-fg);
+  cursor: pointer;
+  transition: transform 200ms ease, opacity 200ms ease;
+}
+.kfc-head-right > a:hover,
+.kfc-head-right > button:hover { transform: scale(1.08); }
+.kfc-head-right > a:focus-visible,
+.kfc-head-right > button:focus-visible { outline: 2px solid var(--kfc-icon-fg); outline-offset: 2px; }
+.kfc-head-right svg { width: 13px; height: 13px; }
+.kfc-label {
+  margin: 0;
+  min-width: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--kfc-fg-soft);
+  /* Quebra entre palavras; só hifeniza (pt-BR) se a palavra não couber. */
+  overflow-wrap: break-word;
+  -webkit-hyphens: auto;
+          hyphens: auto;
+}
+.kfc-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 10px;
+  background: var(--kfc-icon-bg);
+  color: var(--kfc-icon-fg);
+}
+.kfc-icon-svg { width: 17px; height: 17px; }
+.kfc-ring { display: inline-flex; flex: none; margin: -6px -4px -8px 0; }
+.kfc-ring svg { width: 52px; height: 52px; }
+.kfc-ring-text { fill: var(--kfc-ring-text); font-family: inherit; }
+
+.kfc-value {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--kfc-value);
+  overflow-wrap: anywhere;
+}
+.kfc-linha-valor { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px 10px; min-width: 0; }
+.kfc-trend { display: inline-flex; flex: none; padding-bottom: 2px; }
+.kfc-skel {
+  display: block;
+  width: 96px;
+  max-width: 70%;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--kfc-icon-bg);
+  animation: kfc-pulso 1.4s ease-in-out infinite;
+}
+@keyframes kfc-pulso { 50% { opacity: 0.45; } }
+.kfc-hint,
+.kfc-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin: 7px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--kfc-fg-muted);
+}
+.kfc-status { margin: 0; color: var(--kfc-fg); }
+.kfc-hint-text { min-width: 0; overflow-wrap: anywhere; }
+.kfc-dot { width: 7px; height: 7px; flex: none; border-radius: 999px; background: var(--kfc-dot); }
+.kfc-spacer { flex: 1; }
+.kfc-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.kfc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  margin-left: auto;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--kfc-pill-bg);
+  color: var(--kfc-pill-fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.kfc-pill svg { transition: transform 250ms ease; }
+.kfc-pill:hover svg { transform: translate(2px, -2px); }
+.kfc-pill:focus-visible { outline: 2px solid var(--kfc-pill-fg); outline-offset: 2px; }
+
+/* Card clicável (KPI que filtra/abre algo). */
+.kfc[data-clicavel] {
+  cursor: pointer;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease;
+}
+.kfc[data-clicavel]:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -18px hsl(var(--brand-h, 196) var(--brand-s, 100%) 28% / 0.6);
+}
+.kfc[data-clicavel]:hover .kfc-pill svg { transform: translate(2px, -2px); }
+.kfc[data-clicavel]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--primary) / 0.55);
+}
+.kfc[data-active] { box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--primary)); }
+
+/* Card estreito: com anel, o ícone da esquerda sai (o anel fica) e o
+   número encolhe — o rótulo não precisa quebrar no meio da palavra. */
+@container (max-width: 210px) {
+  .kfc-head-left .kfc-icon { display: none; }
+  .kfc-value { font-size: 26px; }
+}
+@container (max-width: 150px) {
+  .kfc-ring svg { width: 44px; height: 44px; }
+  .kfc-label { letter-spacing: 0.1em; }
+}
+
+/* Mini ("sm"): coluna centralizada — no topo o anel (ou o ícone), depois o
+   rótulo, o número e a linha de apoio numa linha só. */
+.kfc[data-size="sm"] {
+  align-items: center;
+  min-height: 0;
+  padding: 12px 10px 11px;
+  border-radius: 14px;
+  background-size: 22px 22px;
+  text-align: center;
+}
+.kfc[data-size="sm"] .kfc-head {
+  flex-direction: column-reverse;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  min-height: 0;
+  margin-bottom: 4px;
+}
+.kfc[data-size="sm"] .kfc-head-left { justify-content: center; padding-top: 0; }
+.kfc[data-size="sm"] .kfc-head-left .kfc-icon { display: none; }
+.kfc[data-size="sm"] .kfc-icon { width: 28px; height: 28px; border-radius: 9px; }
+.kfc[data-size="sm"] .kfc-icon-svg { width: 14px; height: 14px; }
+.kfc[data-size="sm"] .kfc-ring { margin: -2px 0 -3px; }
+.kfc[data-size="sm"] .kfc-ring svg { width: 36px; height: 36px; }
+/* Rótulo sempre na altura de 2 linhas: os números ficam alinhados na faixa. */
+.kfc[data-size="sm"] .kfc-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.6em;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+.kfc[data-size="sm"] .kfc-linha-valor { justify-content: center; }
+.kfc[data-size="sm"] .kfc-value { font-size: 20px; }
+.kfc[data-size="sm"] .kfc-hint {
+  justify-content: center;
+  max-width: 100%;
+  margin-top: 3px;
+  font-size: 10.5px;
+}
+.kfc[data-size="sm"] .kfc-hint .kfc-hint-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kfc[data-size="sm"] .kfc-dot { width: 6px; height: 6px; }
+.kfc[data-size="sm"] .kfc-skel { width: 48px; height: 20px; margin: 2px auto 0; border-radius: 7px; }
+
+@media (max-width: 639px) {
+  .kfc { min-height: 112px; padding: 13px 14px 12px; border-radius: 16px; }
+  .kfc-value { font-size: 26px; }
+  .kfc-icon { width: 30px; height: 30px; border-radius: 9px; }
+  .kfc-icon-svg { width: 15px; height: 15px; }
+  .kfc-ring svg { width: 46px; height: 46px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kfc-skel { animation: none; }
+  .kfc[data-clicavel],
+  .kfc-pill svg { transition: none; }
+  .kfc[data-clicavel]:hover { transform: none; }
+}

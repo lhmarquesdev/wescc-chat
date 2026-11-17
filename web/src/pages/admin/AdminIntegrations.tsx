@@ -3,7 +3,7 @@ import { api, errorMessage } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
 import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
-import { Empty, Field, Modal, Pager, SkeletonList, SkeletonTable, Tabs, Toggle, confirmDialog, useAsync } from '../../components/ui';
+import { Empty, Field, Modal, Pager, SkeletonList, SkeletonTable, Tabs, Toggle, confirmDialog, useAsync, ThLabel } from '../../components/ui';
 import { ActivePill, PageHead, RoomCell, TableWrap } from './parts';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
@@ -81,11 +81,19 @@ export function AdminIntegrations() {
           <table className="table stack kv">
             <thead>
               <tr>
-                <th>Nome</th>
+                <th>
+                  <ThLabel>Nome</ThLabel>
+                </th>
                 <th>{tab === 'webhook-incoming' ? 'Canal' : 'Evento'}</th>
-                <th className="col-lg">Publica como</th>
-                <th>Status</th>
-                <th className="col-xl">Criada</th>
+                <th className="col-lg">
+                  <ThLabel>Publica como</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Status</ThLabel>
+                </th>
+                <th className="col-xl">
+                  <ThLabel>Criada</ThLabel>
+                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>

@@ -4,7 +4,7 @@ import { api, ApiError, errorMessage } from '../../../lib/api';
 import { formatDateTime, formatDuration } from '../../../lib/format';
 import { useStore } from '../../../lib/store';
 import { Icon } from '../../../components/Icon';
-import { Empty, Field, Modal, Pager, SkeletonTable, Tabs, useAsync } from '../../../components/ui';
+import { Empty, Field, Modal, Pager, SkeletonTable, Tabs, useAsync, ThLabel } from '../../../components/ui';
 import { SettingInput } from '../AdminSettings';
 import type { LdapSettings } from './index';
 
@@ -243,16 +243,36 @@ export function LdapSync({ s, status, statusError, reloadStatus, active }: { s: 
             <table className="table ldap-history">
               <thead>
                 <tr>
-                  <th>Início</th>
-                  <th className="ldap-opt">Origem</th>
-                  <th>Situação</th>
-                  <th className="ldap-opt ldap-wide">Duração</th>
-                  <th className="ldap-mid">Resumo</th>
-                  <th className="ldap-opt ldap-wide num">Novos</th>
-                  <th className="ldap-opt ldap-wide num">Atualizados</th>
-                  <th className="ldap-opt ldap-wide num">Desativados</th>
-                  <th className="ldap-opt ldap-wide num">Reativados</th>
-                  <th className="num">Erros</th>
+                  <th>
+                    <ThLabel>Início</ThLabel>
+                  </th>
+                  <th className="ldap-opt">
+                    <ThLabel>Origem</ThLabel>
+                  </th>
+                  <th>
+                    <ThLabel>Situação</ThLabel>
+                  </th>
+                  <th className="ldap-opt ldap-wide">
+                    <ThLabel>Duração</ThLabel>
+                  </th>
+                  <th className="ldap-mid">
+                    <ThLabel>Resumo</ThLabel>
+                  </th>
+                  <th className="ldap-opt ldap-wide num">
+                    <ThLabel>Novos</ThLabel>
+                  </th>
+                  <th className="ldap-opt ldap-wide num">
+                    <ThLabel>Atualizados</ThLabel>
+                  </th>
+                  <th className="ldap-opt ldap-wide num">
+                    <ThLabel>Desativados</ThLabel>
+                  </th>
+                  <th className="ldap-opt ldap-wide num">
+                    <ThLabel>Reativados</ThLabel>
+                  </th>
+                  <th className="num">
+                    <ThLabel>Erros</ThLabel>
+                  </th>
                 </tr>
               </thead>
               <tbody>

@@ -1064,10 +1064,22 @@ export function Pager({
   onCountChange?: (n: number) => void;
 }) {
   if (total <= count && !onCountChange) return null;
+  const page = Math.floor(offset / count) + 1;
+  const pages = Math.max(1, Math.ceil(total / count));
+  // Janela de até 5 números em volta da página atual, com a primeira e a última sempre à vista.
+  const nums: (number | 'gap')[] = [];
+  for (let n = 1; n <= pages; n++) {
+    if (n === 1 || n === pages || Math.abs(n - page) <= 1 || (page <= 3 && n <= 4) || (page >= pages - 2 && n >= pages - 3)) nums.push(n);
+    else if (nums[nums.length - 1] !== 'gap') nums.push('gap');
+  }
   return (
     <div className="pager">
       <span className="pager-range">
-        Mostrando {nf.format(Math.min(offset + 1, total))}–{nf.format(Math.min(offset + count, total))} de {nf.format(total)}
+        Mostrando{' '}
+        <b>
+          {nf.format(Math.min(offset + 1, total))}–{nf.format(Math.min(offset + count, total))}
+        </b>{' '}
+        de <b>{nf.format(total)}</b>
       </span>
       {onCountChange && (
         <span className="pager-sizes" role="group" aria-label="Itens por página">
@@ -1079,15 +1091,80 @@ export function Pager({
           ))}
         </span>
       )}
-      <button type="button" className="btn small" title="Página anterior" aria-label="Página anterior" disabled={offset === 0} onClick={() => onChange(Math.max(0, offset - count))}>
-        <Icon name="prev" />
-      </button>
-      <span className="pager-page">
-        {nf.format(Math.floor(offset / count) + 1)} / {nf.format(Math.max(1, Math.ceil(total / count)))}
+      <span className="pager-nums">
+        <button type="button" className="btn small" title="Página anterior" aria-label="Página anterior" disabled={offset === 0} onClick={() => onChange(Math.max(0, offset - count))}>
+          <Icon name="prev" />
+        </button>
+        {nums.map((n, i) =>
+          n === 'gap' ? (
+            <span key={`g${i}`} className="pager-gap" aria-hidden="true">
+              …
+            </span>
+          ) : (
+            <button key={n} type="button" className="pager-num" aria-label={`Página ${n}`} aria-current={n === page ? 'page' : undefined} onClick={() => onChange((n - 1) * count)}>
+              {nf.format(n)}
+            </button>
+          ),
+        )}
+        <button type="button" className="btn small" title="Próxima página" aria-label="Próxima página" disabled={offset + count >= total} onClick={() => onChange(offset + count)}>
+          <Icon name="next" />
+        </button>
       </span>
-      <button type="button" className="btn small" title="Próxima página" aria-label="Próxima página" disabled={offset + count >= total} onClick={() => onChange(offset + count)}>
-        <Icon name="next" />
-      </button>
     </div>
+  );
+}
+
+/** KPI no padrão único do Atendeti (KpiFolderCard): irmãos alternam marca e marca clara. */
+export function Kpi({ label, value, icon, hint, unit, dot }: { label: ReactNode; value: ReactNode; icon?: IconName; hint?: ReactNode; unit?: ReactNode; dot?: string }) {
+  return (
+    <div className="kfc" data-scheme="auto">
+      <div className="kfc-head">
+        <div className="kfc-head-left">
+          <p className="kfc-label">{label}</p>
+        </div>
+        {(icon || dot) && (
+          <div className="kfc-head-right">
+            <span className="kfc-icon">{icon ? <Icon name={icon} className="kfc-icon-svg" /> : <span className={`status-dot ${dot}`} aria-hidden="true" />}</span>
+          </div>
+        )}
+      </div>
+      <div className="kfc-linha-valor">
+        <p className="kfc-value">{value}</p>
+        {unit && <span className="kfc-trend">{unit}</span>}
+      </div>
+      {hint && (
+        <p className="kfc-hint">
+          <span className="kfc-hint-text">{hint}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Ícone do cabeçalho de coluna, escolhido pelo assunto do rótulo (Atendeti: todo cabeçalho tem ícone de 14px e rótulo).
+const TH_ICONS: [RegExp, IconName][] = [
+  [/e-?mail/i, 'email'],
+  [/nome|pessoa|usu[aá]rio|quem|login|por$|como$/i, 'account'],
+  [/pap[eé]/i, 'admin-permissions'],
+  [/situa|status|aviso/i, 'admin-engagement'],
+  [/sala|cana(l|is)|alvo/i, 'room-channel'],
+  [/time/i, 'room-team'],
+  [/mensag|motivo|detalhe|resumo|o qu[eê]/i, 'nav-chats'],
+  [/membro|pessoas/i, 'admin-users'],
+  [/quando|[uú]ltim|criad|expira|in[ií]cio|iniciada$|desde|atualizad|dura[cç]|per[ií]odo/i, 'cal-time'],
+  [/tipo|regra|evento|a[cç][aã]o|bot[aã]o/i, 'tag'],
+  [/dispositivo/i, 'devices'],
+  [/arquivo|figurinha|itens/i, 'file'],
+  [/url|link|origem|host|provedor|ip|id|pid/i, 'link'],
+  [/projeto/i, 'int-jira'],
+  [/erro|den[uú]ncia/i, 'warning'],
+];
+export function ThLabel({ children, icon }: { children: string; icon?: IconName }) {
+  const found = icon ?? TH_ICONS.find(([re]) => re.test(children))?.[1] ?? 'sort';
+  return (
+    <span className="th-label">
+      <Icon name={found} />
+      {children}
+    </span>
   );
 }

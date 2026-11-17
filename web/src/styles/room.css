@@ -125,7 +125,7 @@
   padding: 0 8px;
   border-radius: 9px;
   background: hsl(var(--st-red-solid));
-  color: #fff;
+  color: hsl(var(--on-color));
   font-size: var(--fs-11);
   line-height: var(--lh-11);
   font-weight: var(--fw-semibold);
@@ -955,11 +955,11 @@ button.reaction:hover {
   border: 0;
   border-radius: var(--radius-sm);
   background: rgb(0 0 0 / 0.55);
-  color: #fff;
+  color: hsl(var(--on-color));
 }
 .glass-btn:hover {
   background: rgb(0 0 0 / 0.7);
-  color: #fff;
+  color: hsl(var(--on-color));
 }
 .att-thumb-box {
   flex-shrink: 0;
@@ -1429,7 +1429,7 @@ a.att-title {
   height: 56px;
   padding: 0 12px 0 16px;
   background: rgb(0 0 0 / 0.6);
-  color: #fff;
+  color: hsl(var(--on-color));
   cursor: default;
 }
 .lightbox-who {
@@ -1479,11 +1479,11 @@ a.att-title {
   border: 0;
   border-radius: var(--radius-md);
   background: rgb(255 255 255 / 0.1);
-  color: #fff;
+  color: hsl(var(--on-color));
 }
 .lightbox-btn:hover {
   background: rgb(255 255 255 / 0.2);
-  color: #fff;
+  color: hsl(var(--on-color));
 }
 
 /* ---------- Compositor ---------- */

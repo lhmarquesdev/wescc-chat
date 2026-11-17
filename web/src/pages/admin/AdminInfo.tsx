@@ -1,23 +1,9 @@
-import type { ReactNode } from 'react';
 import { api } from '../../lib/api';
 import { formatBytes, formatDateTime } from '../../lib/format';
-import { Icon, type IconName } from '../../components/Icon';
-import { SkeletonStats, useAsync } from '../../components/ui';
+import { Kpi, SkeletonStats, useAsync, ThLabel } from '../../components/ui';
 import { PageHead, TableWrap, num } from './parts';
 
-// Rótulo primeiro (com ícone de 16px ou o ponto de presença), valor grande embaixo.
-function Stat({ label, value, icon, dot }: { label: string; value: ReactNode; icon?: IconName; dot?: string }) {
-  return (
-    <div className="stat">
-      <div className="stat-value">{value}</div>
-      <div className="stat-label">
-        {icon && <Icon name={icon} />}
-        {dot && <span className={`status-dot ${dot}`} aria-hidden="true" />}
-        {label}
-      </div>
-    </div>
-  );
-}
+const Stat = Kpi;
 
 export function AdminInfo() {
   const { data, loading } = useAsync(() => api.get('statistics'), []);
@@ -35,7 +21,7 @@ export function AdminInfo() {
       <PageHead title="Informações" />
       <section className="admin-section">
         <h2 className="section-title">Usuários</h2>
-        <div className="stats">
+        <div className="stats kpis">
           <Stat icon="admin-users" label="Total" value={num(data.users.total)} />
           <Stat icon="success" label="Ativos" value={num(data.users.active)} />
           <Stat icon="disabled-user" label="Desativados" value={num(data.users.inactive)} />
@@ -48,7 +34,7 @@ export function AdminInfo() {
       </section>
       <section className="admin-section">
         <h2 className="section-title">Salas e mensagens</h2>
-        <div className="stats">
+        <div className="stats kpis">
           <Stat icon="rooms-all" label="Salas" value={num(data.rooms.total)} />
           <Stat icon="room-channel" label="Canais" value={num(data.rooms.channels)} />
           <Stat icon="room-private" label="Grupos privados" value={num(data.rooms.private_groups)} />
@@ -60,18 +46,14 @@ export function AdminInfo() {
           <Stat
             icon="panel-files"
             label="Arquivos"
-            value={
-              <>
-                {num(data.uploads.total)}
-                <span className="stat-unit">{formatBytes(data.uploads.totalSize)}</span>
-              </>
-            }
+            value={num(data.uploads.total)}
+            hint={formatBytes(data.uploads.totalSize)}
           />
         </div>
       </section>
       <section className="admin-section">
         <h2 className="section-title">Servidor</h2>
-        <div className="stats">
+        <div className="stats kpis">
           <Stat icon="server" label="Versão" value="0.1.0" />
           <Stat icon="code" label="Node.js" value={data.process.nodeVersion ?? '—'} />
           <Stat icon="last-seen" label="Em execução há" value={up < 60 ? `${up} min` : `${Math.round(up / 60)} h`} />
@@ -90,11 +72,21 @@ export function AdminInfo() {
             <table className="table stack kv">
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Host</th>
-                  <th className="num col-md">PID</th>
-                  <th className="col-lg">Iniciada</th>
-                  <th>Último sinal</th>
+                  <th>
+                    <ThLabel>ID</ThLabel>
+                  </th>
+                  <th>
+                    <ThLabel>Host</ThLabel>
+                  </th>
+                  <th className="num col-md">
+                    <ThLabel>PID</ThLabel>
+                  </th>
+                  <th className="col-lg">
+                    <ThLabel>Iniciada</ThLabel>
+                  </th>
+                  <th>
+                    <ThLabel>Último sinal</ThLabel>
+                  </th>
                 </tr>
               </thead>
               <tbody>

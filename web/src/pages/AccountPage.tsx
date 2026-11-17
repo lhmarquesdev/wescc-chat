@@ -9,7 +9,7 @@ import { useSetting, useStore } from '../lib/store';
 import { useLanguages, useTranslateAllowed } from '../lib/translate';
 import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
 import { normalizeLang } from '@shared/translate';
-import { Avatar, Empty, Field, Modal, Segmented, SkeletonList, SkeletonTable, Toggle, confirmDialog, useAsync } from '../components/ui';
+import { Avatar, Empty, Field, Modal, Segmented, SkeletonList, SkeletonTable, Toggle, confirmDialog, useAsync, ThLabel } from '../components/ui';
 import { useMedia } from '../components/overlay';
 import { Icon } from '../components/Icon';
 import { SideBrand, TakeoverBack, TakeoverHead } from '../components/Sidebar';
@@ -791,9 +791,15 @@ function Devices() {
           <table className="table stack kv">
             <thead>
               <tr>
-                <th>Dispositivo</th>
-                <th>Último uso</th>
-                <th className="col-lg">Login</th>
+                <th>
+                  <ThLabel>Dispositivo</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Último uso</ThLabel>
+                </th>
+                <th className="col-lg">
+                  <ThLabel>Login</ThLabel>
+                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>
@@ -950,9 +956,15 @@ function Tokens() {
           <table className="table stack kv">
             <thead>
               <tr>
-                <th>Nome</th>
-                <th>Criado</th>
-                <th>Último uso</th>
+                <th>
+                  <ThLabel>Nome</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Criado</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Último uso</ThLabel>
+                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>

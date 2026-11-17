@@ -4,7 +4,7 @@ import { api, errorMessage } from '../../lib/api';
 import { useSetting, useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { ProviderIcon } from '../../components/BrandIcons';
-import { Empty, Field, Modal, SkeletonTable, Tabs, Toggle, confirmDialog, useAsync } from '../../components/ui';
+import { Empty, Field, Modal, SkeletonTable, Tabs, Toggle, confirmDialog, useAsync, ThLabel } from '../../components/ui';
 import { ActivePill, PageHead, TableWrap } from './parts';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
@@ -97,11 +97,21 @@ export function AdminOAuth() {
           <table className="table stack kv">
             <thead>
               <tr>
-                <th>Provedor</th>
-                <th>ID</th>
-                <th>Botão</th>
-                <th>Status</th>
-                <th>URL de callback</th>
+                <th>
+                  <ThLabel>Provedor</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>ID</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Botão</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>Status</ThLabel>
+                </th>
+                <th>
+                  <ThLabel>URL de callback</ThLabel>
+                </th>
               </tr>
             </thead>
             <tbody>
