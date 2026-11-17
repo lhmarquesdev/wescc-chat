@@ -298,10 +298,6 @@
     background: hsl(var(--card));
     text-align: center;
   }
-  .auth-art .brand-mark {
-    border-radius: 28px;
-    box-shadow: 0 30px 60px -24px hsl(234 60% 45% / 0.55);
-  }
   .auth-art-name {
     font-family: var(--font-display);
     font-size: 56px;
@@ -586,9 +582,6 @@ a.crumb:hover {
 }
 .side-brand:hover {
   text-decoration: none;
-}
-.side-brand .brand-mark {
-  box-shadow: 0 0 0 1px hsl(0 0% 100% / 0.22);
 }
 .side-title {
   min-width: 0;

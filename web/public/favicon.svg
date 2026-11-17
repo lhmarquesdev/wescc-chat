@@ -1,16 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -17.25 114.5 114.5" stroke-linejoin="round" stroke-width="3">
   <defs>
-    <linearGradient id="mark-fill" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5b6bf0"/>
-      <stop offset="1" stop-color="#3240b5"/>
+    <linearGradient id="fold" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#0072b0"/>
+      <stop offset="1" stop-color="#00b0f0"/>
     </linearGradient>
-    <clipPath id="mark-clip"><rect width="28" height="28" rx="8"/></clipPath>
   </defs>
-  <rect width="28" height="28" rx="8" fill="url(#mark-fill)"/>
-  <path class="mark-highlight" clip-path="url(#mark-clip)" fill="#fff" fill-opacity=".18" fill-rule="evenodd" d="M8 0h12a8 8 0 0 1 8 8v12a8 8 0 0 1-8 8H8a8 8 0 0 1-8-8V8a8 8 0 0 1 8-8zM8 1h12a8 8 0 0 1 8 8v12a8 8 0 0 1-8 8H8a8 8 0 0 1-8-8V9a8 8 0 0 1 8-8z"/>
-  <g fill="#fff" transform="translate(6 6)">
-    <rect x="2" y="2.5" width="12" height="2.5" rx="1.25"/>
-    <rect x="2" y="6.75" width="8.5" height="2.5" rx="1.25"/>
-    <rect x="2" y="11" width="12" height="2.5" rx="1.25"/>
+  <g class="mark-fold" fill="url(#fold)" stroke="url(#fold)">
+    <polygon points="0,0 18,0 31.6,80 13.6,80"/>
+    <polygon points="42.6,22 60.6,22 70.46,80 52.46,80"/>
+  </g>
+  <g class="mark-flat" fill="#00b0f0" stroke="#00b0f0">
+    <polygon points="13.6,80 31.6,80 60.6,22 42.6,22"/>
+    <polygon points="52.46,80 70.46,80 110.46,0 92.46,0"/>
   </g>
 </svg>

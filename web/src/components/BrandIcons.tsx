@@ -1,4 +1,5 @@
 import type { OAuthProviderType } from '@shared/index';
+import { useId } from 'react';
 import { Icon, type IconSize } from './Icon';
 
 // Marcas dos provedores de login. GitHub, GitLab e Google vêm do Simple Icons (CC0-1.0), em currentColor;
@@ -58,15 +59,29 @@ export function MicrosoftIcon({ size = 18, label }: { size?: number; label?: str
   );
 }
 
-// A marca do produto, o logo padrão: quadrado com gradiente e as três barras de um "E" (que também lembram linhas de conversa).
+// A marca do produto, na linha do logo do Atendeti: um monograma inclinado de fita dobrada, sem moldura.
+// O "W" tem os traços que sobem na cor da marca e os que descem em degradê mais escuro (a dobra da fita).
+// As cores vêm de --mark-flat, --mark-fold-a e --mark-fold-b (base.css): azul da marca no claro, branco sobre a marca.
 // O mesmo desenho está em public/favicon.svg, de onde saem os ícones do PWA (scripts/visual/brand-icons.mjs).
 export function BrandMark({ size = 28 }: { size?: number }) {
+  const id = useId();
   return (
-    <span className="brand-mark" style={{ width: size, height: size }} aria-hidden="true">
-      <svg viewBox="0 0 16 16" fill="#fff" focusable="false">
-        <rect x="2" y="2.5" width="12" height="2.5" rx="1.25" />
-        <rect x="2" y="6.75" width="8.5" height="2.5" rx="1.25" />
-        <rect x="2" y="11" width="12" height="2.5" rx="1.25" />
+    <span className="brand-mark" style={{ height: size, width: Math.round((size * 114.5) / 84) }} aria-hidden="true">
+      <svg viewBox="-2 -2 114.5 84" strokeLinejoin="round" strokeWidth="3" focusable="false">
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="0.35" y2="1">
+            <stop offset="0" style={{ stopColor: 'var(--mark-fold-a)' }} />
+            <stop offset="1" style={{ stopColor: 'var(--mark-fold-b)' }} />
+          </linearGradient>
+        </defs>
+        <g fill={`url(#${id})`} stroke={`url(#${id})`}>
+          <polygon points="0,0 18,0 31.6,80 13.6,80" />
+          <polygon points="42.6,22 60.6,22 70.46,80 52.46,80" />
+        </g>
+        <g style={{ fill: 'var(--mark-flat)', stroke: 'var(--mark-flat)' }}>
+          <polygon points="13.6,80 31.6,80 60.6,22 42.6,22" />
+          <polygon points="52.46,80 70.46,80 110.46,0 92.46,0" />
+        </g>
       </svg>
     </span>
   );
