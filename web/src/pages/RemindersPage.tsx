@@ -133,7 +133,7 @@ export function RemindersPage() {
     <div className="page reminders-page">
       <TakeoverHead title="Lembretes" />
       <header className="page-head">
-        <h1>Lembretes</h1>
+        <h1 data-eyebrow="Organização">Lembretes</h1>
       </header>
       <div className="page-body">
         {!reminders.length ? (

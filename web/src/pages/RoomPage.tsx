@@ -602,7 +602,7 @@ export function RoomPage() {
                 <Icon name={roomIconName(room)} size={20} />
               </span>
             )}
-            <div className="room-title">
+            <div className="room-title" data-eyebrow={room.t === 'd' ? 'Conversa direta' : room.prid ? 'Discussão' : room.teamMain ? 'Time' : room.notice ? 'Canal de avisos' : room.t === 'p' ? 'Canal privado' : 'Canal'}>
               <div className="room-name">
                 <span className="room-name-text">{name}</span>
                 {sub?.f && (

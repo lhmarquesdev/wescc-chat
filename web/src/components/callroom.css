@@ -11,8 +11,8 @@
   padding: 0 var(--space-3) 0 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-full);
-  background: var(--ok-solid);
-  color: var(--fg-on-accent);
+  background: hsl(var(--primary));
+  color: hsl(var(--on-color));
   font: inherit;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
@@ -24,18 +24,18 @@
     border-color var(--dur-1) linear;
 }
 .call-join-pill:where(:hover) {
-  background: color-mix(in srgb, var(--ok-solid) 88%, var(--fg));
+  background: color-mix(in srgb, hsl(var(--primary)) 88%, hsl(var(--foreground)));
 }
 .call-join-pill:focus-visible {
   outline: 2px solid transparent;
-  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+  box-shadow: var(--focus-ring);
 }
 .call-join-count {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: color-mix(in srgb, var(--fg-on-accent) 22%, transparent);
+  background: color-mix(in srgb, hsl(var(--on-color)) 22%, transparent);
   font-size: var(--fs-11);
   line-height: 18px;
   text-align: center;
@@ -43,25 +43,25 @@
 }
 /* Já estou nesta chamada: a pílula só abre a janela. */
 .call-join-pill.in {
-  background: var(--ok-soft);
-  border-color: color-mix(in srgb, var(--ok) 35%, transparent);
-  color: var(--ok);
+  background: hsl(var(--primary) / 0.1);
+  border-color: color-mix(in srgb, hsl(var(--brand-ink-2)) 35%, transparent);
+  color: hsl(var(--brand-ink-2));
 }
 .call-join-pill.in:where(:hover) {
-  background: color-mix(in srgb, var(--ok-soft) 80%, var(--ok));
+  background: color-mix(in srgb, hsl(var(--primary) / 0.1) 80%, hsl(var(--brand-ink-2)));
 }
 .call-join-pill.in .call-join-count {
-  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  background: color-mix(in srgb, hsl(var(--brand-ink-2)) 16%, transparent);
 }
 /* Barrada (motivo no leitor de tela e num aviso ao clicar): continua focável. */
 .call-join-pill[aria-disabled='true'] {
-  background: var(--bg-muted);
-  border-color: var(--border);
-  color: var(--fg-muted);
+  background: hsl(var(--muted));
+  border-color: hsl(var(--border));
+  color: hsl(var(--muted-foreground));
   cursor: not-allowed;
 }
 .call-join-pill[aria-disabled='true'] .call-join-count {
-  background: var(--border);
+  background: hsl(var(--border));
 }
 /* No toque a pílula mantém os 32 px à vista; a área cresce para 44 px por baixo, como os botões pequenos. */
 @media (pointer: coarse) {
@@ -81,26 +81,26 @@
 /* Entrar numa chamada viva tem um só jeito em toda a sala: o verde da pílula (faixa, cartão e "Em andamento").
    O barrado continua o de .btn. */
 .btn.call-join:not(:disabled, [aria-disabled='true']) {
-  background: var(--ok-solid);
+  background: hsl(var(--primary));
   border-color: transparent;
-  color: var(--fg-on-accent);
+  color: hsl(var(--on-color));
 }
 .btn.call-join:not(:disabled, [aria-disabled='true']):hover {
-  background: color-mix(in srgb, var(--ok-solid) 88%, var(--fg));
+  background: color-mix(in srgb, hsl(var(--primary)) 88%, hsl(var(--foreground)));
 }
 .btn.call-join:not(:disabled, [aria-disabled='true']):active {
-  background: color-mix(in srgb, var(--ok-solid) 80%, var(--fg));
+  background: color-mix(in srgb, hsl(var(--primary)) 80%, hsl(var(--foreground)));
 }
 /* Iniciar barrado no cabeçalho: o mesmo cursor da pílula, da faixa e do menu. */
 .icon-btn.call-start[aria-disabled='true'] {
   cursor: not-allowed;
 }
 .menu button.call-menu-item[aria-disabled='true'] {
-  color: var(--fg-disabled);
+  color: hsl(var(--text-5));
   cursor: not-allowed;
 }
 .menu button.call-menu-item[aria-disabled='true'] .icon {
-  color: var(--fg-disabled);
+  color: hsl(var(--text-5));
 }
 /* O motivo dos itens barrados, logo abaixo deles (alinhado com o texto dos itens, depois do ícone). */
 .menu .call-menu-why {
@@ -108,7 +108,7 @@
   padding: 2px 10px var(--space-2) calc(10px + 16px + 10px);
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   white-space: normal;
 }
 .menu.sheet .call-menu-why {
@@ -123,12 +123,12 @@
   gap: var(--space-3);
   min-height: 52px;
   padding: var(--space-2) var(--space-3) var(--space-2) var(--space-5);
-  border-bottom: 1px solid var(--border);
-  background: var(--ok-soft);
-  color: var(--fg);
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--foreground));
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  --ring-offset: var(--ok-soft);
+  --ring-offset: hsl(var(--primary) / 0.1);
   animation: fade-in var(--dur-3) var(--ease-out);
 }
 .call-room-banner-icon {
@@ -138,8 +138,8 @@
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: var(--ok-solid);
-  color: var(--fg-on-accent);
+  background: hsl(var(--primary));
+  color: hsl(var(--on-color));
 }
 .call-room-banner-text {
   flex: 1;
@@ -154,7 +154,7 @@
   white-space: nowrap;
 }
 .call-room-banner-meta {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -164,7 +164,7 @@
   margin-top: 2px;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-room-banner-people {
   display: flex;
@@ -174,7 +174,7 @@
   margin-left: -6px;
 }
 .call-room-banner-people .avatar {
-  box-shadow: 0 0 0 2px var(--ok-soft);
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.1);
 }
 .call-room-banner > .btn {
   flex-shrink: 0;
@@ -184,15 +184,15 @@
 }
 /* Pausada pela trava: cor de aviso; o Entrar fica (um supervisor destrava ao entrar). */
 .call-room-banner.warn {
-  background: var(--warn-soft);
-  --ring-offset: var(--warn-soft);
+  background: hsl(var(--st-amber-soft));
+  --ring-offset: hsl(var(--st-amber-soft));
 }
 .call-room-banner.warn .call-room-banner-icon {
-  background: var(--warn-solid);
-  color: var(--warn-on-solid);
+  background: hsl(var(--warning));
+  color: hsl(var(--warning-foreground));
 }
 .call-room-banner.warn .call-room-banner-people .avatar {
-  box-shadow: 0 0 0 2px var(--warn-soft);
+  box-shadow: 0 0 0 2px hsl(var(--st-amber-soft));
 }
 @media (max-width: 760px) {
   /* Uma linha só: sem rostos, o motivo some atrás do aviso do botão. */
@@ -258,12 +258,12 @@
   width: 420px;
 }
 .call-card.group .call-card-tile {
-  background: var(--bg-muted);
-  color: var(--fg-muted);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 .call-card.group.live .call-card-tile {
-  background: var(--ok-solid);
-  color: var(--fg-on-accent);
+  background: hsl(var(--primary));
+  color: hsl(var(--on-color));
 }
 .call-card.group .call-card-meta {
   font-variant-numeric: tabular-nums;
@@ -275,7 +275,7 @@
   margin-top: var(--space-1);
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-card-faces {
   display: flex;
@@ -284,7 +284,7 @@
   margin-left: calc(var(--space-1-5) * -1);
 }
 .call-card-faces .avatar {
-  box-shadow: 0 0 0 2px var(--bg-surface);
+  box-shadow: 0 0 0 2px hsl(var(--card));
 }
 .call-card-reason {
   margin-top: 2px;
@@ -298,16 +298,16 @@
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;
-  color: var(--call-accept);
+  color: hsl(var(--st-green-solid));
 }
 .side-live.in {
-  color: var(--ok);
+  color: hsl(var(--brand-ink-2));
 }
 .in-call-badge {
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;
-  color: var(--ok);
+  color: hsl(var(--brand-ink-2));
   vertical-align: -2px;
 }
 .user-card-status .in-call-badge,
@@ -353,12 +353,12 @@
   width: 40px;
   height: 40px;
   border-radius: var(--radius-md);
-  background: var(--bg-muted);
-  color: var(--fg-muted);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 .calls-live .calls-room-tile {
-  background: var(--ok-solid);
-  color: var(--fg-on-accent);
+  background: hsl(var(--primary));
+  color: hsl(var(--on-color));
 }
 .call-list-meta.tabular {
   font-variant-numeric: tabular-nums;
@@ -401,7 +401,7 @@
   line-height: var(--lh-14);
 }
 .admin-calls-rows dt {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .admin-calls-rows dd {
   margin: 0;
@@ -413,7 +413,7 @@
   display: block;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .admin-calls-actions {
   display: flex;

@@ -19,9 +19,9 @@
   width: 100%;
   height: 280px;
   padding: var(--space-5) var(--space-4);
-  border: 2px dashed var(--border-strong);
+  border: 2px dashed hsl(var(--line-2));
   border-radius: var(--radius-lg);
-  background: var(--bg-subtle);
+  background: hsl(var(--surface-2));
   text-align: center;
   transition:
     background-color var(--dur-1) linear,
@@ -31,8 +31,8 @@
   height: 220px;
 }
 .stk-drop.over {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.1);
 }
 /* A área já diz o que fazer: o status do FileButton ("Nenhum arquivo selecionado") só repetiria. */
 .stk-drop .file-name {
@@ -40,29 +40,29 @@
 }
 .stk-drop-icon {
   display: inline-flex;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .stk-drop.over .stk-drop-icon {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .stk-drop-title {
   margin: 0;
   font-size: var(--fs-15);
   line-height: var(--lh-15);
   font-weight: var(--fw-medium);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .stk-drop-or {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .stk-drop-hint {
   max-width: 400px;
   margin: var(--space-1) 0 0;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 
 /* ---------- Editor: duas colunas ---------- */
@@ -87,7 +87,7 @@
   height: 360px;
   overflow: hidden;
   border-radius: var(--radius-lg);
-  background: repeating-conic-gradient(var(--bg-muted) 0 25%, var(--bg-subtle) 0 50%) 0 0 / 16px 16px;
+  background: repeating-conic-gradient(hsl(var(--muted)) 0 25%, hsl(var(--surface-2)) 0 50%) 0 0 / 16px 16px;
   touch-action: none;
   user-select: none;
   cursor: grab;
@@ -114,8 +114,8 @@
 }
 .stk-crop {
   position: absolute;
-  border: 1px solid var(--accent);
-  box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--bg-canvas) 55%, transparent);
+  border: 1px solid hsl(var(--primary));
+  box-shadow: 0 0 0 100vmax color-mix(in srgb, hsl(var(--background)) 55%, transparent);
   cursor: move;
 }
 .stk-stage[data-tool] .stk-crop {
@@ -125,17 +125,17 @@
 .stk-crop:focus-visible {
   box-shadow:
     0 0 0 2px var(--ring-offset),
-    0 0 0 4px var(--focus),
-    0 0 0 100vmax color-mix(in srgb, var(--bg-canvas) 55%, transparent);
+    0 0 0 4px hsl(var(--ring)),
+    0 0 0 100vmax color-mix(in srgb, hsl(var(--background)) 55%, transparent);
 }
 .stk-handle {
   position: absolute;
   width: 12px;
   height: 12px;
   margin: -6px 0 0 -6px;
-  border: 1px solid var(--accent);
+  border: 1px solid hsl(var(--primary));
   border-radius: 2px;
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
 }
 /* Área de toque de 44 px em volta da alça de 12 px. */
 .stk-handle::before {
@@ -190,9 +190,9 @@
 }
 .stk-brush-cursor {
   position: absolute;
-  border: 1px solid var(--fg);
+  border: 1px solid hsl(var(--foreground));
   border-radius: 50%;
-  box-shadow: 0 0 0 1px var(--bg-raised);
+  box-shadow: 0 0 0 1px hsl(var(--popover));
   pointer-events: none;
 }
 .stk-tools {
@@ -224,7 +224,7 @@
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   font-weight: var(--fw-semibold);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .stk-section-body {
   display: flex;
@@ -262,23 +262,23 @@
   margin: 0;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .stk-toggle-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-height: var(--control-sm);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .stk-toggle-row > :not(.icon) {
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 /* Ferramenta ligada (Apagar área, Pincel): o mesmo destaque de um chip escolhido. */
 .btn.stk-tool[aria-pressed='true'] {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  border-color: color-mix(in srgb, hsl(var(--primary)) 45%, transparent);
+  color: hsl(var(--brand-ink-2));
 }
 .stk-range {
   display: grid;
@@ -288,7 +288,7 @@
   min-height: var(--control-sm);
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 /* Desenhado com tokens nos dois temas: trilho --bg-muted, parte preenchida e alça em --accent (--stk-fill vem do componente).
    [type] no seletor: vence a caixa dos campos (:read-only e :disabled pintam o fundo). */
@@ -306,25 +306,25 @@
 .stk-range input::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: var(--radius-full);
-  background: linear-gradient(to right, var(--accent) var(--stk-fill, 0%), var(--bg-muted) var(--stk-fill, 0%));
+  background: linear-gradient(to right, hsl(var(--primary)) var(--stk-fill, 0%), hsl(var(--muted)) var(--stk-fill, 0%));
 }
 .stk-range input::-moz-range-track {
   height: 4px;
   border-radius: var(--radius-full);
-  background: var(--bg-muted);
+  background: hsl(var(--muted));
 }
 .stk-range input::-moz-range-progress {
   height: 4px;
   border-radius: var(--radius-full);
-  background: var(--accent);
+  background: hsl(var(--primary));
 }
 .stk-range input::-webkit-slider-thumb {
   width: 16px;
   height: 16px;
   margin-top: -6px;
-  border: 2px solid var(--bg-raised);
+  border: 2px solid hsl(var(--popover));
   border-radius: 50%;
-  background: var(--accent);
+  background: hsl(var(--primary));
   box-shadow: var(--shadow-1);
   appearance: none;
 }
@@ -332,9 +332,9 @@
   box-sizing: border-box;
   width: 16px;
   height: 16px;
-  border: 2px solid var(--bg-raised);
+  border: 2px solid hsl(var(--popover));
   border-radius: 50%;
-  background: var(--accent);
+  background: hsl(var(--primary));
   box-shadow: var(--shadow-1);
 }
 /* Desligado: cores de desligado, sem opacidade. */
@@ -342,23 +342,23 @@
   cursor: not-allowed;
 }
 .stk-range input:disabled::-webkit-slider-runnable-track {
-  background: var(--bg-muted);
+  background: hsl(var(--muted));
 }
 .stk-range input:disabled::-moz-range-progress {
   background: transparent;
 }
 .stk-range input:disabled::-webkit-slider-thumb {
-  border-color: var(--border);
-  background: var(--fg-disabled);
+  border-color: hsl(var(--border));
+  background: hsl(var(--text-5));
   box-shadow: none;
 }
 .stk-range input:disabled::-moz-range-thumb {
-  border-color: var(--border);
-  background: var(--fg-disabled);
+  border-color: hsl(var(--border));
+  background: hsl(var(--text-5));
   box-shadow: none;
 }
 .stk-range:has(input:disabled) {
-  color: var(--fg-disabled);
+  color: hsl(var(--text-5));
 }
 /* O anel do DS vai na alça, não na caixa toda do controle (nem o halo dos campos no clique). */
 .stk-range input[type='range']:focus {
@@ -367,15 +367,15 @@
 .stk-range input:focus-visible::-webkit-slider-thumb {
   box-shadow:
     0 0 0 2px var(--ring-offset),
-    0 0 0 4px var(--focus);
+    0 0 0 4px hsl(var(--ring));
 }
 .stk-range input:focus-visible::-moz-range-thumb {
   box-shadow:
     0 0 0 2px var(--ring-offset),
-    0 0 0 4px var(--focus);
+    0 0 0 4px hsl(var(--ring));
 }
 .stk-range output {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -393,17 +393,17 @@
 .stk-previews figcaption {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
-/* Cada bloco resolve os tokens light-dark() no seu tema: é o que as outras pessoas veem. */
+/* Cada bloco fica no seu tema (eloom-tema-claro / eloom-tema-escuro): é o que as outras pessoas veem. */
 .stk-preview {
   display: grid;
   place-items: center;
   width: 96px;
   height: 96px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-md);
-  background: var(--bg-canvas);
+  background: hsl(var(--background));
 }
 .stk-preview.light {
   color-scheme: light;
@@ -415,11 +415,11 @@
   margin: 0;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
 }
 .stk-size.over {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 
 /* ---------- Detalhes ---------- */
@@ -437,7 +437,7 @@
   margin-bottom: var(--space-4);
   padding: var(--space-3);
   border-radius: var(--radius-lg);
-  background: var(--bg-subtle);
+  background: hsl(var(--surface-2));
 }
 /* Ao rolar até o erro, ele não encosta na borda do rodapé. */
 .stk-modal .stk-error {
@@ -452,7 +452,7 @@
   justify-content: center;
   gap: var(--space-2);
   padding: var(--space-8) 0;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .stk-review {
   display: flex;
@@ -466,13 +466,13 @@
   margin: 0;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .stk-import-list {
   margin: 0;
   padding: 0;
   list-style: none;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-md);
 }
 .stk-import-list li {
@@ -482,7 +482,7 @@
   gap: var(--space-3);
   min-height: 52px;
   padding: var(--space-1-5) var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid hsl(var(--line-1));
 }
 .stk-import-list li:last-child {
   border-bottom: 0;
@@ -497,7 +497,7 @@
 .stk-import-reason {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
 .stk-thumb {
@@ -507,8 +507,8 @@
   height: 40px;
   overflow: hidden;
   border-radius: var(--radius-sm);
-  background: repeating-conic-gradient(var(--bg-muted) 0 25%, var(--bg-subtle) 0 50%) 0 0 / 8px 8px;
-  color: var(--fg-muted);
+  background: repeating-conic-gradient(hsl(var(--muted)) 0 25%, hsl(var(--surface-2)) 0 50%) 0 0 / 8px 8px;
+  color: hsl(var(--muted-foreground));
 }
 .stk-thumb img {
   width: 100%;
@@ -532,19 +532,19 @@ span.stk-import-name {
 }
 .stk-upload p {
   margin: 0;
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .stk-progress {
   height: 4px;
   overflow: hidden;
   border-radius: var(--radius-full);
-  background: var(--bg-muted);
+  background: hsl(var(--muted));
 }
 .stk-progress > span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--accent);
+  background: hsl(var(--primary));
   transition: width var(--dur-2) linear;
 }
 .stk-summary p {
@@ -552,7 +552,7 @@ span.stk-import-name {
 }
 .stk-summary summary {
   cursor: pointer;
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .stk-summary summary:focus-visible {
   border-radius: var(--radius-xs);
@@ -562,7 +562,7 @@ span.stk-import-name {
   padding-left: var(--space-5);
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .stk-summary li + li {
   margin-top: var(--space-1);
@@ -591,10 +591,10 @@ span.stk-import-name {
   }
   /* Acordeão: Recorte, Fundo, Contorno, Detalhes. */
   .stk-side > .stk-section {
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid hsl(var(--border));
   }
   .stk-side > .stk-section:first-of-type {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid hsl(var(--border));
   }
   .stk-side > .stk-anim-notice {
     margin-bottom: var(--space-4);
@@ -623,7 +623,7 @@ span.stk-import-name {
     cursor: pointer;
   }
   .stk-acc .icon {
-    color: var(--fg-muted);
+    color: hsl(var(--muted-foreground));
     transition: rotate var(--dur-2) var(--ease-out);
   }
   .stk-acc[aria-expanded='true'] .icon {
@@ -631,7 +631,7 @@ span.stk-import-name {
   }
   .stk-acc:focus-visible {
     border-radius: var(--radius-sm);
-    box-shadow: inset 0 0 0 2px var(--focus);
+    box-shadow: inset 0 0 0 2px hsl(var(--ring));
   }
   .stk-section-body {
     padding-bottom: var(--space-4);
@@ -650,9 +650,9 @@ span.stk-import-name {
   position: fixed;
   z-index: var(--z-popover);
   pointer-events: none;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-md);
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
   box-shadow: var(--shadow-2);
 }
 .stk-ghost > .card {
@@ -662,7 +662,7 @@ span.stk-import-name {
 }
 :where(.stk-tiles, .stk-pack-rows, .stk-org-packs) > [data-dragging] {
   border-radius: var(--radius-md);
-  background: var(--bg-muted);
+  background: hsl(var(--muted));
 }
 :where(.stk-tiles, .stk-pack-rows, .stk-org-packs) > [data-dragging] > * {
   visibility: hidden;
@@ -671,7 +671,7 @@ span.stk-import-name {
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   cursor: grab;
   touch-action: none;
   opacity: 0;
@@ -717,12 +717,12 @@ span.stk-import-name {
 }
 .stk-pack-name .icon {
   flex-shrink: 0;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   opacity: 0;
   transition: opacity var(--dur-1) linear;
 }
 .stk-pack-name:hover {
-  background: var(--bg-hover);
+  background: hsl(var(--muted) / 0.6);
 }
 .stk-pack-name:is(:hover, :focus-visible) .icon {
   opacity: 1;
@@ -737,7 +737,7 @@ input.stk-pack-rename {
 .stk-pack-count {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 .stk-pack-org {
@@ -747,9 +747,9 @@ input.stk-pack-rename {
   align-items: center;
 }
 .stk-role-chips .chip.selectable:disabled {
-  border-color: var(--border);
+  border-color: hsl(var(--border));
   background: transparent;
-  color: var(--fg-disabled);
+  color: hsl(var(--text-5));
   cursor: not-allowed;
 }
 /* Linhas da mesma altura: a peça da capa tem uma linha a mais (a pílula) e as outras peças acompanham. */
@@ -780,13 +780,13 @@ input.stk-pack-rename {
   border: 0;
   border-radius: var(--radius-md);
   background: none;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   font: inherit;
   cursor: pointer;
   transition: background-color var(--dur-1) linear;
 }
 button.stk-tile-open:hover {
-  background: var(--bg-hover);
+  background: hsl(var(--muted) / 0.6);
 }
 .stk-tile-img {
   display: grid;
@@ -809,7 +809,7 @@ button.stk-tile-open:hover {
   overflow: hidden;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -824,7 +824,7 @@ button.stk-tile-open:hover {
   width: 24px;
   height: 24px;
   border-radius: var(--radius-sm);
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
 }
 .stk-tile-more {
   position: absolute;
@@ -836,7 +836,7 @@ button.stk-tile-open:hover {
 .stk-tile-more .icon-btn {
   width: 28px;
   height: 28px;
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
 }
 .stk-tile:is(:hover, :focus-within) :is(.stk-tile-drag, .stk-tile-more),
 .stk-tile-more:has([aria-expanded='true']) {
@@ -852,10 +852,10 @@ button.stk-tile-open:hover {
   height: 100%;
   min-height: 104px;
   padding: 0;
-  border: 2px dashed var(--border-strong);
+  border: 2px dashed hsl(var(--line-2));
   border-radius: var(--radius-md);
   background: transparent;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   font: inherit;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
@@ -865,12 +865,12 @@ button.stk-tile-open:hover {
     color var(--dur-1) linear;
 }
 .stk-tile-add:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent-text);
+  border-color: hsl(var(--primary));
+  color: hsl(var(--brand-ink-2));
 }
 .stk-tile-add:disabled {
-  border-color: var(--border);
-  color: var(--fg-disabled);
+  border-color: hsl(var(--border));
+  color: hsl(var(--text-5));
   cursor: not-allowed;
 }
 
@@ -918,7 +918,7 @@ button.stk-tile-open:hover {
   margin: 0 0 var(--space-4);
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .card .stk-note {
   margin-bottom: var(--space-3);
@@ -933,7 +933,7 @@ button.stk-tile-open:hover {
 .stk-counter {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
 }
 .stk-counter {
@@ -949,7 +949,7 @@ button.stk-tile-open:hover {
   user-select: none;
 }
 .stk-pack-rows > li + li {
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid hsl(var(--line-1));
 }
 .stk-pack-row {
   display: flex;
@@ -961,21 +961,21 @@ button.stk-tile-open:hover {
   border: 0;
   border-radius: var(--radius-md);
   background: none;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   font: inherit;
   text-align: left;
   cursor: pointer;
   transition: background-color var(--dur-1) linear;
 }
 button.stk-pack-row:hover {
-  background: var(--bg-hover);
+  background: hsl(var(--muted) / 0.6);
 }
 .stk-pack-row:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--focus);
+  box-shadow: inset 0 0 0 2px hsl(var(--ring));
 }
 .stk-pack-row > .icon:last-child {
   flex-shrink: 0;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .stk-row-text {
   display: flex;
@@ -995,7 +995,7 @@ button.stk-pack-row:hover {
 .stk-row-sub {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .stk-row-drag {
   width: 24px;
@@ -1010,8 +1010,8 @@ button.stk-pack-row:hover {
   flex-shrink: 0;
   overflow: hidden;
   border-radius: var(--radius-md);
-  background: var(--bg-subtle);
-  color: var(--fg-muted);
+  background: hsl(var(--surface-2));
+  color: hsl(var(--muted-foreground));
 }
 .stk-cover img {
   width: 100%;
@@ -1033,7 +1033,7 @@ button.stk-pack-row:hover {
   width: 72px;
   height: 72px;
   border-radius: var(--radius-md);
-  background: var(--bg-subtle);
+  background: hsl(var(--surface-2));
 }
 .stk-fav-remove {
   position: absolute;
@@ -1045,7 +1045,7 @@ button.stk-pack-row:hover {
 .icon-btn.stk-fav-remove {
   width: 28px;
   height: 28px;
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
 }
 .stk-fav:is(:hover, :focus-within) .stk-fav-remove {
   opacity: 1;
@@ -1059,7 +1059,7 @@ button.stk-pack-row:hover {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 
 /* ---------- Administração → Figurinhas ---------- */
@@ -1120,7 +1120,7 @@ button.stk-pack-row:hover {
 .stk-org-pack-count {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .stk-org-pack-meta {
   display: flex;
@@ -1131,7 +1131,7 @@ button.stk-pack-row:hover {
 .stk-org-pack-roles {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .stk-removed-cell {
   display: flex;
@@ -1147,8 +1147,8 @@ button.stk-pack-row:hover {
   height: 40px;
   overflow: hidden;
   border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
-  color: var(--fg-muted);
+  background: hsl(var(--surface-2));
+  color: hsl(var(--muted-foreground));
 }
 .stk-removed-tile img {
   width: 100%;

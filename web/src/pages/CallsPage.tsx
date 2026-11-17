@@ -169,12 +169,12 @@ export function CallsPage() {
   return (
     <div className="page calls-page">
       <header className="page-head">
-        <h1>Chamadas</h1>
+        <h1 data-eyebrow="Comunicação">Chamadas</h1>
+        <Segmented label="Filtrar chamadas" value={filter} onChange={pick} items={FILTERS} />
       </header>
       <div className="page-body">
         <div className="call-history">
           {enabled && <LiveCalls onOpen={(c) => navigate(roomPath(roomOf(c)))} />}
-          <Segmented label="Filtrar chamadas" value={filter} onChange={pick} items={FILTERS} />
           {body}
           {data && <Pager offset={offset} count={COUNT} total={data.total} onChange={setOffset} />}
         </div>

@@ -1207,6 +1207,7 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
 
   const cls = [
     'msg',
+    own && 'own',
     grouped && 'grouped',
     (mentioned || highlighted) && !own && 'mentioned',
     m.pinned && 'pinned',

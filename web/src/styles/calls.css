@@ -9,7 +9,7 @@
 .call-preflight,
 .call-note {
   color-scheme: dark;
-  color: var(--call-fg);
+  color: hsl(var(--foreground));
   /* Tamanho dos controles: cada modo troca só estas variáveis. */
   --ctl: 48px;
   --hang-w: 64px;
@@ -30,8 +30,8 @@
   padding: 0;
   border-radius: var(--radius-full);
   border: 0;
-  background: var(--call-control);
-  color: var(--fg-on-accent);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--on-color));
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -42,57 +42,57 @@
     color var(--dur-1) linear;
 }
 .call-btn.accept {
-  background: var(--call-accept);
-  color: var(--fg-on-accent);
+  background: hsl(var(--st-green-solid));
+  color: hsl(var(--on-color));
 }
 /* Desligar é uma pílula mais larga: não se confunde com os outros controles. */
 .call-btn.hang {
   width: var(--hang-w);
-  background: var(--call-hang);
-  color: var(--fg-on-accent);
+  background: hsl(var(--st-red-solid));
+  color: hsl(var(--on-color));
 }
 /* Microfone ou câmera desligados: o ícone cortado em vermelho e um contorno, sem o preenchimento branco. */
 .call-btn.off {
-  background: var(--call-control);
-  color: var(--danger);
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--danger) 55%, transparent);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--st-red));
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, hsl(var(--st-red)) 55%, transparent);
 }
 .call-btn.off:focus-visible {
   box-shadow:
-    inset 0 0 0 1.5px color-mix(in srgb, var(--danger) 55%, transparent),
+    inset 0 0 0 1.5px color-mix(in srgb, hsl(var(--st-red)) 55%, transparent),
     0 0 0 2px var(--ring-offset),
-    0 0 0 4px var(--focus);
+    0 0 0 4px hsl(var(--ring));
 }
 .call-btn.on {
-  background: var(--accent);
-  color: var(--fg-on-accent);
+  background: hsl(var(--primary));
+  color: hsl(var(--on-color));
 }
 /* Hover só com mouse: no toque ele fica preso depois do toque. */
 @media (hover: hover) {
   .call-btn:hover {
-    background: var(--call-control-hover);
+    background: hsl(var(--on-color) / 0.18);
   }
   .call-btn.accept:hover {
-    background: color-mix(in srgb, var(--call-accept) 88%, var(--fg-on-accent));
+    background: color-mix(in srgb, hsl(var(--st-green-solid)) 88%, hsl(var(--on-color)));
   }
   .call-btn.hang:hover {
-    background: color-mix(in srgb, var(--call-hang) 88%, var(--fg-on-accent));
+    background: color-mix(in srgb, hsl(var(--st-red-solid)) 88%, hsl(var(--on-color)));
   }
   .call-btn.off:hover {
-    background: var(--call-control-hover);
+    background: hsl(var(--on-color) / 0.18);
   }
   .call-btn.on:hover {
-    background: var(--accent-hover);
+    background: hsl(var(--primary) / 0.92);
   }
   .call-pill-main:hover {
-    background: var(--call-control);
+    background: hsl(var(--on-color) / 0.12);
   }
 }
 .call-btn-label {
   font-size: var(--fs-11);
   line-height: var(--lh-11);
   font-weight: var(--fw-medium);
-  color: var(--call-fg);
+  color: hsl(var(--foreground));
   white-space: nowrap;
 }
 
@@ -106,7 +106,7 @@
   font-size: var(--fs-14);
   line-height: var(--lh-14);
   font-weight: var(--fw-semibold);
-  color: var(--call-fg);
+  color: hsl(var(--foreground));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -114,7 +114,7 @@
 .call-status {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -126,14 +126,14 @@
 
 /* Anel do avatar enquanto toca (verde) ou enquanto chama (azul). Sem animação fica um anel fixo de 4px. */
 .call-ring {
-  --ring: color-mix(in srgb, var(--call-accept) 45%, transparent);
+  --halo: color-mix(in srgb, hsl(var(--st-green-solid)) 45%, transparent);
   display: inline-flex;
   border-radius: 50%;
-  box-shadow: 0 0 0 4px var(--ring);
+  box-shadow: 0 0 0 4px var(--halo);
   animation: call-halo 1.6s var(--ease-out) infinite;
 }
 .call-ring.out {
-  --ring: var(--accent-ring);
+  --halo: hsl(var(--brand-mid) / 0.2);
 }
 .call-ring.idle {
   box-shadow: none;
@@ -141,7 +141,7 @@
 }
 @keyframes call-halo {
   from {
-    box-shadow: 0 0 0 0 var(--ring);
+    box-shadow: 0 0 0 0 var(--halo);
   }
   to {
     box-shadow: 0 0 0 12px transparent;
@@ -150,7 +150,7 @@
 
 /* ---------- Chamada recebida (computador): cartão no alto, à direita ---------- */
 .call-incoming {
-  --ring-offset: var(--bg-raised);
+  --ring-offset: hsl(var(--popover));
   position: fixed;
   top: 16px;
   right: 16px;
@@ -160,8 +160,8 @@
   display: flex;
   flex-direction: column;
   padding: var(--space-4);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-3), var(--highlight-top);
   animation: call-drop var(--dur-3) var(--ease-out);
@@ -172,7 +172,7 @@
   gap: var(--space-3);
   min-width: 0;
   padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid hsl(var(--line-1));
 }
 .call-incoming-head strong {
   font-size: var(--fs-15);
@@ -185,7 +185,7 @@
   min-width: 0;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-incoming > .call-buttons {
   justify-content: space-around;
@@ -203,12 +203,12 @@
   inset: 0;
   z-index: -1;
   border-radius: inherit;
-  background: var(--call-accept);
+  background: hsl(var(--st-green-solid));
   animation: call-accept 1.2s var(--ease-in-out) infinite;
   transition: background-color var(--dur-1) linear;
 }
 :where(.call-incoming) .accept:hover::before {
-  background: color-mix(in srgb, var(--call-accept) 88%, var(--fg-on-accent));
+  background: color-mix(in srgb, hsl(var(--st-green-solid)) 88%, hsl(var(--on-color)));
 }
 @keyframes call-accept {
   50% {
@@ -226,7 +226,7 @@
 .call-incoming.full {
   --ctl: 64px;
   --hang-w: 64px;
-  --ring-offset: var(--call-bg);
+  --ring-offset: hsl(var(--background));
   inset: 0;
   width: auto;
   max-width: none;
@@ -234,7 +234,7 @@
   padding: 0 var(--space-6) calc(env(safe-area-inset-bottom) + 48px);
   border: 0;
   border-radius: 0;
-  background: radial-gradient(120% 80% at 50% 0%, var(--accent-soft) 0%, var(--call-bg) 60%);
+  background: radial-gradient(120% 80% at 50% 0%, hsl(var(--primary) / 0.1) 0%, hsl(var(--background)) 60%);
   box-shadow: none;
   animation: call-fade var(--dur-3) var(--ease-out);
 }
@@ -249,7 +249,7 @@
   gap: var(--space-2);
   font-size: var(--fs-15);
   line-height: var(--lh-15);
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 /* O avatar fica centrado a 30% da altura. */
 .call-hero {
@@ -274,8 +274,8 @@
   position: absolute;
   inset: -12px;
   border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--call-accept) 40%, transparent);
-  background: color-mix(in srgb, var(--call-accept) 5%, transparent);
+  border: 1px solid color-mix(in srgb, hsl(var(--st-green-solid)) 40%, transparent);
+  background: color-mix(in srgb, hsl(var(--st-green-solid)) 5%, transparent);
   opacity: 0.6;
   animation: call-ripple 1.6s var(--ease-in-out) infinite;
 }
@@ -302,7 +302,7 @@
   line-height: var(--lh-28);
   font-weight: var(--fw-semibold);
   letter-spacing: -0.01em;
-  color: var(--fg-on-accent);
+  color: hsl(var(--on-color));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -322,15 +322,15 @@
   margin-top: var(--space-6);
   padding: var(--space-2) var(--space-4);
   border-radius: 20px;
-  background: var(--call-control);
-  color: var(--call-fg);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--foreground));
   font-size: var(--fs-14);
   line-height: var(--lh-14);
   text-align: left;
 }
 .call-quote > .icon {
   margin-top: 3px;
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-quote > span {
   display: -webkit-box;
@@ -354,8 +354,8 @@
   padding: 0 var(--space-5);
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--call-control);
-  color: var(--call-fg);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--foreground));
   font: inherit;
   font-size: var(--fs-15);
   font-weight: var(--fw-medium);
@@ -363,7 +363,7 @@
   transition: background-color var(--dur-1) linear;
 }
 .call-audio-only:hover {
-  background: var(--call-control-hover);
+  background: hsl(var(--on-color) / 0.18);
 }
 .call-answer > .call-buttons {
   width: 100%;
@@ -383,14 +383,14 @@
 /* ---------- Janela da chamada (flutuante) ----------
    Presa a um canto da área principal: abaixo do cabeçalho ou acima do compositor (posição em style). */
 .call-window {
-  --ring-offset: var(--call-bg);
+  --ring-offset: hsl(var(--background));
   position: fixed;
   top: 72px;
   right: 16px;
   z-index: var(--z-call);
   width: 360px;
   max-width: calc(100vw - 32px);
-  background: var(--call-bg);
+  background: hsl(var(--background));
   border-radius: var(--radius-xl);
   overflow: hidden;
   box-shadow:
@@ -424,7 +424,7 @@
 .call-stage {
   position: relative;
   aspect-ratio: 16 / 9;
-  background: var(--call-bg);
+  background: hsl(var(--background));
   overflow: hidden;
 }
 .call-remote {
@@ -457,7 +457,7 @@
   gap: var(--space-1);
   text-align: center;
   /* Cor sólida levemente tingida: degradê só nas telas de chamada recebida (spec 1.1). */
-  background: color-mix(in srgb, var(--accent) 10%, var(--call-bg));
+  background: color-mix(in srgb, hsl(var(--primary)) 10%, hsl(var(--background)));
 }
 .call-placeholder .call-name {
   margin-top: var(--space-5);
@@ -484,7 +484,7 @@
   aspect-ratio: 16 / 9;
   object-fit: cover;
   border-radius: var(--radius-md);
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
   box-shadow:
     var(--shadow-2),
     0 0 0 1px rgb(255 255 255 / 0.16);
@@ -504,7 +504,7 @@
   display: grid;
   place-items: center;
   border-radius: var(--radius-lg);
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
   box-shadow:
     var(--shadow-2),
     0 0 0 1px rgb(255 255 255 / 0.08);
@@ -516,7 +516,7 @@
   padding: var(--space-3) var(--space-3) var(--space-4);
 }
 .call-bar .muted {
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-bar-head {
   display: flex;
@@ -540,7 +540,7 @@
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -550,8 +550,8 @@
     color var(--dur-1) linear;
 }
 .call-tool:hover {
-  background: var(--call-control);
-  color: var(--call-fg);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--foreground));
 }
 
 /* ---------- Ampliada: ocupa a área principal (a barra lateral continua usável) ---------- */
@@ -612,11 +612,11 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: var(--call-control);
-  color: var(--call-fg);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--foreground));
 }
 :where(.call-window.big) .call-tool:hover {
-  background: var(--call-control-hover);
+  background: hsl(var(--on-color) / 0.18);
 }
 /* Nome de quem está do outro lado, no alto à esquerda sobre o vídeo. */
 .call-chip {
@@ -783,7 +783,7 @@
 }
 .call-root:fullscreen {
   display: block;
-  background: var(--call-bg);
+  background: hsl(var(--background));
 }
 /* Menus, diálogos, folhas e avisos abertos de dentro da chamada: uma ilha escura com a própria escala. */
 .call-layer {
@@ -792,7 +792,7 @@
   z-index: var(--z-call-popover);
   pointer-events: none;
   color-scheme: dark;
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .call-layer > * {
   pointer-events: auto;
@@ -828,8 +828,8 @@
   height: 20px;
   padding: 0 var(--space-2);
   border-radius: var(--radius-full);
-  background: var(--ok-soft);
-  color: var(--ok);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-medium);
@@ -846,8 +846,8 @@
   place-items: center;
   overflow: hidden;
   border-radius: var(--radius-lg);
-  background: var(--bg-raised);
-  color: var(--call-fg);
+  background: hsl(var(--popover));
+  color: hsl(var(--foreground));
 }
 /* O anel de quem fala fica por cima do vídeo (o box-shadow do quadro ficaria embaixo dele). Sem animação. */
 .call-tile::after {
@@ -858,7 +858,7 @@
   pointer-events: none;
 }
 .call-tile.speaking::after {
-  box-shadow: inset 0 0 0 2px var(--call-accept);
+  box-shadow: inset 0 0 0 2px hsl(var(--st-green-solid));
 }
 .call-tile > .call-tile-video {
   position: absolute;
@@ -870,7 +870,7 @@
 }
 .call-tile-video.contain {
   object-fit: contain;
-  background: var(--call-bg);
+  background: hsl(var(--background));
 }
 /* Câmera que cabe inteira no destaque: a cópia borrada atrás aparece no lugar das faixas. */
 .call-tile-video.contain.over {
@@ -888,7 +888,7 @@
 .call-tile-paused {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 /* Nome embaixo à esquerda, no mesmo chip escuro do nome da chamada a dois. */
 .call-tile-name {
@@ -904,7 +904,7 @@
   padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
   background: rgb(0 0 0 / 0.5);
-  color: var(--call-fg);
+  color: hsl(var(--foreground));
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-medium);
@@ -919,10 +919,10 @@
   line-height: var(--lh-11);
 }
 .call-muted {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .call-hand-up {
-  color: var(--warn);
+  color: hsl(var(--st-amber));
 }
 /* Menu da pessoa: no canto, aparece com o mouse em cima ou o foco dentro; no toque fica sempre. */
 :where(.call-tile) > .menu-wrap {
@@ -955,7 +955,7 @@
   border: 0;
   border-radius: var(--radius-md);
   background: rgb(0 0 0 / 0.5);
-  color: var(--call-fg);
+  color: hsl(var(--foreground));
   cursor: pointer;
   transition: background-color var(--dur-1) linear;
 }
@@ -969,8 +969,8 @@
 .call-more-tile {
   border: 0;
   padding: 0;
-  background: var(--call-control);
-  color: var(--call-fg);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--foreground));
   font: inherit;
   font-size: var(--fs-22);
   line-height: var(--lh-22);
@@ -982,7 +982,7 @@
 /* Só com mouse: no toque o :hover gruda depois do toque. */
 @media (hover: hover) {
   .call-more-tile:hover {
-    background: var(--call-control-hover);
+    background: hsl(var(--on-color) / 0.18);
   }
 }
 
@@ -1054,12 +1054,12 @@
   gap: var(--space-1);
   padding: var(--space-4);
   text-align: center;
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
   font-size: var(--fs-14);
   line-height: var(--lh-14);
 }
 .call-alone strong {
-  color: var(--call-fg);
+  color: hsl(var(--foreground));
   font-size: var(--fs-16);
   line-height: var(--lh-16);
   font-weight: var(--fw-semibold);
@@ -1071,8 +1071,8 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: var(--call-control);
-  color: var(--call-fg);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--foreground));
 }
 .call-alone-actions {
   display: flex;
@@ -1106,8 +1106,8 @@
   height: 28px;
   padding: 0 var(--space-3);
   border-radius: var(--radius-full);
-  background: var(--call-accept);
-  color: var(--fg-on-accent);
+  background: hsl(var(--st-green-solid));
+  color: hsl(var(--on-color));
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   font-weight: var(--fw-medium);
@@ -1127,31 +1127,31 @@
   align-items: center;
   gap: 10px;
   padding: 10px var(--space-3);
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
-  background: var(--bg-raised);
-  color: var(--fg);
+  background: hsl(var(--popover));
+  color: hsl(var(--foreground));
   box-shadow: var(--shadow-2);
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   text-align: left;
 }
 .call-banner > .icon {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-banner.warn {
-  background: var(--warn-soft);
-  border-color: color-mix(in srgb, var(--warn-solid) 45%, transparent);
+  background: hsl(var(--st-amber-soft));
+  border-color: color-mix(in srgb, hsl(var(--warning)) 45%, transparent);
 }
 .call-banner.warn > .icon {
-  color: var(--warn);
+  color: hsl(var(--st-amber));
 }
 .call-banner.err {
-  background: var(--danger-soft);
-  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: hsl(var(--st-red-soft));
+  border-color: color-mix(in srgb, hsl(var(--st-red)) 45%, transparent);
 }
 .call-banner.err > .icon {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .call-banner-text {
   flex: 1;
@@ -1177,8 +1177,8 @@
   padding: 0 10px;
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--call-control);
-  color: var(--call-fg);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--foreground));
   font: inherit;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
@@ -1190,25 +1190,25 @@
 /* Só com mouse: no toque o :hover gruda depois do toque. */
 @media (hover: hover) {
   .call-people-chip:hover {
-    background: var(--call-control-hover);
+    background: hsl(var(--on-color) / 0.18);
   }
 }
 .call-people-chip[aria-pressed='true'] {
-  background: var(--accent);
-  color: var(--fg-on-accent);
+  background: hsl(var(--primary));
+  color: hsl(var(--on-color));
 }
 .call-signal {
   flex: none;
   display: inline-flex;
-  color: var(--warn);
+  color: hsl(var(--st-amber));
 }
 .call-room-icon {
   flex: none;
   display: inline-grid;
   place-items: center;
   border-radius: var(--radius-md);
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 
 /* ---------- Janela encaixada (grupo): só o quadro em destaque ---------- */
@@ -1270,7 +1270,7 @@
 }
 /* O palco é focável (Espaço para falar): o anel fica por dentro, a janela cobre a área toda. */
 :where(.call-window.g-big) .call-stage:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--focus);
+  box-shadow: inset 0 0 0 2px hsl(var(--ring));
 }
 .call-head {
   grid-area: 1 / 1;
@@ -1295,13 +1295,13 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: var(--call-control);
-  color: var(--call-fg);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--foreground));
 }
 /* Só com mouse: no toque o :hover gruda depois do toque. */
 @media (hover: hover) {
   :where(.call-window.g-big) .call-tool:hover {
-    background: var(--call-control-hover);
+    background: hsl(var(--on-color) / 0.18);
   }
 }
 /* Faixas da ampliada: no alto do palco, acima dos quadros (empurram a grade para baixo, não a cobrem). */
@@ -1329,8 +1329,8 @@
 .g-big > .call-people {
   grid-area: 1 / 2;
   min-width: 0;
-  border-left: 1px solid var(--border);
-  background: var(--bg-surface);
+  border-left: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 
 /* Tela: o botão e a seta de opções no canto dele. */
@@ -1355,10 +1355,10 @@
   padding: 0;
   display: grid;
   place-items: center;
-  border: 2px solid var(--call-bg);
+  border: 2px solid hsl(var(--background));
   border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--call-fg) 18%, var(--call-bg));
-  color: var(--call-fg);
+  background: color-mix(in srgb, hsl(var(--foreground)) 18%, hsl(var(--background)));
+  color: hsl(var(--foreground));
   cursor: pointer;
   transition: background-color var(--dur-1) linear;
 }
@@ -1368,7 +1368,7 @@
 /* Só com mouse: no toque o :hover gruda depois do toque. */
 @media (hover: hover) {
   .call-split-arrow:hover {
-    background: color-mix(in srgb, var(--call-fg) 28%, var(--call-bg));
+    background: color-mix(in srgb, hsl(var(--foreground)) 28%, hsl(var(--background)));
   }
 }
 /* Controle indisponível: continua focável e explica o motivo ao clicar. */
@@ -1385,7 +1385,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .sheet.call-people {
   height: 80dvh;
@@ -1427,7 +1427,7 @@
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-people-row {
   display: flex;
@@ -1441,11 +1441,11 @@
 /* Só com mouse: no toque o :hover gruda depois do toque. */
 @media (hover: hover) {
   .call-people-row:hover {
-    background: var(--bg-hover);
+    background: hsl(var(--muted) / 0.6);
   }
 }
 .call-people-row:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--focus);
+  box-shadow: inset 0 0 0 2px hsl(var(--ring));
 }
 .call-people-who {
   flex: 1;
@@ -1469,7 +1469,7 @@
 .call-people-sub {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-people-state {
   flex: none;
@@ -1482,7 +1482,7 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid hsl(var(--border));
 }
 .call-people-foot > .btn {
   flex: 1 1 auto;
@@ -1510,7 +1510,7 @@
 /* Só com mouse: no toque o :hover gruda depois do toque. */
 @media (hover: hover) {
   .call-ring-row:hover {
-    background: var(--bg-hover);
+    background: hsl(var(--muted) / 0.6);
   }
 }
 .call-ring-row.disabled {
@@ -1534,17 +1534,17 @@
 .call-ring-who span {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-ring-check {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .call-ring-empty {
   display: flex;
   justify-content: center;
   margin: 0;
   padding: var(--space-6) var(--space-2);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   font-size: var(--fs-14);
   line-height: var(--lh-14);
 }
@@ -1568,7 +1568,7 @@
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-medium);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 /* O gatilho ocupa a coluna inteira e o nome do aparelho encurta com reticências. */
 .call-device > .menu-wrap {
@@ -1589,7 +1589,7 @@
   text-align: left;
 }
 .call-device-btn > .call-device-caret {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-keys {
   margin: 0 0 var(--space-4);
@@ -1600,7 +1600,7 @@
   justify-content: space-between;
   gap: var(--space-4);
   padding: 10px 0;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid hsl(var(--line-1));
   font-size: var(--fs-14);
   line-height: var(--lh-14);
 }
@@ -1630,7 +1630,7 @@
   align-items: center;
   gap: 10px;
   min-height: 40px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid hsl(var(--line-1));
   font-size: var(--fs-14);
   line-height: var(--lh-14);
 }
@@ -1640,16 +1640,16 @@
   flex: none;
   display: grid;
   place-items: center;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 :where(.call-selftest-step.success) .call-selftest-icon {
-  color: var(--ok);
+  color: hsl(var(--brand-ink-2));
 }
 :where(.call-selftest-step.failed) .call-selftest-icon {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 :where(.call-selftest-step.running) .call-selftest-icon {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .call-selftest-dot {
   width: 8px;
@@ -1658,7 +1658,7 @@
   background: currentColor;
 }
 :where(.call-selftest-step.idle) .call-selftest-dot {
-  background: var(--border-strong);
+  background: hsl(var(--line-2));
 }
 .call-selftest-label {
   flex: 1;
@@ -1668,15 +1668,15 @@
   flex: none;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 :where(.call-selftest-step.failed) .call-selftest-status {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 
 /* ---------- Tela de entrada ---------- */
 .call-preflight {
-  --ring-offset: var(--bg-raised);
+  --ring-offset: hsl(var(--popover));
   position: fixed;
   inset: 0;
   z-index: var(--z-call);
@@ -1686,7 +1686,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--space-6) var(--space-4);
-  background: var(--call-bg);
+  background: hsl(var(--background));
   animation: call-fade var(--dur-3) var(--ease-out);
 }
 /* margin: auto centra sem cortar o alto quando o cartão é maior que a tela. */
@@ -1697,10 +1697,10 @@
   flex-direction: column;
   gap: var(--space-4);
   padding: var(--space-6);
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-xl);
-  background: var(--bg-raised);
-  color: var(--fg);
+  background: hsl(var(--popover));
+  color: hsl(var(--foreground));
   box-shadow: var(--shadow-3), var(--highlight-top);
 }
 .call-preflight-head h2 {
@@ -1713,21 +1713,21 @@
   margin: 2px 0 0;
   font-size: var(--fs-14);
   line-height: var(--lh-14);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .call-preflight-who {
   margin: 0;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-preflight-preview {
-  --ring-offset: var(--call-bg);
+  --ring-offset: hsl(var(--background));
   position: relative;
   aspect-ratio: 16 / 9;
   overflow: hidden;
   border-radius: var(--radius-lg);
-  background: var(--call-bg);
+  background: hsl(var(--background));
 }
 .call-preflight-video {
   width: 100%;
@@ -1745,7 +1745,7 @@
   justify-content: center;
   gap: var(--space-3);
   padding-bottom: var(--space-12);
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
   font-size: var(--fs-14);
   line-height: var(--lh-14);
 }
@@ -1762,7 +1762,7 @@
   margin: 0;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-preflight-card > .callout {
   margin: 0;
@@ -1783,32 +1783,32 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-meter-track {
   flex: 1;
   height: 4px;
   overflow: hidden;
   border-radius: var(--radius-full);
-  background: var(--border-strong);
+  background: hsl(var(--line-2));
 }
 .call-meter-bar {
   display: block;
   width: 100%;
   height: 100%;
-  background: var(--call-accept);
+  background: hsl(var(--st-green-solid));
   transform-origin: left center;
   transform: scaleX(0);
 }
 :where(.call-meter.off) .call-meter-bar {
-  background: var(--fg-muted);
+  background: hsl(var(--muted-foreground));
 }
 
 /* ---------- Chamada recebida em grupo ---------- */
 .call-by {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 :where(.call-incoming.full) .call-by {
   margin-top: var(--space-1);
@@ -1835,12 +1835,12 @@
   gap: var(--space-1);
   padding: var(--space-6) var(--space-4);
   text-align: center;
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
   font-size: var(--fs-14);
   line-height: var(--lh-14);
 }
 .call-end strong {
-  color: var(--call-fg);
+  color: hsl(var(--foreground));
   font-size: var(--fs-16);
   line-height: var(--lh-16);
   font-weight: var(--fw-semibold);
@@ -1852,8 +1852,8 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: var(--call-control);
-  color: var(--call-fg);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--foreground));
 }
 .call-end-actions {
   display: flex;
@@ -1861,7 +1861,7 @@
   margin-top: var(--space-4);
 }
 .call-note {
-  --ring-offset: var(--call-bg);
+  --ring-offset: hsl(var(--background));
   position: fixed;
   top: 72px;
   right: 16px;
@@ -1873,7 +1873,7 @@
   min-height: 48px;
   padding: var(--space-1-5) var(--space-4) var(--space-1-5) var(--space-1-5);
   border-radius: var(--radius-full);
-  background: var(--call-bg);
+  background: hsl(var(--background));
   box-shadow:
     var(--shadow-3),
     0 0 0 1px rgb(255 255 255 / 0.06);
@@ -1889,8 +1889,8 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: var(--call-control);
-  color: var(--call-fg);
+  background: hsl(var(--on-color) / 0.12);
+  color: hsl(var(--foreground));
 }
 .call-note-text {
   flex: 1;
@@ -1922,17 +1922,17 @@
   width: max-content;
   max-width: calc(100vw - 32px);
   padding: var(--space-1-5) var(--space-1-5) var(--space-1-5) 14px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid hsl(var(--line-2));
   border-radius: var(--radius-lg);
-  background: var(--bg-inverse);
-  color: var(--fg-inverse);
+  background: hsl(var(--surface-inverse));
+  color: hsl(var(--on-color));
   box-shadow: var(--shadow-3);
   font-size: var(--fs-14);
   line-height: var(--lh-14);
   animation: call-drop var(--dur-3) var(--ease-out);
 }
 .call-version-icon {
-  color: var(--info);
+  color: hsl(var(--brand-ink-2));
 }
 .call-version-text {
   min-width: 0;
@@ -1943,7 +1943,7 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
   font: inherit;
   font-size: var(--fs-13);
   font-weight: var(--fw-semibold);
@@ -1956,10 +1956,10 @@
   }
 }
 .call-version-close {
-  --ring-offset: var(--bg-inverse);
+  --ring-offset: hsl(var(--surface-inverse));
   width: 28px;
   height: 28px;
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 
 /* ---------- Chamada em grupo no celular ---------- */
@@ -2093,19 +2093,19 @@
   z-index: var(--z-raised);
   margin: 0;
   padding: var(--space-2) var(--space-1);
-  background: var(--bg-canvas);
+  background: hsl(var(--background));
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
-  background: var(--bg-surface);
+  background: hsl(var(--card));
   overflow: clip;
 }
 .call-list li {
@@ -2115,7 +2115,7 @@
   gap: var(--space-3);
   min-height: 64px;
   padding: 0 var(--space-3) 0 var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid hsl(var(--line-1));
   transition: background-color var(--dur-1) linear;
 }
 .call-list li:last-child {
@@ -2124,7 +2124,7 @@
 /* Só com mouse: no toque o :hover gruda na linha depois do toque. */
 @media (hover: hover) {
   .call-list li:hover {
-    background: var(--bg-hover);
+    background: hsl(var(--muted) / 0.6);
   }
 }
 /* A linha inteira abre a conversa: o botão estende a área de clique por cima dela. */
@@ -2153,7 +2153,7 @@
   box-shadow: none;
 }
 .call-list-main:focus-visible::after {
-  box-shadow: inset 0 0 0 2px var(--focus);
+  box-shadow: inset 0 0 0 2px hsl(var(--ring));
 }
 .call-list-text {
   display: flex;
@@ -2164,13 +2164,13 @@
   font-size: var(--fs-14);
   line-height: var(--lh-14);
   font-weight: var(--fw-semibold);
-  color: var(--fg);
+  color: hsl(var(--foreground));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 :where(.call-list li.missed) .call-list-name {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .call-list-meta {
   display: flex;
@@ -2179,16 +2179,16 @@
   min-width: 0;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 :where(.call-list li.missed) .call-list-meta > .icon {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .call-time {
   flex-shrink: 0;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 /* Vazio e erro no mesmo cartão das linhas. */
 .card.call-empty {
@@ -2201,9 +2201,9 @@
   padding-top: 0;
 }
 .call-sk-list {
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
-  background: var(--bg-surface);
+  background: hsl(var(--card));
   overflow: clip;
 }
 .call-sk-row {
@@ -2212,7 +2212,7 @@
   gap: var(--space-3);
   min-height: 64px;
   padding: 0 var(--space-3) 0 var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid hsl(var(--line-1));
 }
 .call-sk-row:last-child {
   border-bottom: 0;

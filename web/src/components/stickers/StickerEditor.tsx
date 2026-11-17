@@ -1084,13 +1084,13 @@ function StaticStudio({ img, phone, limitKB, top, details, handleRef, onReady }:
       <Section title="Prévia" phone={phone}>
         <div className="stk-previews">
           <figure>
-            <div className="stk-preview light">
+            <div className="stk-preview light eloom-tema-claro">
               <canvas ref={tileLight} />
             </div>
             <figcaption>Tema claro</figcaption>
           </figure>
           <figure>
-            <div className="stk-preview dark">
+            <div className="stk-preview dark eloom-tema-escuro">
               <canvas ref={tileDark} />
             </div>
             <figcaption>Tema escuro</figcaption>

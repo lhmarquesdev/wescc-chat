@@ -464,8 +464,8 @@ export function SuggestList({ anchor, id, label, onHidden, children }: { anchor:
 
 // Campo inválido: a caixa visível é o .chips (o campo de dentro não tem borda), então a borda e o halo de erro do
 // design system para input[aria-invalid] vão nela. Fica no style porque vence o :hover e o :focus-within do .chips.
-const CHIPS_INVALID: CSSProperties = { borderColor: 'var(--danger)' };
-const CHIPS_INVALID_FOCUS: CSSProperties = { borderColor: 'var(--danger)', boxShadow: '0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent)' };
+const CHIPS_INVALID: CSSProperties = { borderColor: 'hsl(var(--st-red))' };
+const CHIPS_INVALID_FOCUS: CSSProperties = { borderColor: 'hsl(var(--st-red))', boxShadow: '0 0 0 3px color-mix(in srgb, hsl(var(--st-red)) 22%, transparent)' };
 
 export interface ChipSuggestion {
   value: string;

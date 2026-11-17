@@ -1,20 +1,6 @@
 /* ---------- Conversa (dono 4a) ----------
    Mensagens, markdown, anexos, compositor, seletor de emoji e visualizador de imagens. */
 
-/* Barra da mensagem, sugestões, seletor de emoji, pílula "ir para o fim" e compositor ficam acima do fundo: no escuro,
-   --bg-hover e --bg-active ficam a um nível deles e o hover, a linha ativa e o "Mais" aberto sumiam. Mesma regra de
-   overlays.css (menus, modais). */
-@supports (color: light-dark(white, black)) {
-  :where(.msg-toolbar, .suggestions, .emoji-picker, .jump-wrap, .composer) {
-    --raised-hover: light-dark(var(--bg-hover), color-mix(in srgb, var(--fg) 8%, var(--bg-raised)));
-    --raised-active: light-dark(var(--bg-active), color-mix(in srgb, var(--fg) 12%, var(--bg-raised)));
-  }
-  :where(.msg-toolbar, .suggestions, .emoji-picker, .jump-wrap, .composer) > * {
-    --bg-hover: var(--raised-hover);
-    --bg-active: var(--raised-active);
-  }
-}
-
 /* ---------- Lista de mensagens ---------- */
 .messages {
   flex: 1;
@@ -57,7 +43,7 @@
   padding: 32px 20px 16px;
   font-size: var(--fs-14);
   line-height: var(--lh-14);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .room-start-icon {
   width: 48px;
@@ -66,8 +52,8 @@
   place-items: center;
   margin-bottom: 10px;
   border-radius: var(--radius-lg);
-  background: var(--bg-muted);
-  color: var(--fg-2);
+  background: hsl(var(--muted));
+  color: hsl(var(--text-2));
 }
 .room-start > .avatar {
   margin-bottom: 10px;
@@ -76,7 +62,7 @@
   font-size: var(--fs-16);
   line-height: var(--lh-16);
   font-weight: var(--fw-semibold);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .room-start-topic {
   max-width: 640px;
@@ -98,14 +84,14 @@
   align-items: center;
   height: 24px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 12px;
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
   box-shadow: var(--shadow-1);
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-medium);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   pointer-events: auto;
 }
 /* Presa no topo (data-stuck, MessageList): só aparece enquanto a pessoa rola, e some 1 s depois de parar. */
@@ -130,7 +116,7 @@
 .unread-sep::before {
   content: '';
   flex: 1;
-  border-top: 1px solid var(--danger);
+  border-top: 1px solid hsl(var(--st-red));
 }
 .unread-sep span {
   display: inline-flex;
@@ -138,7 +124,7 @@
   height: 18px;
   padding: 0 8px;
   border-radius: 9px;
-  background: var(--danger-solid);
+  background: hsl(var(--st-red-solid));
   color: #fff;
   font-size: var(--fs-11);
   line-height: var(--lh-11);
@@ -146,39 +132,37 @@
 }
 
 /* ---------- Linha da mensagem ---------- */
+/* Conversa em balões (Atendeti): avatar redondo de 32px, balão de raio 16 com o canto de baixo reto do lado de quem
+   fala; os meus à direita, na cor da marca; os dos outros à esquerda, em cinza. */
 .msg {
-  --ring-surface: var(--bg-canvas);
+  --ring-surface: hsl(var(--background));
   position: relative;
   display: flex;
-  gap: 12px;
-  padding: 6px 20px;
-  transition: background-color var(--dur-1) linear;
+  gap: 10px;
+  padding: 6px 24px;
 }
-.msg:hover {
-  --ring-surface: var(--bg-subtle);
-  background: var(--bg-subtle);
+.msg.own {
+  flex-direction: row-reverse;
 }
 /* A linha recebe o foco quando um modal aberto pelo "Mais" fecha (restoreFocus): o anel mostra onde o Tab continua. */
 .msg:focus {
   outline: none;
 }
 .msg:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--focus);
+  box-shadow: inset 0 0 0 2px hsl(var(--ring));
 }
 .msg.grouped {
-  padding-top: 2px;
-  padding-bottom: 2px;
+  padding-top: 1px;
+  padding-bottom: 1px;
 }
-.msg.mentioned {
-  background: var(--mention-row);
-  box-shadow: inset 2px 0 0 var(--mention-bar);
+.msg.mentioned > .msg-main > .msg-body {
+  background: hsl(var(--st-amber-soft));
+  box-shadow: inset 0 0 0 1px hsl(var(--st-amber-line));
 }
-.msg.mentioned:hover {
-  background: color-mix(in srgb, var(--mention-bar) 14%, var(--bg-canvas));
-}
-.msg.editing {
-  background: var(--accent-soft);
-  box-shadow: inset 2px 0 0 var(--accent);
+.msg.editing > .msg-main > .msg-body {
+  box-shadow:
+    0 0 0 2px hsl(var(--background)),
+    0 0 0 4px hsl(var(--brand-mid) / 0.55);
 }
 /* Destino de um link: o amarelo fica 600 ms e some em 1200 ms. */
 .msg.highlight {
@@ -187,7 +171,7 @@
 @keyframes msg-flash {
   0%,
   33% {
-    background-color: var(--highlight);
+    background-color: hsl(var(--st-amber-solid) / 0.35);
   }
   100% {
     background-color: transparent;
@@ -196,7 +180,7 @@
 @media (prefers-reduced-motion: reduce) {
   /* Sem a animação, o destaque fica parado enquanto dura a classe. */
   .msg.highlight {
-    background: var(--highlight);
+    background: hsl(var(--st-amber-solid) / 0.35);
   }
 }
 .msg.arrive {
@@ -216,14 +200,14 @@
   padding-bottom: 2px;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .msg.system:hover {
   background: none;
 }
 .msg.system .msg-left {
   justify-content: center;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 /* Uma linha só: o texto corta com reticências (o title tem o texto inteiro) e a hora nunca desce sozinha. */
 .system > .msg-main {
@@ -284,7 +268,7 @@
   margin-left: 4px;
 }
 .joins-toggle:hover {
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .joins-toggle .icon {
   transition: transform var(--dur-2) var(--ease-out);
@@ -295,25 +279,26 @@
 
 .msg-left {
   position: relative;
-  width: 36px;
+  width: 32px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 .msg-left .avatar {
-  width: 36px;
-  height: 36px;
-  margin-top: 2px;
+  width: 32px;
+  height: 32px;
+  margin-top: 18px;
+  border-radius: 50%;
 }
 /* Linha agrupada: a hora aparece na calha no hover; o recibo fica no lugar dela. */
 .msg-time-hover {
   position: absolute;
   inset: 0 0 auto;
-  font-size: var(--fs-11);
-  line-height: 22px;
-  text-align: right;
-  color: var(--fg-muted);
+  font-size: var(--fs-10);
+  line-height: 40px;
+  text-align: center;
+  color: hsl(var(--muted-foreground));
   border-radius: var(--radius-xs);
   font-variant-numeric: tabular-nums;
   opacity: 0;
@@ -337,14 +322,28 @@
 .msg-main {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.own > .msg-main {
+  align-items: flex-end;
+}
+.msg-main > * {
+  max-width: 100%;
 }
 /* Uma linha só: um nome longo encolhe com reticências e a hora nunca desce para uma linha própria. */
 .msg-head {
   display: flex;
   align-items: baseline;
   flex-wrap: nowrap;
-  gap: 0 8px;
+  gap: 0 6px;
   min-width: 0;
+  margin-bottom: 3px;
+  padding: 0 4px;
+}
+.own > .msg-main > .msg-head {
+  flex-direction: row-reverse;
 }
 .msg-head > :not(.msg-name) {
   flex: none;
@@ -358,10 +357,10 @@
   border: 0;
   border-radius: var(--radius-xs);
   background: none;
-  font-size: var(--fs-14);
-  line-height: var(--lh-14);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg);
+  color: hsl(var(--text-2));
   text-align: left;
 }
 .msg-name:hover {
@@ -371,7 +370,7 @@
 .msg-username {
   display: none;
   font-size: var(--fs-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .msg.bot .msg-username {
   display: inline;
@@ -382,37 +381,37 @@
   font-size: var(--fs-11);
 }
 .msg-time {
-  font-size: var(--fs-12);
+  font-size: var(--fs-11);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .msg-flag {
   display: inline-flex;
   align-self: center;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .msg-flag.star {
-  color: var(--warn-solid);
+  color: hsl(var(--warning));
 }
 .receipt {
   display: inline-flex;
   align-self: center;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .receipt.read {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .edited {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .msg-body .edited {
   margin-left: 6px;
 }
 .msg-thread-hint {
   font-size: var(--fs-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 /* Tradução pedida pelo menu: "Traduzida do inglês · Ver original" abaixo do corpo */
 .msg-translated {
@@ -423,14 +422,14 @@
   margin-top: 2px;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .msg-translated .msg-tr-btn {
   padding: 0;
   border: 0;
   background: none;
   font: inherit;
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
   cursor: pointer;
 }
 .msg-translated .msg-tr-btn:hover {
@@ -456,7 +455,7 @@
   font: inherit;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 .msg-tr-mark > svg {
@@ -466,7 +465,7 @@ button.msg-tr-mark {
   cursor: pointer;
 }
 button.msg-tr-mark:hover {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .msg-body .msg-tr-mark {
   margin-left: 6px;
@@ -491,10 +490,56 @@ button.msg-tr-mark:hover {
   }
 }
 .msg-body {
-  font-size: var(--fs-15);
-  line-height: var(--lh-15);
+  font-size: 13.5px;
+  line-height: 1.6;
   overflow-wrap: anywhere;
-  color: var(--fg);
+  color: hsl(var(--foreground));
+}
+/* O balão. */
+.msg-main > .msg-body:where(:not(.big-emoji)) {
+  max-width: min(80%, 720px);
+  padding: 10px 14px;
+  border-radius: 16px 16px 16px 6px;
+  background: hsl(var(--muted));
+}
+.grouped > .msg-main > .msg-body:where(:not(.big-emoji)) {
+  border-top-left-radius: 6px;
+}
+.own > .msg-main > .msg-body:where(:not(.big-emoji)) {
+  border-radius: 16px 16px 6px 16px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+.own.grouped > .msg-main > .msg-body:where(:not(.big-emoji)) {
+  border-top-right-radius: 6px;
+}
+.msg-main > .msg-body + :where(.att, .att-rich-wrap, .quote-att, .att-file, .att-media) {
+  margin-top: 6px;
+}
+.msg-main > .msg-body:empty {
+  display: none;
+}
+/* Dentro do meu balão: links, código, menções e marcas em branco. */
+.own > .msg-main > .msg-body :where(a, .link, .edited, .msg-tr-mark, .md-h) {
+  color: inherit;
+}
+.own > .msg-main > .msg-body :where(a) {
+  text-decoration: underline;
+}
+.own > .msg-main > .msg-body :where(.edited, .msg-tr-mark) {
+  opacity: 0.85;
+}
+.own > .msg-main > .msg-body :where(.md-code, .mention) {
+  background: hsl(0 0% 100% / 0.2);
+  color: inherit;
+  border-color: transparent;
+}
+.own > .msg-main > .msg-body :where(blockquote) {
+  border-color: hsl(0 0% 100% / 0.6);
+  color: inherit;
+}
+.own > .msg-main > .msg-body :where(.md-pre-wrap) {
+  color: hsl(var(--foreground));
 }
 .msg-body p {
   margin: 0;
@@ -515,18 +560,18 @@ button.msg-tr-mark:hover {
 /* Barra de ações no hover (some no toque: lá é o toque longo). Some com atraso: com display: none o Tab que sai
    do último botão da linha perdia o foco, porque a barra sumia no instante em que a linha ficava sem foco. */
 .msg-toolbar {
-  --ring-offset: var(--bg-raised);
+  --ring-offset: hsl(var(--popover));
   position: absolute;
   top: -16px;
-  right: 16px;
+  right: 24px;
   z-index: var(--z-toolbar);
   display: flex;
   align-items: center;
-  height: 32px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
+  height: 36px;
+  padding: 3px;
+  border: 1px solid hsl(var(--line-2) / 0.55);
+  border-radius: var(--radius-full);
+  background: hsl(var(--popover));
   box-shadow: var(--shadow-2), var(--highlight-top);
   visibility: hidden;
   opacity: 0;
@@ -558,17 +603,20 @@ button.msg-tr-mark:hover {
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 50%;
   background: none;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
+  transition:
+    background-color var(--dur-2) ease,
+    color var(--dur-2) ease;
 }
 .tb-btn:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--brand-fill));
+  color: hsl(var(--on-color));
 }
 .tb-btn[aria-expanded='true'] {
-  background: var(--bg-active);
-  color: var(--fg);
+  background: hsl(var(--surface-4));
+  color: hsl(var(--foreground));
 }
 .tb-btn.quick {
   font-size: 16px;
@@ -581,7 +629,7 @@ button.msg-tr-mark:hover {
   width: 1px;
   height: 18px;
   margin: 0 2px;
-  background: var(--border);
+  background: hsl(var(--border));
 }
 
 /* Folha de ações (toque longo): reações rápidas em cima, depois os itens do "Mais". */
@@ -591,7 +639,7 @@ button.msg-tr-mark:hover {
   gap: 4px;
   padding: 4px 4px 12px;
   margin-bottom: 4px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid hsl(var(--border));
 }
 .msg-sheet-quick > button.msg-sheet-emoji {
   flex: 0 0 44px;
@@ -600,9 +648,9 @@ button.msg-tr-mark:hover {
   justify-content: center;
   padding: 0;
   border-radius: 50%;
-  background: var(--bg-subtle);
+  background: hsl(var(--surface-2));
   font-size: 22px;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 
 /* Reações */
@@ -622,29 +670,29 @@ button.msg-tr-mark:hover {
   gap: 4px;
   height: 26px;
   padding: 0 8px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 13px;
-  background: var(--bg-subtle);
-  color: var(--fg);
+  background: hsl(var(--surface-2));
+  color: hsl(var(--foreground));
   font-size: 16px;
   line-height: 1;
   transition: border-color var(--dur-1) linear;
 }
 button.reaction:hover {
-  border-color: var(--border-strong);
+  border-color: hsl(var(--line-2));
 }
 .reaction .n {
   font-size: var(--fs-12);
   font-weight: var(--fw-semibold);
   font-variant-numeric: tabular-nums;
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .reaction.mine {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: var(--accent-soft);
+  border-color: color-mix(in srgb, hsl(var(--primary)) 45%, transparent);
+  background: hsl(var(--primary) / 0.1);
 }
 .reaction.mine .n {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .reaction .emoji.custom {
   height: 16px;
@@ -656,10 +704,10 @@ button.reaction:hover {
   width: 32px;
   height: 26px;
   padding: 0;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 13px;
-  background: var(--bg-subtle);
-  color: var(--fg-muted);
+  background: hsl(var(--surface-2));
+  color: hsl(var(--muted-foreground));
   opacity: 0;
   transition: opacity var(--dur-1) linear;
 }
@@ -668,8 +716,8 @@ button.reaction:hover {
   opacity: 1;
 }
 .reaction-add:hover {
-  border-color: var(--border-strong);
-  color: var(--fg);
+  border-color: hsl(var(--line-2));
+  color: hsl(var(--foreground));
 }
 
 /* Resumo do tópico e da discussão */
@@ -679,28 +727,28 @@ button.reaction:hover {
   gap: 8px;
   width: fit-content;
   max-width: calc(100% + 8px);
-  margin: 6px 0 0 -8px;
-  padding: 4px 8px;
+  margin: 4px 0 0;
+  padding: 4px 10px;
   border: 0;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-full);
   background: none;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   text-align: left;
 }
 .thread-summary:hover {
-  --ring-surface: var(--bg-hover);
-  background: var(--bg-hover);
+  --ring-surface: hsl(var(--muted) / 0.6);
+  background: hsl(var(--muted) / 0.6);
 }
 .thread-summary + .thread-summary {
   margin-top: 2px;
 }
 .thread-summary.discussion .icon {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .replies {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
   font-weight: var(--fw-semibold);
   white-space: nowrap;
 }
@@ -712,7 +760,7 @@ button.reaction:hover {
 /* Respostas novas no tópico: o mesmo índigo do selo de tópicos da barra lateral (vermelho é menção e conversa direta). */
 .thread-summary .badge.dot {
   flex-shrink: 0;
-  background: var(--accent);
+  background: hsl(var(--primary));
 }
 .mini-follow {
   width: 20px;
@@ -724,16 +772,16 @@ button.reaction:hover {
 .mention {
   padding: 0 4px;
   border-radius: var(--radius-xs);
-  background: var(--mention-other-bg);
-  color: var(--mention-other-fg);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
   font-weight: var(--fw-medium);
   cursor: pointer;
 }
 .mention.me,
 .mention.all,
 .mention.here {
-  background: var(--mention-me-bg);
-  color: var(--mention-me-fg);
+  background: hsl(var(--st-amber-solid) / 0.22);
+  color: hsl(var(--st-amber));
   font-weight: var(--fw-semibold);
 }
 .mention.group {
@@ -755,10 +803,10 @@ button.reaction:hover {
 }
 .md-code {
   padding: 1px 5px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid hsl(var(--line-1));
   border-radius: var(--radius-xs);
-  background: var(--code-bg);
-  color: var(--code-fg);
+  background: hsl(var(--ink) / 0.06);
+  color: hsl(var(--text-1));
   font-family: var(--font-mono);
   font-size: 0.866em;
 }
@@ -772,17 +820,17 @@ button.reaction:hover {
   margin: 4px 0;
   padding: 10px 12px;
   overflow-x: auto;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid hsl(var(--line-1));
   border-radius: var(--radius-md);
   /* Sombra na borda de onde ainda há código para rolar (as capas "local" andam com o texto e a escondem nas pontas):
      uma linha longa não parece mais cortada a seco. */
   background:
-    linear-gradient(to right, var(--code-bg) 30%, transparent) left / 24px 100% no-repeat local,
-    linear-gradient(to left, var(--code-bg) 30%, transparent) right / 24px 100% no-repeat local,
-    linear-gradient(to right, color-mix(in srgb, var(--code-fg) 14%, transparent), transparent) left / 12px 100% no-repeat scroll,
-    linear-gradient(to left, color-mix(in srgb, var(--code-fg) 14%, transparent), transparent) right / 12px 100% no-repeat scroll,
-    var(--code-bg);
-  color: var(--code-fg);
+    linear-gradient(to right, hsl(var(--ink) / 0.06) 30%, transparent) left / 24px 100% no-repeat local,
+    linear-gradient(to left, hsl(var(--ink) / 0.06) 30%, transparent) right / 24px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, hsl(var(--text-1)) 14%, transparent), transparent) left / 12px 100% no-repeat scroll,
+    linear-gradient(to left, color-mix(in srgb, hsl(var(--text-1)) 14%, transparent), transparent) right / 12px 100% no-repeat scroll,
+    hsl(var(--ink) / 0.06);
+  color: hsl(var(--text-1));
   font: 13px/20px var(--font-mono);
   white-space: pre;
 }
@@ -798,12 +846,12 @@ button.reaction:hover {
 }
 /* Sobre o código, no canto: fundo e borda próprios para não se misturar ao texto da primeira linha. */
 .btn.md-copy {
-  border: 1px solid var(--border);
-  background: var(--bg-raised);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--popover));
   box-shadow: var(--shadow-1);
 }
 .btn.md-copy:hover {
-  background: var(--bg-hover);
+  background: hsl(var(--muted) / 0.6);
 }
 .md-pre-wrap:hover .md-copy,
 .md-copy:focus-visible {
@@ -857,7 +905,7 @@ button.reaction:hover {
 .att-image-box:not(.loaded) {
   min-width: min(240px, 100%);
   min-height: 160px;
-  background: var(--skeleton);
+  background: hsl(var(--muted));
 }
 .att-image-open {
   display: block;
@@ -875,10 +923,10 @@ button.reaction:hover {
   min-width: 120px;
   min-height: 64px;
   object-fit: contain;
-  background: var(--bg-subtle);
+  background: hsl(var(--surface-2));
   max-width: min(400px, 100%);
   max-height: 320px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
 }
 .att-image-actions {
@@ -921,7 +969,7 @@ button.reaction:hover {
   width: 72px;
   height: 72px;
   object-fit: cover;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-md);
 }
 .att-video {
@@ -942,7 +990,7 @@ button.reaction:hover {
   margin-top: 4px;
   font-size: var(--fs-14);
   line-height: var(--lh-14);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 /* Cartão do arquivo: quadradinho do tipo, nome, "PDF · 14,5 KB" e baixar. */
 .att-file {
@@ -953,14 +1001,14 @@ button.reaction:hover {
   max-width: 100%;
   height: 56px;
   padding: 0 8px 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
-  background: var(--bg-surface);
-  color: var(--fg);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
   transition: border-color var(--dur-1) linear;
 }
 .att-file:hover {
-  border-color: var(--border-strong);
+  border-color: hsl(var(--line-2));
   text-decoration: none;
 }
 .att-file-meta {
@@ -980,7 +1028,7 @@ button.reaction:hover {
 .att-file-size {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .att-file-dl {
   display: grid;
@@ -989,11 +1037,11 @@ button.reaction:hover {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-md);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .att-file:hover .att-file-dl {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--muted) / 0.6);
+  color: hsl(var(--foreground));
 }
 .att-tile {
   display: grid;
@@ -1002,8 +1050,8 @@ button.reaction:hover {
   width: 36px;
   height: 36px;
   border-radius: var(--radius-md);
-  background: var(--bg-muted);
-  color: var(--fg-2);
+  background: hsl(var(--muted));
+  color: hsl(var(--text-2));
 }
 .att-tile.sm {
   width: 28px;
@@ -1011,31 +1059,31 @@ button.reaction:hover {
   border-radius: var(--radius-sm);
 }
 .att-tile[data-kind='pdf'] {
-  background: var(--danger-soft);
-  color: var(--danger);
+  background: hsl(var(--st-red-soft));
+  color: hsl(var(--st-red));
 }
 .att-tile[data-kind='doc'],
 .att-tile[data-kind='image'],
 .att-tile[data-kind='video'],
 .att-tile[data-kind='audio'] {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 .att-tile[data-kind='sheet'] {
-  background: var(--ok-soft);
-  color: var(--ok);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 .att-tile[data-kind='archive'] {
-  background: var(--warn-soft);
-  color: var(--warn);
+  background: hsl(var(--st-amber-soft));
+  color: hsl(var(--st-amber));
 }
 .quote-att {
   max-width: 640px;
   margin-top: 6px;
   padding: 6px 12px;
-  border-left: 2px solid var(--border-strong);
+  border-left: 2px solid hsl(var(--line-2));
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  background: var(--bg-subtle);
+  background: hsl(var(--surface-2));
 }
 .quote-head {
   display: flex;
@@ -1043,12 +1091,12 @@ button.reaction:hover {
   gap: 6px;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .quote-head strong {
   font-size: var(--fs-13);
   font-weight: var(--fw-semibold);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .quote-body {
   margin-top: 2px;
@@ -1068,9 +1116,9 @@ button.reaction:hover {
   display: flex;
   gap: 12px;
   padding: 10px 12px;
-  border-left: 3px solid var(--border-strong);
+  border-left: 3px solid hsl(var(--line-2));
   border-radius: 0 10px 10px 0;
-  background: var(--bg-subtle);
+  background: hsl(var(--surface-2));
 }
 .att-rich-main {
   flex: 1;
@@ -1089,7 +1137,7 @@ button.reaction:hover {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .att-author img {
   flex-shrink: 0;
@@ -1101,10 +1149,10 @@ button.reaction:hover {
 }
 .att-title {
   font-weight: var(--fw-semibold);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 a.att-title {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .att-fields {
   display: grid;
@@ -1122,7 +1170,7 @@ a.att-title {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .att-field-value {
   font-size: var(--fs-13);
@@ -1140,7 +1188,7 @@ a.att-title {
 .att-footer {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .att-pending {
   display: inline-flex;
@@ -1149,11 +1197,11 @@ a.att-title {
   max-width: 100%;
   margin-top: 6px;
   padding: 6px 10px;
-  border: 1px dashed var(--border-strong);
+  border: 1px dashed hsl(var(--line-2));
   border-radius: var(--radius-md);
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
 
@@ -1166,9 +1214,9 @@ a.att-title {
   max-width: 100%;
   margin-top: 4px;
   padding: 10px 10px 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
-  background: var(--bg-surface);
+  background: hsl(var(--card));
 }
 .call-card-tile {
   display: grid;
@@ -1177,12 +1225,12 @@ a.att-title {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 .call-card.missed .call-card-tile {
-  background: var(--danger-soft);
-  color: var(--danger);
+  background: hsl(var(--st-red-soft));
+  color: hsl(var(--st-red));
 }
 .call-card-text {
   flex: 1;
@@ -1194,12 +1242,12 @@ a.att-title {
   font-size: var(--fs-14);
   line-height: var(--lh-14);
   font-weight: var(--fw-medium);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .call-card-meta {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .call-card > .btn {
   flex-shrink: 0;
@@ -1210,9 +1258,9 @@ a.att-title {
   max-width: 640px;
   margin-top: 4px;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
-  background: var(--bg-surface);
+  background: hsl(var(--card));
   box-shadow: var(--shadow-1);
 }
 .notice-card-head {
@@ -1228,8 +1276,8 @@ a.att-title {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-md);
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 .notice-card-titles {
   display: flex;
@@ -1242,14 +1290,14 @@ a.att-title {
   line-height: var(--lh-15);
   font-weight: var(--fw-semibold);
   letter-spacing: -0.005em;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   text-wrap: balance;
   overflow-wrap: anywhere;
 }
 .notice-card-meta {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .notice-card > .msg-body {
   padding: 10px 16px 12px;
@@ -1274,8 +1322,8 @@ a.att-title {
 }
 .notice-card-foot {
   padding: 10px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-subtle);
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--surface-2));
 }
 .notice-card-foot:empty {
   display: none;
@@ -1303,11 +1351,11 @@ a.att-title {
   gap: 6px;
   height: 32px;
   padding: 0 14px 0 12px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 16px;
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
   box-shadow: var(--shadow-2), var(--highlight-top);
-  color: var(--fg);
+  color: hsl(var(--foreground));
   font-size: var(--fs-13);
   font-weight: var(--fw-medium);
   white-space: nowrap;
@@ -1315,10 +1363,10 @@ a.att-title {
   animation: pop-in var(--dur-2) var(--ease-out);
 }
 .jump-pill:hover {
-  background: var(--bg-hover);
+  background: hsl(var(--muted) / 0.6);
 }
 .jump-pill .icon {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 
 /* Quem leu (modal) */
@@ -1356,7 +1404,7 @@ a.att-title {
   justify-content: center;
   padding: 64px 16px 56px;
   /* Fundo sólido translúcido do design system: sem desfoque da sala por trás. */
-  background: var(--scrim-lightbox);
+  background: hsl(var(--overlay) / 0.9);
   cursor: zoom-out;
   animation: fade-in var(--dur-2) var(--ease-out);
 }
@@ -1406,7 +1454,7 @@ a.att-title {
 .lightbox-time {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .lightbox-file {
   max-width: 40vw;
@@ -1414,7 +1462,7 @@ a.att-title {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--fs-13);
-  color: var(--call-fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .lightbox-actions {
   display: flex;
@@ -1422,7 +1470,7 @@ a.att-title {
   gap: 8px;
 }
 .lightbox-btn {
-  --ring-offset: var(--call-bg);
+  --ring-offset: hsl(var(--background));
   display: grid;
   place-items: center;
   width: 40px;
@@ -1441,22 +1489,25 @@ a.att-title {
 /* ---------- Compositor ---------- */
 .composer {
   position: relative;
-  margin: 0 16px 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  background: var(--bg-input);
+  margin: 0 24px 20px;
+  border: 1px solid hsl(var(--line-2));
+  border-radius: var(--radius-xl);
+  background: hsl(var(--card));
   box-shadow: var(--shadow-1);
-  transition: border-color var(--dur-2) linear;
+  transition:
+    border-color var(--dur-2) ease,
+    box-shadow var(--dur-2) ease;
 }
 .composer:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 60%, var(--border-strong));
+  border-color: hsl(var(--brand-mid));
+  box-shadow: var(--focus-ring-input);
 }
 /* Sem poder enviar: o motivo e, em cima, a faixa das agendadas (se houver). */
 .composer.disabled {
   display: flex;
   flex-direction: column;
-  border-color: var(--border);
-  background: var(--bg-subtle);
+  border-color: hsl(var(--border));
+  background: hsl(var(--surface-2));
   box-shadow: none;
 }
 .composer-note {
@@ -1468,7 +1519,7 @@ a.att-title {
   padding: 12px 16px;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   text-align: center;
 }
 .composer-note > span {
@@ -1481,18 +1532,18 @@ a.att-title {
   min-width: 0;
   height: 36px;
   padding: 0 8px 0 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  background: var(--bg-subtle);
+  background: hsl(var(--surface-2));
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .composer-bar + .composer-bar {
   border-radius: 0;
 }
 .composer-bar > .icon {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .composer-bar .icon-btn {
   width: 28px;
@@ -1507,31 +1558,31 @@ a.att-title {
   white-space: nowrap;
 }
 .composer-bar.editing {
-  background: var(--accent-soft);
+  background: hsl(var(--primary) / 0.1);
 }
 .composer-bar.editing > .icon {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .composer-bar.editing .composer-bar-text {
   font-weight: var(--fw-medium);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 /* Agendada que não saiu: em destaque até a pessoa resolver. */
 .composer-bar.scheduled.failed {
-  background: var(--danger-soft);
+  background: hsl(var(--st-red-soft));
 }
 .composer-bar.scheduled.failed > .icon,
 .composer-bar.scheduled.failed .composer-bar-text {
-  color: var(--danger);
+  color: hsl(var(--st-red));
   font-weight: var(--fw-medium);
 }
 .composer-bar-hint {
   font-size: var(--fs-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 .composer-bar.quoting {
-  box-shadow: inset 2px 0 0 var(--border-strong);
+  box-shadow: inset 2px 0 0 hsl(var(--line-2));
 }
 .composer-bar-excerpt {
   flex: 1;
@@ -1539,7 +1590,7 @@ a.att-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .composer-bar.upload .composer-bar-text {
   flex: 0 1 auto;
@@ -1551,13 +1602,13 @@ a.att-title {
   height: 4px;
   overflow: hidden;
   border-radius: 2px;
-  background: var(--bg-muted);
+  background: hsl(var(--muted));
 }
 .progress > div,
 .progress > span {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: hsl(var(--primary));
   transition: width var(--dur-2) linear;
 }
 .composer-bar-pct {
@@ -1565,7 +1616,7 @@ a.att-title {
   font-size: var(--fs-12);
   font-variant-numeric: tabular-nums;
   text-align: right;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .composer-row textarea {
   display: block;
@@ -1579,7 +1630,7 @@ a.att-title {
   outline: none;
   resize: none;
   background: transparent;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   font: var(--fs-15) / var(--lh-15) var(--font-sans);
 }
 .composer-row textarea:focus {
@@ -1587,7 +1638,7 @@ a.att-title {
   box-shadow: none;
 }
 .composer-row textarea::placeholder {
-  color: var(--fg-placeholder);
+  color: hsl(var(--text-4));
   /* Nome longo de sala ou pessoa: o texto de exemplo corta numa linha, o compositor vazio não cresce. */
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1607,7 +1658,7 @@ a.att-title {
   padding: 4px 14px;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   white-space: nowrap;
 }
 /* Quebra só quando não cabe (o .spacer ocupa a sobra numa linha só): o que desce fica à direita, perto de
@@ -1634,17 +1685,17 @@ a.att-title {
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
 }
 .composer-tools > button:where(:not(.btn)):hover,
 .tool-btn:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--muted) / 0.6);
+  color: hsl(var(--foreground));
 }
 .tool-btn.on {
-  background: var(--bg-active);
-  color: var(--fg);
+  background: hsl(var(--surface-4));
+  color: hsl(var(--foreground));
 }
 .tool-btn input[type='file'] {
   display: none;
@@ -1654,7 +1705,7 @@ a.att-title {
   width: 1px;
   height: 18px;
   margin: 0 4px;
-  background: var(--border);
+  background: hsl(var(--border));
 }
 .composer-tools > .chip {
   flex-shrink: 0;
@@ -1667,10 +1718,10 @@ a.att-title {
   margin-right: 8px;
   font-size: var(--fs-12);
   font-variant-numeric: tabular-nums;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .counter.over {
-  color: var(--danger);
+  color: hsl(var(--st-red));
   font-weight: var(--fw-semibold);
 }
 /* Barra estreita (celular, painel de conversa): o contador ganha uma linha própria acima das ferramentas,
@@ -1717,7 +1768,7 @@ a.att-title {
 }
 /* Sugestões (@, #, :, /, !): em portal, acima do compositor. */
 .suggestions {
-  --ring-offset: var(--bg-raised);
+  --ring-offset: hsl(var(--popover));
   position: fixed;
   z-index: var(--z-popover);
   width: 360px;
@@ -1725,11 +1776,11 @@ a.att-title {
   max-height: 280px;
   overflow-y: auto;
   padding: 4px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
   box-shadow: var(--shadow-2), var(--highlight-top);
-  color: var(--fg);
+  color: hsl(var(--foreground));
   animation: pop-in-up var(--dur-2) var(--ease-out);
 }
 .suggestions[data-side='bottom'] {
@@ -1740,7 +1791,7 @@ a.att-title {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .suggestions button {
   display: flex;
@@ -1752,11 +1803,11 @@ a.att-title {
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   text-align: left;
 }
 .suggestions button.active {
-  background: var(--bg-hover);
+  background: hsl(var(--muted) / 0.6);
 }
 .sug-lead {
   display: grid;
@@ -1764,7 +1815,7 @@ a.att-title {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .sug-emoji {
   font-size: 18px;
@@ -1785,11 +1836,11 @@ a.att-title {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--fs-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 /* Na linha ativa o fundo sobe um degrau: o texto secundário também, para manter 4.5:1 no escuro. */
 .active > .sug-sub {
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 
 /* Envio de arquivo: lista no modal e área de soltar. */
@@ -1810,14 +1861,14 @@ a.att-title {
 .upload-size {
   font-size: var(--fs-12);
   font-variant-numeric: tabular-nums;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .upload-preview {
   flex-shrink: 0;
   width: 48px;
   height: 48px;
   object-fit: cover;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-md);
 }
 .upload-list + input {
@@ -1832,10 +1883,10 @@ a.att-title {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 2px dashed var(--accent);
+  border: 2px dashed hsl(var(--primary));
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--accent) 6%, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
-  color: var(--accent-text);
+  background: color-mix(in srgb, hsl(var(--primary)) 6%, color-mix(in srgb, hsl(var(--background)) 88%, transparent));
+  color: hsl(var(--brand-ink-2));
   font-size: var(--fs-15);
   font-weight: var(--fw-medium);
   pointer-events: none;
@@ -1844,7 +1895,7 @@ a.att-title {
 
 /* ---------- Seletor de emoji ---------- */
 .emoji-picker {
-  --ring-offset: var(--bg-raised);
+  --ring-offset: hsl(var(--popover));
   position: fixed;
   z-index: var(--z-popover);
   display: flex;
@@ -1853,11 +1904,11 @@ a.att-title {
   max-width: calc(100vw - 16px);
   height: 400px;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
   box-shadow: var(--shadow-2), var(--highlight-top);
-  color: var(--fg);
+  color: hsl(var(--foreground));
   animation: pop-in-up var(--dur-2) var(--ease-out);
 }
 .emoji-picker[data-side='bottom'] {
@@ -1886,7 +1937,7 @@ a.att-title {
   position: absolute;
   top: 16px;
   left: 18px;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   pointer-events: none;
 }
 .emoji-search input {
@@ -1900,7 +1951,7 @@ a.att-title {
   gap: 2px;
   padding: 0 8px;
   overflow-x: auto;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid hsl(var(--border));
   scrollbar-width: none;
 }
 .emoji-cats button {
@@ -1914,14 +1965,14 @@ a.att-title {
   border: 0;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   background: none;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .emoji-cats button:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--muted) / 0.6);
+  color: hsl(var(--foreground));
 }
 .emoji-cats button.active {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .emoji-cats .active::after {
   content: '';
@@ -1931,7 +1982,7 @@ a.att-title {
   left: 6px;
   height: 2px;
   border-radius: 1px;
-  background: var(--accent);
+  background: hsl(var(--primary));
 }
 .emoji-grid {
   flex: 1;
@@ -1945,14 +1996,14 @@ a.att-title {
   top: 0;
   z-index: 1;
   padding: 8px 2px 4px;
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .emoji-picker.in-sheet .emoji-section-title {
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
 }
 .emoji-items {
   display: grid;
@@ -1975,7 +2026,7 @@ a.att-title {
 }
 .emoji-items button:hover,
 .emoji-items button:focus-visible {
-  background: var(--bg-hover);
+  background: hsl(var(--muted) / 0.6);
 }
 .emoji-items img {
   width: 24px;
@@ -1986,7 +2037,7 @@ a.att-title {
   padding: 40px 8px;
   text-align: center;
   font-size: var(--fs-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .emoji-foot {
   display: flex;
@@ -1995,9 +2046,9 @@ a.att-title {
   gap: 8px;
   height: 32px;
   padding: 0 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid hsl(var(--border));
   font-size: var(--fs-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .emoji-foot-glyph {
   display: inline-flex;
@@ -2011,7 +2062,7 @@ a.att-title {
 .emoji-foot code {
   font-family: var(--font-mono);
   font-size: var(--fs-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 
 /* ---------- Celular e toque ---------- */
@@ -2079,7 +2130,7 @@ a.att-title {
     background: none;
   }
   .msg.mentioned:hover {
-    background: var(--mention-row);
+    background: hsl(var(--st-amber-soft));
   }
   /* Toque longo abre a folha de ações: sem seleção de texto nem o menu do sistema. */
   .msg {
@@ -2242,9 +2293,9 @@ a.att-title {
   max-width: 100%;
   margin-top: 6px;
   padding: 8px 10px 8px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
-  background: var(--bg-surface);
+  background: hsl(var(--card));
 }
 .voice-play {
   display: inline-flex;
@@ -2255,20 +2306,20 @@ a.att-title {
   height: 40px;
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--accent);
-  color: var(--fg-on-accent);
+  background: hsl(var(--primary));
+  color: hsl(var(--on-color));
   cursor: pointer;
   transition: background var(--dur-1) linear, transform var(--dur-1) ease-out;
 }
 .voice-play:hover {
-  background: var(--accent-hover);
+  background: hsl(var(--primary) / 0.92);
 }
 .voice-play:active {
   transform: scale(0.94);
 }
 .voice-play:disabled {
-  background: var(--bg-muted);
-  color: var(--fg-disabled);
+  background: hsl(var(--muted));
+  color: hsl(var(--text-5));
   cursor: default;
 }
 .voice-play .icon {
@@ -2289,7 +2340,7 @@ a.att-title {
   font-size: var(--fs-13);
   font-weight: var(--fw-medium);
   line-height: var(--lh-13);
-  color: var(--fg);
+  color: hsl(var(--foreground));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2306,18 +2357,18 @@ a.att-title {
   border-radius: 4px;
 }
 .voice-wave:focus-visible {
-  outline: 2px solid var(--focus);
+  outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }
 .voice-wave > i {
   flex: 1;
   min-width: 2px;
   border-radius: 2px;
-  background: var(--border-strong);
+  background: hsl(var(--line-2));
   transition: background var(--dur-1) linear;
 }
 .voice-wave > i.on {
-  background: var(--accent);
+  background: hsl(var(--primary));
 }
 .voice-knob {
   position: absolute;
@@ -2325,9 +2376,9 @@ a.att-title {
   width: 12px;
   height: 12px;
   margin: -6px 0 0 -6px;
-  border: 2px solid var(--bg-surface);
+  border: 2px solid hsl(var(--card));
   border-radius: var(--radius-full);
-  background: var(--accent);
+  background: hsl(var(--primary));
   box-shadow: var(--shadow-1);
   opacity: 0;
   transition: opacity var(--dur-2) linear;
@@ -2344,12 +2395,12 @@ a.att-title {
   gap: 4px;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
 }
 .voice-mic {
   display: inline-flex;
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .voice-speed {
   flex-shrink: 0;
@@ -2358,15 +2409,15 @@ a.att-title {
   padding: 0 6px;
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--bg-muted);
+  background: hsl(var(--muted));
   font: var(--fw-semibold) var(--fs-12) / 1 var(--font-sans);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   cursor: pointer;
   font-variant-numeric: tabular-nums;
 }
 .voice-speed:hover {
-  background: var(--bg-active);
-  color: var(--fg);
+  background: hsl(var(--surface-4));
+  color: hsl(var(--foreground));
 }
 @media (pointer: coarse) {
   .voice-play {
@@ -2402,7 +2453,7 @@ a.att-title {
   gap: 10px;
   padding: 0 60px 0 16px;
   border-radius: var(--radius-lg);
-  background: var(--bg-input);
+  background: hsl(var(--surface-1));
   overflow: visible;
 }
 .voice-bar.locked {
@@ -2413,11 +2464,11 @@ a.att-title {
   width: 10px;
   height: 10px;
   border-radius: var(--radius-full);
-  background: var(--danger-solid);
+  background: hsl(var(--st-red-solid));
   animation: voice-blink 1.2s ease-in-out infinite;
 }
 .voice-dot.paused {
-  background: var(--fg-muted);
+  background: hsl(var(--muted-foreground));
   animation: none;
 }
 @keyframes voice-blink {
@@ -2429,7 +2480,7 @@ a.att-title {
   flex-shrink: 0;
   min-width: 38px;
   font: var(--fw-medium) var(--fs-15) / 1 var(--font-sans);
-  color: var(--fg);
+  color: hsl(var(--foreground));
   font-variant-numeric: tabular-nums;
 }
 .voice-slide {
@@ -2439,7 +2490,7 @@ a.att-title {
   justify-content: center;
   gap: 4px;
   font-size: var(--fs-14);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
   pointer-events: none;
   animation: voice-nudge 1.6s ease-in-out infinite;
@@ -2460,15 +2511,15 @@ a.att-title {
   gap: 2px;
   width: 36px;
   padding: 10px 0 8px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-full);
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
   box-shadow: var(--shadow-1);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   pointer-events: none;
 }
 .voice-lock > .icon:last-child {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   animation: voice-rise 1.4s ease-in-out infinite;
 }
 @keyframes voice-rise {
@@ -2489,13 +2540,13 @@ a.att-title {
 .voice-live > i {
   flex: 0 0 3px;
   border-radius: 2px;
-  background: var(--accent);
+  background: hsl(var(--primary));
 }
 .voice-trash {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .voice-trash:hover {
-  background: var(--danger-soft);
+  background: hsl(var(--st-red-soft));
 }
 /* Segurando: o botão cresce e fica vermelho, como quem está gravando. */
 .btn.primary.send.mic {
@@ -2505,9 +2556,9 @@ a.att-title {
   -webkit-touch-callout: none;
 }
 .btn.primary.send.mic.holding {
-  background: var(--danger-solid);
+  background: hsl(var(--st-red-solid));
   transform: scale(1.18);
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--danger-solid) 18%, transparent);
+  box-shadow: 0 0 0 6px color-mix(in srgb, hsl(var(--st-red-solid)) 18%, transparent);
   transition: transform var(--dur-2) ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2520,8 +2571,8 @@ a.att-title {
 
 /* Palavra destacada (Minha conta › Preferências): as cores da menção a você. */
 mark.hl-word {
-  background: var(--mention-me-bg);
-  color: var(--mention-me-fg);
+  background: hsl(var(--st-amber-solid) / 0.22);
+  color: hsl(var(--st-amber));
   border-radius: 3px;
   padding: 0 2px;
 }
@@ -2533,9 +2584,9 @@ mark.hl-word {
   max-width: 640px;
   margin-top: 4px;
   padding: 6px 12px;
-  border-left: 2px solid var(--border-strong);
+  border-left: 2px solid hsl(var(--line-2));
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  background: var(--bg-subtle);
+  background: hsl(var(--surface-2));
   min-width: 0;
 }
 .fwd-head {
@@ -2546,7 +2597,7 @@ mark.hl-word {
   margin-bottom: 2px;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 /* Ícone e origem juntos; a origem longa corta com reticências (o nome inteiro fica no title). */
 .fwd-from {
@@ -2595,11 +2646,11 @@ mark.hl-word {
   }
 }
 .fwd-head a:hover {
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .fwd-author {
   font-weight: var(--fw-medium);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .fwd-card > .att-video,
 .fwd-card > .video-msg {
@@ -2614,10 +2665,10 @@ mark.hl-word {
   max-width: 480px;
   margin-top: 4px;
   padding: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
-  background: var(--bg-surface);
-  --ring-offset: var(--bg-surface);
+  background: hsl(var(--card));
+  --ring-offset: hsl(var(--card));
 }
 .poll-head {
   display: flex;
@@ -2626,16 +2677,16 @@ mark.hl-word {
   gap: 4px 6px;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .poll-head > .icon {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .poll-q {
   font-size: var(--fs-15);
   line-height: var(--lh-15);
   font-weight: var(--fw-semibold);
-  color: var(--fg);
+  color: hsl(var(--foreground));
   overflow-wrap: anywhere;
 }
 .poll-q p {
@@ -2656,10 +2707,10 @@ mark.hl-word {
   min-height: 40px;
   padding: 8px 10px;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  color: var(--fg);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
   font: inherit;
   font-size: var(--fs-14);
   line-height: var(--lh-14);
@@ -2668,11 +2719,11 @@ mark.hl-word {
   transition: border-color var(--dur-1) linear;
 }
 .poll-opt:where(:hover:not(:disabled, [aria-disabled='true'])) {
-  border-color: var(--border-hover);
+  border-color: hsl(var(--line-3));
 }
 .poll-opt:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+  box-shadow: var(--focus-ring);
 }
 .poll-opt[aria-disabled='true'] {
   cursor: not-allowed;
@@ -2681,28 +2732,28 @@ mark.hl-word {
    tudo a 0,55). O estado aparece pela borda neutra, sem hover, e pela opção vencedora em destaque. */
 .poll-opt:disabled {
   cursor: default;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   opacity: 1;
 }
 .poll-card.closed .poll-opt {
-  border-color: var(--border-subtle, var(--border));
-  background: var(--bg-subtle);
+  border-color: hsl(var(--line-1));
+  background: hsl(var(--surface-2));
 }
 .poll-card.closed .poll-bar {
-  background: var(--bg-muted);
+  background: hsl(var(--muted));
 }
 .poll-card.closed .poll-opt.top {
-  border-color: var(--accent);
+  border-color: hsl(var(--primary));
 }
 .poll-card.closed .poll-opt.top .poll-bar {
-  background: var(--accent-soft-hover);
+  background: hsl(var(--primary) / 0.16);
 }
 .poll-card.closed .poll-opt.top .poll-count {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
   font-weight: var(--fw-semibold);
 }
 .poll-opt.on {
-  border-color: var(--accent);
+  border-color: hsl(var(--primary));
 }
 .poll-opt.top {
   font-weight: var(--fw-semibold);
@@ -2711,7 +2762,7 @@ mark.hl-word {
   position: absolute;
   inset: 0 auto 0 0;
   z-index: -1;
-  background: var(--accent-soft);
+  background: hsl(var(--primary) / 0.1);
   transition: width var(--dur-4) var(--ease-out);
 }
 .poll-check {
@@ -2721,23 +2772,23 @@ mark.hl-word {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  border: 1.5px solid var(--control-border);
+  border: 1.5px solid hsl(var(--line-3));
   border-radius: var(--radius-full);
-  color: var(--fg-on-accent);
+  color: hsl(var(--on-color));
 }
 .poll-opts[role='group'] .poll-check {
   border-radius: var(--radius-xs);
 }
 .poll-opt.on .poll-check {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary));
 }
 .poll-card.closed .poll-check {
-  border-color: var(--border-strong);
+  border-color: hsl(var(--line-2));
 }
 .poll-card.closed .poll-opt.on .poll-check {
-  border-color: var(--fg-muted);
-  background: var(--fg-muted);
+  border-color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted-foreground));
 }
 .poll-text {
   flex: 1;
@@ -2749,7 +2800,7 @@ mark.hl-word {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-regular);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
 }
 .poll-foot {
@@ -2782,7 +2833,7 @@ mark.hl-word {
   margin-top: 4px;
   overflow: hidden;
   border-radius: var(--radius-xl);
-  background: var(--bg-muted);
+  background: hsl(var(--muted));
 }
 .video-msg video {
   display: block;
@@ -2804,14 +2855,14 @@ mark.hl-word {
   padding: 0;
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--scrim);
-  color: var(--fg-on-accent);
+  background: hsl(var(--brand-h) 30% 12% / 0.32);
+  color: hsl(var(--on-color));
   cursor: pointer;
   transition: opacity var(--dur-2) linear;
 }
 .video-msg-play:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--focus);
+  box-shadow: 0 0 0 2px hsl(var(--ring));
 }
 .video-msg.playing .video-msg-play {
   opacity: 0;
@@ -2826,8 +2877,8 @@ mark.hl-word {
   bottom: 10px;
   padding: 1px 6px;
   border-radius: var(--radius-full);
-  background: var(--scrim);
-  color: var(--fg-on-accent);
+  background: hsl(var(--brand-h) 30% 12% / 0.32);
+  color: hsl(var(--on-color));
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-variant-numeric: tabular-nums;
@@ -2838,12 +2889,12 @@ mark.hl-word {
   top: 8px;
   right: 8px;
   border-radius: var(--radius-full);
-  background: var(--scrim);
-  color: var(--fg-on-accent);
+  background: hsl(var(--brand-h) 30% 12% / 0.32);
+  color: hsl(var(--on-color));
 }
 .icon-btn.video-msg-full:hover {
-  background: var(--scrim);
-  color: var(--fg-on-accent);
+  background: hsl(var(--brand-h) 30% 12% / 0.32);
+  color: hsl(var(--on-color));
 }
 .video-msg-bar {
   position: absolute;
@@ -2851,13 +2902,13 @@ mark.hl-word {
   right: 0;
   bottom: 0;
   height: 3px;
-  background: color-mix(in srgb, var(--fg-on-accent) 25%, transparent);
+  background: color-mix(in srgb, hsl(var(--on-color)) 25%, transparent);
   pointer-events: none;
 }
 .video-msg-bar > span {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: hsl(var(--primary));
 }
 @media (max-width: 760px) {
   .video-msg {
@@ -2890,7 +2941,7 @@ mark.hl-word {
   min-height: 0;
   padding: 0;
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--fg-on-accent) 35%, transparent);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, hsl(var(--on-color)) 35%, transparent);
 }
 @media (pointer: coarse) {
   .btn.primary.send-more {
@@ -2899,7 +2950,7 @@ mark.hl-word {
   }
 }
 .composer-bar.scheduled > .icon {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .composer-bar.scheduled > .btn {
   margin-left: auto;

@@ -13,10 +13,10 @@ const hm = new Intl.DateTimeFormat('pt-BR', {
 });
 
 // Cabeçalho da seção (56px, preso no alto): título com a contagem opcional e as ações à direita, a principal por último.
-export function PageHead({ title, count, children }: { title: ReactNode; count?: number; children?: ReactNode }) {
+export function PageHead({ title, count, eyebrow, children }: { title: ReactNode; count?: number; eyebrow?: string; children?: ReactNode }) {
   return (
     <div className="page-title-row page-head">
-      <h1>
+      <h1 data-eyebrow={eyebrow}>
         {title}
         {count !== undefined && <span className="pill head-count">{nf.format(count)}</span>}
       </h1>
@@ -27,7 +27,7 @@ export function PageHead({ title, count, children }: { title: ReactNode; count?:
 
 // Status de conta: pill com ponto, verde quando ativa.
 export function ActivePill({ active, on = 'Ativo', off = 'Desativado' }: { active: boolean; on?: string; off?: string }) {
-  return <span className={active ? 'pill ok dot' : 'pill dot'}>{active ? on : off}</span>;
+  return <span className={active ? 'pill ok' : 'pill off'}>{active ? on : off}</span>;
 }
 
 // Papéis como pills com o nome em português, numa linha só: o administrador primeiro, o papel base
@@ -42,7 +42,7 @@ export function RolePills({ roles }: { roles: string[] }) {
   return (
     <span className="role-pills">
       {shown.map((r) => (
-        <span key={r} className={r === 'admin' ? 'pill accent' : 'pill'}>
+        <span key={r} className={r === 'admin' ? 'pill role accent' : 'pill role'}>
           {roleLabel(r)}
         </span>
       ))}

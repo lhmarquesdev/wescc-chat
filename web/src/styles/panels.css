@@ -50,7 +50,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-canvas);
+  background: hsl(var(--background));
 }
 /* Carregando: a mesma altura do cabeçalho, sem ser um .room-header (os testes esperam o de verdade). */
 .room-head-skeleton {
@@ -58,9 +58,10 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  height: var(--header-h);
+  height: var(--faixa-h);
   padding: 0 var(--space-5);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 .room-head-skeleton-lines {
   display: flex;
@@ -79,16 +80,37 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  height: var(--header-h);
-  padding: 0 var(--space-3) 0 var(--space-5);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-canvas);
-  --ring-offset: var(--bg-canvas);
+  height: var(--faixa-h);
+  padding: 0 var(--space-6) 0 var(--space-5);
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  --ring-offset: hsl(var(--card));
+  --ring-surface: hsl(var(--card));
+}
+/* Sobretítulo da faixa: o tipo da conversa, em caixa alta. */
+.room-title::before {
+  content: attr(data-eyebrow);
+  display: block;
+  font-size: var(--fs-10);
+  line-height: 14px;
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--track-eyebrow);
+  color: hsl(var(--muted-foreground));
+}
+.room-header > .room-icon {
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 .room-icon {
   display: flex;
   flex-shrink: 0;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .room-title {
   flex: 1;
@@ -99,10 +121,11 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  font-family: var(--font-display);
   font-size: var(--fs-16);
   line-height: 22px;
-  font-weight: var(--fw-semibold);
-  letter-spacing: -0.01em;
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--track-title);
   white-space: nowrap;
 }
 .room-name-text {
@@ -125,16 +148,16 @@
   border: 0;
   border-radius: var(--radius-xs);
   background: none;
-  color: var(--warn-solid);
+  color: hsl(var(--warning));
   cursor: pointer;
 }
 .room-fav:hover {
-  background: var(--bg-hover);
+  background: hsl(var(--muted) / 0.6);
 }
 .room-mark {
   flex-shrink: 0;
   display: inline-flex;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .pill.clickable {
   border: 0;
@@ -142,13 +165,13 @@
   transition: background-color var(--dur-1) linear;
 }
 .pill.clickable:hover {
-  background: var(--bg-active);
-  color: var(--fg);
+  background: hsl(var(--surface-4));
+  color: hsl(var(--foreground));
 }
 .room-topic {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -164,18 +187,23 @@
   cursor: pointer;
 }
 .room-topic.clickable:hover {
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .room-actions {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 2px;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .room-actions .icon-btn {
   width: 36px;
   height: 36px;
+  border-radius: var(--radius-full);
+}
+.room-actions .icon-btn:where(:hover:not(:disabled)) {
+  background: hsl(var(--muted));
+  color: hsl(var(--brand-ink));
 }
 .room-actions .with-count {
   width: auto;
@@ -191,7 +219,7 @@
   width: 1px;
   height: 20px;
   margin: 0 6px;
-  background: var(--border);
+  background: hsl(var(--border));
 }
 
 /* Anúncio da sala: uma linha, "Ver mais" quando não cabe. */
@@ -202,15 +230,15 @@
   gap: var(--space-2);
   min-height: 40px;
   padding: var(--space-2) var(--space-5);
-  background: var(--accent-soft);
-  color: var(--fg);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--foreground));
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  --ring-offset: var(--accent-soft);
+  --ring-offset: hsl(var(--primary) / 0.1);
 }
 .announcement > .icon {
   flex-shrink: 0;
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .announcement-text {
   flex: 1;
@@ -249,13 +277,13 @@
   gap: var(--space-3);
   min-height: 64px;
   padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--border);
-  background: var(--bg-subtle);
-  color: var(--fg-2);
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--surface-2));
+  color: hsl(var(--text-2));
   font-size: var(--fs-14);
   line-height: var(--lh-14);
   text-align: center;
-  --ring-offset: var(--bg-subtle);
+  --ring-offset: hsl(var(--surface-2));
 }
 
 /* Quem digita: a linha fica sobre o fim da lista, sem ocupar espaço quando ninguém digita. */
@@ -274,8 +302,8 @@
   gap: 6px;
   height: 22px;
   padding: 0 var(--space-5);
-  background: var(--bg-canvas);
-  color: var(--fg-muted);
+  background: hsl(var(--background));
+  color: hsl(var(--muted-foreground));
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   pointer-events: none;
@@ -288,7 +316,7 @@
   right: 0;
   bottom: 100%;
   height: var(--space-2);
-  background: linear-gradient(to top, var(--bg-canvas), transparent);
+  background: linear-gradient(to top, hsl(var(--background)), transparent);
 }
 /* Enquanto alguém digita, o fim da lista e a pílula "ir para o fim" sobem a altura da faixa: no fim da lista ela
    nunca cobre a última mensagem. */
@@ -305,7 +333,7 @@
   white-space: nowrap;
 }
 .typing-text strong {
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   font-weight: var(--fw-semibold);
 }
 .typing .dots {
@@ -333,10 +361,10 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-left: 1px solid var(--border);
-  background: var(--bg-canvas);
-  --ring-offset: var(--bg-canvas);
-  --ring-surface: var(--bg-canvas);
+  border-left: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  --ring-offset: hsl(var(--background));
+  --ring-surface: hsl(var(--background));
   animation: panel-slide var(--dur-3) var(--ease-out);
 }
 .panel-scrim {
@@ -347,19 +375,21 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: var(--header-h);
-  padding: 0 var(--space-3) 0 var(--space-4);
-  border-bottom: 1px solid var(--border);
+  height: var(--faixa-h);
+  padding: 0 var(--space-3) 0 var(--space-5);
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 .panel-head h2,
 .panel-head h3 {
   flex: 1;
   min-width: 0;
   margin: 0;
+  font-family: var(--font-display);
   font-size: var(--fs-16);
   line-height: 22px;
-  font-weight: var(--fw-semibold);
-  letter-spacing: -0.01em;
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--track-title);
 }
 .panel-title-text {
   display: block;
@@ -376,7 +406,7 @@
   line-height: var(--lh-12);
   font-weight: var(--fw-regular);
   letter-spacing: 0;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .panel-head :where(.sub) .link {
   font-size: inherit;
@@ -444,11 +474,11 @@
   border: 0;
   border-radius: var(--radius-md);
   background: none;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   text-align: left;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  --ring-surface: var(--bg-canvas);
+  --ring-surface: hsl(var(--background));
   transition: background-color var(--dur-1) linear;
 }
 .result + .result {
@@ -457,14 +487,14 @@
 /* Só com mouse: no toque o :hover ficava pintado na linha depois de voltar; lá vale o :active. */
 @media (hover: hover) {
   .result:hover {
-    background: var(--bg-hover);
-    --ring-surface: var(--bg-hover);
+    background: hsl(var(--muted) / 0.6);
+    --ring-surface: hsl(var(--muted) / 0.6);
   }
 }
 @media (hover: none) {
   .result:active {
-    background: var(--bg-hover);
-    --ring-surface: var(--bg-hover);
+    background: hsl(var(--muted) / 0.6);
+    --ring-surface: hsl(var(--muted) / 0.6);
   }
 }
 .result-head {
@@ -487,7 +517,7 @@
 }
 .result-head > .icon {
   flex-shrink: 0;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .result-head .avatar {
   display: inline-block;
@@ -514,21 +544,21 @@
   margin-top: 6px;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .result-count {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
   font-weight: var(--fw-semibold);
 }
 .results-count {
   margin: 0 0 var(--space-2);
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 ::highlight(search-hit) {
-  background-color: var(--highlight);
-  color: var(--fg);
+  background-color: hsl(var(--st-amber-solid) / 0.35);
+  color: hsl(var(--foreground));
 }
 /* Filtros de busca: um link discreto que abre a lista dos mais usados, cada um com o que faz. */
 .search-tips > summary {
@@ -539,7 +569,7 @@
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-medium);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   list-style: none;
 }
@@ -547,7 +577,7 @@
   display: none;
 }
 .search-tips > :where(summary):hover {
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .search-help {
   display: grid;
@@ -557,7 +587,7 @@
   list-style: none;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .search-help kbd {
   font-family: var(--font-mono);
@@ -577,8 +607,8 @@
   text-align: left;
 }
 .search-tip:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--muted) / 0.6);
+  color: hsl(var(--foreground));
 }
 .search-tip > kbd {
   flex: none;
@@ -608,7 +638,7 @@
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .member {
   display: flex;
@@ -621,22 +651,22 @@
   border: 0;
   border-radius: var(--radius-md);
   background: none;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   text-align: left;
-  --ring-surface: var(--bg-canvas);
+  --ring-surface: hsl(var(--background));
   transition: background-color var(--dur-1) linear;
 }
 /* Só com mouse: no toque o :hover ficava pintado na linha depois de voltar; lá vale o :active. */
 @media (hover: hover) {
   .member:hover {
-    background: var(--bg-hover);
-    --ring-surface: var(--bg-hover);
+    background: hsl(var(--muted) / 0.6);
+    --ring-surface: hsl(var(--muted) / 0.6);
   }
 }
 @media (hover: none) {
   .member:active {
-    background: var(--bg-hover);
-    --ring-surface: var(--bg-hover);
+    background: hsl(var(--muted) / 0.6);
+    --ring-surface: hsl(var(--muted) / 0.6);
   }
 }
 .member-who {
@@ -659,7 +689,7 @@
 .member-sub {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .member .pill {
   flex-shrink: 0;
@@ -677,20 +707,20 @@
   margin: 0 -8px;
   padding: 0 var(--space-1) 0 var(--space-2);
   border-radius: var(--radius-md);
-  color: var(--fg);
+  color: hsl(var(--foreground));
   transition: background-color var(--dur-1) linear;
 }
 /* Só com mouse: no toque o :hover ficava pintado na linha depois de voltar; lá vale o :active. */
 @media (hover: hover) {
   .file-row:hover {
-    background: var(--bg-hover);
-    --ring-offset: var(--bg-hover);
+    background: hsl(var(--muted) / 0.6);
+    --ring-offset: hsl(var(--muted) / 0.6);
   }
 }
 @media (hover: none) {
   .file-row:active {
-    background: var(--bg-hover);
-    --ring-offset: var(--bg-hover);
+    background: hsl(var(--muted) / 0.6);
+    --ring-offset: hsl(var(--muted) / 0.6);
   }
 }
 .file-row-main {
@@ -701,7 +731,7 @@
   gap: var(--space-3);
   padding: 6px 0;
   border-radius: var(--radius-sm);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .file-row-main:hover {
   text-decoration: none;
@@ -712,7 +742,7 @@
   flex-shrink: 0;
   object-fit: cover;
   border-radius: var(--radius-md);
-  background: var(--bg-muted);
+  background: hsl(var(--muted));
 }
 .file-row .att-tile {
   width: 40px;
@@ -737,7 +767,7 @@
 .file-row-meta {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .file-row-download {
   opacity: 0;
@@ -760,7 +790,7 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   text-align: left;
 }
 .team-room:hover {
@@ -768,7 +798,7 @@
 }
 .team-room > .icon {
   flex-shrink: 0;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .team-room-text {
   display: flex;
@@ -826,7 +856,7 @@
   display: inline-block;
   margin-right: 6px;
   vertical-align: -2px;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 /* O mesmo ícone do tipo da sala que a lista e o cabeçalho usam, no tamanho do avatar do topo. */
 .info-hero-icon {
@@ -835,19 +865,19 @@
   width: 72px;
   height: 72px;
   border-radius: var(--radius-xl);
-  background: var(--bg-muted);
-  color: var(--fg-2);
+  background: hsl(var(--muted));
+  color: hsl(var(--text-2));
 }
 .info-handle {
   margin-top: -6px;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .info-topic {
   font-size: var(--fs-14);
   line-height: var(--lh-14);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
 .info-topic p {
@@ -874,8 +904,8 @@
   padding: 0 10px;
   border: 0;
   border-radius: 10px;
-  background: var(--bg-subtle);
-  color: var(--fg-2);
+  background: hsl(var(--surface-2));
+  color: hsl(var(--text-2));
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-medium);
@@ -884,8 +914,8 @@
     color var(--dur-1) linear;
 }
 .info-tile:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--muted) / 0.6);
+  color: hsl(var(--foreground));
 }
 .info section {
   font-size: var(--fs-14);
@@ -902,7 +932,7 @@
   font-weight: var(--fw-semibold);
   letter-spacing: 0;
   text-transform: none;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .info :where(section) p {
   margin: 0;
@@ -914,7 +944,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .info .info-meta {
   align-items: center;
@@ -938,7 +968,7 @@
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .info-retention {
   display: flex;
@@ -960,7 +990,7 @@
   padding: 0 10px;
 }
 .info-actions .icon {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .info-image {
   display: flex;
@@ -971,14 +1001,14 @@
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-4);
-  border: 1px solid var(--danger-soft);
+  border: 1px solid hsl(var(--st-red-soft));
   border-radius: var(--radius-lg);
 }
 .danger-zone > p {
   margin: 0;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 
 /* Tópico (thread) */
@@ -991,15 +1021,15 @@
 }
 /* Seguindo a thread: sino cheio na cor de destaque. */
 .icon-btn.follow-on {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .thread-root {
   margin: var(--space-3) var(--space-4);
   padding: var(--space-3);
   border-radius: var(--radius-lg);
-  background: var(--bg-subtle);
-  --ring-surface: var(--bg-subtle);
-  --ring-offset: var(--bg-subtle);
+  background: hsl(var(--surface-2));
+  --ring-surface: hsl(var(--surface-2));
+  --ring-offset: hsl(var(--surface-2));
 }
 .thread-root .msg {
   padding: 0;
@@ -1024,17 +1054,17 @@
 
 /* ---------- Cartão do usuário (popover; no celular, folha) ---------- */
 .user-card-pop {
-  --ring-offset: var(--bg-raised);
-  --ring-surface: var(--bg-raised);
+  --ring-offset: hsl(var(--popover));
+  --ring-surface: hsl(var(--popover));
   position: fixed;
   z-index: var(--z-popover);
   width: 320px;
   max-width: calc(100vw - 16px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  background: var(--bg-raised);
-  color: var(--fg);
-  border: 1px solid var(--border);
+  background: hsl(var(--popover));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-2), var(--highlight-top);
   outline: none;
@@ -1077,24 +1107,24 @@
   overflow-wrap: anywhere;
 }
 .user-card-handle {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
 .user-card-status {
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .user-card .chips {
   gap: var(--space-1);
 }
 /* O Administrador: coroa e a cor de destaque, que nenhum papel criado recebe. */
 .user-card .pill.root-role {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 .bio {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   overflow-wrap: anywhere;
 }
 .bio p {
@@ -1106,7 +1136,7 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .user-card-meta li {
   display: flex;
@@ -1116,7 +1146,7 @@
 }
 .user-card-meta .icon {
   flex-shrink: 0;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .user-card-meta a {
   min-width: 0;
@@ -1140,14 +1170,14 @@
 
 /* ---------- Canais de avisos e "Ciente" ---------- */
 .pill.notice {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 /* "Sem conversa direta" é regra da empresa, não erro: pílula neutra (o vermelho fica para erros de verdade). */
 .pill.blocked {
-  background: var(--bg-subtle);
-  color: var(--fg-muted);
-  box-shadow: inset 0 0 0 1px var(--border);
+  background: hsl(var(--surface-2));
+  color: hsl(var(--muted-foreground));
+  box-shadow: inset 0 0 0 1px hsl(var(--border));
 }
 .pill.notice,
 .pill.blocked {
@@ -1162,13 +1192,13 @@
   padding: var(--space-1) var(--space-5);
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  background: var(--bg-subtle);
-  border-bottom: 1px solid var(--border);
-  color: var(--fg-muted);
-  --ring-offset: var(--bg-subtle);
+  background: hsl(var(--surface-2));
+  border-bottom: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  --ring-offset: hsl(var(--surface-2));
 }
 .notice-bar strong {
-  color: var(--fg);
+  color: hsl(var(--foreground));
   font-weight: var(--fw-semibold);
 }
 .notice-bar-text {
@@ -1180,14 +1210,14 @@
 .notice-bar-text > .icon {
   flex-shrink: 0;
   margin-top: 1px;
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .notice-bar-pending {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   font-weight: var(--fw-medium);
 }
 .notice-bar-label {
@@ -1200,7 +1230,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--accent);
+  background: hsl(var(--primary));
   flex-shrink: 0;
 }
 .notice-bar-pending .link {
@@ -1253,16 +1283,16 @@
   height: 28px;
   margin-right: 6px;
   padding: 0 10px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid hsl(var(--line-2));
   border-radius: var(--radius-md);
   background: transparent;
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   font-size: var(--fs-12);
   white-space: nowrap;
 }
 .composer-tools > .off:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--muted) / 0.6);
+  color: hsl(var(--foreground));
 }
 /* "Pedir “Ciente”" cabe inteiro no celular; só numa tela muito estreita fica o ícone (o texto segue no aria-label). */
 @media (max-width: 359px) {
@@ -1274,7 +1304,7 @@
 
 /* Painel da sala: quem publica */
 .notice-info h4 > .icon {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .notice-info ul {
   margin: var(--space-2) 0 0;
@@ -1341,8 +1371,8 @@
     width: 32px;
     height: 32px;
     border-radius: var(--radius-md);
-    background: var(--bg-muted);
-    color: var(--fg-2);
+    background: hsl(var(--muted));
+    color: hsl(var(--text-2));
   }
   .room-topic {
     font-size: var(--fs-12);
@@ -1495,10 +1525,10 @@
 .export-summary {
   margin: 0;
   font-variant-numeric: tabular-nums;
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .export-summary.danger {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .export-actions {
   display: flex;
@@ -1524,12 +1554,12 @@
   flex-direction: column;
   gap: var(--space-1-5);
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-md);
-  background: var(--bg-surface);
+  background: hsl(var(--card));
 }
 .scheduled-item.failed {
-  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  border-color: color-mix(in srgb, hsl(var(--st-red)) 40%, hsl(var(--border)));
 }
 .scheduled-top {
   display: flex;
@@ -1548,7 +1578,7 @@
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   font-weight: var(--fw-semibold);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .scheduled-top button.pill {
   border: 0;
@@ -1562,7 +1592,7 @@
   overflow: hidden;
   font-size: var(--fs-14);
   line-height: var(--lh-14);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   overflow-wrap: anywhere;
 }
 .scheduled-text p {
@@ -1571,7 +1601,7 @@
 .scheduled-error {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 
 /* Pouca altura (zoom de 400%, celular deitado): cabeçalho da sala mais baixo e sem o tópico, para sobrar lista. */

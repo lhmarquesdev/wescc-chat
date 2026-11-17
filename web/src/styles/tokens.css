@@ -1,136 +1,461 @@
 /* ==========================================================================
-   Tokens do design system (v1). Primeiro arquivo de estilo de main.tsx.
-   Uma fonte única: toda cor com tema é light-dark(CLARO, ESCURO).
-   Os seletores de tema só trocam color-scheme (mais os --side-*, que mudam
-   por tema e não por color-scheme).
+   TOKENS DE TEMA — Design System AtendeTI (Eloom), Painel de Gestão.
+   Cópia de design-system-atendeti/src/styles/tokens.css com a cor da marca
+   AtendeTI (196 100% 47% = #00B0F0, marca-atendeti.css) e o fundo "papel" da
+   Gestão (eloom.css) já aplicados. Sem Tailwind: as telas usam os tokens
+   direto, sempre como hsl(var(--token)) ou hsl(var(--token) / alpha).
+
+   Cada token tem versão clara (:root) e escura (:root.dark). Tela nenhuma
+   escreve cor: usa token. O tema escuro liga com a classe `dark` no <html>.
+   .eloom-tema-claro / .eloom-tema-escuro: subárvore que fica clara / escura
+   seja qual for o tema (a chamada é sempre escura).
    ========================================================================== */
 
-:root {
+/* .eloom-tema-claro: subárvore que fica clara mesmo no tema escuro (formulário com
+   cores próprias, documento, e-mail, diagrama). Recebe os mesmos tokens claros. */
+:root,
+.eloom-tema-claro {
   color-scheme: light;
 
-  /* ---- Superfícies ---- */
-  --bg-canvas: light-dark(#ffffff, #14171c);   /* área principal, páginas */
-  --bg-surface: light-dark(#ffffff, #181b21);  /* cards, painéis, tabelas */
-  --bg-raised: light-dark(#ffffff, #1e222a);   /* menus, popovers, modais, barra da mensagem */
-  --bg-subtle: light-dark(#f7f8fa, #1a1e25);   /* áreas secundárias, hover da mensagem */
-  --bg-muted: light-dark(#eff1f4, #222731);    /* pills, skeleton, preenchimentos neutros */
-  --bg-hover: light-dark(#f2f4f7, #1f232b);    /* hover sobre canvas/surface */
-  --bg-active: light-dark(#e9ecf0, #262b35);   /* pressionado, selecionado neutro */
-  --bg-input: light-dark(#ffffff, #1a1e25);
-  --bg-inverse: light-dark(#1c2028, #2a303a);  /* toasts, tooltips */
+  /* ---- Marca ----------------------------------------------------------
+     --brand-* vêm de applyBrandToDom (@/lib/brand) em runtime; os
+     valores abaixo são o fallback do 1º paint / sem JS. */
+  --brand-primary: 196 100% 47%;
+  --brand-h: 196;
+  --brand-s: 100%;
+  --brand-primary-fg: 0 0% 100%;
+  --brand-accent: 196 55% 93%;
+  --brand-accent-fg: 196 100% 24%;
+  --brand-primary-dark: 196 100% 47%;
+  --brand-primary-dark-fg: 0 0% 100%;
+  --brand-accent-dark: 196 50% 18%;
+  --brand-accent-dark-fg: 196 85% 82%;
 
-  /* ---- Texto ---- */
-  --fg: light-dark(#1a1e26, #e6e9ee);
-  --fg-2: light-dark(#4a5261, #b9c0cb);
-  --fg-muted: light-dark(#646c7b, #8e97a6);
-  --fg-placeholder: light-dark(#6f7786, #7d8696);
-  --fg-disabled: light-dark(#a3aab6, #596170);
-  --fg-on-accent: #ffffff;
-  --fg-inverse: light-dark(#f3f4f6, #e6e9ee);
+  --primary: var(--brand-primary, 174 62% 35%);
+  --primary-foreground: var(--brand-primary-fg, 0 0% 100%);
+  --accent: var(--brand-accent, 174 35% 93%);
+  --accent-foreground: var(--brand-accent-fg, 174 62% 24%);
+  --ring: var(--brand-primary, 174 62% 35%);
 
-  /* ---- Linhas ---- */
-  --border: light-dark(#e3e6eb, #2b313c);
-  --border-subtle: light-dark(#eef0f3, #222731);
-  --border-strong: light-dark(#cdd2da, #3a4250);
-  --border-hover: light-dark(#aeb5c0, #4a5363);
-  --control-border: light-dark(#848c9a, #6b7485); /* checkbox, rádio, toggle desligado: >= 3:1 */
+  /* Tons derivados da marca, por PAPEL (nunca por lightness fixo na tela). */
+  --brand-ink: var(--brand-h) var(--brand-s) 24%;        /* texto forte da marca */
+  --brand-ink-2: var(--brand-h) var(--brand-s) 32%;      /* texto/ícone da marca */
+  --brand-deep: var(--brand-h) var(--brand-s) 28%;       /* superfície cheia escura (sidebar, selos) */
+  --brand-deep-2: var(--brand-h) var(--brand-s) 20%;     /* gradiente/borda da superfície cheia */
+  --brand-mid: var(--brand-h) var(--brand-s) 42%;        /* preenchimento, foco, anéis */
+  --brand-tint: var(--brand-h) var(--brand-s) 96%;       /* fundo levíssimo da marca */
+  --brand-tint-2: var(--brand-h) var(--brand-s) 91%;     /* fundo suave da marca */
+  --brand-line: var(--brand-h) var(--brand-s) 82%;       /* borda suave da marca */
 
-  /* ---- Destaque (índigo) ---- */
-  --accent: light-dark(#4453db, #4f5ee4);
-  --accent-hover: light-dark(#3a48c8, #5a68ea);
-  --accent-active: light-dark(#3240b5, #4554d8);
-  --accent-soft: light-dark(#edeffc, #1f2448);
-  --accent-soft-hover: light-dark(#e2e6fa, #262c58);
-  --accent-text: light-dark(#3a48c8, #8c99ff);
-  --accent-ring: light-dark(rgb(68 83 219 / 0.28), rgb(140 153 255 / 0.35));
-  --focus: light-dark(#4453db, #8c99ff);
+  /* ---- Fundo e superfícies (claro → escuro: 1 é a mais elevada) -------- */
+  --background: 218 22% 95%;
+  --foreground: 215 25% 15%;
+  --card: 0 0% 100%;
+  --card-foreground: 215 25% 15%;
+  --card-border: 210 18% 90%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 215 25% 15%;
+  --popover-border: 210 18% 90%;
+  --secondary: 218 18% 93%;
+  --secondary-foreground: 215 25% 15%;
+  --muted: 218 18% 93%;
+  --muted-foreground: 215 16% 47%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 210 18% 90%;
+  --input: 210 18% 90%;
 
-  /* ---- Semânticas (base = texto e ícone, -solid = preenchimento, -soft = fundo suave) ---- */
-  --ok: light-dark(#157f3c, #4cc97a);
-  --ok-solid: light-dark(#15803d, #1a7f45);
-  --ok-soft: light-dark(#e8f5ec, #15291e);
-  --warn: light-dark(#9a5b00, #f5b84a);
-  --warn-solid: #f5a524;
-  --warn-on-solid: #1c1400;
-  --warn-soft: light-dark(#fff4db, #2b2414);
-  --danger: light-dark(#c8283a, #ff7a85);
-  --danger-solid: light-dark(#c8283a, #c42b3a);
-  --danger-hover: light-dark(#b02233, #d63240);
-  --danger-soft: light-dark(#fdecee, #2a1a1e);
-  --info: var(--accent-text);
-  --info-soft: var(--accent-soft);
+  --page-from: 218 26% 97%;      /* gradiente "papel" do fundo da página */
+  --page-to: 218 21% 93.5%;
+  --page-dot: 220 12% 30%;       /* grade de pontos do fundo */
 
-  /* ---- Presença (preenchimento do ponto; offline é um anel) ---- */
-  --presence-online: light-dark(#1fa463, #2bb673);
-  --presence-away: #f5a524;
-  --presence-busy: #e5484d;
-  --presence-offline: light-dark(#8b93a1, #7d8796);
-  --ring-surface: var(--bg-canvas); /* redefinido pelos contêineres (barra lateral, linhas) */
+  --surface-1: 0 0% 100%;        /* cartão */
+  --surface-2: 220 14% 98%;      /* cartão recuado, cabeçalho de tabela */
+  --surface-3: 220 14% 96%;      /* hover, campo desabilitado */
+  --surface-4: 220 14% 92%;      /* trilho, chip neutro */
+  --surface-5: 220 13% 86%;      /* controle neutro preenchido */
+  --surface-6: 220 13% 74%;      /* scrollbar, grade forte */
+  --surface-inverse: 220 22% 14%; /* chip/tooltip escuro: continua escuro no tema escuro */
 
-  /* ---- Menções e destaques ---- */
-  --mention-row: light-dark(#fef6e9, #2a251d);
-  --mention-bar: #f5a524;
-  --mention-me-bg: light-dark(#ffe7ad, #45361a);
-  --mention-me-fg: light-dark(#6b4100, #ffd27a);
-  --mention-other-bg: var(--accent-soft);
-  --mention-other-fg: var(--accent-text);
-  --highlight: light-dark(#ffeead, #4a3f12);
+  /* Vidro: branco translúcido no claro, grafite translúcido no escuro. */
+  --glass: 0 0% 100%;
+  --glass-line: 0 0% 100%;
+  --glass-line-k: 1;
 
-  /* ---- Código ---- */
-  --code-bg: light-dark(#f3f4f7, #1e222a);
-  --code-fg: var(--fg);
+  /* Sobre superfícies coloridas (botão da marca, sidebar, selos): sempre branco. */
+  --on-color: 0 0% 100%;
 
-  /* ---- Diversos ---- */
-  --skeleton: light-dark(#eef0f3, #222731);
-  --skeleton-shine: light-dark(rgb(255 255 255 / 0.6), rgb(255 255 255 / 0.05));
-  --scrim: light-dark(rgb(12 14 18 / 0.48), rgb(0 0 0 / 0.64));
-  /* Visualizador de imagens: o mesmo nos dois temas e sem desfoque (o desfoque pesa nos PCs do atendimento). */
-  --scrim-lightbox: rgb(0 0 0 / 0.9);
-  --shadow-color: light-dark(rgb(16 24 40 / 0.1), rgb(0 0 0 / 0.5));
-  --shadow-color-strong: light-dark(rgb(16 24 40 / 0.18), rgb(0 0 0 / 0.6));
+  /* Pasta (cards de pasta do BI, Biblioteca e Base de Conhecimento). */
+  --folder-back: 41 34% 86%;
+  --folder-front: 44 46% 92%;
+  --folder-ic: 0 0% 100%;
+  --folder-text: 258 22% 18%;
+  --folder-sub: 38 9% 51%;
+  --folder-meta: 40 11% 59%;
+  --folder-accent: 17 66% 66%;
 
-  /* ---- Marca (gradiente do logo padrão; troque junto com public/favicon.svg) ---- */
-  --brand-from: #5b6bf0;
-  --brand-to: #3240b5;
+  /* ---- Texto ----------------------------------------------------------- */
+  --text-1: 215 25% 15%;         /* título, valor */
+  --text-2: 220 14% 30%;         /* corpo */
+  --text-3: 215 16% 47%;         /* apoio (= muted-foreground) */
+  --text-4: 220 9% 60%;          /* placeholder, legenda */
+  --text-5: 220 13% 78%;         /* ícone desativado */
 
-  /* ---- Barra lateral (escura nos dois temas; veja os blocos de tema abaixo) ---- */
-  --side-bg: #13161c;
-  --side-hover: #1e232b;
-  --side-active: #262c36;
-  --side-border: transparent;
-  --side-fg: #b4bcc8;
-  --side-fg-strong: #ffffff;
-  --side-fg-muted: #7d8796;
-  --side-input-bg: rgb(255 255 255 / 0.06);
-  --side-input-border: rgb(255 255 255 / 0.08);
+  /* ---- Bordas ---------------------------------------------------------- */
+  --line-1: 220 13% 91%;
+  --line-2: 220 13% 86%;
+  --line-3: 220 13% 78%;
+  --ink: 222 47% 11%;            /* tinta para fios e véus translúcidos */
 
-  /* ---- Palco da chamada (sempre escuro) ---- */
-  --call-bg: #0b0d11;
-  --call-control: rgb(255 255 255 / 0.12);
-  --call-control-hover: rgb(255 255 255 / 0.18);
-  --call-fg: #e6e9ee;
-  --call-fg-muted: #9aa3b2;
-  --call-accept: #1fa463;
-  --call-hang: #e5484d;
+  /* ---- Sombras ---------------------------------------------------------
+     alpha real = alpha pedido × --shadow-k: no escuro a sombra precisa ser
+     mais densa para continuar visível. --highlight-k faz o mesmo com os
+     filetes de luz (inset branco), que no escuro quase somem. */
+  --shadow-color: 222 47% 11%;
+  --shadow-k: 1;
+  --highlight: 0 0% 100%;
+  --highlight-k: 1;
+  --overlay: 222 47% 6%;
 
-  /* ---- Gráficos (paleta de referência, validada sobre #ffffff / #1a1e25) ---- */
-  --s1: light-dark(#2a78d6, #3987e5);
-  --s2: light-dark(#eb6834, #d95926);
-  --s3: light-dark(#1baf7a, #199e70);
-  --s4: light-dark(#eda100, #c98500);
-  --s5: light-dark(#e87ba4, #d55181);
-  --s6: #008300;
-  --s7: light-dark(#6250d6, #9085e9);
-  --s8: light-dark(#e34948, #e66767);
-  --chart-grid: light-dark(#eceef2, #262b35);
-  --chart-axis: light-dark(#cdd2da, #3a4250);
+  /* ---- Status (verde, azul, laranja, vermelho e família) ---------------
+     -       texto/ícone sobre superfície
+     -solid  ponto, barra, preenchimento (texto branco por cima)
+     -soft   fundo levíssimo
+     -line   borda suave                                                   */
+  --st-green: 160 84% 27%;
+  --st-green-solid: 160 84% 39%;
+  --st-green-soft: 152 76% 95%;
+  --st-green-line: 152 60% 80%;
 
-  /* ---- Seta do select (#8a92a0 funciona nos dois temas: 3.1:1 / 5:1) ---- */
-  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a92a0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --st-teal: 175 84% 26%;
+  --st-teal-solid: 175 84% 32%;
+  --st-teal-soft: 166 76% 95%;
+  --st-teal-line: 168 60% 78%;
 
-  /* ---- Tipografia ---- */
-  --font-sans: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace;
+  --st-blue: 217 91% 45%;
+  --st-blue-solid: 217 91% 55%;
+  --st-blue-soft: 214 95% 96%;
+  --st-blue-line: 213 90% 85%;
+
+  --st-violet: 263 70% 50%;
+  --st-violet-solid: 262 83% 58%;
+  --st-violet-soft: 262 90% 96%;
+  --st-violet-line: 262 80% 87%;
+
+  --st-pink: 330 76% 42%;
+  --st-pink-solid: 330 81% 56%;
+  --st-pink-soft: 327 73% 96%;
+  --st-pink-line: 327 70% 86%;
+
+  --st-red: 0 72% 42%;
+  --st-red-solid: 0 72% 51%;
+  --st-red-soft: 0 86% 97%;
+  --st-red-line: 0 90% 88%;
+
+  --st-orange: 21 90% 44%;
+  --st-orange-solid: 25 95% 53%;
+  --st-orange-soft: 33 100% 96%;
+  --st-orange-line: 32 95% 84%;
+
+  --st-amber: 32 95% 37%;
+  --st-amber-solid: 38 92% 50%;
+  --st-amber-soft: 48 96% 95%;
+  --st-amber-line: 46 90% 76%;
+
+  /* ---- Tokens antigos, mantidos pelos componentes ---------------------- */
+  --success: var(--brand-primary, 174 62% 35%);
+  --success-foreground: 0 0% 100%;
+  --warning: 38 92% 50%;
+  --warning-foreground: 215 25% 15%;
+  --warning-ink: 215 25% 15%;      /* texto sobre fundo suave de aviso */
+
+  /* ---- Gráficos -------------------------------------------------------- */
+  --chart-1: var(--brand-primary, 174 62% 35%);
+  --chart-2: 199 89% 48%;
+  --chart-3: 262 83% 58%;
+  --chart-4: 142 71% 45%;
+  --chart-5: 38 92% 50%;
+  --chart-6: 0 72% 51%;
+  --chart-7: 330 81% 56%;
+  --chart-8: 215 16% 47%;
+  --serie-1: 174 84% 32%;        /* paleta tonal dos gráficos do BI */
+  --serie-2: 174 85% 22%;
+  --serie-3: 174 62% 52%;
+  --serie-4: 174 55% 45%;
+  --chart-grid: 220 13% 91%;     /* linhas de grade */
+  --chart-axis: 220 9% 46%;      /* rótulos de eixo e legenda */
+  --chart-axis-line: 220 13% 86%;
+  --chart-cursor: 222 47% 11%;   /* véu do hover */
+  --chart-track: 220 14% 92%;    /* trilho de barra/rosca */
+
+  /* ---- Sidebar --------------------------------------------------------- */
+  --sidebar-bg: var(--brand-h, 174) var(--brand-s, 62%) 28%;
+  --sidebar: var(--brand-h, 174) var(--brand-s, 62%) 28%;
+  --sidebar-foreground: 0 0% 100%;
+  --sidebar-border: var(--brand-h, 174) var(--brand-s, 62%) 20%;
+  --sidebar-primary: 0 0% 100%;
+  --sidebar-primary-foreground: var(--brand-h, 174) var(--brand-s, 62%) 22%;
+  --sidebar-accent: 0 0% 100% / 0.18;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-ring: var(--brand-h, 174) var(--brand-s, 62%) 70%;
+
+  /* Item ativo do menu lateral. */
+  --nav-active-bg: 0 0% 100%;
+  --nav-active-fg: var(--brand-h) var(--brand-s) 30%;
+  --nav-active-fg-hover: var(--brand-h) var(--brand-s) 24%;
+
+  --radius: 0.75rem;
+
+  --button-outline: rgba(0, 0, 0, 0.1);
+  --badge-outline: rgba(0, 0, 0, 0.05);
+  --opaque-button-border-intensity: -8;
+  --elevate-1: rgba(0, 0, 0, 0.03);
+  --elevate-2: rgba(0, 0, 0, 0.08);
+}
+
+/* Ilhas sempre escuras: a chamada (palco, toque, pré-entrada e avisos) usa os tokens escuros nos dois temas. */
+:root.dark,
+.eloom-tema-escuro,
+.call-incoming,
+.call-window,
+.call-preflight,
+.call-note,
+.call-layer,
+.call-version {
+  color-scheme: dark;
+
+  --primary: var(--brand-primary-dark, 174 62% 45%);
+  --primary-foreground: var(--brand-primary-dark-fg, 0 0% 100%);
+  --accent: var(--brand-accent-dark, 174 40% 18%);
+  --accent-foreground: var(--brand-accent-dark-fg, 174 70% 82%);
+  --ring: var(--brand-primary-dark, 174 62% 45%);
+
+  --brand-ink: var(--brand-h) var(--brand-s) 80%;
+  --brand-ink-2: var(--brand-h) var(--brand-s) 70%;
+  --brand-deep: var(--brand-h) var(--brand-s) 24%;
+  --brand-deep-2: var(--brand-h) var(--brand-s) 15%;
+  --brand-mid: var(--brand-h) var(--brand-s) 50%;
+  --brand-tint: var(--brand-h) 45% 14%;
+  --brand-tint-2: var(--brand-h) 50% 19%;
+  --brand-line: var(--brand-h) 45% 30%;
+
+  --background: 222 24% 8%;
+  --foreground: 210 20% 94%;
+  --card: 222 20% 12%;
+  --card-foreground: 210 20% 94%;
+  --card-border: 222 14% 21%;
+  --popover: 222 20% 13.5%;
+  --popover-foreground: 210 20% 94%;
+  --popover-border: 222 14% 24%;
+  --secondary: 222 16% 18%;
+  --secondary-foreground: 210 20% 94%;
+  --muted: 222 16% 17%;
+  --muted-foreground: 218 14% 68%;
+  --destructive: 0 84% 64%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 222 14% 21%;
+  --input: 222 14% 24%;
+
+  --page-from: 222 24% 9.5%;
+  --page-to: 222 24% 7%;
+  --page-dot: 218 14% 70%;
+
+  --surface-1: 222 20% 12%;
+  --surface-2: 222 19% 13.5%;
+  --surface-3: 222 18% 15.5%;
+  --surface-4: 222 16% 19%;
+  --surface-5: 222 14% 25%;
+  --surface-6: 222 12% 36%;
+  --surface-inverse: 222 16% 25%;
+
+  --glass: 222 20% 13%;
+  --glass-line: 218 14% 70%;
+  --glass-line-k: 0.18;
+
+  --on-color: 0 0% 100%;
+
+  --folder-back: 36 16% 15%;
+  --folder-front: 38 15% 20%;
+  --folder-ic: 38 14% 27%;
+  --folder-text: 40 24% 92%;
+  --folder-sub: 38 14% 70%;
+  --folder-meta: 38 11% 60%;
+  --folder-accent: 20 75% 66%;
+
+  --text-1: 210 20% 94%;
+  --text-2: 214 16% 82%;
+  --text-3: 218 14% 68%;
+  --text-4: 218 11% 56%;
+  --text-5: 220 9% 40%;
+
+  --line-1: 222 14% 21%;
+  --line-2: 222 13% 26%;
+  --line-3: 222 12% 34%;
+  --ink: 214 30% 92%;
+
+  --shadow-color: 228 40% 2%;
+  --shadow-k: 2.6;
+  --highlight: 0 0% 100%;
+  --highlight-k: 0.07;
+  --overlay: 228 40% 3%;
+
+  --st-green: 158 64% 58%;
+  --st-green-solid: 160 75% 40%;
+  --st-green-soft: 160 45% 14%;
+  --st-green-line: 160 40% 27%;
+
+  --st-teal: 172 66% 58%;
+  --st-teal-solid: 175 75% 36%;
+  --st-teal-soft: 175 45% 14%;
+  --st-teal-line: 175 40% 27%;
+
+  --st-blue: 213 94% 72%;
+  --st-blue-solid: 217 91% 58%;
+  --st-blue-soft: 217 50% 18%;
+  --st-blue-line: 217 45% 33%;
+
+  --st-violet: 258 90% 78%;
+  --st-violet-solid: 262 83% 62%;
+  --st-violet-soft: 262 40% 19%;
+  --st-violet-line: 262 36% 35%;
+
+  --st-pink: 330 82% 75%;
+  --st-pink-solid: 330 81% 56%;
+  --st-pink-soft: 330 42% 18%;
+  --st-pink-line: 330 38% 33%;
+
+  --st-red: 0 90% 74%;
+  --st-red-solid: 0 72% 55%;
+  --st-red-soft: 0 45% 17%;
+  --st-red-line: 0 42% 32%;
+
+  --st-orange: 27 96% 66%;
+  --st-orange-solid: 25 95% 53%;
+  --st-orange-soft: 25 50% 16%;
+  --st-orange-line: 25 45% 30%;
+
+  --st-amber: 43 96% 62%;
+  --st-amber-solid: 38 92% 50%;
+  --st-amber-soft: 38 50% 15%;
+  --st-amber-line: 38 45% 29%;
+
+  --success: var(--brand-primary-dark, 174 62% 45%);
+  --success-foreground: 0 0% 100%;
+  --warning: 38 92% 55%;
+  --warning-foreground: 222 24% 8%;
+  --warning-ink: 43 96% 72%;
+
+  --chart-1: var(--brand-primary-dark, 174 62% 45%);
+  --chart-2: 199 89% 60%;
+  --chart-3: 262 83% 70%;
+  --chart-4: 142 65% 55%;
+  --chart-5: 38 92% 60%;
+  --chart-6: 0 85% 66%;
+  --chart-7: 330 81% 68%;
+  --chart-8: 218 14% 68%;
+  --serie-1: 174 72% 44%;
+  --serie-2: 174 60% 74%;
+  --serie-3: 174 62% 58%;
+  --serie-4: 174 45% 34%;
+  --chart-grid: 222 14% 21%;
+  --chart-axis: 218 14% 68%;
+  --chart-axis-line: 222 13% 30%;
+  --chart-cursor: 214 30% 92%;
+  --chart-track: 222 16% 19%;
+
+  --sidebar-bg: var(--brand-h, 174) var(--brand-s, 50%) 14%;
+  --sidebar: var(--brand-h, 174) var(--brand-s, 50%) 14%;
+  --sidebar-foreground: 0 0% 100%;
+  --sidebar-border: var(--brand-h, 174) var(--brand-s, 50%) 10%;
+  --sidebar-primary: 0 0% 100%;
+  --sidebar-primary-foreground: var(--brand-h, 174) var(--brand-s, 62%) 18%;
+  --sidebar-accent: 0 0% 100% / 0.12;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-ring: var(--brand-h, 174) var(--brand-s, 62%) 70%;
+
+  --nav-active-bg: var(--brand-h) var(--brand-s) 34%;
+  --nav-active-fg: 0 0% 100%;
+  --nav-active-fg-hover: 0 0% 100%;
+
+  --button-outline: rgba(255, 255, 255, 0.1);
+  --badge-outline: rgba(255, 255, 255, 0.06);
+  --elevate-1: rgba(255, 255, 255, 0.03);
+  --elevate-2: rgba(255, 255, 255, 0.06);
+}
+
+/* Bordas derivadas: mesma fórmula nos dois temas. */
+:root {
+  --primary-border: hsl(var(--primary));
+  --primary-border: hsl(from hsl(var(--primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --secondary-border: hsl(var(--secondary));
+  --secondary-border: hsl(from hsl(var(--secondary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --muted-border: hsl(var(--muted));
+  --muted-border: hsl(from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --accent-border: hsl(var(--accent));
+  --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --destructive-border: hsl(var(--destructive));
+  --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --sidebar-primary-border: hsl(var(--sidebar-primary));
+  --sidebar-accent-border: hsl(var(--sidebar-accent));
+}
+
+/* Trocar de tema não pode animar a tela inteira: o controlador liga esta
+   classe por um quadro enquanto troca. */
+.eloom-theme-switching,
+.eloom-theme-switching * {
+  transition: none !important;
+}
+
+/* Barra de rolagem acompanha o tema. */
+:root.dark ::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--surface-6) / 0.7);
+}
+:root.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--text-4));
+}
+:root.dark ::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+/* Impressão e PDF: sempre em papel branco, seja qual for o tema da tela. */
+@media print {
+  :root.dark {
+    color-scheme: light;
+    --background: 0 0% 100%;
+    --foreground: 215 25% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 15%;
+    --muted: 210 20% 93%;
+    --muted-foreground: 215 16% 47%;
+    --border: 210 18% 90%;
+    --surface-1: 0 0% 100%;
+    --surface-2: 220 14% 98%;
+    --surface-3: 220 14% 96%;
+    --surface-4: 220 14% 92%;
+    --text-1: 215 25% 15%;
+    --text-2: 220 14% 30%;
+    --text-3: 215 16% 47%;
+    --text-4: 220 9% 60%;
+    --line-1: 220 13% 91%;
+    --line-2: 220 13% 86%;
+    --line-3: 220 13% 78%;
+    --ink: 222 47% 11%;
+  }
+}
+
+
+/* ==========================================================================
+   MEDIDAS — o que não é cor: fontes, escala de texto, espaço, tamanhos,
+   raios, sombras, movimento e camadas. Valores do BRAND.md / PADROES.md.
+   ========================================================================== */
+:root {
+  /* ---- Tipografia: Plus Jakarta Sans (texto) + Space Grotesk (títulos, números grandes). Nunca Inter. ---- */
+  --font-sans: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Space Grotesk Variable', 'Space Grotesk', 'Plus Jakarta Sans Variable', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, monospace;
+  --fs-10: 10px; --lh-10: 14px;
   --fs-11: 11px; --lh-11: 16px;
   --fs-12: 12px; --lh-12: 16px;
   --fs-13: 13px; --lh-13: 18px;
@@ -145,6 +470,9 @@
   --fw-medium: 500;
   --fw-semibold: 600;
   --fw-bold: 700;
+  --track-title: -0.014em;   /* títulos */
+  --track-ui: -0.005em;      /* texto de interface */
+  --track-eyebrow: 0.16em;   /* rótulos em caixa alta (10–11 px) */
 
   /* ---- Espaço (grade de 4px) ---- */
   --space-half: 2px;
@@ -161,47 +489,39 @@
   --space-16: 64px;
 
   /* ---- Tamanhos ---- */
-  --control-sm: 28px;
-  --control-md: 36px;
-  --control-lg: 44px;
+  --control-sm: 32px;        /* botão pequeno (h-8) */
+  --control-md: 36px;        /* ação na faixa (h-9) */
+  --control-lg: 44px;        /* pílula de ação, busca e campo em cartão (h-11) */
   --touch: 44px;
-  --side-w: 272px;
+  --side-w: 18rem;           /* sidebar expandida */
+  --side-w-icon: 5rem;       /* sidebar no modo ícone */
   --panel-w: 380px;
   --panel-w-wide: 420px;
-  --header-h: 56px;
-  --tabbar-h: 56px;
+  --header-h: 56px;          /* cabeçalho da casca (h-14) */
+  --faixa-h: 85px;           /* faixa de página */
+  --tabbar-h: 64px;          /* dock inferior do celular */
 
-  /* ---- Raios ---- */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
+  /* ---- Raios (base 12px) ---- */
+  --radius: 0.75rem;
+  --radius-xs: 6px;
+  --radius-sm: 8px;          /* campo, avatar */
+  --radius-md: 10px;
   --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-full: 999px;
-
-  /* ---- Elevação ---- */
-  --shadow-1: 0 1px 2px var(--shadow-color);
-  --shadow-2: 0 4px 12px -2px var(--shadow-color), 0 2px 4px -2px var(--shadow-color);
-  --shadow-3: 0 24px 48px -12px var(--shadow-color-strong), 0 8px 16px -8px var(--shadow-color);
-  --highlight-top: inset 0 1px 0 light-dark(transparent, rgb(255 255 255 / 0.04));
-
-  /* ---- Foco ----
-     Uso: box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus).
-     Os contêineres redefinem --ring-offset (.sidebar usa --side-bg). Não junte
-     num token só: var() é resolvido onde é declarado. */
-  --ring-offset: var(--bg-canvas);
-  --focus-ring-input: 0 0 0 3px var(--accent-ring);
+  --radius-xl: 16px;         /* cartão */
+  --radius-2xl: 20px;        /* cartão de edição */
+  --radius-full: 999px;      /* pílulas, chips, botões de ação */
 
   /* ---- Movimento ---- */
-  --dur-1: 80ms;   /* hover, pressionar */
-  --dur-2: 120ms;  /* menus, tooltips, barra da mensagem */
-  --dur-3: 180ms;  /* modais, painéis, toasts, chegada de mensagem */
-  --dur-4: 240ms;  /* gaveta, página, pulo do contador */
-  --dur-5: 320ms;  /* folhas no celular */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-1: 120ms;
+  --dur-2: 180ms;            /* hover de superfície */
+  --dur-3: 220ms;
+  --dur-4: 360ms;            /* barras e gavetas */
+  --dur-5: 420ms;            /* troca de aba */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-in-out: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
 
   /* ---- Camadas ---- */
   --z-raised: 1;
@@ -218,57 +538,42 @@
   --z-call: 600;
   --z-call-incoming: 700;
 
-  /* ---- Nomes antigos: todo token antigo continua valendo (CSS customizado do admin) ---- */
-  --bg: var(--bg-canvas);
-  --bg-2: var(--bg-subtle);
-  --bg-3: var(--bg-muted);
-  --primary: var(--accent);
-  --primary-fg: var(--fg-on-accent);
-  --primary-soft: var(--accent-soft);
-  --success: var(--ok);
-  --warning: var(--warn-solid);
-  --mention-bg: var(--mention-row);
-  --shadow: var(--shadow-2);
-  --radius: var(--radius-md);
-  /* --fg, --fg-muted, --border, --danger, --danger-soft, --code-bg, --side-*,
-     --s1..--s3, --ok e --warn mantêm o nome e recebem os valores acima. */
+  /* ---- Seta do select ---- */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a92a0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-    --side-bg: #0e1014;
-    --side-hover: #191c22;
-    --side-active: #222731;
-    --side-border: #1f232b;
-  }
-}
-:root[data-theme='dark'] {
-  color-scheme: dark;
-  --side-bg: #0e1014;
-  --side-hover: #191c22;
-  --side-active: #222731;
-  --side-border: #1f232b;
-}
+/* Sombras e anéis dependem dos tokens de cor: repetidos nas subárvores de tema para resolverem com os valores delas. */
+:root,
+.eloom-tema-claro,
+.eloom-tema-escuro,
+.call-incoming,
+.call-window,
+.call-preflight,
+.call-note,
+.call-layer,
+.call-version {
+  /* Cor da marca "cheia" dos botões de ação, barras e seleção (BRAND.md: 35% de luz; 28% no hover). */
+  --brand-fill: var(--brand-h) var(--brand-s) 35%;
+  --brand-fill-hover: var(--brand-h) var(--brand-s) 28%;
 
-/* Navegadores sem light-dark() (Chrome < 123, Firefox < 120, Safari < 17.5)
-   ficam no tema claro. Conferido por scripts/check-tokens.mjs: estes valores
-   têm de ser iguais ao primeiro argumento de cada light-dark() acima. */
-@supports not (color: light-dark(#fff, #000)) {
-  :root {
-    --bg-canvas: #ffffff; --bg-surface: #ffffff; --bg-raised: #ffffff; --bg-subtle: #f7f8fa;
-    --bg-muted: #eff1f4; --bg-hover: #f2f4f7; --bg-active: #e9ecf0; --bg-input: #ffffff; --bg-inverse: #1c2028;
-    --fg: #1a1e26; --fg-2: #4a5261; --fg-muted: #646c7b; --fg-placeholder: #6f7786; --fg-disabled: #a3aab6; --fg-inverse: #f3f4f6;
-    --border: #e3e6eb; --border-subtle: #eef0f3; --border-strong: #cdd2da; --border-hover: #aeb5c0; --control-border: #848c9a;
-    --accent: #4453db; --accent-hover: #3a48c8; --accent-active: #3240b5; --accent-soft: #edeffc; --accent-soft-hover: #e2e6fa;
-    --accent-text: #3a48c8; --accent-ring: rgb(68 83 219 / 0.28); --focus: #4453db;
-    --ok: #157f3c; --ok-solid: #15803d; --ok-soft: #e8f5ec; --warn: #9a5b00; --warn-soft: #fff4db;
-    --danger: #c8283a; --danger-solid: #c8283a; --danger-hover: #b02233; --danger-soft: #fdecee;
-    --presence-online: #1fa463; --presence-offline: #8b93a1;
-    --mention-row: #fef6e9; --mention-me-bg: #ffe7ad; --mention-me-fg: #6b4100; --highlight: #ffeead; --code-bg: #f3f4f7;
-    --skeleton: #eef0f3; --skeleton-shine: rgb(255 255 255 / 0.6); --scrim: rgb(12 14 18 / 0.48);
-    --shadow-color: rgb(16 24 40 / 0.1); --shadow-color-strong: rgb(16 24 40 / 0.18); --highlight-top: inset 0 0 0 transparent;
-    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s7: #6250d6; --s8: #e34948;
-    --chart-grid: #eceef2; --chart-axis: #cdd2da;
-  }
+  --shadow-1: 0 1px 2px hsl(var(--shadow-color) / calc(0.04 * var(--shadow-k)));
+  --shadow-2:
+    0 1px 2px hsl(var(--shadow-color) / calc(0.1 * var(--shadow-k))),
+    0 8px 20px -4px hsl(var(--shadow-color) / calc(0.14 * var(--shadow-k)));
+  --shadow-3:
+    0 2px 4px hsl(var(--shadow-color) / calc(0.1 * var(--shadow-k))),
+    0 8px 20px -4px hsl(var(--shadow-color) / calc(0.14 * var(--shadow-k))),
+    0 32px 64px -20px hsl(var(--shadow-color) / calc(0.3 * var(--shadow-k)));
+  /* Container flutuante (dock, popover, softphone). */
+  --shadow-float:
+    inset 0 1px 0 hsl(var(--highlight) / calc(0.9 * var(--highlight-k))),
+    0 20px 50px -16px hsl(var(--shadow-color) / calc(0.22 * var(--shadow-k)));
+  --highlight-top: inset 0 1px 0 hsl(var(--highlight) / calc(0.9 * var(--highlight-k)));
+
+  /* Foco: anel de 3–4 px da cor da marca a 12–20%. */
+  --ring-offset: hsl(var(--background));
+  --ring-surface: hsl(var(--card));
+  --focus-ring: 0 0 0 3px hsl(var(--brand-mid) / 0.3);
+  --focus-ring-input: 0 0 0 3px hsl(var(--brand-mid) / 0.14);
+  --focus-ring-pill: 0 0 0 4px hsl(var(--brand-fill) / 0.12), 0 1px 2px hsl(var(--brand-fill) / 0.06);
 }

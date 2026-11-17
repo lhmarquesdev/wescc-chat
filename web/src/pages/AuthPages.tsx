@@ -35,19 +35,11 @@ function AuthShell({ children, title, subtitle }: { children: ReactNode; title?:
   const version = useVersion();
   return (
     <div className="auth">
-      <aside className="auth-brand">
-        <div className="auth-brand-top">
-          <BrandMark size={40} />
-          <span className="auth-brand-name">{site}</span>
-        </div>
-        <div className="auth-brand-copy">
-          <p className="auth-headline">Toda a operação em uma só conversa.</p>
-          <p className="auth-subline">Chat, chamadas e agenda da sua equipe em um só lugar.</p>
-        </div>
-        <div className="auth-brand-foot">
-          {site}
-          {version && ` · versão ${version}`}
-        </div>
+      {/* Padrão Atendeti: a arte da marca no lado claro e o formulário no painel azul. */}
+      <aside className="auth-art">
+        <BrandMark size={112} />
+        <span className="auth-art-name">{site}</span>
+        <p className="auth-art-line">Chat, chamadas e agenda da sua equipe em um só lugar.</p>
       </aside>
       <main className="auth-main">
         <div className="auth-card">
@@ -57,12 +49,17 @@ function AuthShell({ children, title, subtitle }: { children: ReactNode; title?:
           </div>
           {title && (
             <div className="auth-head">
+              <span className="auth-eyebrow">Acesso restrito</span>
               <h2 className="auth-title">{title}</h2>
               {subtitle && <p className="auth-subtitle">{subtitle}</p>}
             </div>
           )}
           {children}
           {terms && <div className="auth-terms">{renderMarkdown(terms)}</div>}
+          <div className="auth-foot">
+            {site} © {new Date().getFullYear()} · Acesso restrito a usuários autorizados
+            {version && ` · versão ${version}`}
+          </div>
         </div>
       </main>
     </div>
@@ -172,7 +169,7 @@ export function LoginPage() {
 
   return (
     <AuthShell
-      title={needCode ? 'Verificação em duas etapas' : 'Entrar'}
+      title={needCode ? 'Verificação em duas etapas' : 'Bem-vindo de volta'}
       subtitle={needCode ? 'Digite o código do seu aplicativo autenticador.' : ldap ? 'Use seu usuário de rede ou e-mail corporativo.' : 'Use seu usuário ou e-mail corporativo.'}
     >
       <form onSubmit={submit} className="form auth-form">

@@ -1,6 +1,7 @@
-// Fontes servidas pelo próprio app (sem CDN): Inter com tamanho óptico e JetBrains Mono para código.
-import '@fontsource-variable/inter/opsz.css';
-import '@fontsource-variable/jetbrains-mono';
+// Fontes do Design System AtendeTI, servidas pelo próprio app (sem CDN): Plus Jakarta Sans (texto) e Space Grotesk (títulos).
+import '@fontsource-variable/plus-jakarta-sans';
+import '@fontsource-variable/plus-jakarta-sans/wght-italic.css';
+import '@fontsource-variable/space-grotesk';
 // Ordem fixa da cascata: cada arquivo só sobrescreve regras dos anteriores. Vem antes de qualquer componente, para
 // o CSS de cada recurso (figurinhas, chamadas, integrações, avisos), importado pelos próprios componentes, entrar
 // depois do design system.
@@ -45,7 +46,7 @@ function syncTheme() {
   const bg = theme ? getComputedStyle(document.body).backgroundColor : '';
   for (const [meta, original] of themeMetas) meta.content = bg || original;
 }
-new MutationObserver(syncTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+new MutationObserver(syncTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
 syncTheme();
 
 createRoot(document.getElementById('root')!).render(

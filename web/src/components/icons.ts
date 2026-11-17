@@ -99,6 +99,7 @@ import {
   Laptop,
   LayoutGrid,
   LayoutPanelLeft,
+  PanelLeft,
   Lightbulb,
   Link,
   ListFilter,
@@ -351,6 +352,7 @@ export const ICONS = {
 
   // ---------- Dono 3: estrutura, navegação, início, diretório, login ----------
   'nav-menu': Menu,
+  'side-toggle': PanelLeft, // barra do topo: recolhe e expande o menu lateral
   'nav-home': House,
   'nav-directory': Compass,
   'nav-calls': Phone,

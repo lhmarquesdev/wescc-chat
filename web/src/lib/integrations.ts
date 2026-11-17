@@ -151,9 +151,9 @@ export const JIRA_TYPE_ICON: Record<JiraTypeKind, IconName> = {
 // Status pela forma e pelo texto, com cor semântica (nunca o acento). Sem .pill.info no design system, "em andamento"
 // usa a pílula neutra com o círculo tracejado, e a barra neutra mais escura (--info é o próprio acento no design system).
 export const JIRA_STATUS: Record<JiraStatusCategory, { pill: string; icon: IconName; bar: string }> = {
-  new: { pill: 'pill', icon: 'jira-status-new', bar: 'var(--border-strong)' },
-  indeterminate: { pill: 'pill', icon: 'jira-status-progress', bar: 'var(--fg-muted)' },
-  done: { pill: 'pill ok', icon: 'success', bar: 'var(--ok)' },
+  new: { pill: 'pill', icon: 'jira-status-new', bar: 'hsl(var(--line-2))' },
+  indeterminate: { pill: 'pill', icon: 'jira-status-progress', bar: 'hsl(var(--muted-foreground))' },
+  done: { pill: 'pill ok', icon: 'success', bar: 'hsl(var(--brand-ink-2))' },
 };
 
 // A mesma lista do servidor.

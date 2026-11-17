@@ -84,7 +84,7 @@ export function HomePage() {
   return (
     <div className="page home-page">
       <header className="page-head">
-        <h1>{title || 'Início'}</h1>
+        <h1 data-eyebrow="Visão geral">{title || 'Início'}</h1>
       </header>
       <div className="page-body">
         <section className="home-hello">
@@ -375,9 +375,7 @@ export function DirectoryPage() {
   return (
     <div className="page directory-page">
       <header className="page-head">
-        <h1>Diretório</h1>
-      </header>
-      <div className="page-body">
+        <h1 data-eyebrow="Explorar">Diretório</h1>
         <Tabs
           value={type}
           onChange={(v) => {
@@ -387,6 +385,13 @@ export function DirectoryPage() {
           items={DIR_TABS.map((t) => ({ id: t.id, label: t.label, icon: t.icon }))}
         />
         <SearchInput className="directory-search" value={text} onChange={setText} placeholder={meta.search} />
+        {data && !error && (
+          <span className="head-chip">
+            {data.total} {data.total === 1 ? 'registro' : 'registros'}
+          </span>
+        )}
+      </header>
+      <div className="page-body">
         {content}
         {data && !error && <Pager offset={offset} count={25} total={data.total} onChange={setOffset} />}
       </div>

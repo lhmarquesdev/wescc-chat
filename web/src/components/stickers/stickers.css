@@ -59,7 +59,7 @@ span.sticker-hit {
   outline: 2px solid transparent;
   box-shadow:
     0 0 0 2px var(--ring-offset),
-    0 0 0 4px var(--focus);
+    0 0 0 4px hsl(var(--ring));
 }
 .sticker-removed {
   display: flex;
@@ -68,10 +68,10 @@ span.sticker-hit {
   justify-content: center;
   gap: 4px;
   padding: 4px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
-  background: var(--bg-subtle);
-  color: var(--fg-muted);
+  background: hsl(var(--surface-2));
+  color: hsl(var(--muted-foreground));
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   text-align: center;
@@ -94,11 +94,11 @@ span.sticker-hit {
   width: 28px;
   height: 28px;
   padding: 0;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
+  background: color-mix(in srgb, hsl(var(--popover)) 88%, transparent);
   box-shadow: var(--shadow-1);
-  color: var(--fg);
+  color: hsl(var(--foreground));
   cursor: pointer;
   opacity: 0;
   transition: opacity var(--dur-1) linear;
@@ -112,7 +112,7 @@ span.sticker-hit {
   outline: 2px solid transparent;
   box-shadow:
     var(--shadow-1),
-    0 0 0 2px var(--focus);
+    0 0 0 2px hsl(var(--ring));
 }
 @media (hover: none) {
   .sticker-play {
@@ -142,7 +142,7 @@ span.sticker-hit {
   justify-content: center;
 }
 .expr-head .seg-nav button[aria-disabled='true'] {
-  color: var(--fg-disabled);
+  color: hsl(var(--text-5));
   cursor: not-allowed;
 }
 .expr-body {
@@ -184,7 +184,7 @@ span.sticker-hit {
   padding: 0 8px;
   overflow-x: auto;
   overflow-y: hidden;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid hsl(var(--border));
   scroll-snap-type: x proximity;
   scrollbar-width: none;
 }
@@ -212,7 +212,7 @@ span.sticker-hit {
   border: 0;
   border-radius: var(--radius-md);
   background: none;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   scroll-snap-align: start;
   transition:
@@ -220,12 +220,12 @@ span.sticker-hit {
     color var(--dur-1) linear;
 }
 .sticker-pack-btn:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--muted) / 0.6);
+  color: hsl(var(--foreground));
 }
 .sticker-pack-btn.active {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 .sticker-pack-btn.active::after {
   content: '';
@@ -235,11 +235,11 @@ span.sticker-hit {
   left: 6px;
   height: 2px;
   border-radius: var(--radius-full);
-  background: var(--accent);
+  background: hsl(var(--primary));
 }
 .sticker-pack-btn:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--focus);
+  box-shadow: inset 0 0 0 2px hsl(var(--ring));
 }
 .sticker-pack-btn img {
   width: 24px;
@@ -253,7 +253,7 @@ span.sticker-hit {
   width: 1px;
   height: 18px;
   margin: 0 4px;
-  background: var(--border);
+  background: hsl(var(--border));
 }
 @media (pointer: coarse) {
   .sticker-packs,
@@ -302,11 +302,11 @@ span.sticker-hit {
   align-items: center;
   gap: 4px;
   padding: 8px 4px 4px;
-  background: var(--bg-raised);
+  background: hsl(var(--popover));
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .sticker-section-name {
   min-width: 0;
@@ -341,16 +341,16 @@ span.sticker-hit {
   transition: background-color var(--dur-1) linear;
 }
 .sticker-cell:hover {
-  background: var(--bg-hover);
+  background: hsl(var(--muted) / 0.6);
 }
 /* Menu da figurinha aberto: a célula de origem fica marcada enquanto ele está na tela. */
 .sticker-cell.menu-open {
-  background: var(--bg-active);
+  background: hsl(var(--surface-4));
 }
 /* Anel por dentro, como nas linhas do DS: a grade rolável não o corta. */
 .sticker-cell:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--focus);
+  box-shadow: inset 0 0 0 2px hsl(var(--ring));
 }
 .sticker-cell.blocked {
   opacity: 0.4;
@@ -366,7 +366,7 @@ span.sticker-hit {
   display: grid;
   place-items: center;
   border-radius: inherit;
-  background: color-mix(in srgb, var(--bg-raised) 60%, transparent);
+  background: color-mix(in srgb, hsl(var(--popover)) 60%, transparent);
 }
 .sticker-cell-veil .spinner {
   margin: 0;
@@ -382,10 +382,10 @@ span.sticker-hit {
   flex-shrink: 0;
   height: 28px;
   padding: 0 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid hsl(var(--border));
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -437,7 +437,7 @@ span.sticker-hit {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .suggestions.sticker-suggest .sticker-suggest-head .icon-btn {
   position: relative;
@@ -447,15 +447,15 @@ span.sticker-hit {
   height: 24px;
   padding: 0;
   border-radius: var(--radius-sm);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .suggestions.sticker-suggest .sticker-suggest-head .icon-btn:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--muted) / 0.6);
+  color: hsl(var(--foreground));
 }
 .suggestions.sticker-suggest .sticker-suggest-head .icon-btn:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--focus);
+  box-shadow: inset 0 0 0 2px hsl(var(--ring));
 }
 @media (pointer: coarse) {
   .suggestions.sticker-suggest .sticker-suggest-head .icon-btn::before {
@@ -499,17 +499,17 @@ span.sticker-hit {
 
 /* ---------- Cartão da figurinha (popover; no celular, folha) ---------- */
 .sticker-card-pop {
-  --ring-offset: var(--bg-raised);
-  --ring-surface: var(--bg-raised);
+  --ring-offset: hsl(var(--popover));
+  --ring-surface: hsl(var(--popover));
   position: fixed;
   z-index: var(--z-popover);
   width: 320px;
   max-width: calc(100vw - 16px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  background: var(--bg-raised);
-  color: var(--fg);
-  border: 1px solid var(--border);
+  background: hsl(var(--popover));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-2), var(--highlight-top);
   outline: none;
@@ -517,21 +517,6 @@ span.sticker-hit {
 }
 .sticker-card-pop:focus-visible {
   box-shadow: var(--shadow-2), var(--highlight-top);
-}
-/* No escuro, o hover e o fundo dos botões sobem um degrau a partir do fundo do cartão (a regra das camadas do DS). */
-@supports (color: light-dark(white, black)) {
-  .sticker-card-pop {
-    --raised-surface: light-dark(var(--bg-surface), color-mix(in srgb, var(--fg) 5%, var(--bg-raised)));
-    --raised-hover: light-dark(var(--bg-hover), color-mix(in srgb, var(--fg) 8%, var(--bg-raised)));
-    --raised-active: light-dark(var(--bg-active), color-mix(in srgb, var(--fg) 12%, var(--bg-raised)));
-  }
-  .sticker-card-pop > * {
-    --bg-hover: var(--raised-hover);
-    --bg-active: var(--raised-active);
-  }
-  .sticker-card-pop .btn {
-    --bg-surface: var(--raised-surface);
-  }
 }
 .sticker-card {
   display: flex;
@@ -561,7 +546,7 @@ span.sticker-hit {
   margin: 2px 0 0;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .sticker-card-restricted {
   display: inline-flex;
@@ -586,7 +571,7 @@ span.sticker-hit {
   height: 0;
   margin: 2px 0;
   border: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid hsl(var(--border));
 }
 .sticker-card-actions > .menu-wrap,
 .sticker-card-actions > .menu-wrap > span {
@@ -603,7 +588,7 @@ span.sticker-hit {
 }
 .sticker-save-menu .sticker-menu-count {
   font-size: var(--fs-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
 }
 .sheet.sticker-save-menu .sticker-menu-head {
@@ -615,12 +600,12 @@ span.sticker-hit {
   margin: 0 0 var(--space-2);
   font-size: var(--fs-14);
   line-height: var(--lh-14);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .sticker-remove-text .sticker-provenance {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .sticker-remove .field {
   margin-top: var(--space-3);

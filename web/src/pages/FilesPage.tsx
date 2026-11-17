@@ -232,7 +232,7 @@ export function FilesPage() {
   return (
     <div className="page fl-page" onDragOver={(e) => canEdit && (e.preventDefault(), setDragOver(true))} onDragLeave={(e) => e.currentTarget === e.target && setDragOver(false)} onDrop={onDrop}>
       <header className="page-head fl-head">
-        <h1>Arquivos</h1>
+        <h1 data-eyebrow="Pastas compartilhadas">Arquivos</h1>
         {!phone && <SearchInput className="fl-search" value={search} onChange={setSearch} placeholder="Buscar em todas as pastas" />}
         <div className="fl-head-actions">
           {(folder ? canEdit : canCreateRoot) && !trash && (

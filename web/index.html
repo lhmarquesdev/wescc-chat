@@ -6,8 +6,8 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14171c" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f0f2f5" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f1219" />
     <title>Wescc Chat</title>
     <script>
       // Tema escolhido na conta (guardado por main.tsx): aplicado antes da primeira pintura, só se a
@@ -18,6 +18,9 @@
         if (t && a && t.uid === a.userId) {
           if (t.theme === 'light' || t.theme === 'dark') document.documentElement.dataset.theme = t.theme;
         } else if (t !== null) localStorage.removeItem('wescc.theme');
+        // A classe `dark` liga os tokens escuros; sem escolha guardada (Automático) vale o tema do sistema.
+        var c = document.documentElement.dataset.theme;
+        if (c === 'dark' || (c !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.classList.add('dark');
       } catch (e) {
         try {
           localStorage.removeItem('wescc.theme');

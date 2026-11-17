@@ -364,7 +364,7 @@ async function setStatus(choice: { status?: UserStatus; statusId?: string }) {
   }
 }
 
-async function setTheme(theme: Theme) {
+export async function setTheme(theme: Theme) {
   const me = useStore.getState().me;
   if (!me) return;
   applyTheme(theme);
@@ -488,6 +488,18 @@ export function UserMenu({ trigger, placement }: { trigger: ReactNode; placement
       </Menu>
       {editStatus && <StatusTextModal onClose={() => setEditStatus(false)} />}
     </>
+  );
+}
+
+// Cabeçalho do menu lateral: o logo do Wescchat e o nome. Também abre a navegação da Administração e da conta.
+export function SideBrand({ offline }: { offline?: boolean }) {
+  const siteName = useSetting<string>('Site_Name') || 'Wescchat';
+  return (
+    <Link to="/home" className="side-brand" title={siteName}>
+      <BrandMark size={36} />
+      <span className="side-title">{siteName}</span>
+      {offline && <span className="offline-pill" role="img" title="Reconectando…" aria-label="Reconectando…" />}
+    </Link>
   );
 }
 
@@ -802,20 +814,17 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
     <aside className="sidebar" data-mode={mode} onClick={(e) => (e.target as HTMLElement).closest('a') && onNavigate?.()}>
       <div className="side-head">
         {list ? (
-          <h1 className="side-title">Conversas</h1>
+          <>
+            <h1 className="side-title">Conversas</h1>
+            <CreateMenu onPick={setCreate} size={20} />
+          </>
         ) : (
-          <div className="side-brand">
-            <BrandMark size={28} />
-            <span className="side-title" title={siteName}>
-              {siteName}
-            </span>
-            {!connected && <span className="offline-pill" role="img" title="Reconectando…" aria-label="Reconectando…" />}
-          </div>
+          <SideBrand offline={!connected} />
         )}
-        <CreateMenu onPick={setCreate} size={list ? 20 : 18} />
       </div>
       {!list && (
         <nav className="side-actions" aria-label="Navegação principal">
+          <div className="side-label">Plataforma</div>
           <NavRow to="/home" icon="nav-home" label="Início" onNavigate={onNavigate} />
           {callsEnabled && <NavRow to="/calls" icon="nav-calls" label="Chamadas" extra={<CallsNavBadge />} onNavigate={onNavigate} />}
           {calendarOn && <NavRow to="/calendar" icon="nav-calendar" label="Agenda" onNavigate={onNavigate} />}
@@ -873,6 +882,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
         >
           <Icon name="filter-unread" />
         </button>
+        {!list && <CreateMenu onPick={setCreate} />}
       </div>
       <nav className="side-list" aria-label="Conversas" ref={listRef} onKeyDown={onListKey}>
         {list && !searching && !onlyUnread && <ForYou />}
@@ -894,7 +904,6 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
         )}
         {empty}
       </nav>
-      {!list && !phone && <SideFoot />}
       {create && <CreateModal kind={create} onClose={() => setCreate(null)} />}
     </aside>
   );

@@ -25,10 +25,10 @@ export function lineTone(line: string, status: ConnectorStatus['tone']): LineTon
 // §7.7: as linhas são uma lista; o tom vem no ícone de 14 px (sucesso --ok, atenção --warn, erro --danger), o texto
 // fica na cor normal. O ícone fica no meio da primeira linha (altura de linha de 14 px), mesmo quando o texto quebra.
 const TONE_ICON: Record<LineTone, { icon: IconName; color: string; label?: string }> = {
-  ok: { icon: 'success', color: 'var(--ok)' },
-  warn: { icon: 'warning', color: 'var(--warn)', label: 'Atenção' },
-  err: { icon: 'error', color: 'var(--danger)', label: 'Erro' },
-  info: { icon: 'info', color: 'var(--fg-muted)' },
+  ok: { icon: 'success', color: 'hsl(var(--brand-ink-2))' },
+  warn: { icon: 'warning', color: 'hsl(var(--st-amber))', label: 'Atenção' },
+  err: { icon: 'error', color: 'hsl(var(--st-red))', label: 'Erro' },
+  info: { icon: 'info', color: 'hsl(var(--muted-foreground))' },
 };
 const LINE: CSSProperties = { alignItems: 'flex-start', fontSize: 'var(--fs-14)', lineHeight: 'var(--lh-14)' };
 const LINE_ICON: CSSProperties = { display: 'inline-flex', alignItems: 'center', flexShrink: 0, height: 'var(--lh-14)' };

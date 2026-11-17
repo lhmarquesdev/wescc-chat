@@ -12,7 +12,7 @@ import { normalizeLang } from '@shared/translate';
 import { Avatar, Empty, Field, Modal, Segmented, SkeletonList, SkeletonTable, Toggle, confirmDialog, useAsync } from '../components/ui';
 import { useMedia } from '../components/overlay';
 import { Icon } from '../components/Icon';
-import { SideFoot, TakeoverBack, TakeoverHead } from '../components/Sidebar';
+import { SideBrand, TakeoverBack, TakeoverHead } from '../components/Sidebar';
 import { QrCode } from '../components/QrCode';
 import { DeviceCell, NewDevicePill, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
 // Figurinhas: o item some com a função desligada.
@@ -46,7 +46,9 @@ export function AccountPage() {
     <div className="page with-nav takeover account-page">
       <TakeoverHead title="Minha conta" />
       <nav className="page-nav" aria-label="Minha conta" ref={navRef}>
-        <TakeoverBack />
+        <div className="side-head">
+          <SideBrand />
+        </div>
         <h2>Minha conta</h2>
         <NavLink to="/account/profile">
           <Icon name="account" />
@@ -90,7 +92,7 @@ export function AccountPage() {
             Contas conectadas
           </NavLink>
         )}
-        <SideFoot />
+        <TakeoverBack />
       </nav>
       <div className="page-body">
         {section === 'profile' && <Profile />}
@@ -558,10 +560,25 @@ function PushToggle() {
   return <Toggle checked={on} onChange={(v) => void change(v)} label="Notificações push neste dispositivo" description="Chegam mesmo com o chat fechado." />;
 }
 
+// Tema no padrão AtendeTI: a classe `dark` no <html> liga os tokens escuros. data-theme guarda a escolha
+// (light, dark ou ausente = Automático, que segue o sistema operacional).
+const systemDark = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+function paintTheme() {
+  const root = document.documentElement;
+  const choice = root.dataset.theme;
+  const dark = choice === 'dark' || (choice !== 'light' && !!systemDark?.matches);
+  if (root.classList.contains('dark') === dark) return;
+  // Trocar de tema não anima a tela inteira.
+  root.classList.add('eloom-theme-switching');
+  root.classList.toggle('dark', dark);
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('eloom-theme-switching')));
+}
+systemDark?.addEventListener('change', paintTheme);
 export function applyTheme(theme: string) {
   const root = document.documentElement;
   if (theme === 'light' || theme === 'dark') root.dataset.theme = theme;
   else delete root.dataset.theme;
+  paintTheme();
 }
 
 function Security() {

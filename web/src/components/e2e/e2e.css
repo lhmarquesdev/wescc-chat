@@ -9,25 +9,25 @@
   gap: var(--space-2);
   min-height: 40px;
   padding: var(--space-1) var(--space-5);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-subtle);
-  color: var(--fg-2);
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--surface-2));
+  color: hsl(var(--text-2));
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  --ring-offset: var(--bg-subtle);
+  --ring-offset: hsl(var(--surface-2));
 }
 .e2e-banner > .icon:first-child {
   flex-shrink: 0;
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .e2e-banner.none > .icon:first-child,
 .e2e-banner.locked > .icon:first-child,
 .e2e-banner.waiting > .icon:first-child {
-  color: var(--warn);
+  color: hsl(var(--st-amber));
 }
 .e2e-banner.error > .icon:first-child,
 .e2e-banner.unsupported > .icon:first-child {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .e2e-banner-text {
   flex: 1;
@@ -42,7 +42,7 @@
 }
 /* Quem voltou para a conversa: a frase inteira, mesmo no celular (quebra a linha se precisar). */
 .e2e-banner.returned > .icon:first-child {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .e2e-banner.returned .e2e-banner-text {
   white-space: normal;
@@ -62,11 +62,11 @@
   border: 0;
   border-radius: var(--radius-sm, 6px);
   background: none;
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
   cursor: pointer;
 }
 .room-mark.e2e-mark:hover {
-  background: var(--bg-hover);
+  background: hsl(var(--muted) / 0.6);
 }
 
 /* ---------- Mensagens ---------- */
@@ -74,24 +74,24 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1-5);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   font-style: italic;
 }
 .msg-e2e > .icon {
   flex-shrink: 0;
 }
 .msg-e2e.failed {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .e2e-file-note {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
-  background: var(--bg-subtle);
-  color: var(--fg-muted);
+  background: hsl(var(--surface-2));
+  color: hsl(var(--muted-foreground));
   font-size: var(--fs-13);
   line-height: var(--lh-13);
 }
@@ -106,10 +106,10 @@
   min-height: 160px;
   max-height: 360px;
   padding: var(--space-4);
-  border: 1px dashed var(--border-strong);
+  border: 1px dashed hsl(var(--line-2));
   border-radius: 10px;
-  background: var(--skeleton);
-  color: var(--fg-muted);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
   font: inherit;
   font-size: var(--fs-13);
   cursor: pointer;
@@ -124,7 +124,7 @@
 /* ---------- Diálogos ---------- */
 .e2e-lead {
   margin: 0 0 var(--space-3);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .e2e-setup {
   display: flex;
@@ -144,10 +144,10 @@
   gap: var(--space-1) var(--space-3);
   width: 100%;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-strong);
+  border: 1px solid hsl(var(--line-2));
   border-radius: var(--radius-md);
-  background: var(--code-bg);
-  color: var(--fg);
+  background: hsl(var(--ink) / 0.06);
+  color: hsl(var(--foreground));
   font: 600 16px/24px var(--font-mono);
   font-variant-ligatures: none;
   letter-spacing: 0.06em;
@@ -174,7 +174,7 @@
   gap: var(--space-2);
   margin: 0;
   padding-left: var(--space-5);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 
 /* ---------- Busca nas mensagens carregadas ---------- */

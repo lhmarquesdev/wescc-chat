@@ -139,7 +139,7 @@ export function CalendarPage() {
   return (
     <div className="page cal-page">
       <header className="page-head cal-head">
-        <h1>Agenda</h1>
+        <h1 data-eyebrow="Organização">Agenda</h1>
         <div className="cal-head-actions">
           {canMeet && !phone && (
             <button type="button" className="btn" onClick={() => openNew({ meeting: true })}>

@@ -3,95 +3,135 @@
    Especificidade: no máximo 2 classes + 1 elemento ou pseudo-classe. Variantes ficam em (0,2,0) e o
    estado desabilitado vem por último, para vencer todas sem :not(:disabled) nos seletores. */
 
-/* ---------- Botões ---------- */
+/* ---------- Botões (Atendeti: pílulas) ----------
+   .btn = "ghost pill" (fundo da página, fio fino, sobe 1px no hover com borda da marca).
+   .btn.primary = "action pill" (marca 35%, sombra colorida, brilho que varre no hover). */
 .btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
   min-height: var(--control-md);
-  padding: 0 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  color: var(--fg);
-  font-size: var(--fs-14);
-  line-height: var(--lh-14);
-  font-weight: var(--fw-medium);
+  padding: 0 16px;
+  border: 1px solid hsl(var(--line-2));
+  border-radius: var(--radius-full);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-semibold);
   white-space: nowrap;
   text-decoration: none;
   cursor: pointer;
   user-select: none;
+  overflow: hidden;
+  isolation: isolate;
   transition:
-    background-color var(--dur-1) linear,
-    border-color var(--dur-1) linear,
-    color var(--dur-1) linear;
+    background-color var(--dur-2) ease,
+    border-color var(--dur-2) ease,
+    color var(--dur-2) ease,
+    box-shadow var(--dur-2) ease,
+    transform var(--dur-2) ease;
 }
 .btn:hover {
   text-decoration: none;
 }
+.btn > .icon {
+  transition: transform var(--dur-3) var(--ease-out);
+}
 .btn:where(:hover:not(:disabled)) {
-  background: var(--bg-hover);
-  border-color: var(--border-hover);
+  background: hsl(var(--muted));
+  border-color: hsl(var(--brand-fill) / 0.35);
+  color: hsl(var(--brand-ink));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -6px hsl(var(--brand-fill) / 0.35);
 }
 .btn:where(:active:not(:disabled)) {
-  background: var(--bg-active);
+  transform: scale(0.97);
 }
 .btn.primary {
-  background: var(--accent);
+  background: hsl(var(--brand-fill));
   border-color: transparent;
-  color: var(--fg-on-accent);
-  box-shadow: var(--shadow-1);
+  color: hsl(var(--on-color));
+  box-shadow:
+    0 1px 2px hsl(var(--brand-fill) / 0.3),
+    0 6px 16px -6px hsl(var(--brand-fill) / 0.55);
+}
+/* Brilho que varre o botão principal. */
+.btn.primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(105deg, transparent 30%, hsl(0 0% 100% / 0.28) 50%, transparent 70%);
+  transform: translateX(-120%);
+  pointer-events: none;
 }
 .btn.primary:where(:hover:not(:disabled)) {
-  background: var(--accent-hover);
+  background: hsl(var(--brand-fill-hover));
+  border-color: transparent;
+  color: hsl(var(--on-color));
+  box-shadow:
+    0 2px 4px hsl(var(--brand-fill) / 0.3),
+    0 10px 22px -8px hsl(var(--brand-fill) / 0.6);
 }
-.btn.primary:where(:active:not(:disabled)) {
-  background: var(--accent-active);
+.btn.primary:where(:hover:not(:disabled))::before {
+  transform: translateX(120%);
+  transition: transform 720ms var(--ease-out);
+}
+.btn.primary:where(:hover:not(:disabled)) > .icon:first-child {
+  transform: rotate(90deg);
 }
 .btn.ghost {
   background: transparent;
   border-color: transparent;
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
+  box-shadow: none;
 }
 .btn.ghost:where(:hover:not(:disabled)) {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--muted));
+  border-color: transparent;
+  color: hsl(var(--brand-ink));
+  box-shadow: none;
 }
-/* Destrutivo comum (Excluir, Encerrar, Remover): secundário com texto vermelho, sem contorno gritando. */
+/* Destrutivo comum (Excluir, Encerrar, Remover): pílula com texto vermelho. */
 .btn.danger {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .btn.danger:where(:hover:not(:disabled)) {
-  background: var(--danger-soft);
-  border-color: var(--danger-soft);
+  background: hsl(var(--st-red-soft));
+  border-color: hsl(var(--st-red-line));
+  color: hsl(var(--st-red));
+  box-shadow: none;
 }
 .btn.danger:where(.ghost) {
   border-color: transparent;
 }
 /* Só no botão de confirmar de um diálogo destrutivo. */
 .btn.danger:where(.solid) {
-  background: var(--danger-solid);
+  background: hsl(var(--st-red-solid));
   border-color: transparent;
-  color: var(--fg-on-accent);
+  color: hsl(var(--on-color));
+  box-shadow: 0 6px 16px -6px hsl(var(--st-red-solid) / 0.55);
 }
 .btn.danger:where(.solid:hover:not(:disabled)) {
-  background: var(--danger-hover);
+  background: hsl(var(--st-red));
+  border-color: transparent;
+  color: hsl(var(--on-color));
 }
 .btn.small {
   min-height: var(--control-sm);
-  padding: 0 10px;
+  padding: 0 12px;
   gap: var(--space-1-5);
-  border-radius: var(--radius-sm);
-  font-size: var(--fs-13);
-  line-height: var(--lh-13);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
 }
 .btn.lg {
   min-height: var(--control-lg);
-  padding: 0 18px;
-  border-radius: 10px;
-  font-size: var(--fs-15);
-  line-height: var(--lh-15);
+  padding: 0 22px;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
 }
 .btn.full,
 .btn.block {
@@ -102,20 +142,26 @@
   pointer-events: none;
   cursor: progress;
 }
-/* Desabilitado sem opacidade: o botão principal desabilitado não parece quebrado. */
 .btn:disabled,
 .btn[aria-disabled='true'] {
-  background: var(--bg-muted);
-  border-color: transparent;
-  color: var(--fg-disabled);
+  opacity: 0.55;
   box-shadow: none;
-  opacity: 1;
   cursor: not-allowed;
 }
 .btn:focus-visible {
   outline: 2px solid transparent;
   outline-offset: 2px;
-  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+  box-shadow: var(--focus-ring);
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .btn > .icon,
+  .btn.primary::before {
+    transition: none;
+  }
+  .btn:where(:hover:not(:disabled)) {
+    transform: none;
+  }
 }
 
 .icon-btn {
@@ -125,7 +171,7 @@
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -138,17 +184,17 @@
 }
 /* :where() deixa a cor do contexto (barra lateral, ilhas escuras) vencer no hover. */
 .icon-btn:where(:hover) {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--muted) / 0.6);
+  color: hsl(var(--foreground));
 }
 .icon-btn.on {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 .icon-btn:disabled,
 .icon-btn[aria-disabled='true'] {
   background: transparent;
-  color: var(--fg-disabled);
+  color: hsl(var(--text-5));
   opacity: 1;
 }
 /* Com contador (Membros 12). */
@@ -159,12 +205,12 @@
 .icon-btn .count {
   font-size: var(--fs-12);
   font-weight: var(--fw-semibold);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
 }
 .link {
   border: 0;
   background: none;
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
   padding: 0;
   font: inherit;
   border-radius: var(--radius-xs);
@@ -182,13 +228,15 @@
   flex-wrap: wrap;
 }
 .danger {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .spin {
   animation: spin 0.7s linear infinite;
 }
 
 /* ---------- Pills, badges, chips ---------- */
+/* Etiqueta neutra (Atendeti: chip redondo, 10px em negrito). Estado NUNCA é pílula colorida: as variantes
+   ok/warn/err/busy viram ponto de 8px com halo pulsando + texto neutro. */
 .pill {
   display: inline-flex;
   align-items: center;
@@ -196,33 +244,65 @@
   height: 20px;
   padding: 0 var(--space-2);
   border-radius: var(--radius-full);
-  background: var(--bg-muted);
-  color: var(--fg-2);
-  font-size: var(--fs-12);
-  line-height: var(--lh-12);
-  font-weight: var(--fw-medium);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: var(--fs-10);
+  line-height: 1;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.02em;
   white-space: nowrap;
   vertical-align: middle;
 }
 .pill.accent {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
 }
-.pill.ok {
-  background: var(--ok-soft);
-  color: var(--ok);
+.pill.ok,
+.pill.warn,
+.pill.err,
+.pill.busy,
+.pill.off {
+  --dot-c: var(--primary);
+  gap: var(--space-2);
+  height: auto;
+  min-height: 20px;
+  padding: 0;
+  background: none;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
 }
 .pill.warn {
-  background: var(--warn-soft);
-  color: var(--warn);
+  --dot-c: var(--st-amber-solid);
 }
 .pill.err {
-  background: var(--danger-soft);
-  color: var(--danger);
+  --dot-c: var(--st-red-solid);
 }
-.pill.busy {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+.pill.off {
+  --dot-c: var(--surface-6);
+}
+.pill.ok > .icon,
+.pill.warn > .icon,
+.pill.err > .icon,
+.pill.busy > .icon {
+  display: none;
+}
+.pill.ok::before,
+.pill.warn::before,
+.pill.err::before,
+.pill.busy::before,
+.pill.off::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: hsl(var(--dot-c));
+  flex-shrink: 0;
+  animation: status-pulse 2s var(--ease-out) infinite;
+}
+.pill.off::before {
+  animation: none;
 }
 .pill.dot::before {
   content: '';
@@ -232,18 +312,29 @@
   background: currentColor;
   flex-shrink: 0;
 }
+@keyframes status-pulse {
+  0% {
+    box-shadow: 0 0 0 0 hsl(var(--dot-c) / 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 7px hsl(var(--dot-c) / 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pill::before {
+    animation: none !important;
+  }
+}
 
 .badge {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: var(--fg-muted);
-  color: var(--fg-on-accent);
+  background: hsl(var(--primary));
+  color: hsl(var(--on-color));
   /* No escuro, como na barra lateral: fundo apagado e número claro (o cinza médio com número escuro parecia
      desligado). */
-  background: light-dark(var(--fg-muted), var(--border-strong));
-  color: light-dark(var(--fg-on-accent), var(--fg));
   font-size: var(--fs-11);
   line-height: 1;
   font-weight: var(--fw-semibold);
@@ -256,20 +347,20 @@
 }
 /* A classe .mention do markdown também casa aqui: as cores e a forma do contador são declaradas de novo. */
 .badge.mention {
-  background: var(--danger-solid);
-  color: var(--fg-on-accent);
+  background: hsl(var(--st-red-solid));
+  color: hsl(var(--on-color));
   padding: 0 5px;
   border-radius: 9px;
   font-weight: var(--fw-semibold);
   cursor: inherit;
 }
 .badge.group {
-  background: var(--warn-solid);
-  color: var(--warn-on-solid);
+  background: hsl(var(--warning));
+  color: hsl(var(--warning-foreground));
 }
 .badge.thread {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 /* Não lida sem contagem. */
 .badge.dot {
@@ -278,7 +369,7 @@
   height: 8px;
   padding: 0;
   border-radius: 50%;
-  background: var(--danger-solid);
+  background: hsl(var(--st-red-solid));
 }
 .badge.bump {
   animation: badge-bump var(--dur-4) var(--ease-out);
@@ -300,9 +391,9 @@
   gap: var(--space-1-5);
   height: 28px;
   padding: 0 var(--space-1) 0 10px;
-  border-radius: var(--radius-md);
-  background: var(--bg-muted);
-  color: var(--fg);
+  border-radius: var(--radius-full);
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   font-weight: var(--fw-medium);
@@ -324,22 +415,22 @@
   border: 0;
   border-radius: var(--radius-xs);
   background: none;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 .chip button:hover {
-  background: var(--bg-active);
-  color: var(--fg);
+  background: hsl(var(--surface-4));
+  color: hsl(var(--foreground));
 }
 /* Escolha liga/desliga (papéis, filtros por tipo). */
 .chip.selectable {
   padding: 0 10px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid hsl(var(--line-2));
   background: transparent;
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   cursor: pointer;
   user-select: none;
   transition:
@@ -350,19 +441,19 @@
 /* No toque o :hover gruda e parece um terceiro estado: lá o chip só reage enquanto está pressionado. */
 @media (hover: hover) {
   .chip.selectable:hover {
-    background: var(--bg-hover);
-    color: var(--fg);
+    background: hsl(var(--muted) / 0.6);
+    color: hsl(var(--foreground));
   }
 }
 .chip.selectable:active {
-  background: var(--bg-hover);
-  color: var(--fg);
+  background: hsl(var(--muted) / 0.6);
+  color: hsl(var(--foreground));
 }
 .chip.selectable.on {
   padding-left: var(--space-2);
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  border-color: color-mix(in srgb, hsl(var(--primary)) 45%, transparent);
+  color: hsl(var(--brand-ink-2));
 }
 .chip.on:where(.selectable)::before {
   content: '';
@@ -377,14 +468,14 @@
   font-size: var(--fs-11);
   line-height: var(--lh-11);
   font-weight: var(--fw-medium);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .chip:where(.on) > .chip-note {
   color: inherit;
   opacity: 0.8;
 }
 .chip.selectable:has(:focus-visible) {
-  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+  box-shadow: var(--focus-ring);
 }
 /* O checkbox some da vista mas fica no Tab, mesmo com o atributo hidden: Espaço liga e desliga, e o anel acima aparece. */
 .chip.selectable {
@@ -405,16 +496,14 @@
 
 /* ---------- Avatares e presença ---------- */
 .avatar {
-  border-radius: 50%;
+  border-radius: 24%;
   object-fit: cover;
   flex-shrink: 0;
-  background: var(--skeleton);
+  background: hsl(var(--muted));
   display: block;
-  outline: 1px solid light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.06));
-  outline-offset: -1px;
 }
 .avatar.room {
-  border-radius: 25%;
+  border-radius: 24%;
 }
 .avatar[data-loaded='fade'] {
   animation: fade-in var(--dur-2) var(--ease-out);
@@ -431,7 +520,7 @@
   width: var(--dot, 10px);
   height: var(--dot, 10px);
   border-radius: 50%;
-  background: var(--presence-offline);
+  background: hsl(var(--surface-6));
   flex-shrink: 0;
   vertical-align: middle;
 }
@@ -442,32 +531,32 @@
   box-shadow: 0 0 0 2px var(--ring-surface);
 }
 .status-dot.online {
-  background: var(--presence-online);
+  background: hsl(var(--primary));
 }
 /* Ausente: meio preenchido (canto superior esquerdo) com anel âmbar. */
 .status-dot.away {
-  background: linear-gradient(135deg, var(--presence-away) 50%, transparent 50%);
-  box-shadow: inset 0 0 0 1.5px var(--presence-away);
+  background: linear-gradient(135deg, hsl(var(--warning)) 50%, transparent 50%);
+  box-shadow: inset 0 0 0 1.5px hsl(var(--warning));
 }
 .avatar-wrap .status-dot.away {
   background-color: var(--ring-surface);
   box-shadow:
-    inset 0 0 0 1.5px var(--presence-away),
+    inset 0 0 0 1.5px hsl(var(--warning)),
     0 0 0 2px var(--ring-surface);
 }
 /* Ocupado: ponto vermelho com uma barra branca. */
 .status-dot.busy {
-  background: var(--presence-busy) linear-gradient(#fff, #fff) center / 50% 2px no-repeat;
+  background: hsl(var(--st-red-solid)) linear-gradient(#fff, #fff) center / 50% 2px no-repeat;
 }
 /* Offline: anel vazado. */
 .status-dot.offline {
   background: transparent;
-  box-shadow: inset 0 0 0 2px var(--presence-offline);
+  box-shadow: inset 0 0 0 2px hsl(var(--surface-6));
 }
 .avatar-wrap .status-dot.offline {
   background: var(--ring-surface);
   box-shadow:
-    inset 0 0 0 2px var(--presence-offline),
+    inset 0 0 0 2px hsl(var(--surface-6)),
     0 0 0 2px var(--ring-surface);
 }
 .avatar-wrap[data-big] .status-dot {
@@ -510,8 +599,8 @@
   height: 20px;
   padding: 0 4px;
   border-radius: 10px;
-  background: var(--bg-muted);
-  color: var(--fg-2);
+  background: hsl(var(--muted));
+  color: hsl(var(--text-2));
   font-size: var(--fs-11);
   font-weight: var(--fw-semibold);
   display: inline-flex;
@@ -526,23 +615,31 @@
 select,
 textarea {
   font: inherit;
-  font-size: var(--fs-14);
-  color: var(--fg);
-  background-color: var(--bg-input);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  font-weight: var(--fw-medium);
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--line-2));
+  border-radius: var(--radius-sm);
   padding: 0 12px;
   min-width: 0;
   transition:
-    border-color var(--dur-1) linear,
-    box-shadow var(--dur-1) linear;
+    border-color var(--dur-2) ease,
+    background-color var(--dur-2) ease,
+    box-shadow var(--dur-2) ease;
+}
+:where(input, textarea)::placeholder {
+  color: hsl(var(--text-4));
+  font-weight: var(--fw-regular);
 }
 :where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='submit'], [type='button'], [type='reset'], [type='image'])),
 select {
-  height: var(--control-md);
+  height: 40px;
 }
+/* Área de texto: raio 12, nunca pílula. */
 textarea {
   padding: 10px 12px;
+  border-radius: var(--radius-lg);
   resize: vertical;
   line-height: var(--lh-14);
 }
@@ -552,7 +649,7 @@ textarea:where(:not([rows])) {
 select {
   appearance: none;
   padding-right: 32px;
-  background: var(--bg-input) var(--chevron) no-repeat right 10px center / 16px;
+  background: hsl(var(--card)) var(--chevron) no-repeat right 10px center / 16px;
   cursor: pointer;
 }
 select:where([multiple], [size]:not([size='1'])) {
@@ -561,34 +658,52 @@ select:where([multiple], [size]:not([size='1'])) {
   background-image: none;
 }
 :where(input, select, textarea):hover {
-  border-color: var(--border-hover);
+  border-color: hsl(var(--line-3));
 }
-/* O contorno do bloco Base sai; o foco do campo é a borda de destaque com o anel suave. O compositor,
-   a busca da barra lateral e a do seletor de emoji desenham o foco deles. */
 input:focus,
 select:focus,
 textarea:focus {
   outline: none;
 }
-/* Caixa de seleção e rádio ficam com o anel global de base.css: o halo suave não chega a 3:1 em volta deles. */
+/* Caixa de seleção e rádio ficam com o anel global de base.css. */
 :where(input:not([type='checkbox'], [type='radio']), select, textarea):where(:not(.composer *, .side-search *, .emoji-picker *)):focus {
-  border-color: var(--accent);
+  border-color: hsl(var(--brand-mid));
   box-shadow: var(--focus-ring-input);
 }
+/* Dentro de um cartão de edição o campo vira pílula de 44px sem borda (Atendeti: eloom-editor-card). */
+.card :where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='submit'], [type='button'], [type='reset'], [type='image'])),
+.card :where(select) {
+  height: 44px;
+  padding: 0 18px;
+  border-color: transparent;
+  border-radius: var(--radius-full);
+  background-color: hsl(var(--muted) / 0.6);
+}
+.card :where(select) {
+  padding-right: 36px;
+  background-position: right 14px center;
+}
+.card :where(textarea) {
+  border-color: transparent;
+  background-color: hsl(var(--muted) / 0.6);
+}
+.card :where(input:not([type='checkbox'], [type='radio']), select, textarea):focus {
+  background-color: hsl(var(--background));
+  border-color: hsl(var(--brand-fill));
+  box-shadow: var(--focus-ring-pill);
+}
 :where(input, select, textarea)[aria-invalid='true'] {
-  border-color: var(--danger);
+  border-color: hsl(var(--st-red-solid));
 }
 :where(input, select, textarea)[aria-invalid='true']:focus {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+  box-shadow: 0 0 0 3px hsl(var(--st-red-solid) / 0.18);
 }
 :where(input, select, textarea):disabled {
-  background-color: var(--bg-subtle);
-  color: var(--fg-disabled);
-  border-color: var(--border);
+  opacity: 0.55;
   cursor: not-allowed;
 }
 :where(input, textarea):read-only:not([type='checkbox'], [type='radio']) {
-  background-color: var(--bg-subtle);
+  background-color: hsl(var(--surface-2));
 }
 input[type='date'],
 input[type='time'],
@@ -604,14 +719,14 @@ input[type='search']::-webkit-search-decoration {
 input[type='checkbox'],
 input[type='radio'] {
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   margin: 0;
   flex-shrink: 0;
   vertical-align: middle;
-  border: 1.5px solid var(--control-border);
-  border-radius: var(--radius-xs);
-  background: var(--bg-input) no-repeat center / 12px;
+  border: 1.5px solid hsl(var(--line-3));
+  border-radius: 5px;
+  background: hsl(var(--card)) no-repeat center / 13px;
   cursor: pointer;
   transition:
     background-color var(--dur-1) linear,
@@ -622,31 +737,31 @@ input[type='radio'] {
 }
 input[type='checkbox']:hover,
 input[type='radio']:hover {
-  border-color: var(--accent);
+  border-color: hsl(var(--primary));
 }
 input[type='checkbox']:checked {
-  border-color: var(--accent);
-  background-color: var(--accent);
+  border-color: hsl(var(--primary));
+  background-color: hsl(var(--primary));
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
 }
 input[type='checkbox']:indeterminate {
-  border-color: var(--accent);
-  background-color: var(--accent);
+  border-color: hsl(var(--primary));
+  background-color: hsl(var(--primary));
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='4' y='7' width='8' height='2' rx='1' fill='%23fff'/%3E%3C/svg%3E");
 }
 input[type='radio']:checked {
-  border-color: var(--accent);
-  background-image: radial-gradient(circle closest-side, var(--accent) 0 46%, transparent 54%);
+  border-color: hsl(var(--primary));
+  background-image: radial-gradient(circle closest-side, hsl(var(--primary)) 0 46%, transparent 54%);
   background-size: 100%;
 }
 input[type='checkbox']:disabled,
 input[type='radio']:disabled {
-  border-color: var(--fg-disabled);
-  background-color: var(--bg-subtle);
+  border-color: hsl(var(--text-5));
+  background-color: hsl(var(--surface-2));
   cursor: not-allowed;
 }
 input[type='checkbox']:checked:where(:disabled) {
-  background-color: var(--fg-disabled);
+  background-color: hsl(var(--text-5));
 }
 
 .form {
@@ -685,23 +800,23 @@ input[type='checkbox']:checked:where(:disabled) {
   min-width: 0;
 }
 .field-label {
-  font-weight: var(--fw-medium);
-  font-size: var(--fs-13);
-  line-height: var(--lh-13);
-  color: var(--fg-2);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: hsl(var(--foreground));
 }
 .field-required {
   margin-left: 2px;
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .field-hint {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .field-hint.neg,
 .field-error {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .field-error {
   display: flex;
@@ -714,9 +829,9 @@ input[type='checkbox']:checked:where(:disabled) {
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
-  color: var(--danger);
-  background: var(--danger-soft);
-  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  color: hsl(var(--st-red));
+  background: hsl(var(--st-red-soft));
+  border: 1px solid color-mix(in srgb, hsl(var(--st-red)) 30%, transparent);
   padding: 10px 12px;
   border-radius: 10px;
   font-size: var(--fs-14);
@@ -735,7 +850,7 @@ input[type='checkbox']:checked:where(:disabled) {
   gap: 10px;
   min-height: 32px;
   cursor: pointer;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   font-size: var(--fs-14);
   line-height: var(--lh-14);
 }
@@ -751,7 +866,7 @@ input[type='checkbox']:checked:where(:disabled) {
   width: 36px;
   height: 20px;
   border-radius: 10px;
-  background: var(--control-border);
+  background: hsl(var(--surface-5));
   position: relative;
   flex-shrink: 0;
   transition: background-color var(--dur-2) linear;
@@ -769,24 +884,24 @@ input[type='checkbox']:checked:where(:disabled) {
   transition: transform 160ms var(--ease-out);
 }
 .toggle-track:where(:checked + *) {
-  background: var(--accent);
+  background: hsl(var(--primary));
 }
 .toggle-track:where(:checked + *)::after {
   transform: translateX(16px);
 }
 .toggle-track:where(:focus-visible + *) {
   outline: 2px solid transparent;
-  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+  box-shadow: var(--focus-ring);
 }
 .toggle-track:where(:disabled + *) {
-  background: var(--bg-active);
+  background: hsl(var(--surface-4));
 }
 .toggle-track:where(:disabled + *)::after {
   opacity: 0.6;
   box-shadow: none;
 }
 .toggle.disabled {
-  color: var(--fg-disabled);
+  color: hsl(var(--text-5));
   cursor: not-allowed;
 }
 .toggle-text {
@@ -798,7 +913,7 @@ input[type='checkbox']:checked:where(:disabled) {
 .toggle-desc {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 
 .filters {
@@ -820,8 +935,18 @@ input[type='checkbox']:checked:where(:disabled) {
 .search-input {
   width: 100%;
   margin-bottom: var(--space-3);
-  padding-left: 34px;
-  background: var(--bg-input) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a92a0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.34-4.34'/%3E%3C/svg%3E") no-repeat 10px center / 16px;
+  padding-left: 44px;
+  border-color: transparent;
+  border-radius: var(--radius-full);
+  background: hsl(var(--muted) / 0.6) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%238a92a0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.34-4.34'/%3E%3C/svg%3E") no-repeat 16px center / 18px;
+}
+input.search-input {
+  height: 44px;
+}
+input.search-input:focus {
+  background-color: hsl(var(--background));
+  border-color: hsl(var(--brand-fill));
+  box-shadow: var(--focus-ring-pill);
 }
 .search-field {
   position: relative;
@@ -832,8 +957,10 @@ input[type='checkbox']:checked:where(:disabled) {
 }
 .search-field > .icon {
   position: absolute;
-  left: 10px;
-  color: var(--fg-muted);
+  left: 16px;
+  width: 18px;
+  height: 18px;
+  color: hsl(var(--muted-foreground));
   pointer-events: none;
 }
 .search-field .search-input {
@@ -848,7 +975,7 @@ input[type='checkbox']:checked:where(:disabled) {
 }
 .search-clear {
   position: absolute;
-  right: 4px;
+  right: 8px;
 }
 .search-field .search-clear {
   width: 28px;
@@ -873,14 +1000,14 @@ input[type='checkbox']:checked:where(:disabled) {
   min-width: 0;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 /* Sem arquivo: data-empty, não .empty (a classe do estado vazio tem padding de 32px). */
 .file-name[data-empty] {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .codes {
   display: grid;
@@ -888,8 +1015,8 @@ input[type='checkbox']:checked:where(:disabled) {
   gap: var(--space-1) var(--space-4);
   font-family: var(--font-mono);
   font-size: var(--fs-13);
-  background: var(--code-bg);
-  border: 1px solid var(--border-subtle);
+  background: hsl(var(--ink) / 0.06);
+  border: 1px solid hsl(var(--line-1));
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
 }
@@ -897,23 +1024,56 @@ input[type='checkbox']:checked:where(:disabled) {
 .qr {
   background: #fff;
   padding: var(--space-2);
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-md);
   display: inline-block;
 }
 .danger-zone {
-  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border));
+  border: 1px solid color-mix(in srgb, hsl(var(--st-red)) 30%, hsl(var(--border)));
   border-radius: var(--radius-lg);
   padding: var(--space-4);
 }
 
 /* ---------- Cards, tabelas, abas ---------- */
+/* Cartão = "editor card" do Atendeti: vidro, raio 20, título Space Grotesk com a barrinha da marca. */
 .card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-5);
+  background: hsl(var(--glass) / 0.72);
+  backdrop-filter: blur(14px);
+  border: 1px solid hsl(var(--line-2) / 0.55);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-2);
+  padding: 20px 22px 22px;
   margin-bottom: var(--space-4);
+}
+.card > h2,
+.card-head > h2,
+.card-head > div > h2 {
+  position: relative;
+  padding-left: 24px;
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  line-height: 22px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--track-title);
+}
+.card > h2::before,
+.card-head > h2::before,
+.card-head > div > h2::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: hsl(var(--brand-fill));
+  transform-origin: left;
+  animation: bar-draw 520ms var(--ease-out) both;
+}
+@keyframes bar-draw {
+  from {
+    transform: scaleX(0);
+  }
 }
 .card > h2 {
   margin-bottom: var(--space-3);
@@ -930,16 +1090,20 @@ input[type='checkbox']:checked:where(:disabled) {
 }
 .card-desc {
   margin: var(--space-1) 0 0;
-  font-size: var(--fs-13);
-  line-height: var(--lh-13);
-  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: var(--lh-12);
+  color: hsl(var(--muted-foreground));
+}
+.card > h2 + .card-desc,
+.card-head .card-desc {
+  padding-left: 24px;
 }
 .card.action {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
   text-align: left;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   font: inherit;
   cursor: pointer;
   margin: 0;
@@ -948,19 +1112,19 @@ input[type='checkbox']:checked:where(:disabled) {
     box-shadow var(--dur-1) linear;
 }
 .card.action:hover {
-  border-color: var(--border-hover);
+  border-color: hsl(var(--line-3));
   box-shadow: var(--shadow-1);
 }
 .card.action:focus-visible {
   outline: 2px solid transparent;
-  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+  box-shadow: var(--focus-ring);
 }
 .card-icon {
   width: 36px;
   height: 36px;
   border-radius: var(--radius-md);
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;
@@ -974,54 +1138,72 @@ input[type='checkbox']:checked:where(:disabled) {
 .grid-2 > .card {
   margin: 0;
 }
+/* Tabela no padrão Atendeti: cabeçalho cinza em caixa alta, linhas arejadas, barra da marca no hover. */
 .table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
+  background: hsl(var(--card));
 }
 .table th,
 .table td {
   text-align: left;
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 14px var(--space-4);
+  border-bottom: 1px solid hsl(var(--line-1));
   vertical-align: middle;
 }
-.table td {
-  height: 48px;
+.table :where(th, td):first-child {
+  padding-left: var(--space-8);
 }
-/* Cabeçalho em sentence case (sem caixa alta), fixo no topo de quem rola. */
+.table :where(th, td):last-child {
+  padding-right: var(--space-8);
+}
+.table td {
+  height: 56px;
+  font-size: var(--fs-13);
+  transition: background-color var(--dur-2) ease;
+}
 .table th {
-  height: 36px;
+  height: 48px;
   padding-top: 0;
   padding-bottom: 0;
-  font-size: var(--fs-12);
-  line-height: var(--lh-12);
+  font-size: var(--fs-11);
+  line-height: var(--lh-11);
   font-weight: var(--fw-semibold);
-  color: var(--fg-muted);
-  border-bottom-color: var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: hsl(var(--muted-foreground));
+  border-bottom-color: hsl(var(--border));
   white-space: nowrap;
   position: sticky;
   top: 0;
   z-index: var(--z-raised);
-  background: var(--bg-canvas);
+  background: hsl(var(--muted));
 }
-.card .table th {
-  background: var(--bg-surface);
+.table tbody tr:where(:hover) td {
+  background: hsl(var(--brand-fill) / 0.1);
 }
-.modal .table th {
-  background: var(--bg-raised);
+.table tbody tr:where(:hover) td:first-child {
+  box-shadow: inset 3px 0 0 hsl(var(--brand-fill) / 0.55);
+}
+.table tbody tr:where([aria-selected='true'], .selected) td {
+  background: hsl(var(--brand-fill) / 0.07);
+}
+.table tbody tr:where([aria-selected='true'], .selected) td:first-child {
+  box-shadow: inset 3px 0 0 hsl(var(--brand-fill));
+}
+/* Dentro de cartão ou diálogo a tabela não sangra: recuos menores. */
+:where(.card, .modal) .table :where(th, td):first-child {
+  padding-left: var(--space-4);
+}
+:where(.card, .modal) .table :where(th, td):last-child {
+  padding-right: var(--space-4);
+}
+:where(.card, .modal) .table {
+  background: transparent;
 }
 .table tr.clickable {
   cursor: pointer;
-}
-/* No toque o :hover gruda depois do toque: lá a linha só reage enquanto está pressionada. */
-@media (hover: hover) {
-  .table tr:where(.clickable:hover) td {
-    background: var(--bg-hover);
-  }
-}
-.table tr:where(.clickable:active) td {
-  background: var(--bg-hover);
 }
 .table td.center {
   text-align: center;
@@ -1046,6 +1228,7 @@ input[type='checkbox']:checked:where(:disabled) {
   min-width: 0;
 }
 .cell-name {
+  font-size: var(--fs-14);
   font-weight: var(--fw-medium);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1068,7 +1251,7 @@ input[type='checkbox']:checked:where(:disabled) {
 .cell-sub {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1084,11 +1267,16 @@ input[type='checkbox']:checked:where(:disabled) {
   }
 }
 
+/* Abas = controle segmentado do Atendeti: trilho em pílula, aba ativa é um cartão com sombra leve. */
 .tabs {
   display: flex;
-  gap: 0;
-  height: 40px;
-  border-bottom: 1px solid var(--border);
+  gap: 2px;
+  width: fit-content;
+  max-width: 100%;
+  height: 44px;
+  padding: 3px;
+  border-radius: var(--radius-full);
+  background: hsl(var(--muted));
   margin-bottom: var(--space-4);
   overflow-x: auto;
   overflow-y: hidden;
@@ -1098,7 +1286,6 @@ input[type='checkbox']:checked:where(:disabled) {
 .tabs::-webkit-scrollbar {
   display: none;
 }
-/* Abas escondidas de um lado: borda esmaecida (24px). */
 .tabs[data-fade='end'] {
   mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
 }
@@ -1116,62 +1303,62 @@ input[type='checkbox']:checked:where(:disabled) {
   height: 100%;
   border: 0;
   background: none;
-  padding: 0 var(--space-3);
-  color: var(--fg-muted);
-  font-size: var(--fs-14);
+  padding: 0 var(--space-4);
+  color: hsl(var(--muted-foreground));
+  font-size: var(--fs-13);
   font-weight: var(--fw-medium);
   white-space: nowrap;
   flex-shrink: 0;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  transition: color var(--dur-1) linear;
+  border-radius: var(--radius-full);
+  transition:
+    color var(--dur-2) ease,
+    background-color var(--dur-2) ease,
+    box-shadow var(--dur-2) ease;
 }
 .tabs button:hover {
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .tabs button.active {
-  color: var(--fg);
-}
-.tabs button:where(.active)::after {
-  content: '';
-  position: absolute;
-  left: var(--space-3);
-  right: var(--space-3);
-  bottom: 0;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--accent);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  box-shadow:
+    0 1px 2px hsl(var(--shadow-color) / calc(0.08 * var(--shadow-k))),
+    0 2px 6px -2px hsl(var(--shadow-color) / calc(0.1 * var(--shadow-k)));
 }
 .tabs button:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--focus);
+  box-shadow: var(--focus-ring);
 }
-/* Configurações (14 abas) até virar o submenu: fichas de 28px que quebram linha. */
+/* Contador dentro da aba. */
+.tabs button :where(.badge, .count) {
+  min-width: 20px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  background: hsl(var(--muted-foreground) / 0.12);
+  color: hsl(var(--muted-foreground));
+  font-size: var(--fs-10);
+}
+.tabs button.active :where(.badge, .count) {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+/* Muitas abas (Configurações): o trilho quebra linha. */
 .tabs.wrap {
   height: auto;
+  width: auto;
   flex-wrap: wrap;
-  gap: var(--space-1-5);
+  gap: 2px;
   overflow: visible;
-  border-bottom: 0;
+  border-radius: var(--radius-2xl);
   mask-image: none;
 }
 .tabs.wrap button {
-  height: 28px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-strong);
-  font-size: var(--fs-13);
-}
-.tabs.wrap button:where(.active) {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--accent-text);
-}
-.tabs.wrap :where(button)::after {
-  display: none;
+  height: 36px;
 }
 
 .empty {
   padding: var(--space-8) var(--space-4);
   text-align: center;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .empty.small {
   padding: var(--space-4);
@@ -1188,31 +1375,32 @@ input[type='checkbox']:checked:where(:disabled) {
   padding: var(--space-12) var(--space-6);
 }
 .empty-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-xl);
   display: grid;
   place-items: center;
-  background: var(--bg-subtle);
-  background: light-dark(var(--bg-subtle), var(--bg-muted));
-  color: var(--fg-muted);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 .empty.danger .empty-icon {
-  background: var(--danger-soft);
-  color: var(--danger);
+  background: hsl(var(--st-red-soft));
+  color: hsl(var(--st-red));
 }
 .empty-title {
   margin: var(--space-4) 0 0;
+  font-family: var(--font-display);
   font-size: var(--fs-16);
   line-height: var(--lh-16);
-  font-weight: var(--fw-semibold);
-  color: var(--fg);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--track-title);
+  color: hsl(var(--foreground));
 }
 .empty-desc {
   margin-top: var(--space-1);
   font-size: var(--fs-14);
   line-height: var(--lh-14);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   text-wrap: balance;
 }
 .empty-action {
@@ -1222,31 +1410,54 @@ input[type='checkbox']:checked:where(:disabled) {
   justify-content: center;
 }
 
+/* Paginação Atendeti: "Mostrando 1–10 de 24" e círculos. */
 .pager {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--space-1-5);
   margin: var(--space-3) 0;
+  font-size: var(--fs-13);
 }
 .pager .btn.small {
   min-width: 32px;
   min-height: 32px;
   padding: 0 6px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.pager .btn.small:where(:hover:not(:disabled)) {
+  background: hsl(var(--muted));
+  transform: none;
+}
+.pager .btn.small:where([aria-current='page'], .on, .active) {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }
 .pager-range {
   white-space: nowrap;
   font-size: var(--fs-13);
-  color: var(--fg-2);
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
   padding: 0 var(--space-1);
+  margin-right: auto;
 }
-.pager-size {
-  width: auto;
-  min-height: 32px;
-  margin-left: var(--space-2);
-  font-size: var(--fs-13);
+.pager-sizes {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-right: var(--space-3);
+}
+.pager-sizes-label {
+  margin-right: var(--space-1);
+  color: hsl(var(--muted-foreground));
+}
+.pager-page {
+  padding: 0 var(--space-1);
+  color: hsl(var(--text-2));
+  font-variant-numeric: tabular-nums;
 }
 .plain-list {
   list-style: none;
@@ -1258,7 +1469,7 @@ input[type='checkbox']:checked:where(:disabled) {
   align-items: center;
   gap: var(--space-2);
   padding: 10px 0;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid hsl(var(--line-1));
   flex-wrap: wrap;
 }
 .plain-list li > div {
@@ -1272,10 +1483,10 @@ input[type='checkbox']:checked:where(:disabled) {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-1);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid hsl(var(--line-1));
   width: 100%;
   background: none;
-  color: var(--fg);
+  color: hsl(var(--foreground));
   border-left: 0;
   border-right: 0;
   border-top: 0;
@@ -1285,7 +1496,7 @@ input[type='checkbox']:checked:where(:disabled) {
   transition: background-color var(--dur-1) linear;
 }
 .link-row:hover {
-  background: var(--bg-hover);
+  background: hsl(var(--muted) / 0.6);
 }
 .stats {
   display: grid;
@@ -1298,28 +1509,32 @@ input[type='checkbox']:checked:where(:disabled) {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--bg-surface);
-  padding: var(--space-4);
+  border: 1px solid hsl(var(--line-2) / 0.55);
+  border-radius: var(--radius-2xl);
+  background: hsl(var(--glass) / 0.72);
+  box-shadow: var(--shadow-2);
+  padding: var(--space-5);
   min-width: 0;
 }
 .stat-value {
+  font-family: var(--font-display);
   font-size: var(--fs-28);
   line-height: var(--lh-28);
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-bold);
   letter-spacing: -0.02em;
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .stat-label {
   order: -1;
   display: flex;
   align-items: center;
   gap: var(--space-1-5);
-  color: var(--fg-muted);
-  font-size: var(--fs-13);
-  line-height: var(--lh-13);
-  font-weight: var(--fw-medium);
+  color: hsl(var(--muted-foreground));
+  font-size: var(--fs-10);
+  line-height: var(--lh-12);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--track-eyebrow);
 }
 
 /* ---------- Carregamento (esqueletos) ---------- */
@@ -1328,7 +1543,7 @@ input[type='checkbox']:checked:where(:disabled) {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius-sm);
-  background: var(--skeleton);
+  background: hsl(var(--muted));
   flex-shrink: 0;
 }
 .skeleton.circle {
@@ -1339,7 +1554,7 @@ input[type='checkbox']:checked:where(:disabled) {
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, var(--skeleton-shine), transparent);
+  background: linear-gradient(90deg, transparent, hsl(var(--highlight) / calc(0.6 * var(--highlight-k))), transparent);
   animation: shine 1.4s linear infinite;
 }
 @keyframes table-fade {
@@ -1393,7 +1608,7 @@ input[type='checkbox']:checked:where(:disabled) {
   align-items: center;
   height: 48px;
   padding: 0 var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid hsl(var(--line-1));
 }
 .sk-tile {
   border-radius: var(--radius-lg);
@@ -1407,38 +1622,40 @@ input[type='checkbox']:checked:where(:disabled) {
   max-width: 100%;
   padding: 3px;
   margin-bottom: var(--space-4);
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  background: hsl(var(--muted));
+  border-radius: var(--radius-2xl);
 }
 .seg-nav button {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1-5);
-  height: 30px;
-  padding: 0 var(--space-3);
+  height: 36px;
+  padding: 0 var(--space-4);
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-full);
   background: transparent;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   font-size: var(--fs-13);
   font-weight: var(--fw-medium);
   white-space: nowrap;
   cursor: pointer;
   transition:
-    background-color var(--dur-1) linear,
-    color var(--dur-1) linear;
+    background-color var(--dur-2) ease,
+    color var(--dur-2) ease,
+    box-shadow var(--dur-2) ease;
 }
 .seg-nav button:hover {
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .seg-nav button.on {
-  background: var(--bg-raised);
-  color: var(--fg);
-  box-shadow: var(--shadow-1);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  box-shadow:
+    0 1px 2px hsl(var(--shadow-color) / calc(0.08 * var(--shadow-k))),
+    0 2px 6px -2px hsl(var(--shadow-color) / calc(0.1 * var(--shadow-k)));
 }
 .seg-nav button.on:where(:focus-visible) {
-  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+  box-shadow: var(--focus-ring);
 }
 .check-list {
   display: flex;
@@ -1447,9 +1664,9 @@ input[type='checkbox']:checked:where(:disabled) {
   max-height: 200px;
   overflow: auto;
   padding: var(--space-1-5) var(--space-2);
-  border: 1px solid var(--border-strong);
+  border: 1px solid hsl(var(--line-2));
   border-radius: var(--radius-md);
-  background: var(--bg-input);
+  background: hsl(var(--surface-1));
 }
 .check {
   display: inline-flex;
@@ -1466,8 +1683,8 @@ input[type='checkbox']:checked:where(:disabled) {
 /* Código como código: linhas inteiras com rolagem horizontal (quebrar em qualquer ponto partia nomes ao meio) e sem
    ligaduras da fonte mono ("<!--" virava uma seta). */
 .code-block {
-  background: var(--code-bg);
-  border: 1px solid var(--border-subtle);
+  background: hsl(var(--ink) / 0.06);
+  border: 1px solid hsl(var(--line-1));
   border-radius: var(--radius-md);
   padding: 10px 12px;
   font: 13px/20px var(--font-mono);
@@ -1485,7 +1702,7 @@ input[type='checkbox']:checked:where(:disabled) {
   font-variant-numeric: tabular-nums;
 }
 .table tr.clickable:where(:focus-visible) {
-  outline: 2px solid var(--focus);
+  outline: 2px solid hsl(var(--ring));
   outline-offset: -2px;
   box-shadow: none;
 }
@@ -1498,10 +1715,10 @@ input[type='checkbox']:checked:where(:disabled) {
   flex-wrap: wrap;
   padding: var(--space-3) 14px;
   margin-bottom: var(--space-3);
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
-  background: var(--bg-subtle);
-  color: var(--fg);
+  background: hsl(var(--surface-2));
+  color: hsl(var(--foreground));
   font-size: var(--fs-14);
   line-height: var(--lh-14);
 }
@@ -1512,38 +1729,38 @@ input[type='checkbox']:checked:where(:disabled) {
 .callout > .icon:first-child {
   width: 18px;
   height: 18px;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 /* .info também é o painel de informações da sala (coluna): o aviso volta a ser uma linha. */
 .callout.info {
   flex-direction: row;
   gap: var(--space-3);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-  background: var(--accent-soft);
+  border-color: color-mix(in srgb, hsl(var(--primary)) 35%, transparent);
+  background: hsl(var(--primary) / 0.1);
 }
 .callout.info > .icon:where(:first-child) {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
 }
 .callout.warn {
-  border-color: color-mix(in srgb, var(--warn-solid) 45%, transparent);
-  background: var(--warn-soft);
+  border-color: color-mix(in srgb, hsl(var(--warning)) 45%, transparent);
+  background: hsl(var(--st-amber-soft));
 }
 .callout.warn > .icon:where(:first-child) {
-  color: var(--warn);
+  color: hsl(var(--st-amber));
 }
 .callout.ok {
-  border-color: color-mix(in srgb, var(--ok) 35%, transparent);
-  background: var(--ok-soft);
+  border-color: color-mix(in srgb, hsl(var(--brand-ink-2)) 35%, transparent);
+  background: hsl(var(--primary) / 0.1);
 }
 .callout.ok > .icon:where(:first-child) {
-  color: var(--ok);
+  color: hsl(var(--brand-ink-2));
 }
 .callout.err {
-  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
-  background: var(--danger-soft);
+  border-color: color-mix(in srgb, hsl(var(--st-red)) 35%, transparent);
+  background: hsl(var(--st-red-soft));
 }
 .callout.err > .icon:where(:first-child) {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .form .callout {
   margin-bottom: 0;
@@ -1643,15 +1860,15 @@ input[type='checkbox']:checked:where(:disabled) {
     position: sticky;
     left: 0;
     z-index: var(--z-raised);
-    background: var(--bg-canvas);
+    background: hsl(var(--background));
     /* Avatar e nome na mesma linha; a tabela já rola para o lado. */
     white-space: nowrap;
   }
   .card .table :where(th, td):where(:first-child) {
-    background: var(--bg-surface);
+    background: hsl(var(--card));
   }
   .modal .table :where(th, td):where(:first-child) {
-    background: var(--bg-raised);
+    background: hsl(var(--popover));
   }
   @supports (animation-timeline: scroll()) {
     .table:where(:not(.stack)) {
@@ -1672,7 +1889,7 @@ input[type='checkbox']:checked:where(:disabled) {
   }
   .table.stack tr {
     padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: 1px solid hsl(var(--line-1));
   }
   .table.stack td {
     height: auto;
@@ -1684,11 +1901,11 @@ input[type='checkbox']:checked:where(:disabled) {
     background: transparent;
   }
   .table.stack tr:where(.clickable:active) {
-    background: var(--bg-hover);
+    background: hsl(var(--muted) / 0.6);
   }
   @media (hover: hover) {
     .table.stack tr:where(.clickable:hover) {
-      background: var(--bg-hover);
+      background: hsl(var(--muted) / 0.6);
     }
   }
   .table.stack td:where(:first-child) {
@@ -1699,7 +1916,7 @@ input[type='checkbox']:checked:where(:disabled) {
     display: block;
     font-size: var(--fs-12);
     line-height: var(--lh-12);
-    color: var(--fg-muted);
+    color: hsl(var(--muted-foreground));
   }
   .table.stack .row-actions {
     opacity: 1;
@@ -1724,4 +1941,21 @@ input[type='checkbox']:checked:where(:disabled) {
     flex: 1 1 140px;
     min-width: 0;
   }
+}
+
+/* Papel (Atendeti): selo com contorno de 1,5px, sem preenchimento. */
+.pill.role {
+  height: 22px;
+  padding: 0 var(--space-2);
+  border: 1.5px solid hsl(var(--line-3));
+  border-radius: var(--radius-xs);
+  background: none;
+  color: hsl(var(--text-2));
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+}
+.pill.role.accent {
+  border-color: hsl(var(--primary) / 0.55);
+  color: hsl(var(--brand-ink-2));
 }

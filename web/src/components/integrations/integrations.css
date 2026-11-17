@@ -28,11 +28,11 @@
   gap: var(--space-1);
   min-width: 0;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
-  background: var(--bg-surface);
+  background: hsl(var(--card));
   /* Barra de 3px da categoria do status (JIRA_STATUS[…].bar); a cor nunca é o acento. */
-  box-shadow: inset 3px 0 0 var(--att-jira-bar, var(--border-strong));
+  box-shadow: inset 3px 0 0 var(--att-jira-bar, hsl(var(--line-2)));
 }
 .att-jira-row {
   display: flex;
@@ -43,7 +43,7 @@
 }
 .att-jira-row > .icon {
   flex: none;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 /* O status vai para a direita (a pílula ou a âncora da dica que a envolve). */
 .att-jira-row > :last-child {
@@ -62,7 +62,7 @@
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   font-weight: var(--fw-semibold);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   text-decoration: none;
 }
 .att-jira-summary {
@@ -71,7 +71,7 @@
   font-size: var(--fs-14);
   line-height: var(--lh-14);
   font-weight: var(--fw-medium);
-  color: var(--fg);
+  color: hsl(var(--foreground));
   text-decoration: none;
   overflow-wrap: anywhere;
 }
@@ -93,14 +93,14 @@
   min-width: 0;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
 .att-jira .quote-att {
   margin-top: 2px;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   overflow-wrap: anywhere;
 }
 .att-jira-actions {
@@ -152,9 +152,9 @@
   max-width: min(480px, 100%);
   margin-top: var(--space-1);
   padding: 10px 10px 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
-  background: var(--bg-surface);
+  background: hsl(var(--card));
 }
 .att-meeting > span:first-child {
   display: grid;
@@ -163,8 +163,8 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--brand-ink-2));
 }
 .att-meeting > div {
   flex: 1;
@@ -179,12 +179,12 @@
   font-size: var(--fs-14);
   line-height: var(--lh-14);
   font-weight: var(--fw-medium);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .att-meeting small {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .att-meeting > .btn,
 .att-meeting > .icon-btn {
@@ -195,17 +195,17 @@
 /* Moldura tracejada sobre a superfície: não pode parecer uma linha com o mouse em cima. Margem (8px) + borda (1px) +
    recuo (11px) = os 20px das linhas, dos dois lados: o ícone e o nome ficam na coluna do avatar e do nome. */
 .msg.ephemeral {
-  --ring-surface: var(--bg-surface);
+  --ring-surface: hsl(var(--card));
   margin: var(--space-1) var(--space-2);
   padding: var(--space-2) 11px;
-  border: 1px dashed var(--border);
+  border: 1px dashed hsl(var(--border));
   border-radius: var(--radius-md);
-  background: var(--bg-surface);
+  background: hsl(var(--card));
 }
 /* div. para vencer o .msg:hover do room.css, que entra depois deste arquivo. */
 div.ephemeral:hover {
-  --ring-surface: var(--bg-surface);
-  background: var(--bg-surface);
+  --ring-surface: hsl(var(--card));
+  background: hsl(var(--card));
 }
 /* Painel do tópico: as linhas recuam 16px (.thread-panel .msg do panels.css, que entra depois; div. para vencer).
    Margem (8px) + borda + recuo (7px) = 16px. */
@@ -220,8 +220,8 @@ div.ephemeral:hover {
   height: 36px;
   margin-top: 2px;
   border-radius: var(--radius-md);
-  background: var(--bg-muted);
-  color: var(--fg-muted);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 .ephemeral :where(.msg-head > strong) {
   min-width: 0;
@@ -231,7 +231,7 @@ div.ephemeral:hover {
   font-size: var(--fs-14);
   line-height: var(--lh-14);
   font-weight: var(--fw-semibold);
-  color: var(--fg);
+  color: hsl(var(--foreground));
 }
 .ephemeral-pill {
   align-self: center;
@@ -252,10 +252,10 @@ div.ephemeral:hover {
   margin-top: 3px;
 }
 .ephemeral[data-tone='warn'] :where(.msg-body > .icon) {
-  color: var(--warn);
+  color: hsl(var(--st-amber));
 }
 .ephemeral[data-tone='err'] :where(.msg-body > .icon) {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 .ephemeral :where(.msg-main) > .att-jira-stack {
   max-width: none;
@@ -284,7 +284,7 @@ div.ephemeral:hover {
   position: absolute;
   top: 50%;
   left: 10px;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   pointer-events: none;
   translate: 0 -50%;
 }

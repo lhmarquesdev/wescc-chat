@@ -14,15 +14,16 @@ body,
 body {
   /* 20px no corpo de 14px; sem unidade para quem ainda não tem altura de linha própria escalar com o tamanho */
   font: 400 14px/1.4286 var(--font-sans);
-  font-optical-sizing: auto;
-  /* l com cauda e I com serifa: separam Il1 em usuários, códigos de fila e protocolos */
-  font-feature-settings: 'cv05' 1, 'cv08' 1;
+  letter-spacing: var(--track-ui);
   -webkit-font-smoothing: antialiased;
-  background: var(--bg);
-  color: var(--fg);
+  /* Fundo "papel" da Gestão: tom base + gradiente sutil de cima para baixo. */
+  background-color: hsl(var(--background));
+  background-image: linear-gradient(180deg, hsl(var(--page-from)) 0%, hsl(var(--page-to)) 100%);
+  background-attachment: fixed;
+  color: hsl(var(--foreground));
 }
 a {
-  color: var(--accent-text);
+  color: hsl(var(--brand-ink-2));
   text-decoration: none;
 }
 /* Sublinhado só no link comum: qualquer classe que defina text-decoration ganha, sem !important. */
@@ -32,19 +33,23 @@ a:where(:hover) {
 /* Títulos sem margem: o espaço vem do layout de cada tela. */
 h1,
 h2,
-h3 {
+h3,
+h4,
+h5,
+h6 {
   margin: 0;
+  font-family: var(--font-display);
   font-weight: 600;
+  letter-spacing: var(--track-title);
 }
 h1 {
   font-size: var(--fs-18);
   line-height: var(--lh-18);
-  letter-spacing: -0.01em;
+  font-weight: 700;
 }
 h2 {
   font-size: var(--fs-16);
   line-height: var(--lh-16);
-  letter-spacing: -0.01em;
 }
 h3 {
   font-size: var(--fs-14);
@@ -61,8 +66,22 @@ textarea {
 }
 button {
   font: inherit;
+  letter-spacing: inherit;
   color: inherit;
   cursor: pointer;
+}
+/* Feedback tátil dos botões: transição suave e leve aperto no clique. */
+button:not([role='tab'], [role='checkbox'], .no-press) {
+  transition:
+    background-color 180ms var(--ease-in-out),
+    color 180ms var(--ease-in-out),
+    border-color 180ms var(--ease-in-out),
+    box-shadow 200ms var(--ease-in-out),
+    transform 140ms var(--ease-in-out),
+    opacity 180ms var(--ease-in-out);
+}
+button:not([disabled], [role='tab'], [role='checkbox'], .no-press):active {
+  transform: scale(0.97);
 }
 button:disabled {
   cursor: not-allowed;
@@ -71,13 +90,15 @@ button:disabled {
 blockquote {
   margin: 4px 0;
   padding: 2px 12px;
-  border-left: 2px solid var(--border-strong);
-  color: var(--fg-2);
+  border-left: 2px solid hsl(var(--line-2));
+  color: hsl(var(--text-2));
 }
 code,
 .mono {
   font-family: var(--font-mono);
   font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
 /* Ligaduras da fonte mono trocam "->" e "<!--" por setas: em código, cada caractere aparece como foi digitado. */
 code,
@@ -86,7 +107,7 @@ pre,
   font-variant-ligatures: none;
 }
 .muted {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .small {
   font-size: var(--fs-13);
@@ -112,10 +133,10 @@ pre,
   flex: 1;
 }
 .pos {
-  color: var(--ok);
+  color: hsl(var(--brand-ink-2));
 }
 .neg {
-  color: var(--danger);
+  color: hsl(var(--st-red));
 }
 
 /* Utilitários. */
@@ -143,9 +164,9 @@ pre,
 :where(input[type='color']) {
   height: var(--control-md);
   padding: 3px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--bg-input);
+  border: 1px solid hsl(var(--line-2));
+  border-radius: var(--radius-sm);
+  background: hsl(var(--surface-1));
   cursor: pointer;
 }
 :where(input[type='color'])::-webkit-color-swatch-wrapper {
@@ -167,25 +188,23 @@ html {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Barras de rolagem finas. Declarado em cada elemento para a cor sair do color-scheme dele
-   (na barra lateral escura a barra também fica escura). */
+/* Barra de rolagem discreta, combinando com a marca (.eloom-soft-scroll). */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-color: hsl(var(--primary) / 0.3) transparent;
 }
 
 ::selection {
-  background: var(--accent-ring);
+  background: hsl(var(--brand-mid) / 0.22);
 }
 
-/* Sem 700 na interface: o negrito do markdown também sai em 600. */
 b,
 strong {
   font-weight: 600;
 }
 
 ::placeholder {
-  color: var(--fg-placeholder);
+  color: hsl(var(--text-4));
   opacity: 1;
 }
 
@@ -193,26 +212,27 @@ hr {
   height: 0;
   margin: var(--space-4) 0;
   border: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid hsl(var(--border));
 }
 
 /* Atalhos ("Ctrl K", "Esc") e operadores da busca. */
 kbd {
   display: inline-block;
   min-width: 18px;
-  padding: 0 4px;
-  border: 1px solid var(--border);
+  padding: 0 5px;
+  border: 1px solid hsl(var(--line-1));
   border-radius: var(--radius-xs);
-  background: var(--bg-subtle);
-  color: var(--fg-muted);
-  font: 500 11px/16px var(--font-sans);
+  background: hsl(var(--surface-3));
+  color: hsl(var(--muted-foreground));
+  font: 600 10px/16px var(--font-sans);
+  letter-spacing: 0.02em;
   text-align: center;
 }
 
 /* Termo encontrado na busca. */
 mark {
   border-radius: 2px;
-  background: var(--highlight);
+  background: hsl(var(--st-amber-solid) / 0.35);
   color: inherit;
 }
 
@@ -225,7 +245,7 @@ mark {
 :focus-visible:where(:not(textarea, select, input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='button'], [type='submit'], [type='reset']))) {
   outline: 2px solid transparent; /* aparece no alto contraste do Windows */
   outline-offset: 2px;
-  box-shadow: 0 0 0 2px var(--ring-offset), 0 0 0 4px var(--focus);
+  box-shadow: var(--focus-ring);
 }
 
 /* Ícones do componente <Icon>. */
@@ -240,7 +260,8 @@ mark {
   place-items: center;
   flex-shrink: 0;
   border-radius: 28.57%;
-  background: linear-gradient(135deg, var(--brand-from), var(--brand-to));
+  /* O logo do Wescchat é mantido como está (as cores são do logo, não do tema). */
+  background: linear-gradient(135deg, #5b6bf0, #3240b5);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18);
 }
 .brand-mark svg {

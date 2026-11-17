@@ -4,6 +4,7 @@ import { ApiError, errorMessage, getCredentials, syncCredentials } from './lib/a
 import { loadPublicSettings, logout, requestNotificationPermission, signedOutElsewhere, startSession } from './lib/session';
 import { useStore } from './lib/store';
 import { Sidebar } from './components/Sidebar';
+import { Topbar } from './components/Topbar';
 import { MobileTabBar } from './components/MobileTabBar';
 import { markCallsSeen, useMissedCalls } from './components/navState';
 import { useIsPhone } from './components/overlay';
@@ -171,6 +172,24 @@ function Protected() {
   const [failure, setFailure] = useState<BootFailure | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [navOpen, setNavOpen] = useState(false);
+  // Menu lateral recolhido (só ícones), como no Atendeti; a escolha fica neste navegador.
+  const [sideIcon, setSideIcon] = useState(() => {
+    try {
+      return localStorage.getItem('wescchat:side') === 'icon';
+    } catch {
+      return false;
+    }
+  });
+  const toggleSide = useCallback(() => {
+    setSideIcon((v) => {
+      try {
+        localStorage.setItem('wescchat:side', v ? 'full' : 'icon');
+      } catch {
+        /* sem armazenamento: vale só nesta visita */
+      }
+      return !v;
+    });
+  }, []);
   const location = useLocation();
   const navigate = useNavigate();
   const phone = useIsPhone();
@@ -238,7 +257,7 @@ function Protected() {
   }
 
   return (
-    <div className={`layout ${navOpen ? 'nav-open' : ''}`} data-view={view}>
+    <div className={`layout ${navOpen ? 'nav-open' : ''}`} data-view={view} data-side={sideIcon && !phone ? 'icon' : 'full'}>
       {/* Celular fora da lista: a gaveta fica fora da tela e fora do Tab e do leitor de tela. */}
       <aside className="sidebar-wrap" inert={phone && !asList && !navOpen}>
         {asList && !connected && <OfflineBar />}
@@ -250,6 +269,7 @@ function Protected() {
         <button className="mobile-nav-btn" aria-label="Abrir menu" onClick={() => setNavOpen(true)}>
           <Icon name="nav-menu" />
         </button>
+        {!phone && <Topbar collapsed={sideIcon} onToggle={toggleSide} />}
         {!connected && <OfflineBar />}
         {!asList && (
           <ErrorBoundary resetKey={pathname}>

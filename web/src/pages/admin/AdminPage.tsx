@@ -3,7 +3,7 @@ import { NavLink, useParams } from 'react-router-dom';
 import { Navigate } from 'react-router-dom';
 import { usePermission, useStore } from '../../lib/store';
 import { Icon, type IconName } from '../../components/Icon';
-import { SideFoot, TakeoverBack, TakeoverHead } from '../../components/Sidebar';
+import { SideBrand, TakeoverBack, TakeoverHead } from '../../components/Sidebar';
 import { AdminInfo } from './AdminInfo';
 import { AdminUsers } from './AdminUsers';
 import { AdminRooms } from './AdminRooms';
@@ -39,12 +39,14 @@ export function AdminPage() {
     <div className="page with-nav takeover admin-page">
       <TakeoverHead title="Administração" />
       <nav className="page-nav" aria-label="Administração" ref={navRef}>
-        <TakeoverBack />
+        <div className="side-head">
+          <SideBrand />
+        </div>
         <h2>Administração</h2>
         {items.map((i) => (
           <AdminLink key={i.id} id={i.id} icon={i.icon} label={i.label} perm={i.perm} />
         ))}
-        <SideFoot />
+        <TakeoverBack />
       </nav>
       <div className="page-body">
         {section === 'info' && <AdminInfo />}

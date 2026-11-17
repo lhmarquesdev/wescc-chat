@@ -1066,24 +1066,28 @@ export function Pager({
   if (total <= count && !onCountChange) return null;
   return (
     <div className="pager">
+      <span className="pager-range">
+        Mostrando {nf.format(Math.min(offset + 1, total))}–{nf.format(Math.min(offset + count, total))} de {nf.format(total)}
+      </span>
+      {onCountChange && (
+        <span className="pager-sizes" role="group" aria-label="Itens por página">
+          <span className="pager-sizes-label">Por página</span>
+          {(sizes ?? [25, 50, 100]).map((n) => (
+            <button key={n} type="button" className={n === count ? 'btn small on' : 'btn small'} aria-pressed={n === count} onClick={() => onCountChange(n)}>
+              {n}
+            </button>
+          ))}
+        </span>
+      )}
       <button type="button" className="btn small" title="Página anterior" aria-label="Página anterior" disabled={offset === 0} onClick={() => onChange(Math.max(0, offset - count))}>
         <Icon name="prev" />
       </button>
-      <span className="pager-range">
-        {nf.format(Math.min(offset + 1, total))}–{nf.format(Math.min(offset + count, total))} de {nf.format(total)}
+      <span className="pager-page">
+        {nf.format(Math.floor(offset / count) + 1)} / {nf.format(Math.max(1, Math.ceil(total / count)))}
       </span>
       <button type="button" className="btn small" title="Próxima página" aria-label="Próxima página" disabled={offset + count >= total} onClick={() => onChange(offset + count)}>
         <Icon name="next" />
       </button>
-      {onCountChange && (
-        <select className="pager-size" aria-label="Itens por página" value={count} onChange={(e) => onCountChange(Number(e.target.value))}>
-          {(sizes ?? [25, 50, 100]).map((n) => (
-            <option key={n} value={n}>
-              {n} por página
-            </option>
-          ))}
-        </select>
-      )}
     </div>
   );
 }

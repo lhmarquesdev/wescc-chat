@@ -19,14 +19,14 @@
 }
 /* Rodapé do cartão ("3 regras de aviso") e linhas secundárias. */
 .int-hub small {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
   font-size: var(--fs-13);
   line-height: var(--lh-13);
 }
 /* Contas conectadas: o ícone é do sistema de fora, não uma ação (no hub o cartão inteiro é o link). */
 .int-hub section .card-icon {
-  background: var(--bg-muted);
-  color: var(--fg);
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
 }
 /* Ações e a chave da presença afastadas do texto de cima. */
 .int-hub p + .row-actions,
@@ -70,8 +70,8 @@
   width: 24px;
   height: 24px;
   border-radius: var(--radius-full);
-  background: var(--bg-muted);
-  color: var(--fg-2);
+  background: hsl(var(--muted));
+  color: hsl(var(--text-2));
   font-size: var(--fs-12);
   line-height: 24px;
   font-weight: var(--fw-semibold);
@@ -84,7 +84,7 @@
 }
 /* Texto de atenção dentro dos passos ("Copie agora…"). */
 .int-steps em {
-  color: var(--warn);
+  color: hsl(var(--st-amber));
   font-style: normal;
   font-weight: var(--fw-medium);
 }
@@ -114,12 +114,12 @@
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
-  color: var(--fg-2);
+  color: hsl(var(--text-2));
   font-size: var(--fs-14);
   line-height: var(--lh-14);
 }
 .int-secret > span > .icon {
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 
 /* ---------- Salas de destino ---------- */
@@ -133,9 +133,9 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius-md);
-  background: var(--bg-surface);
+  background: hsl(var(--card));
 }
 .int-target-row {
   display: flex;
@@ -145,11 +145,11 @@
   padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
 }
 .int-target-row + .int-target-row {
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid hsl(var(--line-1));
 }
 .int-target-row > .icon {
   flex-shrink: 0;
-  color: var(--fg-muted);
+  color: hsl(var(--muted-foreground));
 }
 .int-target-row > strong {
   flex: 1;
@@ -165,7 +165,7 @@
   min-width: 0;
 }
 .int-target-row small {
-  color: var(--danger);
+  color: hsl(var(--st-red));
   font-size: var(--fs-13);
   line-height: var(--lh-13);
 }
