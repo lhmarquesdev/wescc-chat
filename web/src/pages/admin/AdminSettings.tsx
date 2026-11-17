@@ -43,6 +43,7 @@ const SECTION_LABEL: Record<string, string> = {
   Editing: 'Edição',
   Features: 'Recursos',
   Custom: 'Personalização',
+  Logo: 'Logo do menu lateral',
   Home: 'Início',
   Password: 'Senha',
   Session: 'Sessão',

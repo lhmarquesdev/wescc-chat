@@ -20,6 +20,13 @@
   height: 80px;
   flex: none;
 }
+/* Tamanho do logo do menu: vem das configurações (Aparência › Logo do menu lateral), um para o menu aberto e outro para o recolhido. */
+.side-brand .brand-mark {
+  height: var(--side-logo, 36px);
+}
+[data-side='icon'] .side-brand .brand-mark {
+  height: var(--side-logo-icon, 36px);
+}
 .sidebar .nav-row.active,
 .sidebar .side-item.active,
 .page-nav > a.active {

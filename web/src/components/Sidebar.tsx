@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type CSSProperties, type ReactNode } from 'react';
 import { useFilesTab } from '../lib/files';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { Subscription, UserStatus } from '@shared/index';
@@ -491,11 +491,16 @@ export function UserMenu({ trigger, placement }: { trigger: ReactNode; placement
   );
 }
 
+// Tamanho do logo vindo das configurações, dentro dos limites que cabem no cabeçalho do menu.
+const logoSize = (v: unknown, max: number) => Math.min(max, Math.max(20, Math.round(Number(v)) || 36));
+
 // Cabeçalho do menu lateral: o logo do Wescchat e o nome. Também abre a navegação da Administração e da conta.
 export function SideBrand({ offline }: { offline?: boolean }) {
   const siteName = useSetting<string>('Site_Name') || 'Wescchat';
+  const open = useSetting<number>('Layout_Sidebar_Logo_Size');
+  const icon = useSetting<number>('Layout_Sidebar_Logo_Size_Collapsed');
   return (
-    <Link to="/home" className="side-brand" title={siteName}>
+    <Link to="/home" className="side-brand" title={siteName} style={{ '--side-logo': `${logoSize(open, 64)}px`, '--side-logo-icon': `${logoSize(icon, 48)}px` } as CSSProperties}>
       <BrandMark size={36} />
       <span className="side-title">{siteName}</span>
       {offline && <span className="offline-pill" role="img" title="Reconectando…" aria-label="Reconectando…" />}

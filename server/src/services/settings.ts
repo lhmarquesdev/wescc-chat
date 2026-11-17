@@ -48,6 +48,21 @@ add('General', 'Workspace', 'Language', 'string', 'pt-BR', { public: true, label
 add('General', 'Workspace', 'Default_Channels', 'string', 'geral', { label: 'Canais padrão (separados por vírgula)' });
 add('Layout', 'Home', 'Layout_Home_Title', 'string', 'Início', { public: true, label: 'Título da página inicial' });
 add('Layout', 'Home', 'Layout_Home_Body', 'multiline', 'Boas-vindas ao chat interno.', { public: true, label: 'Conteúdo da página inicial (Markdown)' });
+// Tamanho do logo no topo do menu lateral, em pixels de altura: um valor para o menu aberto e outro para o recolhido.
+const logoSize = (min: number, max: number) => (v: unknown) =>
+  Number.isInteger(Number(v)) && Number(v) >= min && Number(v) <= max ? null : `Use um número inteiro entre ${min} e ${max}.`;
+add('Layout', 'Logo', 'Layout_Sidebar_Logo_Size', 'int', 36, {
+  public: true,
+  label: 'Tamanho do logo com o menu aberto (px)',
+  description: 'Altura do logo no topo do menu lateral. De 20 a 64; o padrão é 36.',
+  validate: logoSize(20, 64),
+});
+add('Layout', 'Logo', 'Layout_Sidebar_Logo_Size_Collapsed', 'int', 36, {
+  public: true,
+  label: 'Tamanho do logo com o menu recolhido (px)',
+  description: 'Altura do logo quando o menu mostra só os ícones. De 20 a 48; o padrão é 36.',
+  validate: logoSize(20, 48),
+});
 add('Layout', 'Custom', 'Layout_Custom_CSS', 'code', '', { public: true, label: 'CSS personalizado' });
 add('Layout', 'Custom', 'Layout_Login_Terms', 'multiline', '', { public: true, label: 'Termos exibidos no login' });
 

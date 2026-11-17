@@ -262,6 +262,8 @@ mark {
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;
+  height: var(--mark-h, 28px);
+  aspect-ratio: 114.5 / 84;
 }
 .brand-mark svg {
   width: 100%;
