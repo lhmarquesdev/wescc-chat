@@ -99,6 +99,9 @@ export function rowPreview(row: any, opts: { withName?: boolean } = {}) {
   return messagePreviewText({ msg: row.msg, sticker: row.extra?.sticker, files: row.files, forward: row.extra?.forward, poll: row.extra?.poll, e2e: row.e2e }, opts);
 }
 
+// Tamanho máximo de customFields (JSON) numa mensagem.
+const CUSTOM_FIELDS_MAX = 4096;
+
 export interface SendInput {
   _id?: string;
   rid: string;
@@ -322,7 +325,16 @@ export async function sendMessage(
     if (handled !== false) return handled;
   }
 
-  if ((input.alias || input.avatar) && !opts.trusted && !rolesHavePermission(roles, 'message-impersonate')) throw forbidden('Sem permissão para personificar.');
+  // Apelido, avatar e emoji no lugar da foto: só integrações e quem pode personificar (bots).
+  if ((input.alias || input.avatar || input.emoji) && !opts.trusted && !rolesHavePermission(roles, 'message-impersonate')) throw forbidden('Sem permissão para personificar.');
+  for (const [k, v] of [['alias', input.alias], ['emoji', input.emoji], ['avatar', input.avatar]] as const) {
+    if (v != null && typeof v !== 'string') throw badRequest('error-invalid-params', `O campo "${k}" deve ser texto.`);
+  }
+  // Campos extras (integrações): um objeto pequeno, guardado como veio em toda mensagem.
+  if (input.customFields != null) {
+    if (typeof input.customFields !== 'object' || Array.isArray(input.customFields)) throw badRequest('error-invalid-params', 'O campo "customFields" deve ser um objeto.');
+    if (JSON.stringify(input.customFields).length > CUSTOM_FIELDS_MAX) throw badRequest('error-invalid-params', 'Os campos extras (customFields) passam de 4 KB.');
+  }
 
   let tmid: string | null = input.tmid ?? null;
   let parent: any = null;
@@ -590,6 +602,10 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   // Legenda de arquivo das versões antigas (description do anexo, com o texto vazio): a web abre a edição com ela, e o
   // texto salvo passa a ser a legenda (sai do anexo, para não aparecer duas vezes).
   const legacyCaption = !e2e && !m.msg && ((m.attachments ?? []) as any[]).some((a) => a?.type === 'file' && a.description);
+  // Salvou sem mudar nada: não marca "editada" nem guarda uma versão igual.
+  if (!e2e && msg === m.msg && !legacyCaption) return withExtra(m);
+  // Sem texto só se sobra outra coisa (arquivo, citação, anexo), como no envio. Tirar tudo é apagar, não editar.
+  if (!e2e && !msg && !(m.files ?? []).length && !(m.attachments ?? []).length) throw badRequest('error-invalid-message', 'Mensagem vazia.');
   const attachments = legacyCaption ? (m.attachments as any[]).map((a) => (a?.type === 'file' && a.description ? { ...a, description: undefined } : a)) : null;
   if (getSetting('Message_KeepHistory')) {
     await query('INSERT INTO message_history (message_id, room_id, msg, edited_by, e2e) VALUES ($1,$2,$3,$4,$5)', [
@@ -728,8 +744,9 @@ export async function react(ctx: Ctx, msgId: string, emoji: string, shouldReact?
   const has = users.includes(ctx.username);
   const add = shouldReact ?? !has;
   if (add === has) return withExtra(m);
-  // Em sala somente leitura a reação é a única voz de quem lê: reação nova só com emoji de verdade, nunca texto livre.
-  if (add && reader && !users.length && !(await isKnownEmoji(key))) throw badRequest('error-invalid-emoji', 'Escolha um emoji da lista para reagir.');
+  // Reação nova só com emoji de verdade (da lista ou personalizado), nunca texto livre: :qualquer_coisa: aparecia como
+  // texto embaixo da mensagem. Numa reação que já existe (importada, emoji personalizado que saiu) a pessoa ainda entra.
+  if (add && !users.length && !(await isKnownEmoji(key))) throw badRequest('error-invalid-emoji', 'Escolha um emoji da lista para reagir.');
   if (add) reactions[key] = { usernames: [...users, ctx.username] };
   else {
     const rest = users.filter((u) => u !== ctx.username);

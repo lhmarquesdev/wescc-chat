@@ -242,6 +242,55 @@ describe('parâmetros inválidos na API de mensagens', () => {
   });
 });
 
+describe('o que a API aceita numa mensagem', () => {
+  it('edição só com espaços é recusada; arquivo sem legenda continua', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `edita-vazio-${uniq()}` }, A)).channel;
+    const m = (await send(A, ch._id, 'texto')).message;
+    const r = await api('POST', 'chat.update', { roomId: ch._id, msgId: m._id, text: '   ' }, A);
+    expect([r.status, r.error]).toEqual([400, 'Mensagem vazia.']);
+    expect((await api('GET', 'chat.getMessage', { msgId: m._id }, A)).message).toMatchObject({ msg: 'texto', editedAt: null });
+    // Num arquivo, tirar a legenda é permitido (o arquivo fica).
+    const f = (await upload(A, ch._id, { body: ['x'], name: 'nota.txt', type: 'text/plain' }, { msg: 'legenda' })).message;
+    expect((await api('POST', 'chat.update', { roomId: ch._id, msgId: f._id, text: '' }, A)).message.msg).toBe('');
+  });
+
+  it('salvar sem mudar o texto não marca "editada" nem guarda versão', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `sem-mudanca-${uniq()}` }, A)).channel;
+    const m = (await send(A, ch._id, 'igual')).message;
+    const r = await api('POST', 'chat.update', { roomId: ch._id, msgId: m._id, text: '  igual ' }, A);
+    expect(r.status).toBe(200);
+    expect(r.message.editedAt).toBeNull();
+    expect((await api('GET', 'chat.getMessage', { msgId: m._id }, A)).message.editedAt).toBeNull();
+    expect((await pool.query('SELECT count(*)::int AS n FROM message_history WHERE message_id = $1', [m._id])).rows[0].n).toBe(0);
+    expect((await api('POST', 'chat.update', { roomId: ch._id, msgId: m._id, text: 'outro' }, A)).message.editedAt).toBeTruthy();
+  });
+
+  it('emoji no lugar da foto só com a permissão de personificar; customFields com limite', async () => {
+    const u = await newUser(A);
+    const ch = (await api('POST', 'channels.create', { name: `emoji-${uniq()}`, members: [u.username] }, A)).channel;
+    const e = await send(u, ch._id, 'oi', { emoji: ':crown:' });
+    expect([e.status, e.error]).toEqual([403, 'Sem permissão para personificar.']);
+    const big = await send(u, ch._id, 'oi', { customFields: { big: 'x'.repeat(200000) } });
+    expect([big.status, big.errorType]).toEqual([400, 'error-invalid-params']);
+    expect((await send(u, ch._id, 'oi', { customFields: 'texto' })).status).toBe(400);
+    const okCf = await send(u, ch._id, 'oi', { customFields: { pedido: '123' } });
+    expect(okCf.message.customFields).toEqual({ pedido: '123' });
+  });
+
+  it('reação nova só com emoji que existe', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `reacao-${uniq()}` }, A)).channel;
+    const m = (await send(A, ch._id, 'reaja')).message;
+    const bad = await api('POST', 'chat.react', { messageId: m._id, emoji: ':isso_nao_existe:' }, A);
+    expect([bad.status, bad.errorType]).toEqual([400, 'error-invalid-emoji']);
+    expect((await api('POST', 'chat.react', { messageId: m._id, emoji: ':thumbsup:' }, A)).status).toBe(200);
+    expect(Object.keys((await api('GET', 'chat.getMessage', { msgId: m._id }, A)).message.reactions)).toEqual([':thumbsup:']);
+    // Reação antiga (importada) com um código que não está na lista: dá para entrar e sair dela.
+    await pool.query(`UPDATE messages SET reactions = '{":velho:": {"usernames": ["fulano"]}}' WHERE id = $1`, [m._id]);
+    expect((await api('POST', 'chat.react', { messageId: m._id, emoji: ':velho:' }, A)).status).toBe(200);
+    expect((await api('GET', 'chat.getMessage', { msgId: m._id }, A)).message.reactions[':velho:'].usernames).toEqual(['fulano', A.username]);
+  });
+});
+
 describe('filtro de palavrões', () => {
   it('pega palavras com acento, em maiúsculas, e a legenda de arquivos', async () => {
     const ch = (await api('POST', 'channels.create', { name: `palavroes-${uniq()}` }, A)).channel;

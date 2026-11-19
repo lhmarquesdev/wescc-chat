@@ -406,6 +406,8 @@ function ComposerView({
     let msg = text.trim();
     if (!msg && !pending.length && !fileEdit) return;
     if (msg.length > maxSize) return useStore.getState().toast(`A mensagem excede ${maxSize} caracteres.`, 'error');
+    // Salvou sem mudar nada: só sai da edição (não marca "editada").
+    if (editing && msg === editTextOf(editing).trim()) return setEditing(null);
     sendTyping(false);
     sendingRef.current = true;
     setSending(true);
