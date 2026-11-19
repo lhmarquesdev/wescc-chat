@@ -119,7 +119,8 @@ export function LoginPage() {
   const next = safeNext(params.get('next'));
   // Sessão já aberta neste navegador (favorito do /login, Voltar depois de entrar): vai direto para o chat. Uma sessão
   // que o servidor encerrou volta para cá pelo próprio chat (o 401 limpa a credencial). O retorno do SSO segue abaixo.
-  const signedIn = !!getCredentials() && !params.get('saml') && !params.get('oauth');
+  // Decidido ao abrir: um SSO que falha com outra sessão guardada volta para cá e mostra o erro.
+  const [signedIn] = useState(() => !!getCredentials() && !params.get('saml') && !params.get('oauth'));
   // Saída forçada com motivo (um administrador redefiniu a criptografia): o aviso fica até a pessoa entrar.
   const [reason] = useState(peekLogoutReason);
   useEffect(() => {
