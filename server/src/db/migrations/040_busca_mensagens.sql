@@ -1,4 +1,5 @@
--- Busca de mensagens sem acento ("reuniao" acha "reunião") e pelo nome e pela legenda dos arquivos.
+-- Busca de mensagens sem acento ("reuniao" acha "reunião") e pelo nome e pela legenda dos arquivos; ausência
+-- automática por conexão.
 
 -- (a) Texto pesquisável de uma mensagem, já dobrado como na busca da barra lateral (wescc_fold, migração 030): o texto,
 --     os nomes dos arquivos e as legendas (attachments[].description). Mensagem cifrada fica de fora: o servidor só tem
@@ -24,3 +25,7 @@ ALTER TABLE messages
   ADD COLUMN search_text text GENERATED ALWAYS AS (wescc_message_search_text(msg, files, attachments, e2e)) STORED,
   ADD COLUMN search tsvector GENERATED ALWAYS AS (to_tsvector('simple', wescc_message_search_text(msg, files, attachments, e2e))) STORED;
 CREATE INDEX messages_search_idx ON messages USING gin (search);
+
+-- (c) Ausência automática: cada conexão (aba, aplicativo, celular) diz se está parada. A pessoa fica Ausente só quando
+--     todas estão; uma ativa a deixa Disponível.
+ALTER TABLE presence_connections ADD COLUMN IF NOT EXISTS idle boolean NOT NULL DEFAULT false;

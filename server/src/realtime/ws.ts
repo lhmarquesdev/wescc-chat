@@ -24,6 +24,20 @@ async function connectionOpened(conn: Conn) {
 async function connectionClosed(conn: Conn) {
   await query('DELETE FROM presence_connections WHERE id = $1', [conn.id]);
   await refreshOffline(conn.userId);
+  await refreshAway(conn.userId);
+}
+
+// Ausência automática: Ausente só quando todas as conexões da pessoa estão paradas, Disponível quando alguma está
+// ativa. Só mexe em quem escolheu "Disponível" (status_default online) e está conectado.
+export async function refreshAway(userId: string) {
+  const u = await one(
+    `UPDATE users SET status = x.next
+     FROM (SELECT CASE WHEN bool_and(idle) THEN 'away' WHEN NOT bool_and(idle) THEN 'online' END AS next FROM presence_connections WHERE user_id = $1) x
+     WHERE users.id = $1 AND x.next IS NOT NULL AND users.status_default = 'online' AND users.status IN ('online', 'away') AND users.status <> x.next
+     RETURNING users.id`,
+    [userId],
+  );
+  if (u) await publishPresence(userId);
 }
 
 export async function refreshOffline(userId: string) {
@@ -46,7 +60,8 @@ export function registerWebsocket(app: FastifyInstance) {
   app.get('/websocket', { websocket: true }, (socket: WebSocket, req) => {
     let conn: Conn | null = null;
     let authTimer: NodeJS.Timeout | null = setTimeout(() => socket.close(4001, 'auth-timeout'), 10_000);
-    let idle = false;
+    // Parada ou não, como a aba disse por último (null: ainda não disse).
+    let idle: boolean | null = null;
 
     const send = (ev: ServerEvent) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(ev));
@@ -131,16 +146,11 @@ export function registerWebsocket(app: FastifyInstance) {
             break;
           }
           case 'idle': {
-            // Ausência automática: só altera quem está "online" por padrão.
-            if (idle === ev.idle) return;
-            idle = ev.idle;
-            const u = await one('SELECT status, status_default FROM users WHERE id = $1', [c.userId]);
-            if (!u || u.status_default !== 'online') return;
-            const next = ev.idle ? 'away' : 'online';
-            if (u.status !== next) {
-              await query('UPDATE users SET status = $2 WHERE id = $1', [c.userId, next]);
-              await publishPresence(c.userId);
-            }
+            // Ausência automática: vale o conjunto das conexões da pessoa (refreshAway), não só esta.
+            if (idle === !!ev.idle) return;
+            idle = !!ev.idle;
+            await query('UPDATE presence_connections SET idle = $2 WHERE id = $1', [c.id, idle]);
+            await refreshAway(c.userId);
             break;
           }
         }

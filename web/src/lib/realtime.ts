@@ -13,6 +13,8 @@ class Realtime {
   private pingTimer: number | null = null;
   private watched = new Set<string>();
   private onReconnect: (() => void) | null = null;
+  // Sem interação há N minutos (ausência automática). Vai ao servidor a cada conexão: ele decide pelo conjunto das abas.
+  private idle = false;
   // Id desta conexão no servidor (as chamadas usam para a sinalização).
   connectionId: string | null = null;
 
@@ -46,6 +48,7 @@ class Realtime {
         const wasRetry = this.retry > 0;
         this.retry = 0;
         for (const rid of this.watched) this.send({ type: 'watch', rid });
+        this.send({ type: 'idle', idle: this.idle });
         if (wasRetry || !first) this.onReconnect?.();
         first = false;
       }
@@ -100,19 +103,18 @@ class Realtime {
   // Ausência automática após N minutos sem interação.
   private setupIdle() {
     let last = Date.now();
-    let idle = false;
     const bump = () => {
       last = Date.now();
-      if (idle) {
-        idle = false;
+      if (this.idle) {
+        this.idle = false;
         this.send({ type: 'idle', idle: false });
       }
     };
     for (const ev of ['mousemove', 'keydown', 'mousedown', 'touchstart', 'focus']) window.addEventListener(ev, bump, { passive: true });
     setInterval(() => {
       const minutes = Number(useStore.getState().settings.Accounts_Default_Away_Minutes ?? 5);
-      if (!idle && minutes > 0 && Date.now() - last > minutes * 60_000) {
-        idle = true;
+      if (!this.idle && minutes > 0 && Date.now() - last > minutes * 60_000) {
+        this.idle = true;
         this.send({ type: 'idle', idle: true });
       }
     }, 15_000);
