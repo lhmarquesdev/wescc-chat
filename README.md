@@ -837,7 +837,8 @@ empresa e nenhum serviço da internet (Google, DeepL, Microsoft…) é usado.
 - Fora do ar, lento ou recusando: a mensagem fica no original (marcada “sem tradução”) e o chat tenta de novo sozinho
   depois de 30 segundos; a lista de idiomas também volta sozinha.
 - Nunca são traduzidas: salas criptografadas e mensagens cifradas, mensagens de sistema, figurinhas, enquetes e
-  encaminhadas. Trechos de código, links, menções, canais e emojis não vão para o tradutor e ficam iguais.
+  encaminhadas. Trechos de código, links, endereços de e-mail, menções, canais e emojis não vão para o tradutor e
+  ficam iguais.
 - Notificações, e-mails, busca, prévia na barra lateral, citações e a auditoria continuam mostrando o original.
   Nenhum texto de mensagem vai para o log.
 
