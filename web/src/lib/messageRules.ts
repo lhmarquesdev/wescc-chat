@@ -66,6 +66,13 @@ export function lastOwnEditable(list: readonly Message[], meId: string, allowEdi
   return undefined;
 }
 
+// Texto que a edição abre: o da mensagem; num arquivo antigo, a legenda que ficava no anexo (o servidor passa o texto
+// salvo para a mensagem).
+export function editTextOf(m: Message): string {
+  if (m.msg || m.e2e) return m.msg;
+  return m.attachments?.find((a) => a.type === 'file' && a.description)?.description ?? '';
+}
+
 // Nome de quem escreveu, como no cabeçalho da mensagem: o alias (webhooks) vem antes do usuário.
 export const authorName = (m: Message) => m.alias || m.u.name || m.u.username;
 

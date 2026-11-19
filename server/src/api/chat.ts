@@ -78,7 +78,8 @@ export function chatRoutes(app: FastifyInstance) {
       const mentions = Array.isArray(body.e2eMentions) ? body.e2eMentions.map(String) : undefined;
       return { message: await updateMessage(ctx, str(body.msgId, 'msgId'), '', body.roomId, { envelope: body.e2e, mentions }) };
     }
-    return { message: await updateMessage(ctx, str(body.msgId, 'msgId'), str(body.text, 'text'), body.roomId) };
+    // Texto vazio: só num arquivo (tira a legenda); updateMessage recusa o resto com "Mensagem vazia.".
+    return { message: await updateMessage(ctx, str(body.msgId, 'msgId'), body.text === '' ? '' : str(body.text, 'text'), body.roomId) };
   });
   route(app, 'POST', 'chat.delete', {}, async (req, _rep, ctx) => {
     const body = b(req);

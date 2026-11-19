@@ -1891,7 +1891,22 @@ a.att-title {
   width: 100%;
   margin-top: 12px;
 }
-.drop-overlay {
+/* Arquivo que o servidor recusaria (vazio, tipo, tamanho): marcado antes de enviar e deixado de fora. */
+.upload-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.upload-problem {
+  margin: 4px 0 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: hsl(var(--st-red));
+}
+.upload-list li.blocked :is(.upload-name, .upload-size) {
+  color: hsl(var(--muted-foreground));
+}.drop-overlay {
   position: fixed;
   z-index: var(--z-popover);
   display: flex;

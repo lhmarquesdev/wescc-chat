@@ -69,7 +69,11 @@ export function filterBadWords(msg: string) {
     .map((w) => w.trim())
     .filter(Boolean);
   let out = msg;
-  for (const w of words) out = out.replace(new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), (m) => '*'.repeat(m.length));
+  // Limite de palavra que entende acento: o \b do JavaScript só conhece a-z, e "mané", "égua" ou "MANÉ" passavam.
+  for (const w of words) {
+    const re = new RegExp(`(?<![\\p{L}\\p{N}_])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'giu');
+    out = out.replace(re, (m) => '*'.repeat([...m].length));
+  }
   return out;
 }
 
@@ -583,6 +587,10 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   const e2e = room.encrypted || e2eEdit ? await checkE2eInput(ctx, room, { _id: m.id, e2e: e2eEdit?.envelope, msg: text }) : null;
   const msg = e2e ? '' : filterBadWords(text.trim());
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
+  // Legenda de arquivo das versões antigas (description do anexo, com o texto vazio): a web abre a edição com ela, e o
+  // texto salvo passa a ser a legenda (sai do anexo, para não aparecer duas vezes).
+  const legacyCaption = !e2e && !m.msg && ((m.attachments ?? []) as any[]).some((a) => a?.type === 'file' && a.description);
+  const attachments = legacyCaption ? (m.attachments as any[]).map((a) => (a?.type === 'file' && a.description ? { ...a, description: undefined } : a)) : null;
   if (getSetting('Message_KeepHistory')) {
     await query('INSERT INTO message_history (message_id, room_id, msg, edited_by, e2e) VALUES ($1,$2,$3,$4,$5)', [
       m.id,
@@ -594,8 +602,9 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   }
   const { mentions, channels } = await parseMentions(e2e ? e2eMentionText(e2eEdit?.mentions) : msg, room);
   const row = await one(
-    `UPDATE messages SET msg = $2, mentions = $3, channels = $4, edited_at = now(), edited_by = $5, e2e = $6, updated_at = now() WHERE id = $1 RETURNING *`,
-    [m.id, msg, JSON.stringify(mentions), JSON.stringify(e2e ? [] : channels), JSON.stringify({ _id: ctx.userId, username: ctx.username }), e2e ? JSON.stringify(e2e) : null],
+    `UPDATE messages SET msg = $2, mentions = $3, channels = $4, edited_at = now(), edited_by = $5, e2e = $6, attachments = COALESCE($7::jsonb, attachments), updated_at = now()
+      WHERE id = $1 RETURNING *`,
+    [m.id, msg, JSON.stringify(mentions), JSON.stringify(e2e ? [] : channels), JSON.stringify({ _id: ctx.userId, username: ctx.username }), e2e ? JSON.stringify(e2e) : null, attachments ? JSON.stringify(attachments) : null],
   );
   // Tradução: a do texto antigo não vale mais (quem está com a mensagem na tela pede de novo pelo editedAt).
   await forgetMessageTranslations(m.id);

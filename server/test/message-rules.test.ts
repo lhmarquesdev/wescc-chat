@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pool } from '../src/db/pool';
+import { getSetting } from '../src/services/settings';
 import { admin, api, newUser, startServer, stopServer, type Auth } from './helpers';
 
 let A: Auth;
@@ -191,6 +192,24 @@ describe('abrir uma mensagem antiga (?msg=)', () => {
   });
 });
 
+async function withSettings(values: Record<string, unknown>, fn: () => Promise<void>) {
+  const before = Object.fromEntries(Object.keys(values).map((k) => [k, getSetting(k)]));
+  const r = await api('POST', 'settings', { settings: values }, A);
+  if (!r.success) throw new Error(JSON.stringify(r));
+  try {
+    await fn();
+  } finally {
+    await api('POST', 'settings', { settings: before }, A);
+  }
+}
+
+const upload = async (auth: Auth, rid: string, file: { body: BlobPart[]; name: string; type: string }, fields: Record<string, string> = {}) => {
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+  fd.append('file', new Blob(file.body, { type: file.type }), file.name);
+  return api('POST', `rooms.upload/${rid}`, fd, auth);
+};
+
 describe('parâmetros inválidos na API de mensagens', () => {
   it('count e datas que não são número ou data respondem 400 (antes, erro 500)', async () => {
     const ch = (await api('POST', 'channels.create', { name: `params-${uniq()}` }, A)).channel;
@@ -220,5 +239,79 @@ describe('parâmetros inválidos na API de mensagens', () => {
       expect([r.status, r.errorType, r.error]).toEqual([400, 'error-invalid-params', 'A mensagem precisa ser texto.']);
     }
     expect((await api('POST', 'chat.postMessage', { roomId: ch._id, text: 5 }, A)).status).toBe(400);
+  });
+});
+
+describe('filtro de palavrões', () => {
+  it('pega palavras com acento, em maiúsculas, e a legenda de arquivos', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `palavroes-${uniq()}` }, A)).channel;
+    await withSettings({ Message_AllowBadWordsFilter: true, Message_BadWordsFilterList: 'bobo, babaca, mané, otário, égua' }, async () => {
+      const cases: [string, string][] = [
+        ['você é bobo', 'você é ****'],
+        ['deixa de ser mané', 'deixa de ser ****'],
+        ['filho de égua!', 'filho de ****!'],
+        ['MANÉ', '****'],
+        ['que otário', 'que ******'],
+        ['manézinho e bobão ficam', 'manézinho e bobão ficam'],
+      ];
+      for (const [msg, out] of cases) expect((await send(A, ch._id, msg)).message.msg).toBe(out);
+      const f = await upload(A, ch._id, { body: ['x'], name: 'a.txt', type: 'text/plain' }, { description: 'seu babaca' });
+      expect(f.message.msg).toBe('seu ******');
+      // Outro cliente com msg e description: a description fica no anexo, também filtrada.
+      const g = await upload(A, ch._id, { body: ['x'], name: 'b.txt', type: 'text/plain' }, { msg: 'segue', description: 'seu babaca' });
+      expect(g.message.attachments[0].description).toBe('seu ******');
+    });
+  });
+});
+
+describe('arquivos enviados', () => {
+  it('a legenda vira o texto da mensagem: menções, limite e edição', async () => {
+    const bruno = await newUser(A);
+    const ch = (await api('POST', 'channels.create', { name: `legenda-${uniq()}`, members: [bruno.username] }, A)).channel;
+    const up = await upload(A, ch._id, { body: ['png'], name: 'grafico.png', type: 'image/png' }, { description: `Gráfico de setembro @${bruno.username} **urgente**` });
+    expect(up.message.msg).toBe(`Gráfico de setembro @${bruno.username} **urgente**`);
+    expect(up.message.mentions.map((x: any) => x.username)).toEqual([bruno.username]);
+    expect(up.message.attachments[0].description).toBeUndefined();
+    const ed = await api('POST', 'chat.update', { roomId: ch._id, msgId: up.message._id, text: 'Gráfico de outubro' }, A);
+    expect(ed.message.msg).toBe('Gráfico de outubro');
+    const long = await upload(A, ch._id, { body: ['x'], name: 'c.txt', type: 'text/plain' }, { description: 'a'.repeat(20000) });
+    expect([long.status, long.errorType]).toEqual([400, 'error-message-size-exceeded']);
+    expect((await pool.query('SELECT count(*)::int AS n FROM files WHERE room_id = $1', [ch._id])).rows[0].n).toBe(1);
+  });
+
+  it('legenda antiga (no anexo): editar passa o texto para a mensagem, sem repetir', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `legenda-antiga-${uniq()}` }, A)).channel;
+    const up = (await upload(A, ch._id, { body: ['x'], name: 'd.txt', type: 'text/plain' }, { description: 'legenda' })).message;
+    // Como as mensagens de antes da correção: texto vazio e a legenda no anexo.
+    await pool.query(`UPDATE messages SET msg = '', attachments = jsonb_set(attachments, '{0,description}', '"Gráfico de setembro"') WHERE id = $1`, [up._id]);
+    const ed = await api('POST', 'chat.update', { roomId: ch._id, msgId: up._id, text: 'Gráfico de outubro' }, A);
+    expect(ed.message.msg).toBe('Gráfico de outubro');
+    expect(ed.message.attachments[0].description).toBeUndefined();
+    expect(ed.message.attachments[0].title).toBe('d.txt');
+  });
+
+  it('arquivo vazio é recusado e os erros dizem qual arquivo', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `vazio-${uniq()}` }, A)).channel;
+    const empty = await upload(A, ch._id, { body: [], name: 'vazio.png', type: 'image/png' });
+    expect([empty.status, empty.errorType, empty.error]).toEqual([400, 'error-file-empty', 'O arquivo “vazio.png” está vazio.']);
+    await withSettings({ FileUpload_MediaTypeBlackList: 'application/zip', FileUpload_MaxFileSize: 1024 }, async () => {
+      const zip = await upload(A, ch._id, { body: ['PK'], name: 'backup.zip', type: 'application/zip' });
+      expect([zip.status, zip.error]).toEqual([400, 'O tipo do arquivo “backup.zip” não é permitido.']);
+      const big = await upload(A, ch._id, { body: ['x'.repeat(5000)], name: 'planilha-grande.xlsx', type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      expect([big.status, big.errorType, big.error]).toEqual([400, 'error-file-too-large', 'O arquivo “planilha-grande.xlsx” é maior que o permitido (1 KB).']);
+    });
+    expect((await pool.query('SELECT count(*)::int AS n FROM files WHERE room_id = $1', [ch._id])).rows[0].n).toBe(0);
+  });
+
+  it('nome longo é encurtado sem perder a extensão', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `nome-longo-${uniq()}` }, A)).channel;
+    const name = `Relatório trimestral de indicadores operacionais ${'muito longo '.repeat(15)}final.pdf`;
+    expect(name.length).toBeGreaterThan(200);
+    const up = await upload(A, ch._id, { body: ['%PDF'], name, type: 'application/pdf' });
+    const stored = up.message.files[0].name as string;
+    expect(stored.endsWith('.pdf')).toBe(true);
+    expect(stored.length).toBeLessThanOrEqual(200);
+    expect(stored.startsWith('Relatório trimestral de indicadores operacionais muito longo')).toBe(true);
+    expect(up.message.attachments[0]).toMatchObject({ title: stored, format: 'PDF' });
   });
 });

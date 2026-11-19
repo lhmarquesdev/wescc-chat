@@ -8,7 +8,7 @@ import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 import { listSettings } from '../src/services/settings';
 import { EMOJI as WEB_EMOJI } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
-import { authorName, continuesGroup, editableKind, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageHref, messageLink, pollMeta, pollShares } from '../../web/src/lib/messageRules';
+import { authorName, continuesGroup, editableKind, editTextOf, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageHref, messageLink, pollMeta, pollShares } from '../../web/src/lib/messageRules';
 import { fromLocalInput, reminderPresets, schedulePresets, toLocalInput, whenText } from '../../web/src/lib/messageTimes';
 import { AHEAD_ERROR, aheadError, POLL_ERRORS, pollInputError, type MessageForward, type MessagePoll } from '@shared/messages';
 import { messagePreviewText } from '@shared/stickers';
@@ -72,6 +72,15 @@ describe('seta para cima no compositor (lastOwnEditable)', () => {
     const list = [text, msg({ t: 'rm' }), msg({ t: 'uj' }), msg({ u: BOT, alias: 'Bruno Lima (Webhook)' })];
     expect(lastOwnEditable(list, ME._id, true)?._id).toBe(text._id);
     expect(lastOwnEditable(list, ME._id, false)).toBeUndefined();
+  });
+});
+
+describe('editar a legenda de um arquivo (editTextOf)', () => {
+  it('abre com o texto; num arquivo antigo, com a legenda que ficava no anexo', () => {
+    expect(editTextOf(msg({ msg: 'olá' }))).toBe('olá');
+    const legacy = msg({ msg: '', attachments: [{ type: 'file', title: 'a.png', description: 'Gráfico de setembro' }] as any });
+    expect(editTextOf(legacy)).toBe('Gráfico de setembro');
+    expect(editTextOf(msg({ msg: '' }))).toBe('');
   });
 });
 

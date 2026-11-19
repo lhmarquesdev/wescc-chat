@@ -9,7 +9,7 @@ import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
 import { slashCommands } from '../lib/commands';
 import { EMOJI, searchEmoji } from '../lib/emoji';
 import { formatBytes, nameList, roomPath } from '../lib/format';
-import { mentionGroups, mentionSuggestions } from '../lib/messageRules';
+import { editTextOf, mentionGroups, mentionSuggestions } from '../lib/messageRules';
 import { whenText } from '../lib/messageTimes';
 import { realtime } from '../lib/realtime';
 import { clientMessageId, registerComposer, useStickers } from '../lib/stickers';
@@ -183,7 +183,7 @@ function ComposerView({
   const wasEditing = useRef(false);
   useEffect(() => {
     if (editing) {
-      setText(editing.msg);
+      setText(editTextOf(editing));
       ta.current?.focus();
     } else if (wasEditing.current) {
       // Fim da edição (salva ou cancelada): volta o rascunho da mensagem nova, que a edição não tocou.
@@ -378,6 +378,8 @@ function ComposerView({
 
   const over = text.length > maxSize;
   textNow.current = text;
+  // Arquivo: a legenda pode ficar vazia (o arquivo continua). Na cifrada, não.
+  const fileEdit = !!editing && !editing.e2e && !!editing.files?.length;
 
   // Mencionou quem não está na sala: essa pessoa não recebe aviso nenhum. Quem pode adicionar pessoas adiciona dali.
   const warnNotInRoom = (list?: { _id: string; username: string; name?: string }[]) => {
@@ -402,7 +404,7 @@ function ComposerView({
   const send = async () => {
     if (sendingRef.current) return;
     let msg = text.trim();
-    if (!msg && !pending.length) return;
+    if (!msg && !pending.length && !fileEdit) return;
     if (msg.length > maxSize) return useStore.getState().toast(`A mensagem excede ${maxSize} caracteres.`, 'error');
     sendTyping(false);
     sendingRef.current = true;
@@ -468,14 +470,17 @@ function ComposerView({
     return true;
   };
 
-  // Arquivo de conversa criptografada: o servidor não vê o tipo nem o tamanho real, então a lista de tipos e o limite
-  // (com os 16 bytes da cifra) são conferidos aqui, com os mesmos textos do servidor.
+  // O que o servidor recusaria, conferido antes de enviar (as mesmas regras de uploads.ts): o modal marca cada arquivo e
+  // nada sobe à toa. Na conversa criptografada o servidor não vê o tipo nem o tamanho real, e só esta conferência vale
+  // (a cifra soma 16 bytes).
   const maxFile = useSetting<number>('FileUpload_MaxFileSize') ?? 0;
-  const e2eFileProblem = (f: File) => {
-    if (!mediaTypeAllowed(f.type || 'application/octet-stream', whiteList, blackList)) return 'Tipo de arquivo não permitido.';
-    if (maxFile > 0 && f.size + 16 > maxFile) {
+  const fileProblem = (f: File) => {
+    if (!f.size) return 'Arquivo vazio.';
+    const type = (f.type || 'application/octet-stream').split(';')[0].trim().toLowerCase();
+    if (!mediaTypeAllowed(type, whiteList, blackList)) return 'Tipo de arquivo não permitido.';
+    if (maxFile > 0 && f.size + (room?.encrypted ? 16 : 0) > maxFile) {
       const limit = maxFile >= 1048576 ? `${Math.round(maxFile / 1048576)} MB` : `${Math.max(1, Math.round(maxFile / 1024))} KB`;
-      return `Arquivo maior que o permitido (${limit}).`;
+      return `Maior que o permitido (${limit}).`;
     }
     return null;
   };
@@ -499,12 +504,10 @@ function ComposerView({
   const doUpload = async (files: File[], description: string, extra: Record<string, string> = {}, label?: string) => {
     let caption = description;
     for (const f of files) {
-      if (room?.encrypted) {
-        const problem = e2eFileProblem(f);
-        if (problem) {
-          useStore.getState().toast(problem, 'error');
-          continue;
-        }
+      const problem = fileProblem(f);
+      if (problem) {
+        useStore.getState().toast(`${label ?? f.name}: ${problem}`, 'error');
+        continue;
       }
       const id = ++uploadSeq.current;
       const abort = new AbortController();
@@ -512,7 +515,8 @@ function ComposerView({
       try {
         const progress = (p: number) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, progress: p } : x)));
         if (room?.encrypted) await sendEncryptedFile(room, f, { msg: caption, tmid, meta: await e2eMeta(f, extra), onProgress: progress, signal: abort.signal });
-        else await uploadTo(`rooms.upload/${rid}`, f, { description: caption, tmid: tmid ?? '', ...extra }, progress, abort.signal);
+        // A legenda vai como o texto da mensagem: menções, formatação e Editar valem para ela.
+        else await uploadTo(`rooms.upload/${rid}`, f, { msg: caption, tmid: tmid ?? '', ...extra }, progress, abort.signal);
         caption = '';
         if (!tmid) useStore.getState().sentFromRoom(rid);
       } catch (e) {
@@ -700,7 +704,11 @@ function ComposerView({
   };
   const ackPending = !!ackOption && askAck && !tmid;
   const cancelPending = () => (setPending([]), setFileDesc(''));
-  const confirmPending = () => (void doUpload(pending, fileDesc), setPending([]), setFileDesc(''));
+  const pendingOk = pending.filter((f) => !fileProblem(f));
+  const descOver = fileDesc.trim().length > maxSize;
+  const canConfirm = pendingOk.length > 0 && !descOver;
+  // Os arquivos marcados no modal (vazio, tipo, tamanho) ficam de fora.
+  const confirmPending = () => canConfirm && (void doUpload(pendingOk, fileDesc), setPending([]), setFileDesc(''));
 
   const scheduledStrip = !tmid && <ScheduledStrip rid={rid} onOpen={() => navigate(`${roomPath({ _id: rid, t: room?.t ?? sub?.t ?? 'c' })}?tab=scheduled`)} />;
 
@@ -946,7 +954,7 @@ function ComposerView({
             <button type="button" className="btn small ghost" onClick={cancelEdit}>
               Cancelar
             </button>
-            <button type="button" className="btn primary small send save" onClick={send} disabled={!text.trim() || over || sending} aria-busy={sending || undefined}>
+            <button type="button" className="btn primary small send save" onClick={send} disabled={(!text.trim() && !fileEdit) || over || sending} aria-busy={sending || undefined}>
               Salvar
             </button>
           </span>
@@ -1039,29 +1047,37 @@ function ComposerView({
               <button type="button" className="btn ghost" onClick={cancelPending}>
                 Cancelar
               </button>
-              <button type="button" className="btn primary" onClick={confirmPending}>
-                Enviar
+              <button type="button" className="btn primary" onClick={confirmPending} disabled={!canConfirm}>
+                {pendingOk.length && pendingOk.length < pending.length ? `Enviar ${pendingOk.length === 1 ? '1 arquivo' : `${pendingOk.length} arquivos`}` : 'Enviar'}
               </button>
             </>
           }
         >
           <ul className="plain-list upload-list">
-            {pending.map((f) => (
-              <li key={f.name}>
-                {f.type.startsWith('image/') ? <img className="upload-preview" src={URL.createObjectURL(f)} alt="" /> : <FileTile name={f.name} mime={f.type} />}
-                <span className="upload-name">{f.name}</span>
-                <span className="upload-size">{formatBytes(f.size)}</span>
-              </li>
-            ))}
+            {pending.map((f, i) => {
+              const problem = fileProblem(f);
+              return (
+                <li key={`${i}-${f.name}`} className={problem ? 'blocked' : undefined}>
+                  {f.type.startsWith('image/') && !problem ? <img className="upload-preview" src={URL.createObjectURL(f)} alt="" /> : <FileTile name={f.name} mime={f.type} />}
+                  <span className="upload-text">
+                    <span className="upload-name">{f.name}</span>
+                    {problem && <span className="upload-problem">{problem} Não será enviado.</span>}
+                  </span>
+                  <span className="upload-size">{formatBytes(f.size)}</span>
+                </li>
+              );
+            })}
           </ul>
           <input
             autoFocus
             placeholder={pending.length > 1 ? 'Descrição (opcional, vai com o primeiro arquivo)' : 'Descrição (opcional)'}
             aria-label="Descrição"
+            aria-invalid={descOver || undefined}
             value={fileDesc}
             onChange={(e) => setFileDesc(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && confirmPending()}
           />
+          {descOver && <p className="upload-problem">{`A descrição excede ${maxSize} caracteres (${fileDesc.trim().length}).`}</p>}
         </Modal>
       )}
     </div>
