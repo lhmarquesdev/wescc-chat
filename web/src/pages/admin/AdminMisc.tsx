@@ -272,7 +272,7 @@ export function AdminEmoji() {
         <SkeletonList n={4} />
       ) : !emojis.length ? (
         <Empty icon="emoji" title="Nenhum emoji personalizado" action={newButton}>
-          Emojis do workspace, como o logo da empresa, para usar com :nome: nas mensagens e reações.
+          Emojis próprios da empresa, como o logo, para usar com :nome: nas mensagens e reações.
         </Empty>
       ) : (
         <div className="emoji-admin">
