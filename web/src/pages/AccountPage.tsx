@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
 import { normalizeHighlights } from '@shared/highlights';
-import { formatDateTime } from '../lib/format';
+import { formatDateTime, plural } from '../lib/format';
 import { disablePushHere, enablePushHere, pushEnabledHere, pushSupported, syncPushSubscription } from '../lib/push';
 import { endSession, startSession } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
@@ -793,7 +793,7 @@ function Devices() {
     if (!yes) return;
     api
       .post('sessions.logout.others')
-      .then((r) => (ok(`${r.removed} sessões encerradas.`), reload()))
+      .then((r) => (ok(`${plural(r.removed, 'sessão encerrada', 'sessões encerradas')}.`), reload()))
       .catch(fail);
   };
   return (
