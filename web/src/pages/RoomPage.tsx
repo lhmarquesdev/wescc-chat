@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
 import { encryptedContent } from '@shared/messages';
 import { e2eToggleVerdict } from '@shared/e2e';
@@ -191,10 +191,11 @@ function Announcement({ text }: { text: string }) {
   );
 }
 
-const BackButton = ({ onClick }: { onClick: () => void }) => (
-  <button type="button" className="icon-btn mobile-only room-back" title="Voltar" aria-label="Voltar" onClick={onClick}>
+// Um link (não um botão): com uma gravação de áudio travada, sair pergunta antes de descartar (VoiceRecorder).
+const BackButton = () => (
+  <Link to="/home" className="icon-btn mobile-only room-back" title="Voltar" aria-label="Voltar">
     <Icon name="back" size={20} />
-  </button>
+  </Link>
 );
 
 function RoomLoading() {
@@ -592,7 +593,7 @@ export function RoomPage() {
       <div className={`room ${openPanel || tmid ? 'with-panel' : ''}`}>
         <div className="room-main">
           <header className="room-header" ref={setHeader}>
-            <BackButton onClick={() => navigate('/home')} />
+            <BackButton />
             {dmUser ? (
               <UserAvatar username={dmUser} size={32} />
             ) : groupDm ? (
