@@ -52,6 +52,9 @@ describe('diretório: acentos e curingas', () => {
     expect(names(await dir(u, 'channels', `vendas_${t}`))).toEqual([`vendas_${t}`]);
     expect((await dir(u, 'channels', '%')).total).toBe(0);
     expect((await dir(u, 'users', '%')).total).toBe(0);
+    // text repetido na URL chega como lista: busca normal, não erro interno.
+    expect((await api('GET', `directory?type=channels&text=vendas&text=${t}`, undefined, u)).status).toBe(200);
+    expect((await api('GET', `channels.list?text=vendas&text=${t}`, undefined, u)).status).toBe(200);
   });
 
   it('users.autocomplete: começo do nome sem acento', async () => {

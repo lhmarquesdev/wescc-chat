@@ -771,7 +771,7 @@ export async function updateSubscriptionFlags(ctx: Ctx, rid: string, data: { fav
 export async function directory(ctx: Ctx, opts: { type: 'channels' | 'users' | 'teams'; text?: string; offset?: number; count?: number; sort?: string }) {
   const count = Math.min(opts.count ?? 25, 100);
   const offset = Number(opts.offset ?? 0);
-  const text = escapeLike(opts.text ?? '');
+  const text = escapeLike(String(opts.text ?? ''));
   const has = (col: string) => `wescc_fold(${col}) LIKE '%' || wescc_fold($1) || '%'`;
   if (opts.type === 'users') {
     const rows = await many(
