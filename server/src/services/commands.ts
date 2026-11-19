@@ -6,7 +6,9 @@ import { one } from '../db/pool';
 import { ApiError, badRequest, forbidden } from '../lib/errors';
 import { bus } from '../realtime/bus';
 import { sendMessage } from './messages';
+import { hasPermission } from './permissions';
 import {
+  canAccessRoom,
   createDirect,
   createRoom,
   getRoomByName,
@@ -54,12 +56,20 @@ async function userIdsOf(names: string[]) {
   return out;
 }
 
-async function roomArg(args: string, fallback: any) {
+// Sala que a pessoa não vê (um grupo privado de que não participa) tem a mesma resposta de uma que não existe: o
+// comando não confirma que ela existe. A administração de salas vê todas.
+async function roomArg(ctx: Ctx, args: string, fallback: any) {
   const name = args.trim().replace(/^#/, '');
   if (!name) return fallback;
   const r = await getRoomByName(name);
-  if (!r) throw badRequest('error-room-not-found', `Sala #${name} não encontrada.`);
+  if (!r || !((await canAccessRoom(ctx.userId, r)) || (await hasPermission(ctx.userId, 'view-room-administration'))))
+    throw badRequest('error-room-not-found', `Sala #${name} não encontrada.`);
   return r;
+}
+
+// Copiar os membros de uma sala é ver a lista dela: com a lista oculta ("Ocultar a lista de membros"), só quem pode vê-la.
+async function assertCanListMembers(ctx: Ctx, room: any) {
+  if (room.broadcast && !(await hasPermission(ctx.userId, 'view-broadcast-member-list', room.id))) throw forbidden('Você não pode ver os membros desta sala.');
 }
 
 const ok = (command: string) => ({ ok: true, command });
@@ -69,7 +79,7 @@ const say = (command: string) => async (ctx: Ctx, room: any, args: string, tmid:
   sendMessage(ctx, { rid: room.id, msg: localCommandText(command, args) ?? '', tmid }, { skipCommands: true });
 
 reg('join', '#canal', 'Entrar em um canal', async (ctx, room, args) => {
-  const r = await roomArg(args, null);
+  const r = await roomArg(ctx, args, null);
   if (!r) throw badRequest('error-invalid-params', 'Informe o canal: /join #canal');
   await joinRoom(ctx, r.id);
   return ok('join');
@@ -92,11 +102,11 @@ reg('topic', 'texto', 'Definir o tópico da sala', async (ctx, room, args) => {
   return ok('topic');
 });
 reg('archive', '[#canal]', 'Arquivar a sala', async (ctx, room, args) => {
-  await setArchived(ctx, (await roomArg(args, room)).id, true);
+  await setArchived(ctx, (await roomArg(ctx, args, room)).id, true);
   return ok('archive');
 });
 reg('unarchive', '[#canal]', 'Desarquivar a sala', async (ctx, room, args) => {
-  await setArchived(ctx, (await roomArg(args, room)).id, false);
+  await setArchived(ctx, (await roomArg(ctx, args, room)).id, false);
   return ok('unarchive');
 });
 reg('mute', '@usuário', 'Silenciar um usuário na sala', async (ctx, room, args) => {
@@ -121,16 +131,18 @@ reg('create', '#canal [private]', 'Criar um canal', async (ctx, _room, args) => 
   return ok('create');
 });
 reg('invite-all-to', '#sala', 'Convidar todos desta sala para outra', async (ctx, room, args) => {
-  const target = await roomArg(args, null);
+  const target = await roomArg(ctx, args, null);
   if (!target) throw badRequest('error-invalid-params', 'Uso: /invite-all-to #sala');
+  await assertCanListMembers(ctx, room);
   const { many } = await import('../db/pool');
   const ids = (await many('SELECT user_id FROM subscriptions WHERE room_id = $1', [room.id])).map((r) => r.user_id);
   await inviteToRoom(ctx, target.id, ids);
   return ok('invite-all-to');
 });
 reg('invite-all-from', '#sala', 'Convidar todos de outra sala para esta', async (ctx, room, args) => {
-  const source = await roomArg(args, null);
+  const source = await roomArg(ctx, args, null);
   if (!source) throw badRequest('error-invalid-params', 'Uso: /invite-all-from #sala');
+  await assertCanListMembers(ctx, source);
   const { many } = await import('../db/pool');
   const ids = (await many('SELECT user_id FROM subscriptions WHERE room_id = $1', [source.id])).map((r) => r.user_id);
   await inviteToRoom(ctx, room.id, ids);

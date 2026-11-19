@@ -1,0 +1,103 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { pool } from '../src/db/pool';
+import { admin, api, newUser, startServer, stopServer, type Auth } from './helpers';
+
+let A: Auth;
+const uniq = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+beforeAll(async () => {
+  await startServer();
+  A = await admin();
+});
+afterAll(stopServer);
+
+const send = async (auth: Auth, rid: string, msg: string, extra: Record<string, unknown> = {}) => api('POST', 'chat.sendMessage', { message: { rid, msg, ...extra } }, auth);
+const membersOf = async (rid: string) => (await api('GET', 'channels.members', { roomId: rid }, A)).members.map((m: any) => m.username).sort();
+
+describe('comandos que apontam para outra sala', () => {
+  it('/invite-all-from de um grupo privado de que a pessoa não participa responde como sala que não existe', async () => {
+    const [alice, bruno, carla] = [await newUser(A), await newUser(A), await newUser(A)];
+    const secret = (await api('POST', 'groups.create', { name: `sigilo-${uniq()}`, members: [bruno.username, carla.username] }, A)).group;
+    const mine = (await api('POST', 'channels.create', { name: `da-alice-${uniq()}` }, alice)).channel;
+    const r = await send(alice, mine._id, `/invite-all-from #${secret.name}`);
+    expect(r.status).toBe(400);
+    expect(r.error).toBe(`Sala #${secret.name} não encontrada.`);
+    expect(await membersOf(mine._id)).toEqual([alice.username]);
+    // O mesmo texto de uma sala que não existe, também nos outros comandos com #sala.
+    for (const cmd of [`/archive #${secret.name}`, `/invite-all-to #${secret.name}`, `/join #${secret.name}`]) {
+      const x = await send(alice, mine._id, cmd);
+      expect([cmd, x.status, x.error]).toEqual([cmd, 400, `Sala #${secret.name} não encontrada.`]);
+    }
+    // Quem participa do grupo copia os membros; a administração de salas também.
+    await api('POST', 'groups.invite', { roomId: secret._id, userId: alice.userId }, A);
+    expect((await send(alice, mine._id, `/invite-all-from #${secret.name}`)).status).toBe(200);
+    expect(await membersOf(mine._id)).toEqual([A.username, alice.username, bruno.username, carla.username].sort());
+  });
+
+  it('não copia os membros de uma sala com a lista de membros oculta', async () => {
+    const [alice, bruno] = [await newUser(A), await newUser(A)];
+    const hidden = (await api('POST', 'channels.create', { name: `oculta-${uniq()}`, members: [alice.username, bruno.username], extraData: { broadcast: true } }, A)).channel;
+    const mine = (await api('POST', 'channels.create', { name: `copia-${uniq()}` }, alice)).channel;
+    const r = await send(alice, mine._id, `/invite-all-from #${hidden.name}`);
+    expect(r.status).toBe(403);
+    expect(await membersOf(mine._id)).toEqual([alice.username]);
+  });
+});
+
+describe('quem saiu da sala', () => {
+  it('removido de um grupo privado não edita nem apaga as próprias mensagens nele', async () => {
+    const [alice, bruno] = [await newUser(A), await newUser(A)];
+    const g = (await api('POST', 'groups.create', { name: `grupo-${uniq()}`, members: [alice.username, bruno.username] }, A)).group;
+    const m = (await send(alice, g._id, 'texto original')).message;
+    await api('POST', 'groups.kick', { roomId: g._id, userId: alice.userId }, A);
+    const upd = await api('POST', 'chat.update', { roomId: g._id, msgId: m._id, text: 'trocado depois de sair' }, alice);
+    expect([upd.status, upd.error]).toEqual([403, 'Você não tem acesso a esta sala.']);
+    const del = await api('POST', 'chat.delete', { roomId: g._id, msgId: m._id }, alice);
+    expect([del.status, del.error]).toEqual([403, 'Você não tem acesso a esta sala.']);
+    expect((await api('GET', 'chat.getMessage', { msgId: m._id }, bruno)).message.msg).toBe('texto original');
+    // O administrador continua podendo editar e apagar.
+    expect((await api('POST', 'chat.update', { roomId: g._id, msgId: m._id, text: 'corrigido pela administração' }, A)).status).toBe(200);
+    expect((await api('POST', 'chat.delete', { roomId: g._id, msgId: m._id }, A)).status).toBe(200);
+  });
+
+  it('quem saiu de um canal público entra de novo para editar (editar é publicar)', async () => {
+    const alice = await newUser(A);
+    const ch = (await api('POST', 'channels.create', { name: `publico-${uniq()}`, members: [alice.username] }, A)).channel;
+    const m = (await send(alice, ch._id, 'mensagem do canal')).message;
+    await api('POST', 'channels.leave', { roomId: ch._id }, alice);
+    const upd = await api('POST', 'chat.update', { roomId: ch._id, msgId: m._id, text: 'outra coisa' }, alice);
+    expect([upd.status, upd.error]).toEqual([403, 'Você precisa entrar na sala para editar mensagens.']);
+    await api('POST', 'channels.join', { roomId: ch._id }, alice);
+    expect((await api('POST', 'chat.update', { roomId: ch._id, msgId: m._id, text: 'outra coisa' }, alice)).message.msg).toBe('outra coisa');
+  });
+});
+
+describe('versões anteriores de uma mensagem editada', () => {
+  it('só quem escreveu e quem modera a sala veem; apagar a mensagem leva as versões', async () => {
+    const [bruno, carla, owner, outsider] = [await newUser(A), await newUser(A), await newUser(A), await newUser(A)];
+    const ch = (await api('POST', 'channels.create', { name: `versoes-${uniq()}`, members: [bruno.username, carla.username, owner.username] }, A)).channel;
+    await api('POST', 'channels.addOwner', { roomId: ch._id, userId: owner.userId }, A);
+    const m = (await send(bruno, ch._id, 'acesso VPN: senha Bru#2026')).message;
+    await api('POST', 'chat.update', { roomId: ch._id, msgId: m._id, text: 'acesso VPN: peça a senha ao suporte' }, bruno);
+    for (const who of [carla, outsider]) {
+      const r = await api('GET', 'chat.getMessageHistory', { msgId: m._id }, who);
+      expect([r.status, r.history]).toEqual([403, undefined]);
+    }
+    for (const who of [bruno, owner, A]) {
+      const r = await api('GET', 'chat.getMessageHistory', { msgId: m._id }, who);
+      expect(r.history.map((h: any) => h.msg)).toEqual(['acesso VPN: senha Bru#2026']);
+    }
+    await api('POST', 'chat.delete', { roomId: ch._id, msgId: m._id }, bruno);
+    expect((await pool.query('SELECT count(*)::int AS n FROM message_history WHERE message_id = $1', [m._id])).rows[0].n).toBe(0);
+  });
+
+  it('raiz de tópico apagada (o lugar fica como "mensagem removida") também perde as versões', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `raiz-${uniq()}` }, A)).channel;
+    const root = (await send(A, ch._id, 'raiz com segredo')).message;
+    await api('POST', 'chat.update', { roomId: ch._id, msgId: root._id, text: 'raiz sem segredo' }, A);
+    await send(A, ch._id, 'resposta', { tmid: root._id });
+    await api('POST', 'chat.delete', { roomId: ch._id, msgId: root._id }, A);
+    expect((await api('GET', 'chat.getMessage', { msgId: root._id }, A)).message.t).toBe('rm');
+    expect((await pool.query('SELECT count(*)::int AS n FROM message_history WHERE message_id = $1', [root._id])).rows[0].n).toBe(0);
+  });
+});

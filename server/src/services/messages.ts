@@ -501,6 +501,10 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   const canEditAny = rolesHavePermission(roles, 'edit-message');
   const own = m.user_id === ctx.userId;
   if (!canEditAny) {
+    // Editar é publicar texto: como para enviar, só quem está na sala. Removido de um grupo (ou de uma DM), a pessoa
+    // não reescreve o que disse lá.
+    await loadRoomForUser(ctx, m.room_id);
+    if (!(await getSubscriptionRow(m.room_id, ctx.userId))) throw forbidden('Você precisa entrar na sala para editar mensagens.');
     if (!getSetting('Message_AllowEditing') || !own) throw forbidden('Você não pode editar esta mensagem.');
     const block = getSetting<number>('Message_AllowEditing_BlockEditInMinutes');
     if (block > 0 && minutesSince(m.created_at) > block && !rolesHavePermission(roles, 'bypass-time-limit-edit-and-delete'))
@@ -555,6 +559,8 @@ export async function deleteMessage(ctx: Ctx, msgId: string, opts: { asAdmin?: b
   const own = m.user_id === ctx.userId;
   const canAny = rolesHavePermission(roles, 'delete-message') || rolesHavePermission(roles, 'force-delete-message');
   if (!canAny && !opts.asAdmin) {
+    // Quem não modera só apaga onde ainda lê (removido de um grupo ou de uma DM, não mexe mais no que ficou lá).
+    await loadRoomForUser(ctx, m.room_id);
     if (!own || !getSetting('Message_AllowDeleting') || !rolesHavePermission(roles, 'delete-own-message')) throw forbidden('Você não pode apagar esta mensagem.');
     const block = getSetting<number>('Message_AllowDeleting_BlockDeleteInMinutes');
     if (block > 0 && minutesSince(m.created_at) > block && !rolesHavePermission(roles, 'bypass-time-limit-edit-and-delete'))
@@ -567,6 +573,8 @@ export async function deleteMessage(ctx: Ctx, msgId: string, opts: { asAdmin?: b
 export async function removeMessageRow(m: any) {
   const { deleteFilesOfMessage } = await import('./uploads');
   await deleteFilesOfMessage(m.id);
+  // As versões antigas (edições) saem junto: apagar a mensagem não deixa o texto guardado em outro lugar.
+  await query('DELETE FROM message_history WHERE message_id = $1', [m.id]);
   // "Lembrar-me": o lembrete sai com a mensagem e a pessoa fica sabendo (Lembretes, outras abas).
   const { removeRemindersOfMessage } = await import('./reminders');
   await removeRemindersOfMessage(m.id);
@@ -877,10 +885,15 @@ export async function searchMessages(ctx: Ctx, opts: { rid?: string; searchText:
   return { total: Number(rows[0]?.total ?? 0), messages: rows.map(withExtra) };
 }
 
+// As versões antigas guardam o que a pessoa tirou ao editar (uma senha, um dado pessoal): só quem escreveu e quem pode
+// editar as mensagens dos outros na sala (dono, moderador, administrador) as veem.
 export async function messageHistory(ctx: Ctx, msgId: string) {
   const m = await getMessageRow(msgId);
   if (!m) throw notFound('error-message-not-found', 'Mensagem não encontrada.');
-  await loadRoomForUser(ctx, m.room_id);
+  if (!rolesHavePermission(await getUserRoles(ctx.userId, m.room_id), 'edit-message')) {
+    await loadRoomForUser(ctx, m.room_id);
+    if (m.user_id !== ctx.userId) throw forbidden('Só quem escreveu a mensagem e quem modera a sala veem as versões anteriores.');
+  }
   return many('SELECT msg, e2e, edited_by, created_at FROM message_history WHERE message_id = $1 ORDER BY id', [msgId]);
 }
 
