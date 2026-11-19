@@ -28,7 +28,7 @@ import { ackMessage, assertCanSeeReceipts, listAcks, myAcks } from '../services/
 import { getReadReceipts } from '../services/reads';
 import { getRoomByName, loadRoomForUser, resolveRoom } from '../services/rooms';
 import { assertCanUpload, getFileForUser, inlineMimeType, listRoomFiles, readUpload, safeMimeType, saveUpload } from '../services/uploads';
-import { b, bool, paging, q, route, str } from './http';
+import { b, bool, dateParam, intParam, paging, q, route, str } from './http';
 
 export function chatRoutes(app: FastifyInstance) {
   route(app, 'POST', 'chat.sendMessage', {}, async (req, _rep, ctx) => {
@@ -113,16 +113,16 @@ export function chatRoutes(app: FastifyInstance) {
   });
   route(app, 'GET', 'chat.getMessage', {}, async (req, _rep, ctx) => ({ message: await getMessage(ctx, str(q(req).msgId, 'msgId')) }));
   route(app, 'GET', 'chat.getMessageHistory', {}, async (req, _rep, ctx) => ({ history: await messageHistory(ctx, str(q(req).msgId, 'msgId')) }));
-  route(app, 'GET', 'chat.getMessagesAround', {}, async (req, _rep, ctx) => ({ messages: await messagesAround(ctx, str(q(req).msgId, 'msgId'), Number(q(req).count ?? 30)) }));
+  route(app, 'GET', 'chat.getMessagesAround', {}, async (req, _rep, ctx) => ({ messages: await messagesAround(ctx, str(q(req).msgId, 'msgId'), intParam(q(req).count, 'count', 30, 1, 100)) }));
 
   for (const prefix of ['channels', 'groups', 'im', 'rooms'] as const) {
     route(app, 'GET', `${prefix}.history`, {}, async (req, _rep, ctx) => {
       const query = q(req);
       const room = await resolveRoom(query);
       const messages = await history(ctx, room.id, {
-        latest: query.latest,
-        oldest: query.oldest,
-        count: Number(query.count ?? 50),
+        latest: dateParam(query.latest, 'latest', { optional: true }),
+        oldest: dateParam(query.oldest, 'oldest', { optional: true }),
+        count: intParam(query.count, 'count', 50, 1, 200),
         inclusive: query.inclusive === 'true',
         showThreadMessages: query.showThreadMessages === 'true',
       });
@@ -136,10 +136,10 @@ export function chatRoutes(app: FastifyInstance) {
       return { ...r, count: r.files.length, offset: p.offset };
     });
   }
-  route(app, 'GET', 'chat.syncMessages', {}, async (req, _rep, ctx) => ({ result: await syncMessages(ctx, str(q(req).roomId, 'roomId'), str(q(req).lastUpdate, 'lastUpdate')) }));
+  route(app, 'GET', 'chat.syncMessages', {}, async (req, _rep, ctx) => ({ result: await syncMessages(ctx, str(q(req).roomId, 'roomId'), dateParam(q(req).lastUpdate, 'lastUpdate')) }));
   route(app, 'GET', 'chat.getThreadMessages', {}, async (req, _rep, ctx) => {
     const p = paging(q(req));
-    const r = await threadMessages(ctx, str(q(req).tmid, 'tmid'), { offset: p.offset, count: Number(q(req).count ?? 200) });
+    const r = await threadMessages(ctx, str(q(req).tmid, 'tmid'), { offset: p.offset, count: intParam(q(req).count, 'count', 200, 1, 500) });
     return { ...r, count: r.messages.length, offset: p.offset };
   });
   route(app, 'GET', 'chat.getThreadsList', {}, async (req, _rep, ctx) => {

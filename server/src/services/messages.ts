@@ -279,6 +279,8 @@ export async function sendMessage(
   } = {},
 ) {
   const sticker = opts.sticker ? input.sticker : undefined; // só o servidor monta figurinhas
+  // A API recebe JSON: msg como número ou objeto quebrava o trim() e virava erro 500.
+  if (input.msg != null && typeof input.msg !== 'string') throw badRequest('error-invalid-params', 'A mensagem precisa ser texto.');
   const room = await getRoom(input.rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   const roles = (await canPostInRoom(ctx, room, { ignoreReadOnly: opts.ignoreReadOnly === true })) ?? (await getUserRoles(ctx.userId, room.id));

@@ -190,3 +190,35 @@ describe('abrir uma mensagem antiga (?msg=)', () => {
     expect(got.slice(got.indexOf(target))).toEqual(ids.slice(9, 40));
   });
 });
+
+describe('parâmetros inválidos na API de mensagens', () => {
+  it('count e datas que não são número ou data respondem 400 (antes, erro 500)', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `params-${uniq()}` }, A)).channel;
+    const m = (await send(A, ch._id, 'base')).message;
+    for (const [path, q] of [
+      ['channels.history', { roomId: ch._id, count: 'abc' }],
+      ['channels.history', { roomId: ch._id, latest: 'ontem' }],
+      ['channels.history', { roomId: ch._id, oldest: 'amanhã' }],
+      ['chat.getMessagesAround', { msgId: m._id, count: 'abc' }],
+      ['chat.getThreadMessages', { tmid: m._id, count: 'abc' }],
+      ['chat.syncMessages', { roomId: ch._id, lastUpdate: 'x' }],
+    ] as const) {
+      const r = await api('GET', path, q, A);
+      expect([path, r.status, r.errorType]).toEqual([path, 400, 'error-invalid-params']);
+      expect(r.error).toMatch(/^O parâmetro "(count|latest|oldest|lastUpdate)" deve ser/);
+    }
+    // Fora dos limites vale o limite; data ISO segue valendo.
+    expect((await api('GET', 'chat.getMessagesAround', { msgId: m._id, count: '-5' }, A)).messages.map((x: any) => x._id)).toContain(m._id);
+    expect((await api('GET', 'channels.history', { roomId: ch._id, count: '0' }, A)).messages).toHaveLength(1);
+    expect((await api('GET', 'channels.history', { roomId: ch._id, latest: new Date(Date.now() + 60000).toISOString() }, A)).status).toBe(200);
+  });
+
+  it('msg que não é texto responde 400', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `msg-tipo-${uniq()}` }, A)).channel;
+    for (const msg of [123, { a: 1 }, ['x']]) {
+      const r = await api('POST', 'chat.sendMessage', { message: { rid: ch._id, msg } }, A);
+      expect([r.status, r.errorType, r.error]).toEqual([400, 'error-invalid-params', 'A mensagem precisa ser texto.']);
+    }
+    expect((await api('POST', 'chat.postMessage', { roomId: ch._id, text: 5 }, A)).status).toBe(400);
+  });
+});
