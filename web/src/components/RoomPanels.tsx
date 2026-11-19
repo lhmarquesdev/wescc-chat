@@ -920,7 +920,8 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
 function searchTerms(q: string) {
   return [...q.matchAll(/"([^"]+)"|(\S+)/g)]
     .map((m) => m[1] ?? m[2])
-    .filter((t) => t.length > 1 && !/^[a-z]+:/i.test(t) && !/^\/.*\/[a-z]*$/i.test(t))
+    // Um símbolo sozinho ("%", "!") também se destaca: é o que a busca achou.
+    .filter((t) => (t.length > 1 || /[^\p{L}\p{N}]/u.test(t)) && !/^[a-z]+:/i.test(t) && !/^\/.*\/[a-z]*$/i.test(t))
     .map(foldText);
 }
 
@@ -1029,15 +1030,37 @@ const NO_RESULTS: Message[] = [];
 const searchPage = (roomId: string, searchText: string, offset: number) =>
   api.get('chat.search', { roomId, searchText, count: SEARCH_PAGE, offset, tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
 
+// Filtro escolhido e ainda sem valor ("from:@", "after:"): o que falta digitar. A busca espera em vez de procurar o
+// operador como texto.
+function pendingFilter(q: string) {
+  const op = /(?:^|\s)(from:@?|in:#?|before:|after:|on:)$/i.exec(q)?.[1];
+  if (!op) return '';
+  if (/^from/i.test(op)) return `Digite o usuário depois de ${op} (ex.: from:@ana.souza).`;
+  if (/^in/i.test(op)) return `Digite o nome do canal depois de ${op}.`;
+  return `Digite a data depois de ${op} (AAAA-MM-DD ou DD/MM/AAAA).`;
+}
+
 function ServerSearchPanel({ room }: Props) {
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
   const list = useRef<HTMLDivElement>(null);
+  const filters = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const t = setTimeout(() => setQ(text.trim()), 300);
     return () => clearTimeout(t);
   }, [text]);
-  const { data, loading, error } = useAsync(() => (q ? searchPage(room._id, q, 0) : Promise.resolve(null)), [q, room._id]);
+  const pending = pendingFilter(q);
+  const { data, loading, error } = useAsync(() => (q && !pending ? searchPage(room._id, q, 0) : Promise.resolve(null)), [q, room._id]);
+  // Escolher um filtro põe o operador na busca e volta ao campo com o cursor no fim, pronto para o nome ou a data.
+  const addTip = (op: string) => {
+    setText((t) => `${t.trim()} ${op}`.trim() + (op.endsWith(':') || op.endsWith('@') ? '' : ' '));
+    requestAnimationFrame(() => {
+      const input = filters.current?.querySelector('input');
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  };
   // Páginas seguintes ("Carregar mais resultados"), da busca da primeira página.
   const [more, setMore] = useState<{ of: unknown; messages: Message[]; loading: boolean; error: string }>({ of: null, messages: NO_RESULTS, loading: false, error: '' });
   const extra = more.of === data ? more : { of: data, messages: NO_RESULTS, loading: false, error: '' };
@@ -1053,7 +1076,7 @@ function ServerSearchPanel({ room }: Props) {
   useHighlight(list, terms, shown);
   return (
     <>
-      <div className="panel-filters">
+      <div className="panel-filters" ref={filters}>
         <SearchInput autoFocus value={text} onChange={setText} placeholder="Buscar mensagens" />
         {/* Os filtros mais usados, com o que fazem, atrás de um toque: a nuvem de operadores parecia sintaxe de
             programador. Escolher um filtro põe o operador na busca. */}
@@ -1065,7 +1088,7 @@ function ServerSearchPanel({ room }: Props) {
           <ul className="search-help" aria-label="Operadores de busca">
             {SEARCH_TIPS.map(([op, what]) => (
               <li key={op}>
-                <button type="button" className="search-tip" onClick={() => setText((t) => `${t.trim()} ${op}`.trim() + (op.endsWith(':') || op.endsWith('@') ? '' : ' '))}>
+                <button type="button" className="search-tip" onClick={() => addTip(op)}>
                   <kbd>{op}</kbd>
                   <span>{what}</span>
                 </button>
@@ -1078,6 +1101,10 @@ function ServerSearchPanel({ room }: Props) {
       {!q ? (
         <Empty icon="search" title="Buscar nesta sala">
           Digite acima para procurar nas mensagens desta sala.
+        </Empty>
+      ) : pending ? (
+        <Empty icon="search" title="Complete o filtro">
+          {pending}
         </Empty>
       ) : loading ? (
         <div role="status" aria-label="Buscando…">

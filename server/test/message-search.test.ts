@@ -102,3 +102,28 @@ describe('chat.search: páginas', () => {
     expect(new Set([...ids(p1), ...ids(p2)]).size).toBe(7);
   });
 });
+
+describe('chat.search: símbolos', () => {
+  it('"%", "_", "C++" acham só o que tem o símbolo; % e _ não valem como curinga; aspas só agrupam', async () => {
+    const room = (await api('POST', 'channels.create', { name: 'busca-simbolos' }, A)).channel._id;
+    const say = async (msg: string) => (await api('POST', 'chat.sendMessage', { message: { rid: room, msg } }, A)).message._id as string;
+    const pct = await say('Desconto de 50% liberado.');
+    const und = await say('O arquivo config_final.txt está na pasta.');
+    const cpp = await say('C++ e C# são linguagens diferentes (sim, sério).');
+    const bang = await say('Cuidado com o degrau!');
+    await say('Copa do mundo e calendário de cursos.');
+    const find = async (q: string) => ids(await api('GET', 'chat.search', { roomId: room, searchText: q }, A)).sort();
+    expect(await find('%')).toEqual([pct]);
+    expect(await find('50%')).toEqual([pct]);
+    expect(await find('_')).toEqual([und]);
+    expect(await find('config_final')).toEqual([und]);
+    expect(await find('C++')).toEqual([cpp]);
+    expect(await find('C#')).toEqual([cpp]);
+    expect(await find('linguagens C++')).toEqual([cpp]);
+    expect(await find('!')).toEqual([bang]);
+    for (const q of ['&', ':*', '\\', '%%', 'arquivo %', 'C++ inexistente', '"']) expect(await find(q), q).toEqual([]);
+    expect(await find('"o arquivo"')).toEqual([und]);
+    // Uma letra sem símbolo continua sendo começo de palavra.
+    expect((await find('c')).length).toBeGreaterThan(1);
+  });
+});

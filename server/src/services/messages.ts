@@ -4,6 +4,7 @@ import type { MessageJira, MessageMeeting } from '@shared/integrations';
 import type { MessageForward, MessagePoll } from '@shared/messages';
 import { messagePreviewText, type MessageSticker } from '@shared/stickers';
 import { E2E_PREVIEW } from '@shared/e2e';
+import { escapeLike } from '@shared/search';
 import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
@@ -906,18 +907,19 @@ export async function searchMessages(ctx: Ctx, opts: { rid?: string; searchText:
     if (isRegex) {
       w.push(`m.msg ~* $${params.push(text.slice(1, -1))}`);
     } else {
-      // Busca textual com prefixo em cada termo + fallback por substring.
-      const terms = text
-        .split(' ')
-        .map((t) => t.replace(/[^\p{L}\p{N}_-]/gu, ''))
-        .filter(Boolean);
-      if (terms.length) {
-        // Os dois lados dobrados (wescc_fold): o índice guarda o texto sem acento, com os arquivos e as legendas.
-        const tsq = terms.map((t) => `${t}:*`).join(' & ');
-        w.push(
-          `(m.search @@ to_tsquery('simple', wescc_fold($${params.push(tsq)})) OR m.search_text LIKE wescc_fold($${params.push(`%${text}%`)}))`,
-        );
-      }
+      // Busca textual com prefixo em cada termo + fallback por substring. Os dois lados dobrados (wescc_fold): o índice
+      // guarda o texto sem acento, com os arquivos e as legendas. % e _ do texto valem como letras (escapeLike).
+      const like = (v: string) => `m.search_text LIKE wescc_fold($${params.push(`%${escapeLike(v)}%`)})`;
+      // As aspas só agrupam ("frase exata").
+      const words = text.replace(/"/g, ' ').split(' ').filter(Boolean);
+      // Palavra que só faz sentido com os símbolos ("%", "C++", "C#", "R$"): sem eles sobra no máximo uma letra, que
+      // acharia toda palavra começada por ela. Vale como pedaço de texto, com os símbolos.
+      const core = (t: string) => t.replace(/[^\p{L}\p{N}]/gu, '');
+      const literal = (t: string) => t !== core(t) && [...core(t)].length < 2;
+      const terms = words.filter((t) => !literal(t)).map((t) => t.replace(/[^\p{L}\p{N}_-]/gu, ''));
+      const all = words.filter(literal).map(like);
+      if (terms.length) all.unshift(`m.search @@ to_tsquery('simple', wescc_fold($${params.push(terms.map((t) => `${t}:*`).join(' & '))}))`);
+      w.push(all.length ? `((${all.join(' AND ')}) OR ${like(words.join(' '))})` : like(text));
     }
   }
   const count = Math.min(opts.count ?? 25, 100);
