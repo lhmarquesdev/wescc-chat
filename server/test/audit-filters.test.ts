@@ -28,6 +28,8 @@ describe('datas da auditoria e do engajamento', () => {
       ['GET', 'audit.log', { startDate: 'abc' }, undefined],
       ['GET', 'audit.log', { end: 'ontem' }, undefined],
       ['GET', 'audit.settings', { start: '1' }, undefined],
+      // Com hora, o dia também é conferido (o JavaScript aceitava 30 de fevereiro como 2 de março).
+      ['GET', 'audit.log', { start: '2026-02-30T10:00:00Z' }, undefined],
     ];
     for (const [method, path, query] of cases) {
       const r = await api(method, path, query, A);

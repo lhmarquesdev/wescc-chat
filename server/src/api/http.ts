@@ -135,13 +135,14 @@ export function dateParam(v: unknown, name: string, opts: { optional?: boolean }
     throw new ApiError(400, 'error-invalid-params', `O parâmetro "${name}" é obrigatório.`);
   }
   const s = typeof v === 'string' ? v.trim() : '';
-  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  // O dia é conferido no calendário também com hora (o JavaScript aceitava 2026-02-30T10:00 como 2 de março).
+  const day = /^(\d{4})-(\d{2})-(\d{2})(T.*)?$/.exec(s);
   if (day) {
     const [y, m, d] = [Number(day[1]), Number(day[2]), Number(day[3])];
     const t = new Date(Date.UTC(y, m - 1, d));
-    if (t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d) return s;
-  } else if (/^\d{4}-\d{2}-\d{2}T/.test(s) && !Number.isNaN(new Date(s).getTime())) {
-    return new Date(s).toISOString();
+    const real = t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+    if (real && !day[4]) return s;
+    if (real && !Number.isNaN(new Date(s).getTime())) return new Date(s).toISOString();
   }
   throw new ApiError(400, 'error-invalid-date', 'Data inválida.', { param: name });
 }
