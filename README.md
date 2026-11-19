@@ -926,8 +926,9 @@ texto. Por isso a proteção depende de o servidor do chat ser o original e de o
   só texto, com tópico e “Ciente”, de 1 minuto a 1 ano à frente (até 100 por pessoa). Sai em nome da pessoa se ela
   ainda puder escrever na sala. A que não sai (por exemplo, a pessoa não pode mais escrever ali, ou o servidor ficou
   parado mais de 1 hora depois do horário) avisa por push e fica em vermelho acima do campo de mensagem, também num
-  canal de avisos, até ser reagendada, enviada ou excluída no painel Mensagens agendadas da sala. Só a própria pessoa
-  vê as suas.
+  canal de avisos, até ser reagendada, enviada ou excluída no painel Mensagens agendadas da sala; editar uma cujo
+  horário passou começa daqui a 1 hora. Uma resposta cujo tópico foi apagado sai na conversa (**Enviar na conversa**,
+  ou Editar). Só a própria pessoa vê as suas.
 - **Exportar mensagens da sala** (painel Exportar mensagens, `export-room-messages`: Administrador e Dono da sala;
   numa DM, só por um papel global): as mensagens de um período em HTML, CSV ou JSON, com ou sem os arquivos (num
   .zip, até `DataExport_Max_Files_MB`, padrão 2048 MB, em Configurações › Mensagens › Exportação). Cada exportação

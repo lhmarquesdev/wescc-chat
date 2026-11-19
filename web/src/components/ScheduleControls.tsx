@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Room, ScheduledMessage } from '@shared/index';
-import { AHEAD_MIN_MS, aheadError } from '@shared/messages';
+import { AHEAD_MIN_MS, aheadError, SCHEDULE_THREAD_GONE } from '@shared/messages';
 import { api, errorMessage } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
 import { fromLocalInput, schedulePresets, toLocalInput, whenText } from '../lib/messageTimes';
@@ -15,6 +15,8 @@ import { confirmDialog, Empty, Field, Menu, Modal } from './ui';
 // do compositor e o painel "Mensagens agendadas". Só quem agendou vê as suas.
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
+// Resposta agendada cujo tópico foi apagado: só dá para enviar na conversa (Editar também tira do tópico).
+const threadGone = (s: ScheduledMessage) => !!s.tmid && s.status === 'failed' && s.error === SCHEDULE_THREAD_GONE;
 const tz = () => {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -75,7 +77,9 @@ export function ScheduleModal({
   onClose: () => void;
 }) {
   const [msg, setMsg] = useState(editing?.msg ?? '');
-  const [value, setValue] = useState(() => toLocalInput(editing ? new Date(editing.sendAt) : new Date(Date.now() + 3600_000)));
+  // O horário guardado já passou (a que falhou por atraso, por exemplo): começa daqui a 1 hora, e uma linha diz qual era.
+  const [passed] = useState(() => !!editing && new Date(editing.sendAt).getTime() <= Date.now() + AHEAD_MIN_MS);
+  const [value, setValue] = useState(() => toLocalInput(editing && !passed ? new Date(editing.sendAt) : new Date(Date.now() + 3600_000)));
   const [busy, setBusy] = useState(false);
   const at = fromLocalInput(value);
   const err = at ? aheadError(at.toISOString(), new Date()) : 'Escolha a data e a hora.';
@@ -107,6 +111,8 @@ export function ScheduleModal({
           <textarea rows={4} value={msg} onChange={(e) => setMsg(e.target.value)} />
         </Field>
       )}
+      {passed && editing && <p className="muted small">O horário original ({whenText(editing.sendAt, new Date())}) já passou; escolha um novo.</p>}
+      {editing && threadGone(editing) && <p className="muted small">O tópico desta mensagem foi apagado: ela vai para a conversa.</p>}
       <Field label="Data e hora" hint={`Fuso deste aparelho: ${tz()}`} error={at && err ? err : undefined}>
         <input type="datetime-local" value={value} min={toLocalInput(new Date(Date.now() + AHEAD_MIN_MS))} onChange={(e) => setValue(e.target.value)} />
       </Field>
@@ -151,9 +157,9 @@ export function ScheduledPanel({ room }: { room: Room }) {
   const now = new Date();
   const store = useStore.getState;
 
-  const sendNow = async (s: ScheduledMessage) => {
+  const sendNow = async (s: ScheduledMessage, inRoom = false) => {
     try {
-      await api.post('chat.sendScheduledMessageNow', { scheduledId: s._id });
+      await api.post('chat.sendScheduledMessageNow', { scheduledId: s._id, ...(inRoom ? { inRoom: true } : {}) });
       store().removeScheduled(s._id);
       store().toast('Mensagem enviada.', 'success');
     } catch (e) {
@@ -172,7 +178,7 @@ export function ScheduledPanel({ room }: { room: Room }) {
   };
   const save = async (s: ScheduledMessage, v: { at: Date; msg?: string }) => {
     try {
-      const r = await api.post('chat.updateScheduledMessage', { scheduledId: s._id, msg: v.msg, sendAt: v.at.toISOString() });
+      const r = await api.post('chat.updateScheduledMessage', { scheduledId: s._id, msg: v.msg, sendAt: v.at.toISOString(), ...(threadGone(s) ? { tmid: null } : {}) });
       store().upsertScheduled(r.scheduled);
       return true;
     } catch (e) {
@@ -194,10 +200,14 @@ export function ScheduledPanel({ room }: { room: Room }) {
           <li key={s._id} className={`scheduled-item ${s.status}`}>
             <div className="scheduled-top">
               <span className="scheduled-when">{whenText(s.sendAt, now)}</span>
-              {s.tmid && (
-                <button type="button" className="pill" onClick={() => navigate(`/${room.t === 'd' ? 'direct' : room.t === 'p' ? 'group' : 'channel'}/${room._id}/thread/${s.tmid}`)}>
-                  No tópico
-                </button>
+              {s.tmid && threadGone(s) ? (
+                <span className="pill">Tópico apagado</span>
+              ) : (
+                s.tmid && (
+                  <button type="button" className="pill" onClick={() => navigate(`/${room.t === 'd' ? 'direct' : room.t === 'p' ? 'group' : 'channel'}/${room._id}/thread/${s.tmid}`)}>
+                    No tópico
+                  </button>
+                )
               )}
               {s.ackRequired && <span className="pill">Pede “Ciente”</span>}
               {s.status === 'sending' && <span className="pill">Enviando…</span>}
@@ -217,10 +227,17 @@ export function ScheduledPanel({ room }: { room: Room }) {
                       <Icon name="edit" size={16} />
                       Editar
                     </button>
-                    <button type="button" onClick={() => (close(), void sendNow(s))}>
-                      <Icon name="send" size={16} />
-                      Enviar agora
-                    </button>
+                    {threadGone(s) ? (
+                      <button type="button" onClick={() => (close(), void sendNow(s, true))}>
+                        <Icon name="send" size={16} />
+                        Enviar na conversa
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => (close(), void sendNow(s))}>
+                        <Icon name="send" size={16} />
+                        Enviar agora
+                      </button>
+                    )}
                     <hr />
                     <button type="button" className="danger" onClick={() => (close(), void cancel(s))}>
                       <Icon name="delete" size={16} />
@@ -232,6 +249,14 @@ export function ScheduledPanel({ room }: { room: Room }) {
             </div>
             <div className="scheduled-text">{renderMarkdown(s.msg, { me: me.username, mentions: [], channels: [] })}</div>
             {s.error && <div className="scheduled-error">{s.error}</div>}
+            {threadGone(s) && (
+              <div>
+                <button type="button" className="btn small" onClick={() => void sendNow(s, true)}>
+                  <Icon name="send" size={14} />
+                  Enviar na conversa
+                </button>
+              </div>
+            )}
           </li>
         ))}
       </ul>

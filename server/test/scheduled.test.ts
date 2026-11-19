@@ -92,7 +92,7 @@ describe('envios agendados', () => {
     } finally {
       await setPermission('mention-all', mentionAll);
     }
-    expect(await err({ msg: 'oi', tmid: 'naoexiste123' })).toBe('Thread inválida.');
+    expect(await err({ msg: 'oi', tmid: 'naoexiste123' })).toBe('Tópico inválido.');
     const g = (await api('POST', 'groups.create', { name: name('cifra'), members: [bruno.username] }, ana)).group._id;
     await pool.query('UPDATE rooms SET encrypted = true WHERE id = $1', [g]);
     expect((await schedule(ana, { rid: g, msg: 'oi' })).error).toBe('Não dá para agendar mensagens em salas criptografadas.');
@@ -275,6 +275,40 @@ describe('envios agendados', () => {
     expect((await api('POST', 'chat.updateScheduledMessage', { scheduledId: s._id, msg: 'nova' }, ana)).status).toBe(400);
     // Enviar agora vale (a própria pessoa conferiu).
     expect((await api('POST', 'chat.sendScheduledMessageNow', { scheduledId: s._id }, ana)).status).toBe(200);
+  });
+
+  it('tópico apagado: o motivo diz isso; "Enviar na conversa" e editar tiram do tópico', async () => {
+    const rid = await channel(ana, [bruno]);
+    const gone = 'O tópico desta mensagem foi apagado.';
+    const root = (await api('POST', 'chat.sendMessage', { message: { rid, msg: 'raiz do tópico' } }, ana)).message;
+    const s = (await schedule(ana, { rid, msg: 'resposta agendada', tmid: root._id, tshow: true })).scheduled;
+    expect(s).toMatchObject({ tmid: root._id, tshow: true });
+    expect((await api('POST', 'chat.delete', { roomId: rid, msgId: root._id }, ana)).status).toBe(200);
+    // Pelo agendador: falha com o motivo.
+    await makeDue(s._id);
+    await sendDueScheduled();
+    expect(await row(s._id)).toMatchObject({ status: 'failed', error: gone });
+    // Enviar agora (no tópico) falha de novo, com o mesmo texto.
+    const again = await api('POST', 'chat.sendScheduledMessageNow', { scheduledId: s._id }, ana);
+    expect(again.status).toBe(400);
+    expect(again.error).toBe(gone);
+    // Enviar na conversa: sai fora do tópico, com o mesmo id.
+    const out = await api('POST', 'chat.sendScheduledMessageNow', { scheduledId: s._id, inRoom: true }, ana);
+    expect(out.status).toBe(200);
+    expect(out.message).toMatchObject({ _id: s._id, rid, msg: 'resposta agendada' });
+    expect(out.message.tmid ?? null).toBeNull();
+    expect(await row(s._id)).toBeUndefined();
+
+    // Editar com tmid: null também tira do tópico (e só null vale).
+    const root2 = (await api('POST', 'chat.sendMessage', { message: { rid, msg: 'outra raiz' } }, ana)).message;
+    const s2 = (await schedule(ana, { rid, msg: 'outra resposta', tmid: root2._id, tshow: true })).scheduled;
+    const ignored = await api('POST', 'chat.updateScheduledMessage', { scheduledId: s2._id, sendAt: inMinutes(20), tmid: 'outroqualquer1' }, ana);
+    expect(ignored.scheduled).toMatchObject({ tmid: root2._id, tshow: true });
+    const moved = await api('POST', 'chat.updateScheduledMessage', { scheduledId: s2._id, sendAt: inMinutes(20), tmid: null }, ana);
+    expect(moved.scheduled).toMatchObject({ tmid: null, tshow: false, status: 'pending' });
+    // Sem tópico, o envio direto também diz "tópico".
+    const bad = await api('POST', 'chat.sendMessage', { message: { rid, msg: 'x', tmid: 'naoexiste123' } }, ana);
+    expect(bad.error).toBe('Tópico inválido.');
   });
 
   it('dois ciclos em paralelo: uma mensagem só', async () => {

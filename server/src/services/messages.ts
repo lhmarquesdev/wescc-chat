@@ -282,9 +282,9 @@ export async function sendMessage(
   let tmid: string | null = input.tmid ?? null;
   let parent: any = null;
   if (tmid) {
-    if (!getSetting('Threads_enabled')) throw badRequest('error-threads-disabled', 'Threads estão desativadas.');
+    if (!getSetting('Threads_enabled')) throw badRequest('error-threads-disabled', 'Os tópicos estão desativados.');
     parent = await getMessageRow(tmid);
-    if (!parent || parent.room_id !== room.id) throw badRequest('error-invalid-thread', 'Thread inválida.');
+    if (!parent || parent.room_id !== room.id) throw badRequest('error-invalid-thread', 'Tópico inválido.');
     // Resposta a uma resposta vira resposta da raiz.
     if (parent.tmid) {
       tmid = parent.tmid;

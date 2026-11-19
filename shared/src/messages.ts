@@ -14,6 +14,8 @@ export const POLL_DEADLINE_MAX_DAYS = 90;
 export const REMINDERS_MAX = 200; // por pessoa
 export const SCHEDULED_MAX = 100; // por pessoa (pendentes e que falharam)
 export const SCHEDULE_LATE_MINUTES = 60; // servidor parado: atraso maior que isso não envia, avisa quem agendou
+// Resposta agendada cujo tópico foi apagado: o painel oferece "Enviar na conversa" (fora do tópico).
+export const SCHEDULE_THREAD_GONE = 'O tópico desta mensagem foi apagado.';
 export const AHEAD_MIN_MS = 60_000; // lembrete e agendamento: pelo menos 1 minuto à frente
 export const AHEAD_MAX_DAYS = 365;
 

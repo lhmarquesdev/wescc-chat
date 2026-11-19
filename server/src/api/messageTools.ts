@@ -79,11 +79,15 @@ export function messageToolsRoutes(app: FastifyInstance) {
   route(app, 'GET', 'chat.getScheduledMessages', {}, async (req, _rep, ctx) => ({ scheduled: await listScheduled(ctx, str(q(req).roomId, 'roomId', { optional: true }) ?? null) }));
   route(app, 'POST', 'chat.updateScheduledMessage', {}, async (req, _rep, ctx) => {
     const body = b(req);
-    return { scheduled: await updateScheduled(ctx, str(body.scheduledId, 'scheduledId'), { msg: body.msg, sendAt: body.sendAt }) };
+    // tmid: null tira a resposta do tópico (só null vale aqui).
+    return { scheduled: await updateScheduled(ctx, str(body.scheduledId, 'scheduledId'), { msg: body.msg, sendAt: body.sendAt, ...(body.tmid === null ? { tmid: null } : {}) }) };
   });
   route(app, 'POST', 'chat.cancelScheduledMessage', {}, async (req, _rep, ctx) => {
     await cancelScheduled(ctx, str(b(req).scheduledId, 'scheduledId'));
     return {};
   });
-  route(app, 'POST', 'chat.sendScheduledMessageNow', {}, async (req, _rep, ctx) => ({ message: await sendScheduledNow(ctx, str(b(req).scheduledId, 'scheduledId')) }));
+  route(app, 'POST', 'chat.sendScheduledMessageNow', {}, async (req, _rep, ctx) => {
+    const body = b(req);
+    return { message: await sendScheduledNow(ctx, str(body.scheduledId, 'scheduledId'), { inRoom: bool(body.inRoom) ?? false }) };
+  });
 }
