@@ -9,7 +9,7 @@ import { hashPassword, verifyPassword } from '../lib/password';
 import { generateSecret, otpauthUrl, totpStep } from '../lib/totp';
 import { bus } from '../realtime/bus';
 import { audit, type Actor } from './audit';
-import { announceNewDevice, deviceCookieHeader, rememberLoginDevice } from './loginDevices';
+import { announceNewDevice, deviceCookieHeader, isKnownDevice, rememberLoginDevice } from './loginDevices';
 import { mapUser, presenceEvent } from './mappers';
 import { getSetting } from './settings';
 import { recordActivity } from './stats';
@@ -131,10 +131,17 @@ export async function registerUser(input: { username: string; name: string; emai
 // O contador do login usa o id da conta quando ela existe (usuário e e-mail contam juntos).
 const loginKey = (login: string) => `user:${login.trim().toLowerCase()}`;
 
-function attemptKeys(login: string, ip?: string) {
+// knownDevice: o navegador já entrou nesta conta (cookie wescc_device; vem de isKnownDevice). Ele conta as próprias falhas
+// à parte e não é barrado pelos contadores da conta e do IP: senão qualquer um tiraria um colega do chat errando a senha
+// dele de outra máquina (ou da mesma rede), a cada fim de bloqueio. Os outros aparelhos seguem o bloqueio da conta.
+function attemptKeys(login: string, ip?: string, knownDevice?: string | null) {
   const keys: { key: string; max: number }[] = [];
   const byUser = getSetting<number>('Accounts_Block_Failed_Login_Attempts');
   const byIp = getSetting<number>('Accounts_Block_Failed_Login_Attempts_By_Ip');
+  if (knownDevice) {
+    if (byUser > 0) keys.push({ key: `${loginKey(login)}|dev:${knownDevice}`, max: byUser });
+    return keys;
+  }
   if (byUser > 0) keys.push({ key: loginKey(login), max: byUser });
   if (byIp > 0 && ip) keys.push({ key: `ip:${ip}`, max: byIp });
   return keys;
@@ -142,16 +149,20 @@ function attemptKeys(login: string, ip?: string) {
 
 const blockMinutes = () => Math.max(1, getSetting<number>('Accounts_Block_Failed_Login_Minutes') || 5);
 
-async function assertNotBlocked(login: string, ip?: string) {
-  const keys = attemptKeys(login, ip).map((k) => k.key);
+async function assertNotBlocked(login: string, ip?: string, knownDevice?: string | null) {
+  const keys = attemptKeys(login, ip, knownDevice).map((k) => k.key);
   if (!keys.length) return;
-  const r = await one('SELECT max(blocked_until) AS until FROM login_attempts WHERE key = ANY($1) AND blocked_until > now()', [keys]);
-  if (r?.until) throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas falhas. Tente novamente em alguns minutos.');
+  const rows = await many('SELECT key FROM login_attempts WHERE key = ANY($1) AND blocked_until > now()', [keys]);
+  if (!rows.length) return;
+  // A conta bloqueada (e não o IP) num aparelho em que ela nunca entrou: quem é dono dela entra por outro.
+  if (!knownDevice && rows.every((r) => r.key === loginKey(login)))
+    throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas falhas nesta conta. Entre por um computador ou celular em que você já entrou antes, ou tente novamente em alguns minutos.');
+  throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas falhas. Tente novamente em alguns minutos.');
 }
 
-async function recordFailedAttempt(login: string, ip?: string) {
+async function recordFailedAttempt(login: string, ip?: string, knownDevice?: string | null) {
   const minutes = blockMinutes();
-  for (const { key, max } of attemptKeys(login, ip)) {
+  for (const { key, max } of attemptKeys(login, ip, knownDevice)) {
     // A contagem recomeça depois de um período sem falhas.
     await query(
       `INSERT INTO login_attempts (key, count, updated_at) VALUES ($1, 1, now())
@@ -164,9 +175,10 @@ async function recordFailedAttempt(login: string, ip?: string) {
   }
 }
 
-async function clearFailedAttempts(login: string) {
-  // Só zera o contador do login: o do IP continua (senão bastaria entrar numa conta própria entre as tentativas).
-  await query('DELETE FROM login_attempts WHERE key = $1', [loginKey(login)]);
+async function clearFailedAttempts(login: string, knownDevice?: string | null) {
+  // Só zera o contador deste login (o do aparelho conhecido, que não desfaz um bloqueio da conta em andamento para os
+  // outros): o do IP continua (senão bastaria entrar numa conta própria entre as tentativas).
+  await query('DELETE FROM login_attempts WHERE key = $1', [knownDevice ? `${loginKey(login)}|dev:${knownDevice}` : loginKey(login)]);
 }
 
 export interface DeviceInfo {
@@ -215,7 +227,8 @@ export async function login(params: { user: string; password: string; code?: str
   const dummy = (dummyHash ??= hashPassword(randomToken()));
   let user = await findUserForLogin(params.user);
   const attemptLogin = user ? `id:${user.id}` : params.user;
-  await assertNotBlocked(attemptLogin, params.device.ip);
+  const known = await isKnownDevice(user?.id, params.device.deviceId);
+  await assertNotBlocked(attemptLogin, params.device.ip, known);
   let ok = false;
   if (getSetting('LDAP_Enable') && (!user || user.auth_source === 'ldap')) {
     const { ldapLogin } = await import('../ldap/ldap');
@@ -236,7 +249,7 @@ export async function login(params: { user: string; password: string; code?: str
   if (!ok) user = null;
 
   if (!user) {
-    await recordFailedAttempt(attemptLogin, params.device.ip);
+    await recordFailedAttempt(attemptLogin, params.device.ip, known);
     await audit({ ip: params.device.ip, username: params.user }, 'auth.login.failed', { login: params.user });
     throw unauthorized('Usuário ou senha incorretos.');
   }
@@ -245,12 +258,12 @@ export async function login(params: { user: string; password: string; code?: str
     if (!params.code) throw new TwoFactorRequired('totp');
     if (!(await check2fa(user, params.code))) {
       // Código errado conta como tentativa falha (senão o código de 6 dígitos poderia ser adivinhado).
-      await recordFailedAttempt(attemptLogin, params.device.ip);
+      await recordFailedAttempt(attemptLogin, params.device.ip, known);
       await audit({ id: user.id, username: user.username, ip: params.device.ip }, 'auth.login.failed', { login: params.user, reason: 'totp' });
       throw unauthorized('Código de verificação inválido ou já usado.');
     }
   }
-  await clearFailedAttempts(attemptLogin);
+  await clearFailedAttempts(attemptLogin, known);
   const s = await createSession(user.id, params.device);
   await audit({ id: user.id, username: user.username, ip: params.device.ip }, 'auth.login', { sessionId: s.sessionId });
   return { user, ...s };
@@ -432,7 +445,8 @@ export async function resetPasswordWithToken(token: string, password: string, ip
   if (!u || !canResetPassword(u)) throw invalid();
   await query('UPDATE users SET password_hash = $2, require_password_change = false, updated_at = now() WHERE id = $1', [u.id, await hashPassword(password)]);
   await query('DELETE FROM password_resets WHERE user_id = $1', [u.id]);
-  await query('DELETE FROM login_attempts WHERE key = $1', [loginKey(`id:${u.id}`)]);
+  // A pessoa provou ser dona do e-mail: os bloqueios da conta (também os de cada aparelho) saem.
+  await query(`DELETE FROM login_attempts WHERE key = $1 OR starts_with(key, $1 || '|dev:')`, [loginKey(`id:${u.id}`)]);
   // Quem estava com a senha antiga (inclusive um invasor) sai de todos os dispositivos e perde os tokens de acesso.
   await revokeAllSessions(u.id, undefined, 'password-changed');
   const tokens = await revokePersonalTokens(u.id);

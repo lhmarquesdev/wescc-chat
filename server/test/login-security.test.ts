@@ -4,7 +4,7 @@ import { pool } from '../src/db/pool';
 import { sha256 } from '../src/lib/ids';
 import { totpCode } from '../src/lib/totp';
 import { getSetting, loadSettings } from '../src/services/settings';
-import { admin, api, connectWs, login, newUser, sleep, startServer, stopServer, type Auth } from './helpers';
+import { admin, api, connectWs, login, newUser, sleep, startServer, stopServer, urlOf, type Auth } from './helpers';
 
 // Os e-mails ficam numa caixa de saída em memória em vez de irem para um servidor SMTP.
 const outbox = vi.hoisted(() => [] as { to: string; subject: string; text: string }[]);
@@ -121,6 +121,53 @@ describe('login', () => {
     await pool.query('DELETE FROM login_attempts');
     // Antes: ~3 ms contra ~35 ms (10x). Agora as duas calculam o scrypt.
     expect(median(unknown)).toBeGreaterThan(median(known) / 3);
+  });
+});
+
+describe('bloqueio por tentativas falhas', () => {
+  // Login como o navegador faz: IP (X-Forwarded-For do proxy local) e o cookie wescc_device, quando já tem.
+  const CHROME = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  const attempt = async (user: string, password: string, ip: string, cookie?: string) => {
+    const r = await fetch(urlOf('/api/v1/login'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': CHROME, 'x-forwarded-for': ip, ...(cookie ? { cookie } : {}) },
+      body: JSON.stringify({ user, password }),
+    });
+    const j = await r.json();
+    return { status: r.status, error: j.error as string | undefined, cookie: /wescc_device=[^;]+/.exec(r.headers.get('set-cookie') ?? '')?.[0] };
+  };
+
+  it('quem erra a senha de outra pessoa não a tira do chat: o navegador em que ela já entrou continua entrando', async () => {
+    await api('POST', 'settings', { settings: { Accounts_Block_Failed_Login_Attempts: 3 } }, A);
+    try {
+      const u = await newUser(A);
+      const own = (await attempt(u.username, PW, '10.7.0.1')).cookie!;
+      expect(own).toBeTruthy();
+      // Tentativas espalhadas por várias máquinas bloqueiam a conta para aparelhos em que ela nunca entrou.
+      for (let i = 0; i < 3; i++) expect((await attempt(u.username, 'errada', `10.66.0.${i + 1}`)).status).toBe(401);
+      const stranger = await attempt(u.username, PW, '10.66.0.9');
+      expect([stranger.status, stranger.error]).toEqual([429, 'Muitas tentativas falhas nesta conta. Entre por um computador ou celular em que você já entrou antes, ou tente novamente em alguns minutos.']);
+      expect((await attempt(`${u.username}@test.local`, PW, '10.7.0.2')).status).toBe(429);
+      // O navegador da pessoa entra (de qualquer rede, inclusive a mesma do atacante), pelo usuário ou pelo e-mail.
+      expect((await attempt(u.username, PW, '10.7.0.1', own)).status).toBe(200);
+      expect((await attempt(`${u.username}@test.local`, PW, '10.66.0.1', own)).status).toBe(200);
+      // Entrar por ele não desfaz o bloqueio da conta para os outros aparelhos.
+      expect((await attempt(u.username, PW, '10.66.0.9')).status).toBe(429);
+      // O cookie de uma conta não vale para outra.
+      const other = await newUser(A);
+      for (let i = 0; i < 3; i++) await attempt(other.username, 'errada', `10.66.1.${i + 1}`);
+      expect((await attempt(other.username, PW, '10.7.0.1', own)).status).toBe(429);
+
+      // O aparelho conhecido também tem limite, só dele: errar 3 vezes nele bloqueia só ele.
+      await pool.query('DELETE FROM login_attempts');
+      for (let i = 0; i < 3; i++) expect((await attempt(u.username, 'errada', '10.7.0.1', own)).status).toBe(401);
+      const self = await attempt(u.username, PW, '10.7.0.1', own);
+      expect([self.status, self.error]).toEqual([429, 'Muitas tentativas falhas. Tente novamente em alguns minutos.']);
+      expect((await attempt(u.username, PW, '10.7.0.5')).status).toBe(200);
+    } finally {
+      await pool.query('DELETE FROM login_attempts');
+      await api('POST', 'settings', { settings: { Accounts_Block_Failed_Login_Attempts: 10 } }, A);
+    }
   });
 });
 

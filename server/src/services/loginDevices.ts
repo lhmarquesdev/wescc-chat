@@ -61,6 +61,15 @@ export function ipPrefix(ip?: string): string {
 
 const SCRIPT_BROWSERS = new Set(['API', 'Outro']);
 
+// Navegador em que a conta já entrou (o cookie anotado num login completo): conta as próprias tentativas falhas e não é
+// barrado pelo bloqueio da conta. Devolve o hash do cookie (a chave do contador dele) ou null. Só o cookie vale (o
+// programa e a rede se imitam com facilidade). A consulta roda também sem conta: o tempo não diz quem tem cadastro.
+export async function isKnownDevice(userId: string | undefined, deviceId?: string): Promise<string | null> {
+  if (!deviceId || !DEVICE_RE.test(deviceId)) return null;
+  const hash = sha256(`d:${deviceId}`);
+  return (await one('SELECT 1 FROM user_devices WHERE user_id = $1 AND device_hash = $2', [userId ?? '', hash])) ? hash : null;
+}
+
 export async function rememberLoginDevice(userId: string, info: { deviceId?: string; userAgent?: string; ip?: string }, parsed: ParsedDevice): Promise<{ deviceId: string; isNew: boolean }> {
   const known = info.deviceId && DEVICE_RE.test(info.deviceId) ? info.deviceId : undefined;
   const deviceId = known ?? randomToken(24);
