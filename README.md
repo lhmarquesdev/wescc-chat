@@ -903,8 +903,8 @@ texto. Por isso a proteção depende de o servidor do chat ser o original e de o
   procura também no nome e na legenda dos arquivos. Mostra o total e traz 50 resultados por vez ("Carregar mais
   resultados"). Filtros: `from:@usuario`, `has:file`, `has:link`, `is:pinned`, `in:#canal` e as datas `before:`,
   `after:` e `on:` com AAAA-MM-DD ou DD/MM/AAAA, no fuso do navegador de quem busca (data que não existe é recusada
-  com o formato certo). Resposta de tópico encontrada abre o tópico. `%`, `_` e palavras com símbolos (`C++`, `50%`)
-  valem como texto: acham só as mensagens que os têm.
+  com o formato certo). Resposta de tópico encontrada abre o tópico. `%` e `_` valem como letras, e um símbolo sozinho
+  ou uma palavra que só existe com os símbolos (`%`, `!`, `C++`, `C#`) acha só as mensagens que os têm.
 - **Status personalizados**: em Administração › Status do usuário (`manage-user-status`), até 30, cada um com um tipo
   (Disponível, Ausente, Ocupado ou Invisível) que decide o comportamento; as pessoas escolhem no menu da própria foto.
   **Ocupado** (ou um personalizado do tipo Ocupado) silencia notificações, som, push e e-mail, inclusive de menções e
