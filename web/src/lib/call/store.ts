@@ -1352,8 +1352,9 @@ async function reattachDirect() {
     // Eu não desliguei daqui: se o fim ficou no meu nome, foi a minha queda.
     toast(r.call.endedBy === meRef()?._id ? LOST_LINK : directEndedText(r.call), 'info', { icon: 'call-hangup' });
   } catch (e) {
-    // Sem rede ou servidor ocupado: tenta de novo na próxima reconexão (e a varredura do servidor resolve o resto).
-    if (g !== gen || !(e instanceof ApiError) || !e.status || e.status >= 500 || e.status === 429) return;
+    // Sem rede, servidor ocupado ou a conexão nova já caiu de novo: tenta na próxima reconexão (e a varredura do
+    // servidor resolve o resto). A mídia segue entre os navegadores enquanto isso.
+    if (g !== gen || !(e instanceof ApiError) || !e.status || e.status >= 500 || e.status === 429 || e.errorType === 'error-call-connection') return;
     teardown();
     set({ ...callIdle });
     toast(LOST_LINK, 'info', { icon: 'call-hangup' });
@@ -1468,7 +1469,12 @@ async function loadActive() {
     const r = (await api.get('calls.active')) as { calls: Call[] };
     const me = meRef()?._id;
     const s = get();
-    const here = liveHere();
+    let here = liveHere();
+    // Aba copiada de uma aba em chamada (Duplicar guia, window.open): a marca veio junto, mas a chamada é da outra aba.
+    if (here && s.tabCall?.callId === here) {
+      markLive(null);
+      here = null;
+    }
     let rejoin: Call | null = null;
     let other: Call | null = null;
     let awayLive = false;
