@@ -269,3 +269,80 @@ describe('quem perde o acesso para de receber na hora', () => {
     }
   });
 });
+
+describe('mensagens', () => {
+  it('#nome só vira link para a sala que quem escreve pode ler', async () => {
+    const { name } = await privateTeamChannel();
+    const grp = await api('POST', 'groups.create', { name: `rh-${tag()}` }, alice);
+    const pub = await api('POST', 'channels.create', { name: `mural-${tag()}`, members: [eve.username] }, alice);
+    const msg = `#${name} #${grp.group.name} #${pub.channel.name}`;
+    const byEve = await send(eve, pub.channel._id, msg);
+    expect(byEve.message.channels.map((c: any) => c.name)).toEqual([pub.channel.name]);
+    const byAlice = await send(alice, pub.channel._id, msg);
+    expect(byAlice.message.channels.map((c: any) => c.name).sort()).toEqual([name, grp.group.name, pub.channel.name].sort());
+  });
+
+  it('editar para @all ou @here segue as regras do envio', async () => {
+    const pub = await api('POST', 'channels.create', { name: `edita-${tag()}`, members: [op.username, eve.username] }, alice);
+    const rid = pub.channel._id;
+    expect((await send(op, rid, '@all oi')).status).toBe(403);
+    const m = await send(op, rid, 'mensagem comum');
+    const all = await api('POST', 'chat.update', { roomId: rid, msgId: m.message._id, text: '@all atenção' }, op);
+    expect(all.status).toBe(403);
+    expect(all.error).toBe('Sem permissão para mencionar @all.');
+    expect((await api('POST', 'chat.update', { roomId: rid, msgId: m.message._id, text: '@here atenção' }, op)).error).toBe('Sem permissão para mencionar @here.');
+    const hist = await api('GET', 'channels.history', { roomId: rid }, alice);
+    expect(hist.messages.find((x: any) => x._id === m.message._id).msg).toBe('mensagem comum');
+    expect((await api('GET', 'chat.getMessageHistory', { msgId: m.message._id }, alice)).history ?? []).toEqual([]);
+    // Edição comum continua; quem pode mencionar @all edita para @all.
+    expect((await api('POST', 'chat.update', { roomId: rid, msgId: m.message._id, text: 'mensagem editada' }, op)).success).toBe(true);
+    const e = await send(eve, rid, 'oi');
+    const ok = await api('POST', 'chat.update', { roomId: rid, msgId: e.message._id, text: '@all reunião' }, eve);
+    expect(ok.success).toBe(true);
+    expect(ok.message.mentions.map((x: any) => x._id)).toContain('all');
+    // Uma mensagem que já tinha @all pode ser corrigida mantendo a menção.
+    const again = await api('POST', 'chat.update', { roomId: rid, msgId: e.message._id, text: '@all reunião às 15h' }, eve);
+    expect(again.success).toBe(true);
+  });
+
+  it('anexo de pessoa só mostra imagem do próprio chat; integração e robô podem mostrar de fora', async () => {
+    const ext = 'http://127.0.0.1:3199/p.gif?who=viewer';
+    const pub = await api('POST', 'channels.create', { name: `pixel-${tag()}`, members: [eve.username] }, alice);
+    const rid = pub.channel._id;
+    const r = await api(
+      'POST',
+      'chat.postMessage',
+      {
+        roomId: rid,
+        text: 'relatório',
+        attachments: [
+          { title: 'grafico', title_link: 'https://exemplo.com/relatorio', image_url: ext, author_name: 'x', author_icon: ext, thumb_url: ext, video_url: ext, audio_url: ext },
+          { title: 'local', image_url: '/avatar/admin', thumb_url: '//127.0.0.1:3199/x.gif' },
+          { title: 'barra invertida', image_url: '/\\127.0.0.1:3199/x.gif' },
+        ],
+      },
+      eve,
+    );
+    expect(r.success).toBe(true);
+    const [a, b, c] = r.message.attachments;
+    expect(a).toEqual({ title: 'grafico', title_link: 'https://exemplo.com/relatorio', author_name: 'x' });
+    expect(b).toEqual({ title: 'local', image_url: '/avatar/admin' });
+    expect(c).toEqual({ title: 'barra invertida' });
+    // Conta de robô (papel bot).
+    const bot = await newUser(A, { roles: ['bot'] });
+    await api('POST', 'channels.join', { roomId: rid }, bot);
+    const fromBot = await api('POST', 'chat.postMessage', { roomId: rid, text: 'alerta', attachments: [{ title: 'grafico', image_url: ext }] }, bot);
+    expect(fromBot.message.attachments[0].image_url).toBe(ext);
+    // Webhook de entrada.
+    const hook = await api('POST', 'integrations.create', { type: 'webhook-incoming', name: 'Grafana', username: 'admin', channel: `#${pub.channel.name}` }, A);
+    expect(hook.success).toBe(true);
+    const res = await fetch(urlOf(`/hooks/${hook.integration._id}/${hook.integration.token}`), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'painel', attachments: [{ title: 'cpu', image_url: ext }] }),
+    });
+    expect(res.status).toBe(200);
+    const hist = await api('GET', 'channels.history', { roomId: rid }, alice);
+    expect(hist.messages.find((m: any) => m.msg === 'painel').attachments[0].image_url).toBe(ext);
+  });
+});

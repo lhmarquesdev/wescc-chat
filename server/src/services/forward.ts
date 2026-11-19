@@ -103,7 +103,8 @@ export async function forwardMessage(ctx: Ctx, input: { messageId: string; targe
     }
     otherAtts.push(a);
   }
-  const integration = otherAtts.length ? await sanitizeAttachments(ctx, otherAtts) : [];
+  // Anexos já gravados no chat (as imagens de fora só entram por integração): encaminhar mantém como estão.
+  const integration = otherAtts.length ? await sanitizeAttachments(ctx, otherAtts, { external: true }) : [];
   const usedIds = [...new Set(fileAtts.map(fileIdOf).filter((x): x is string => !!x))];
   const msgFiles = ((m.files ?? []) as MessageFile[]).filter((f) => usedIds.includes(f._id));
   const types = usedIds.map((id) => String(rowById.get(id)!.type));
