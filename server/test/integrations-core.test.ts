@@ -1526,7 +1526,7 @@ describe('Núcleo: robôs e salas de destino', () => {
     expect(await one_(ctxA, avisos._id, { grant: true })).toMatchObject({ ok: true, needsPublisher: true });
     expect(await one_(ctxU, avisos._id, { grant: true })).toMatchObject({ ok: false, needsPublisher: true, problem: `Você não pode tornar o Jira publicador em #${avisos.name}.` });
     // Robô silenciado.
-    const quiet = await channel(A);
+    const quiet = await channel(A, [jiraBot.username]);
     expect((await api('POST', 'rooms.muteUser', { roomId: quiet._id, username: jiraBot.username }, A)).success).toBe(true);
     expect(await one_(ctxA, quiet._id)).toMatchObject({ ok: false, problem: 'O Jira está silenciado nesta sala.' });
     // Tudo certo.

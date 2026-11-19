@@ -239,7 +239,7 @@ export function RoomPage() {
   const roomLive = useStore((s) => s.rooms[rid]);
   const me = useStore((s) => s.me)!;
   const [room, setRoom] = useState<(Room & { muted?: string[]; team?: any; parent?: any; joinCodeRequired?: boolean }) | null>(null);
-  const [error, setError] = useState<{ text: string; missing: boolean } | null>(null);
+  const [error, setError] = useState<{ text: string; missing: boolean; deleted?: boolean } | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [quoting, setQuoting] = useState<Message | null>(null);
   const [discussionFrom, setDiscussionFrom] = useState<Message | null>(null);
@@ -319,6 +319,8 @@ export function RoomPage() {
       if (ev.type === 'permissions.changed' || (ev.type === 'user' && ev.user.roles && (fromDirect || dmUids.split(',').includes(ev.user._id)))) void loadRoom();
       else if ((dmUids || fromDirect) && ev.type === 'settings.changed' && ev.settings.some((s) => s._id === 'Direct_Restriction_Scope')) void loadRoom();
       else if (ev.type === 'message' && ev.message.rid === rid && (ev.message.t === 'user-muted' || ev.message.t === 'user-unmuted') && ev.message.msg === me.username) void loadRoom();
+      // Excluída com a conversa aberta: sai o histórico e a barra de entrar; fica o aviso com "Voltar às conversas".
+      else if (ev.type === 'room' && ev.action === 'removed' && ev.room._id === rid) setError({ text: 'Esta sala foi excluída.', missing: true, deleted: true });
     });
     return () => {
       off();
@@ -479,7 +481,7 @@ export function RoomPage() {
                   </button>
                 }
               >
-                Ela pode ter sido apagada ou você não tem acesso.
+                {error.deleted ? 'Esta sala foi excluída.' : 'Ela pode ter sido apagada ou você não tem acesso.'}
               </Empty>
             ) : (
               <Empty

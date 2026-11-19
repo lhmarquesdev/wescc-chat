@@ -162,7 +162,11 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
       .catch(fail);
   const kick = async () => {
     const ok = await confirmDialog({ title: `Remover @${username} da sala?`, body: 'A pessoa deixa de ver as mensagens novas desta sala.', confirmLabel: 'Remover da sala', danger: true });
-    if (ok) api.post(`${path}.kick`, { roomId: rid, userId: data.u._id }).then(onClose).catch(fail);
+    if (ok)
+      api
+        .post(`${path}.kick`, { roomId: rid, userId: data.u._id })
+        .then(() => (useStore.getState().toast(`@${username} não está mais na sala.`, 'success'), onClose()))
+        .catch(fail);
   };
 
   const self = data.u._id === me._id;
@@ -173,6 +177,8 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
   const statusText = presence?.statusText ?? data.u.statusText;
   const has = (r: string) => data.roles.includes(r);
   const moderate = !!rid && data.inRoom && !self;
+  // Dono só é silenciado ou removido por quem define donos (outro dono ou administrador), como no servidor.
+  const overOwner = !has('owner') || can('set-owner');
   const toggles = moderate
     ? [
         can('set-owner') && { key: 'owner', icon: 'role-owner' as const, label: has('owner') ? 'Remover dono' : 'Tornar dono', run: () => roleAction('Owner', !has('owner')) },
@@ -185,16 +191,17 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
             label: has('publisher') ? 'Remover publicador' : 'Tornar publicador',
             run: () => roleAction('Publisher', !has('publisher')),
           },
-        can('mute-user') && {
-          key: 'mute',
-          icon: data.muted ? ('unmute-user' as const) : ('mute-user' as const),
-          label: data.muted ? 'Remover silêncio' : 'Silenciar',
-          run: () => api.post(data.muted ? 'rooms.unmuteUser' : 'rooms.muteUser', { roomId: rid, userId: data.u._id }).then(reload).catch(fail),
-        },
+        can('mute-user') &&
+          overOwner && {
+            key: 'mute',
+            icon: data.muted ? ('unmute-user' as const) : ('mute-user' as const),
+            label: data.muted ? 'Remover silêncio' : 'Silenciar',
+            run: () => api.post(data.muted ? 'rooms.unmuteUser' : 'rooms.muteUser', { roomId: rid, userId: data.u._id }).then(reload).catch(fail),
+          },
       ].filter((x): x is Exclude<typeof x, false> => !!x)
     : [];
   const admin = me.permissions.includes('view-user-administration');
-  const canKick = moderate && can('remove-user');
+  const canKick = moderate && can('remove-user') && overOwner;
   const hasMenu = toggles.length > 0 || admin || canKick;
   const globalRoles = (data.u.roles as string[]).filter((r) => r !== 'user');
 

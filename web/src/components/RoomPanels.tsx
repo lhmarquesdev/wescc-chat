@@ -16,6 +16,7 @@ import { clearRoomError, resetTranslationViews, useLanguages, useMyLanguage, use
 import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
 import { normalizeLang } from '@shared/translate';
 import { inviteStatusOf, inviteUses } from '../lib/invites';
+import { ROOM_NAME_MAX, roomNameProblem, roomTextProblem } from '@shared/roomName';
 import { Icon, type IconName } from './Icon';
 import { FileTile } from './MessageItem';
 import { useEscape, useIsPhone } from './overlay';
@@ -225,6 +226,8 @@ function roomForm(room: Room & Record<string, any>) {
     default: room.default,
     featured: room.featured,
     encrypted: room.encrypted,
+    // O código em si o servidor não devolve: só se a sala exige um. Vazio com "Exigir" ligado mantém o código atual.
+    joinCodeRequired: !!room.joinCodeRequired,
     joinCode: '',
     retention: room.retention ?? { enabled: false, overrideGlobal: false, maxAgeDays: 30, filesOnly: false, excludePinned: true },
   };
@@ -240,6 +243,8 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   const navigate = useNavigate();
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState<any>({});
+  // Valores da sala quando a edição abriu: o salvar manda só o que a pessoa mudou em relação a eles.
+  const [base, setBase] = useState<Record<string, any>>({});
   const imageRef = useRef<HTMLInputElement>(null);
   const canEdit = hasPerm('edit-room', roles);
   const canSetRO = hasPerm('set-readonly', roles);
@@ -248,14 +253,18 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   const canRetention = useStore((s) => s.me?.permissions.includes('edit-room-retention-policy'));
   const canToggleE2e = hasPerm('toggle-room-e2e-encryption', roles);
   const e2eSetting = !!useSetting<boolean>('E2E_Enable');
-  useEffect(() => {
-    setF(roomForm(room));
-  }, [room, edit]);
+  // O formulário nasce ao abrir a edição. A sala muda a cada mensagem nova (o evento da sala chega sempre): recarregar o
+  // formulário ali apagaria o que a pessoa está digitando.
+  const startEdit = () => {
+    const v = roomForm(room);
+    setF(v);
+    setBase(v);
+    setEdit(true);
+  };
 
   const save = async () => {
     try {
       // Só o que mudou: quem não tem set-readonly (moderador) salva o resto sem 403 e sem mensagens de sistema à toa.
-      const base: Record<string, any> = roomForm(room);
       const body: any = { rid: room._id };
       for (const [k, v] of Object.entries(f)) if (JSON.stringify(v) !== JSON.stringify(base[k])) body[k] = v;
       // Canal de avisos é sempre somente leitura: o servidor cuida de ro.
@@ -265,7 +274,14 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
         delete body.default;
         delete body.featured;
       }
-      if (!body.joinCode) delete body.joinCode;
+      // Código de acesso: desligar "Exigir" apaga o código (o servidor guarda vazio); ligado, um código novo troca o atual.
+      delete body.joinCodeRequired;
+      if (f.roomType === 'c' && f.joinCodeRequired && !f.joinCode.trim()) {
+        if (!base.joinCodeRequired || base.roomType !== 'c') return fail(new Error('Digite o código de acesso ou desligue “Exigir código de acesso”.'));
+        delete body.joinCode;
+      } else if (f.roomType === 'c' && !f.joinCodeRequired && base.joinCodeRequired) body.joinCode = '';
+      else if (f.roomType === 'c' && f.joinCodeRequired) body.joinCode = f.joinCode.trim();
+      else delete body.joinCode;
       // Ligar ou desligar a criptografia pede a mesma confirmação do menu da conversa (e a senha, para ligar).
       if ('encrypted' in body) {
         if (body.encrypted && !(await requireE2eReady())) return;
@@ -290,6 +306,7 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   };
 
   const setAvatar = async (file: File) => {
+    if (file.size > 5 * 1024 * 1024) return fail(new Error('Imagem muito grande (máx. 5 MB).'));
     const fd = new FormData();
     fd.append('roomId', room._id);
     fd.append('image', file);
@@ -300,17 +317,19 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
     return (
       <div className="form">
         {room.t !== 'd' && (
-          <Field label="Nome">
-            <input value={f.roomName} onChange={(e) => setF({ ...f, roomName: e.target.value })} />
+          <Field label="Nome" error={!room.prid && f.roomName !== base.roomName ? (roomNameProblem(f.roomName) ?? undefined) : undefined}>
+            <input value={f.roomName} maxLength={room.prid ? 200 : ROOM_NAME_MAX} onChange={(e) => setF({ ...f, roomName: e.target.value })} />
           </Field>
         )}
-        <Field label="Tópico">
+        {/* Limite do servidor com o motivo embaixo do campo (sem cortar o que foi colado); um texto antigo maior só avisa
+            quando alguém o muda. */}
+        <Field label="Tópico" error={f.roomTopic !== base.roomTopic ? (roomTextProblem('topic', f.roomTopic) ?? undefined) : undefined}>
           <input value={f.roomTopic} onChange={(e) => setF({ ...f, roomTopic: e.target.value })} />
         </Field>
-        <Field label="Descrição">
+        <Field label="Descrição" error={f.roomDescription !== base.roomDescription ? (roomTextProblem('description', f.roomDescription) ?? undefined) : undefined}>
           <textarea rows={3} value={f.roomDescription} onChange={(e) => setF({ ...f, roomDescription: e.target.value })} />
         </Field>
-        <Field label="Anúncio">
+        <Field label="Anúncio" error={f.roomAnnouncement !== base.roomAnnouncement ? (roomTextProblem('announcement', f.roomAnnouncement) ?? undefined) : undefined}>
           <textarea rows={2} value={f.roomAnnouncement} onChange={(e) => setF({ ...f, roomAnnouncement: e.target.value })} />
         </Field>
         {room.t !== 'd' && (
@@ -362,9 +381,19 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
               />
             )}
             {f.roomType === 'c' && (
-              <Field label="Código de acesso" hint="Deixe vazio para não exigir código.">
-                <input value={f.joinCode} onChange={(e) => setF({ ...f, joinCode: e.target.value })} placeholder="(sem alteração)" />
-              </Field>
+              <>
+                <Toggle
+                  checked={f.joinCodeRequired}
+                  onChange={(v) => setF({ ...f, joinCodeRequired: v, joinCode: v ? f.joinCode : '' })}
+                  label="Exigir código de acesso"
+                  description={base.joinCodeRequired && base.roomType === 'c' ? 'Este canal já exige um código para entrar.' : 'Quem entra no canal precisa digitar o código.'}
+                />
+                {f.joinCodeRequired && (
+                  <Field label={base.joinCodeRequired && base.roomType === 'c' ? 'Novo código de acesso' : 'Código de acesso'} hint={base.joinCodeRequired && base.roomType === 'c' ? 'Deixe vazio para manter o código atual.' : undefined}>
+                    <input value={f.joinCode} onChange={(e) => setF({ ...f, joinCode: e.target.value })} autoComplete="off" />
+                  </Field>
+                )}
+              </>
             )}
             {isAdmin && (
               <>
@@ -394,7 +423,7 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
           <input
             ref={imageRef}
             type="file"
-            accept="image/*"
+            accept="image/png,image/jpeg,image/gif,image/webp"
             tabIndex={-1}
             className="visually-hidden"
             onChange={(e) => {
@@ -427,6 +456,20 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   const toTeam = room.t !== 'd' && !room.teamMain && !room.prid && !room.teamId && hasPerm('create-team', roles) && canEdit;
   const toChannel = room.teamMain && hasPerm('edit-team', roles);
   const canArchive = room.t !== 'd' && hasPerm('archive-room', roles);
+  const canUnarchive = room.t !== 'd' && hasPerm('unarchive-room', roles);
+  const archive = async () => {
+    const yes = await confirmDialog({
+      title: `Arquivar ${room.prid ? name : `#${name}`}?`,
+      body: `Ninguém poderá enviar mensagens; o histórico continua visível. ${canUnarchive ? 'Dá para desarquivar depois.' : 'Depois, só um administrador consegue desarquivar.'}`,
+      confirmLabel: 'Arquivar',
+      danger: true,
+    });
+    if (!yes) return;
+    api
+      .post('channels.archive', { roomId: room._id })
+      .then(() => (ok('Sala arquivada.'), onChanged()))
+      .catch(fail);
+  };
   const convert = async (team: boolean) => {
     const yes = await confirmDialog(
       team
@@ -516,10 +559,10 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
           </p>
         )}
       </section>
-      {(canEdit && room.t !== 'd') || toTeam || toChannel || canArchive ? (
+      {(canEdit && room.t !== 'd') || toTeam || toChannel || canArchive || (room.archived && canUnarchive) ? (
         <div className="info-actions">
           {canEdit && room.t !== 'd' && (
-            <button type="button" className="btn ghost" onClick={() => setEdit(true)}>
+            <button type="button" className="btn ghost" onClick={startEdit}>
               <Icon name="edit" />
               Editar
             </button>
@@ -536,12 +579,31 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
               Converter em canal
             </button>
           )}
-          {canArchive && (
-            <button type="button" className="btn ghost" onClick={() => api.post(room.archived ? 'channels.unarchive' : 'channels.archive', { roomId: room._id }).then(onChanged).catch(fail)}>
-              <Icon name={room.archived ? 'unarchive' : 'archive'} />
-              {room.archived ? 'Desarquivar' : 'Arquivar'}
+          {canArchive && !room.archived && (
+            <button type="button" className="btn ghost" onClick={() => void archive()}>
+              <Icon name="archive" />
+              Arquivar
             </button>
           )}
+          {/* Desarquivar é outra permissão (por padrão só do administrador): quem não tem fica sabendo a quem pedir. */}
+          {room.archived &&
+            (canUnarchive ? (
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() =>
+                  api
+                    .post('channels.unarchive', { roomId: room._id })
+                    .then(() => (ok('Sala desarquivada.'), onChanged()))
+                    .catch(fail)
+                }
+              >
+                <Icon name="unarchive" />
+                Desarquivar
+              </button>
+            ) : (
+              canArchive && <p className="info-hint">Sala arquivada. Para desarquivar, peça a um administrador.</p>
+            ))}
         </div>
       ) : null}
       {canDelete && (
@@ -689,6 +751,7 @@ function TeamPanel({ room, roles }: Props) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [priv, setPriv] = useState(false);
+  const nameProblem = roomNameProblem(name);
   const canAdd = hasPerm('create-team-channel', roles) || hasPerm('add-team-channel', roles);
   const canEditRooms = hasPerm('edit-team-channel', roles);
   const canRemoveRooms = hasPerm('remove-team-channel', roles);
@@ -702,7 +765,9 @@ function TeamPanel({ room, roles }: Props) {
       )}
       {adding && (
         <div className="form panel-add">
-          <input placeholder="nome-do-canal" aria-label="Nome do canal" value={name} onChange={(e) => setName(e.target.value.replace(/\s/g, '-'))} />
+          <Field label="Nome do canal" error={name && nameProblem ? nameProblem : undefined}>
+            <input placeholder="nome-do-canal" maxLength={ROOM_NAME_MAX} value={name} onChange={(e) => setName(e.target.value.replace(/\s/g, '-'))} />
+          </Field>
           <Toggle checked={priv} onChange={setPriv} label="Privado" />
           <div className="row-actions">
             <button type="button" className="btn" onClick={() => setAdding(false)}>
@@ -711,6 +776,7 @@ function TeamPanel({ room, roles }: Props) {
             <button
               type="button"
               className="btn primary"
+              disabled={!!nameProblem}
               onClick={() => api.post('teams.createRoom', { teamId: room.teamId, name, type: priv ? 'p' : 'c' }).then(() => (setAdding(false), setName(''), reload())).catch(fail)}
             >
               Criar
@@ -830,9 +896,14 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
   const [adding, setAdding] = useState<PickedUser[]>([]);
   // "Ocultar a lista de membros": sem view-broadcast-member-list o servidor recusa a lista.
   const hidden = !!room.broadcast && !hasPerm('view-broadcast-member-list', roles);
+  // Mostra de 100 em 100 ("Mostrar mais"); trocar de sala, filtro ou "Somente online" volta para os primeiros. Entrou ou
+  // saiu alguém (o número de membros mudou), a lista recarrega sozinha.
+  const listKey = `${room._id}|${filter}|${onlineOnly}`;
+  const [more, setMore] = useState({ key: listKey, n: MEMBERS_PAGE });
+  const shown = more.key === listKey ? more.n : MEMBERS_PAGE;
   const { data, error, loading, reload } = useAsync(
-    () => (hidden ? Promise.resolve(null) : api.get('rooms.membersOrderedByRole', { roomId: room._id, filter, count: 200 })),
-    [room._id, filter, hidden],
+    () => (hidden ? Promise.resolve(null) : loadMembers(room._id, filter, onlineOnly, shown)),
+    [room._id, filter, hidden, onlineOnly, shown, room.usersCount],
   );
   const canAdd = hasPerm('add-user-to-joined-room', roles);
   const direct = useDirect();
@@ -841,6 +912,8 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
   const all: any[] = data?.members ?? [];
   const online = all.filter((m) => m.status && m.status !== 'offline');
   const offline = onlineOnly ? [] : all.filter((m) => !m.status || m.status === 'offline');
+  const total: number = data?.total ?? all.length;
+  const onlineTotal: number = data?.online ?? online.length;
   if (hidden)
     return (
       <Empty icon="panel-members" title="Lista de membros oculta">
@@ -853,13 +926,14 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
         room.teamMain ? 'teams.addMembers' : room.t === 'p' ? 'groups.invite' : 'channels.invite',
         room.teamMain ? { teamId: room.teamId, members: adding.map((u) => ({ userId: u._id })) } : { roomId: room._id, userIds: adding.map((u) => u._id) },
       )
-      .then(() => (setAdding([]), setPicking(false), reload()))
+      .then(() => (ok(adding.length > 1 ? `${adding.length} pessoas adicionadas.` : 'Pessoa adicionada.'), setAdding([]), setPicking(false), reload()))
       .catch(fail);
-  const group = (title: string, list: any[]) =>
+  // O número do grupo é o total da sala (o servidor conta), não só o que já apareceu na lista.
+  const group = (title: string, list: any[], count: number) =>
     list.length > 0 && (
       <div className="member-group" role="group" aria-label={title}>
         <h4 className="group-label">
-          {title} · {list.length.toLocaleString('pt-BR')}
+          {title} · {count.toLocaleString('pt-BR')}
         </h4>
         {list.map((m) => (
           <MemberRow key={m._id} m={m} muted={!!room.muted?.includes(m.username)} onClick={onUserClick} />
@@ -909,12 +983,37 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
         </Empty>
       ) : (
         <>
-          {group('Online', online)}
-          {group('Offline', offline)}
+          {group('Online', online, onlineTotal)}
+          {group('Offline', offline, Math.max(total - onlineTotal, offline.length))}
+          {all.length < total && (
+            <div className="members-more">
+              <p className="access-hint">
+                Mostrando {all.length.toLocaleString('pt-BR')} de {total.toLocaleString('pt-BR')}. Busque pelo nome ou veja mais.
+              </p>
+              <button type="button" className="btn" disabled={loading} aria-busy={loading || undefined} onClick={() => setMore({ key: listKey, n: shown + MEMBERS_PAGE })}>
+                Mostrar mais
+              </button>
+            </div>
+          )}
         </>
       )}
     </>
   );
+}
+
+const MEMBERS_PAGE = 100;
+
+// Membros da sala até n (o servidor entrega no máximo 500 por vez): por papel, online primeiro.
+async function loadMembers(roomId: string, filter: string, onlineOnly: boolean, n: number) {
+  const params = { roomId, filter, ...(onlineOnly ? { status: 'online,away,busy' } : {}) };
+  const first = await api.get('rooms.membersOrderedByRole', { ...params, count: Math.min(n, 500) });
+  const members: any[] = [...first.members];
+  while (members.length < Math.min(n, first.total)) {
+    const r = await api.get('rooms.membersOrderedByRole', { ...params, count: Math.min(n - members.length, 500), offset: members.length });
+    if (!r.members.length) break;
+    members.push(...r.members);
+  }
+  return { ...first, members };
 }
 
 // Termos a destacar nos resultados: sem operadores (from:, has:…) nem /regex/; aspas viram uma frase. Dobrados

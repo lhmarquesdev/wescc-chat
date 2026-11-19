@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { create } from 'zustand';
 import { api } from './api';
 import { realtime } from './realtime';
@@ -114,3 +115,23 @@ export function markAcked(rid: string, msgId: string) {
   const cur = useAcks.getState().byRoom[rid] ?? { acked: new Set<string>(), pending: [] };
   put(rid, { acked: new Set([...cur.acked, msgId]), pending: cur.pending.filter((x) => x !== msgId) });
 }
+
+// Avisos que esperam o "Ciente" valem também fora do canal (Início, barra lateral): cada canal de avisos da pessoa fica
+// com a lista carregada e em dia, como se estivesse na tela. São poucos canais, uma busca para cada.
+export function useNoticeAcks() {
+  const key = useStore((s) =>
+    Object.values(s.subscriptions)
+      .filter((x) => x.notice)
+      .map((x) => x.rid)
+      .sort()
+      .join(','),
+  );
+  useEffect(() => {
+    if (!key) return;
+    const offs = key.split(',').map((rid) => watchAcks(rid));
+    return () => offs.forEach((off) => off());
+  }, [key]);
+}
+
+// Quantos avisos da sala esperam o "Ciente" desta pessoa (0 fora de canal de avisos ou antes de a lista chegar).
+export const usePendingAcks = (rid: string, notice?: boolean) => useAcks((a) => (notice ? (a.byRoom[rid]?.pending.length ?? 0) : 0));

@@ -33,10 +33,13 @@ const ACCOUNT: Record<string, string> = {
 function useTrail(): { label: string; to?: string }[] {
   const { pathname } = useLocation();
   const subs = useStore((s) => s.subscriptions);
+  const rooms = useStore((s) => s.rooms);
   const room = /^\/(channel|group|direct)\/([^/]+)/.exec(pathname);
   if (room) {
     const sub = subs[room[2]] ?? Object.values(subs).find((s) => s.name === room[2]);
-    return [{ label: 'Conversas', to: '/home' }, { label: sub?.fname || sub?.name || 'Conversa' }];
+    // Sem inscrição (prévia de um canal, sala excluída com a conversa aberta): o nome que se conhece da sala.
+    const known = room[1] !== 'direct' ? rooms[room[2]] : undefined;
+    return [{ label: 'Conversas', to: '/home' }, { label: sub?.fname || sub?.name || known?.fname || known?.name || 'Conversa' }];
   }
   const area = AREAS.find(([re]) => re.test(pathname));
   if (!area) return [{ label: 'Início' }];

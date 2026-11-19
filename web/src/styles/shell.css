@@ -2177,6 +2177,16 @@ button.side-item {
   line-height: var(--lh-12);
   color: hsl(var(--sidebar-foreground) / 0.7);
 }
+/* Canal de time: o nome do time logo depois do nome do canal, no espaço que sobra. O nome do canal tem a preferência e só
+   encolhe quando o do time já está no mínimo (o title do item tem os dois inteiros). */
+.side-item:has(> .side-team) > .side-name {
+  flex: 0 1 auto;
+}
+.side-team {
+  flex: 1 1 0;
+  min-width: 2.5rem;
+  max-width: none;
+}
 /* Resultado do servidor: o nome em cima e o detalhe (@usuário, time e membros, "Sem conversa direta") embaixo, cada
    um com a largura toda da linha. Lado a lado, na barra de 272px o detalhe virava "c…" ou sumia; o title da linha
    tem o texto todo. */

@@ -3,6 +3,7 @@ import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { LOCK_TEXT } from '@shared/rbac';
 import { escapeLike } from '@shared/search';
+import { roomNameProblem, roomTextProblem, type RoomTextField } from '@shared/roomName';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
@@ -16,10 +17,20 @@ import { actorOf, getUserById, type Ctx } from './users';
 import { emit } from './hooks';
 import { forgetRoomTranslations } from '../translate/forget';
 
-const ROOM_NAME_RE = /^[0-9a-zA-ZÀ-ſ._-]{1,64}$/;
-
 export function validateRoomName(name: string) {
-  if (!ROOM_NAME_RE.test(name)) throw badRequest('error-invalid-room-name', `"${name}" não é um nome de sala válido (use letras, números, ponto, hífen e sublinhado).`);
+  const problem = roomNameProblem(name);
+  if (problem) throw badRequest('error-invalid-room-name', problem);
+}
+
+// Tópico, descrição ou anúncio novo (null apaga): undefined quando não muda. Só o valor novo passa pelo limite: um texto
+// antigo maior continua até alguém trocá-lo (o formulário da administração reenvia todos os campos).
+function roomText(field: RoomTextField, v: unknown, current: string | null | undefined): string | undefined {
+  if (v === undefined) return undefined;
+  const value = v === null ? '' : v;
+  if (value === (current ?? '')) return undefined;
+  const problem = roomTextProblem(field, value);
+  if (problem) throw badRequest('error-invalid-params', problem);
+  return value as string;
 }
 
 export async function getRoom(rid: string, db?: Queryable) {
@@ -198,7 +209,8 @@ export async function userRoomIds(userId: string): Promise<string[]> {
 export async function addUserToRoom(
   rid: string,
   userId: string,
-  opts: { inviter?: { id: string; username: string }; silent?: boolean; roles?: string[]; db?: Queryable } = {},
+  // batch: quem chama adiciona várias pessoas e avisa o número de membros uma vez no fim (convite, sala nova).
+  opts: { inviter?: { id: string; username: string }; silent?: boolean; roles?: string[]; db?: Queryable; batch?: boolean } = {},
 ) {
   const room = await getRoom(rid, opts.db);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
@@ -232,6 +244,8 @@ export async function addUserToRoom(
   }
   bus.joinRoom(userId, rid);
   const after = async () => {
+    // O número de membros mudou (cabeçalho e painel Membros de quem está na sala).
+    if (!opts.batch) await notifyRoomUpdated(rid);
     await notifySubscription(userId, rid, 'inserted', sub);
     if (!opts.silent && room.t !== 'd') {
       if (opts.inviter && opts.inviter.id !== userId) {
@@ -278,6 +292,8 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
     for (const r of unjoined) bus.leaveRoom(userId, r.id);
   }
   bus.leaveRoom(userId, rid);
+  // O número de membros mudou: quem fica na sala vê na hora (quem saiu já não recebe o aviso de grupo privado).
+  await notifyRoomUpdated(rid);
   bus.publish({ user: userId }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(sub, room) });
   // Criptografia: quem fica gera uma chave nova (ela não lê o que vier depois). O aviso sai depois de tirar a pessoa da
   // sala: o pedido de chave nova não chega para ela.
@@ -305,7 +321,8 @@ export async function listMembers(rid: string, opts: { offset?: number; count?: 
   if (opts.filter) w += ` AND (u.username ILIKE $${params.push(`%${opts.filter}%`)} OR u.name ILIKE $${params.length})`;
   if (opts.status?.length) w += ` AND u.status = ANY($${params.push(opts.status)})`;
   const rows = await many(
-    `SELECT u.id, u.username, u.name, u.status, u.status_text, u.status_custom, u.avatar_etag, s.roles AS room_roles, count(*) OVER() AS total
+    `SELECT u.id, u.username, u.name, u.status, u.status_text, u.status_custom, u.avatar_etag, s.roles AS room_roles, count(*) OVER() AS total,
+       count(*) FILTER (WHERE coalesce(u.status, 'offline') <> 'offline') OVER() AS online_total
      FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.room_id = $1 ${w}
      ORDER BY ${opts.orderByRole ? `CASE WHEN 'owner' = ANY(s.roles) THEN 0 WHEN 'moderator' = ANY(s.roles) THEN 1 WHEN 'leader' = ANY(s.roles) THEN 2 WHEN 'publisher' = ANY(s.roles) THEN 3 ELSE 4 END,` : ''}
        (u.status <> 'offline') DESC, u.username LIMIT ${Math.min(opts.count ?? 50, 500)} OFFSET ${Number(opts.offset ?? 0)}`,
@@ -313,6 +330,8 @@ export async function listMembers(rid: string, opts: { offset?: number; count?: 
   );
   return {
     total: Number(rows[0]?.total ?? 0),
+    // Quantos dos encontrados estão online (o painel Membros mostra o total de cada grupo, não só o da página).
+    online: Number(rows[0]?.online_total ?? 0),
     members: rows.map((r) => ({
       _id: r.id,
       username: r.username,
@@ -359,6 +378,8 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
     validateRoomName(input.name);
     if (await getRoomByName(input.name)) throw badRequest('error-duplicate-channel-name', `Já existe uma sala chamada ${input.name}.`);
   }
+  const topic = roomText('topic', input.topic, '') ?? '';
+  const description = roomText('description', input.description, '') ?? '';
   // Grupo criado já criptografado (a discussão herda da sala de origem, conferida em createDiscussion).
   if (input.encrypted && !input.prid) {
     if (input.type !== 'p') throw E2E_ERR.roomType();
@@ -379,8 +400,8 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
       input.type,
       input.name,
       input.fname ?? input.name,
-      input.topic ?? '',
-      input.description ?? '',
+      topic,
+      description,
       owner?.id ?? null,
       ro,
       input.broadcast ?? false,
@@ -395,8 +416,9 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
       input.reactWhenReadOnly ?? false,
     ],
   );
-  if (owner) await addUserToRoom(id, owner.id, { roles: ['owner'], silent: true });
-  for (const u of users) await addUserToRoom(id, u.id, { inviter: owner ?? undefined, silent: true });
+  // A sala nova sai com o número de membros certo no aviso de criação (canal) e na inscrição de cada um.
+  if (owner) await addUserToRoom(id, owner.id, { roles: ['owner'], silent: true, batch: true });
+  for (const u of users) await addUserToRoom(id, u.id, { inviter: owner ?? undefined, silent: true, batch: true });
   if (ctx) await audit(actorOf(ctx), 'room.created', { rid: id, name: input.name, t: input.type });
   const room = await getRoom(id);
   if (await isPublicRoom(room)) bus.publish({ all: true }, { type: 'room', action: 'inserted', room: publicRoomView(room) });
@@ -409,7 +431,7 @@ export async function createDirect(ctx: Ctx, usernames: string[]) {
   const names = [...new Set(usernames.map((u) => u.replace(/^@/, '').toLowerCase()))].filter((u) => u !== ctx.username.toLowerCase());
   const others = names.length ? await many('SELECT id, username, active FROM users WHERE lower(username) = ANY($1)', [names]) : [];
   if (others.length !== names.length) throw badRequest('error-invalid-user', 'Usuário não encontrado.');
-  if (others.length > 8) throw badRequest('error-too-many-users', 'Máximo de 9 participantes em mensagem direta.');
+  if (others.length > 8) throw badRequest('error-too-many-users', 'Uma mensagem direta junta no máximo 8 pessoas além de você.');
   const all = [{ id: ctx.userId, username: ctx.username }, ...others];
   const uids = all.map((u) => u.id).sort();
   const existing = await one(`SELECT * FROM rooms WHERE t = 'd' AND dm_key = $1`, [uids.join(',')]);
@@ -437,7 +459,7 @@ export async function createDirect(ctx: Ctx, usernames: string[]) {
   );
   // Corrida com outra criação simultânea da mesma DM: devolve a existente.
   if (!inserted) return one(`SELECT * FROM rooms WHERE t = 'd' AND dm_key = $1`, [uids.join(',')]);
-  for (const u of all) await addUserToRoom(id, u.id, { silent: true });
+  for (const u of all) await addUserToRoom(id, u.id, { silent: true, batch: true });
   return getRoom(id);
 }
 
@@ -480,13 +502,23 @@ export async function inviteToRoom(ctx: Ctx, rid: string, userIds: string[]) {
     (room.t === 'p' && rolesHavePermission(roles, 'add-user-to-any-p-room'));
   if (!allowed) throw forbidden();
   await assertCanBringIn(ctx.userId, room, userIds);
-  for (const uid of userIds) await addUserToRoom(rid, uid, { inviter: { id: ctx.userId, username: ctx.username } });
+  for (const uid of userIds) await addUserToRoom(rid, uid, { inviter: { id: ctx.userId, username: ctx.username }, batch: true });
+  // Um aviso do número de membros para o convite inteiro, e não um por pessoa.
+  if (userIds.length) await notifyRoomUpdated(rid);
+}
+
+// Dono da sala só é silenciado ou removido por quem pode Definir donos nela (outro dono ou administrador): um moderador
+// não age sobre quem está acima dele.
+async function assertCanActOnOwner(ctx: Ctx, rid: string, target: { user_id: string; roles: string[] } | null) {
+  if (!target?.roles.includes('owner') || target.user_id === ctx.userId) return;
+  if (!(await hasPermission(ctx.userId, 'set-owner', rid))) throw forbidden('Só donos podem silenciar ou remover outro dono.');
 }
 
 export async function kickFromRoom(ctx: Ctx, rid: string, userId: string) {
   if (!(await hasPermission(ctx.userId, 'remove-user', rid))) throw forbidden();
   const target = await getSubscriptionRow(rid, userId);
   if (!target) throw badRequest('error-user-not-in-room', 'Usuário não está na sala.');
+  await assertCanActOnOwner(ctx, rid, target);
   if (target.roles.includes('owner')) {
     const n = await one(`SELECT count(*)::int AS n FROM subscriptions WHERE room_id = $1 AND 'owner' = ANY(roles)`, [rid]);
     if (n.n <= 1) throw badRequest('error-you-are-last-owner', 'Não é possível remover o último dono.');
@@ -529,6 +561,10 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
     await assertCanToggleE2e(ctx, room, !!s.encrypted, roles);
     toggleChecked = true;
   }
+  // Antes de gravar qualquer coisa: um texto recusado não deixa a gravação pela metade.
+  const topic = roomText('topic', s.roomTopic, room.topic);
+  const description = roomText('description', s.roomDescription, room.description);
+  const announcement = roomText('announcement', s.roomAnnouncement, room.announcement);
   const sets: string[] = [];
   const params: unknown[] = [rid];
   const sys: [string, string][] = [];
@@ -539,22 +575,24 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
       validateRoomName(s.roomName);
       const other = await getRoomByName(s.roomName);
       if (other && other.id !== rid) throw badRequest('error-duplicate-channel-name', 'Já existe uma sala com esse nome.');
-    }
+    } else if (typeof s.roomName !== 'string' || !s.roomName.trim()) throw badRequest('error-invalid-params', 'Informe o nome da discussão.');
+    // Discussão: o mesmo limite de quando ela é criada.
+    else if (s.roomName.length > 200) throw badRequest('error-invalid-params', 'O nome da discussão pode ter no máximo 200 caracteres.');
     sets.push(`name = $${params.push(s.roomName)}`, `fname = $${params.length}`);
     sys.push(['r', s.roomName]);
     if (room.team_main && room.team_id) await query('UPDATE teams SET name = $2 WHERE id = $1', [room.team_id, s.roomName]);
   }
-  if (s.roomTopic !== undefined && s.roomTopic !== room.topic) {
-    sets.push(`topic = $${params.push(s.roomTopic)}`);
-    sys.push(['room_changed_topic', s.roomTopic]);
+  if (topic !== undefined) {
+    sets.push(`topic = $${params.push(topic)}`);
+    sys.push(['room_changed_topic', topic]);
   }
-  if (s.roomDescription !== undefined && s.roomDescription !== room.description) {
-    sets.push(`description = $${params.push(s.roomDescription)}`);
-    sys.push(['room_changed_description', s.roomDescription]);
+  if (description !== undefined) {
+    sets.push(`description = $${params.push(description)}`);
+    sys.push(['room_changed_description', description]);
   }
-  if (s.roomAnnouncement !== undefined && s.roomAnnouncement !== room.announcement) {
-    sets.push(`announcement = $${params.push(s.roomAnnouncement)}`);
-    sys.push(['room_changed_announcement', s.roomAnnouncement]);
+  if (announcement !== undefined) {
+    sets.push(`announcement = $${params.push(announcement)}`);
+    sys.push(['room_changed_announcement', announcement]);
   }
   if (s.roomType !== undefined && s.roomType !== room.t && room.t !== 'd') {
     if (!can(s.roomType === 'c' ? 'create-c' : 'create-p')) throw forbidden();
@@ -693,8 +731,10 @@ export async function deleteRoom(ctx: Ctx, rid: string) {
     bus.leaveRoom(s.user_id, rid);
     bus.publish({ user: s.user_id }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(s, room) });
   }
-  // Quem participava já soube pela inscrição; os demais, só de um canal público, e sem o conteúdo dele.
+  // Canal público: todos sabem que saiu (diretório, quem está vendo a prévia), sem o conteúdo dele. Grupo privado e DM:
+  // só quem participava, que também recebe o aviso com a sala aberta na tela.
   if (isPublic) bus.publish({ all: true }, { type: 'room', action: 'removed', room: publicRoomView(room) });
+  else for (const s of subs) bus.publish({ user: s.user_id }, { type: 'room', action: 'removed', room: mapRoom(room) });
   await audit(actorOf(ctx), 'room.deleted', { rid, name: room.name, t: room.t });
 }
 
@@ -764,6 +804,14 @@ export async function setMuted(ctx: Ctx, rid: string, userId: string, mute: bool
   if (!(await hasPermission(ctx.userId, 'mute-user', rid))) throw forbidden();
   const target = await one('SELECT username FROM users WHERE id = $1', [userId]);
   if (!target) throw notFound('error-invalid-user', 'Usuário não encontrado.');
+  const sub = await getSubscriptionRow(rid, userId);
+  const room = await getRoom(rid);
+  const isMuted = !!room?.muted?.includes(target.username);
+  // Silenciar só quem está na sala. Quem saiu continua silenciado (sair e voltar não tira o silêncio) e ainda dá para tirar.
+  if (!sub && (mute || !isMuted)) throw badRequest('error-user-not-in-room', 'Usuário não está na sala.');
+  await assertCanActOnOwner(ctx, rid, sub);
+  // Nada muda: sem outra mensagem "silenciou fulano" na sala.
+  if (isMuted === mute) return;
   await query(
     mute
       ? 'UPDATE rooms SET muted = array_append(array_remove(muted, $2), $2), updated_at = now() WHERE id = $1'

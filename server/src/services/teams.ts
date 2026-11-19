@@ -3,8 +3,20 @@ import { badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { audit } from './audit';
 import { mapRoom, mapTeam } from './mappers';
-import { hasPermission } from './permissions';
-import { addUserToRoom, createRoom, deleteRoom, getRoom, getRoomByName, notifyRoomUpdated, privatizeRooms, removeUserFromRoom, republishSubscriptions, withDiscussions } from './rooms';
+import { getUserRoles, hasPermission, rolesHavePermission } from './permissions';
+import {
+  addUserToRoom,
+  createRoom,
+  deleteRoom,
+  getRoom,
+  getRoomByName,
+  getSubscriptionRow,
+  notifyRoomUpdated,
+  privatizeRooms,
+  removeUserFromRoom,
+  republishSubscriptions,
+  withDiscussions,
+} from './rooms';
 import { bus } from '../realtime/bus';
 import { sendSystemMessage } from './messages';
 import { actorOf, type Ctx } from './users';
@@ -107,17 +119,34 @@ export async function teamRooms(ctx: Ctx, team: any, opts: { filter?: string; of
   );
   return {
     total: Number(rows[0]?.total ?? 0),
-    rooms: rows.map((r) => ({ ...mapRoom(r), isMember: r.is_member, teamDefault: !!r.custom_fields?.teamDefault })),
+    rooms: rows.map((r) => {
+      const room: any = { ...mapRoom(r), isMember: r.is_member, teamDefault: !!r.custom_fields?.teamDefault };
+      // Grupo privado de que a pessoa não participa: aparece na lista (Ver todas as salas do time), sem o conteúdo.
+      if (r.t === 'p' && !r.is_member) {
+        delete room.lastMessage;
+        delete room.announcement;
+      }
+      return room;
+    }),
   };
 }
 
 export async function addRoomsToTeam(ctx: Ctx, team: any, rids: string[]) {
   if (!(await hasPermission(ctx.userId, 'add-team-channel', team.room_id))) throw forbidden();
+  // Cada sala precisa poder ser movida por quem pede: Mover salas para um time NA sala (dono ou moderador dela, ou um
+  // papel global como Administrador). Grupo privado de que a pessoa não participa nem aparece para ela. Tudo é conferido
+  // antes de mover a primeira: uma recusa no meio não deixa metade das salas no time.
+  const rooms = [];
   for (const rid of rids) {
     const room = await getRoom(rid);
     if (!room || room.t === 'd') throw badRequest('error-invalid-room', 'Sala inválida.');
+    if (room.t === 'p' && !(await getSubscriptionRow(rid, ctx.userId)) && !(await hasPermission(ctx.userId, 'view-room-administration'))) throw badRequest('error-invalid-room', 'Sala inválida.');
     if (room.team_id) throw badRequest('error-room-already-on-team', `A sala ${room.name} já pertence a um time.`);
-    if (!(await hasPermission(ctx.userId, 'move-room-to-team', rid)) && !(await hasPermission(ctx.userId, 'add-team-channel', team.room_id))) throw forbidden();
+    if (!(await hasPermission(ctx.userId, 'move-room-to-team', rid))) throw forbidden(`Só quem é dono ou moderador de ${room.fname ?? room.name} pode levar a sala para um time.`);
+    rooms.push(room);
+  }
+  for (const room of rooms) {
+    const rid = room.id;
     await query('UPDATE rooms SET team_id = $2, updated_at = now() WHERE id = $1', [rid, team.id]);
     await sendSystemMessage(team.room_id, 'user-added-room-to-team', { id: ctx.userId, username: ctx.username }, room.fname ?? room.name);
     await notifyRoomUpdated(rid);
@@ -160,6 +189,14 @@ export async function updateTeamRoom(ctx: Ctx, rid: string, isDefault: boolean) 
   if (!room?.team_id) throw badRequest('error-invalid-room', 'Sala inválida.');
   const team = await requireTeam({ teamId: room.team_id });
   if (!(await hasPermission(ctx.userId, 'edit-team-channel', team.room_id))) throw forbidden();
+  // Grupo privado marcado como padrão recebe todo o time: só quem pode pôr pessoas nele (participa e tem Adicionar
+  // pessoas à sala, ou tem Adicionar pessoas a qualquer grupo privado).
+  if (isDefault && room.t === 'p') {
+    const roles = await getUserRoles(ctx.userId, rid);
+    const member = !!(await getSubscriptionRow(rid, ctx.userId));
+    if (!((member && rolesHavePermission(roles, 'add-user-to-joined-room')) || rolesHavePermission(roles, 'add-user-to-any-p-room')))
+      throw forbidden('Só quem pode adicionar pessoas a este grupo privado pode torná-lo padrão do time.');
+  }
   await query(`UPDATE rooms SET custom_fields = jsonb_set(custom_fields, '{teamDefault}', to_jsonb($2::boolean)), updated_at = now() WHERE id = $1`, [rid, isDefault]);
   if (isDefault) {
     const members = await many('SELECT user_id FROM team_members WHERE team_id = $1', [team.id]);
@@ -197,6 +234,10 @@ export async function removeTeamMember(ctx: Ctx, team: any, userId: string, room
   const owners = await one(`SELECT count(*)::int AS n FROM team_members WHERE team_id = $1 AND 'owner' = ANY(roles) AND user_id <> $2`, [team.id, userId]);
   const target = await one('SELECT roles FROM team_members WHERE team_id = $1 AND user_id = $2', [team.id, userId]);
   if (!target) throw badRequest('error-user-not-in-team', 'Usuário não está no time.');
+  // Como na sala: dono só sai pela mão de quem define donos (outro dono ou administrador), não de um moderador.
+  if (ctx.userId !== userId && (target.roles.includes('owner') || (await getSubscriptionRow(team.room_id, userId))?.roles.includes('owner'))) {
+    if (!(await hasPermission(ctx.userId, 'set-owner', team.room_id))) throw forbidden('Só donos podem silenciar ou remover outro dono.');
+  }
   if (target.roles.includes('owner') && owners.n === 0) throw badRequest('error-you-are-last-owner', 'Não é possível remover o último dono do time.');
   await removeUserFromRoom(team.room_id, userId, { by: { id: ctx.userId, username: ctx.username } });
   for (const rid of rooms) {

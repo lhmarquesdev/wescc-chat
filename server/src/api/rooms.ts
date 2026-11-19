@@ -6,6 +6,7 @@ import { newId } from '../lib/ids';
 import { audit } from '../services/audit';
 import { assertCanBringIn, directParentFor, directPolicyFor } from '../services/direct';
 import { mapRoom, mapTeam } from '../services/mappers';
+import { imageType } from '../importer/pending';
 import { cleanHistory, createDiscussion, listDiscussions } from '../services/messages';
 import { hasPermission } from '../services/permissions';
 import { getInvite, INVITE_MAX_DAYS, INVITE_MAX_USES, inviteNumber, inviteStatus, listInvites, oneJoinAtATime, type InviteStatus } from '../services/invites';
@@ -63,6 +64,7 @@ import { b, bool, paging, q, route, str, strArray } from './http';
 import { readAvatarUpload, resolveUserParam } from './users';
 
 const PREFIX_TYPE: Record<string, 'c' | 'p'> = { channels: 'c', groups: 'p' };
+
 
 export function roomsRoutes(app: FastifyInstance) {
   // ---------- Assinaturas e salas do usuário ----------
@@ -132,7 +134,7 @@ export function roomsRoutes(app: FastifyInstance) {
   route(app, 'GET', 'rooms.membersOrderedByRole', {}, async (req, _rep, ctx) => {
     const room = await loadRoomForUser(ctx, str(q(req).roomId, 'roomId'));
     if (room.broadcast && !(await hasPermission(ctx.userId, 'view-broadcast-member-list', room.id))) throw forbidden();
-    return listMembers(room.id, { ...paging(q(req)), filter: q(req).filter, orderByRole: true });
+    return listMembers(room.id, { ...paging(q(req)), filter: q(req).filter, status: strArray(q(req).status), orderByRole: true });
   });
   route(app, 'POST', 'rooms.saveRoomSettings', {}, async (req, _rep, ctx) => {
     const body = b(req);
@@ -188,13 +190,15 @@ export function roomsRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'rooms.setAvatar', {}, async (req, _rep, ctx) => {
     // Até 5 MB, e a permissão conferida antes de ler o arquivo quando o roomId vem antes dele (como na web).
-    const { data, type, fields } = await readAvatarUpload(req, async (f) => {
+    // O tipo vem do conteúdo (imageType, abaixo), não do que o navegador declarou.
+    const { data, fields } = await readAvatarUpload(req, async (f) => {
       if (f.roomId && !(await hasPermission(ctx.userId, 'edit-room-avatar', f.roomId))) throw forbidden();
     });
     const rid = fields.roomId ?? '';
     if (!rid || !data) throw badRequest('error-invalid-params', 'roomId e imagem são obrigatórios.');
     if (!(await hasPermission(ctx.userId, 'edit-room-avatar', rid))) throw forbidden();
-    if (!/^image\/(png|jpeg|gif|webp)$/.test(type)) throw badRequest('error-invalid-image', 'Formato não suportado.');
+    const type = imageType(data);
+    if (!type) throw badRequest('error-invalid-image', 'Formato não suportado. Use uma imagem PNG, JPEG, GIF ou WEBP.');
     await query(
       `INSERT INTO room_avatars (room_id, content_type, data) VALUES ($1,$2,$3) ON CONFLICT (room_id) DO UPDATE SET content_type = EXCLUDED.content_type, data = EXCLUDED.data, updated_at = now()`,
       [rid, type, data],
@@ -352,6 +356,8 @@ export function roomsRoutes(app: FastifyInstance) {
   // ---------- Discussões ----------
   route(app, 'POST', 'rooms.createDiscussion', {}, async (req, _rep, ctx) => {
     const body = b(req);
+    if (body.t_name === undefined || body.t_name === null || String(body.t_name).trim() === '') throw badRequest('error-invalid-params', 'Informe o nome da discussão.');
+    if (String(body.t_name).length > 200) throw badRequest('error-invalid-params', 'O nome da discussão pode ter no máximo 200 caracteres.');
     const room = await createDiscussion(ctx, {
       prid: str(body.prid, 'prid'),
       pmid: body.pmid,
@@ -494,7 +500,8 @@ export function roomsRoutes(app: FastifyInstance) {
   route(app, 'POST', 'teams.createRoom', {}, async (req, _rep, ctx) => {
     const body = b(req);
     const room = await createTeamRoom(ctx, await requireTeam(body), {
-      name: str(body.name, 'name'),
+      // Vazio ou inválido: a regra de nome da sala explica (validateRoomName), em vez de "parâmetro obrigatório".
+      name: String(body.name ?? ''),
       type: body.type === 'p' ? 'p' : 'c',
       members: strArray(body.members),
       readOnly: !!bool(body.readOnly),

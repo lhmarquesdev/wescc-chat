@@ -494,9 +494,10 @@ export async function sendMessage(
   if (room.prid) await bumpDiscussionCounter(room);
   void recordActivity(ctx.userId, 'message');
   void dispatchNotifications(ctx, room, row, mentions, parent, highlights).catch(() => {});
-  // A própria leitura do remetente
-  const { markReadInternal } = await import('./reads');
-  await markReadInternal(ctx.userId, room.id);
+  // A própria leitura do remetente: a conversa principal, ou só a thread quando a resposta fica só nela.
+  const { markReadInternal, markThreadReadInternal } = await import('./reads');
+  if (!tmid || input.tshow) await markReadInternal(ctx.userId, room.id);
+  if (tmid) await markThreadReadInternal(ctx.userId, room.id, tmid);
   if (room.t === 'c' || room.t === 'p') await notifyRoomUpdated(room.id);
   else bus.publish({ room: room.id }, { type: 'room', action: 'updated', room: (await import('./mappers')).mapRoom(await getRoom(room.id)) });
   // Integrações (webhooks de saída, bots, Jira) não leem mensagens criptografadas.

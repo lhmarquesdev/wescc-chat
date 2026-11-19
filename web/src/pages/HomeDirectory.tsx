@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Subscription } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
-import { useAcks } from '../lib/acks';
+import { useAcks, usePendingAcks } from '../lib/acks';
 import { partyOf, useDirect } from '../lib/direct';
 import { badgeCount, plural, roomIconName, roomPath } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
 import { requestNotificationPermission } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
 import { Icon, type IconName } from '../components/Icon';
-import { useForYou } from '../components/navState';
+import { shownUnread, useForYou } from '../components/navState';
 import { ForYouCard } from '../components/Sidebar';
 import { JoinCodeDialog } from '../components/JoinCodeDialog';
 import { Empty, GroupAvatar, Pager, SearchInput, SkeletonTable, Tabs, UserAvatar, useAsync, ThLabel } from '../components/ui';
@@ -26,11 +26,14 @@ function greeting(h: number) {
 
 // O que há de novo numa sala, em uma linha ("3 mensagens novas · 2 tópicos com respostas").
 // Num canal de avisos a linha fala de avisos, e dos que esperam o "Ciente" quando a lista já é conhecida.
+// Sala silenciada ou com o contador oculto (sem menção): fala das novidades sem o número, como a barra lateral.
 function unreadLine(s: Subscription, pending = 0) {
   const parts: string[] = [];
+  const count = shownUnread(s);
   if (s.userMentions > 0 && s.t !== 'd') parts.push(plural(s.userMentions, 'menção a você', 'menções a você'));
   if (pending > 0) parts.push(plural(pending, 'aviso aguardando seu “Ciente”', 'avisos aguardando seu “Ciente”'));
-  else if (s.unread > 0) parts.push(s.notice ? plural(s.unread, 'aviso novo', 'avisos novos') : plural(s.unread, 'mensagem nova', 'mensagens novas'));
+  else if (count > 0) parts.push(s.notice ? plural(count, 'aviso novo', 'avisos novos') : plural(count, 'mensagem nova', 'mensagens novas'));
+  else if (s.unread > 0) parts.push(s.notice ? 'Avisos novos' : 'Mensagens novas');
   if (s.tunread.length) parts.push(plural(s.tunread.length, 'tópico com respostas', 'tópicos com respostas'));
   return parts.join(' · ') || 'Mensagens novas';
 }
@@ -39,7 +42,8 @@ function UnreadRow({ s }: { s: Subscription }) {
   const navigate = useNavigate();
   const dmUser = s.t === 'd' && !s.name.includes(',') ? s.name : null;
   const mention = s.userMentions > 0 || s.t === 'd';
-  const pending = useAcks((a) => (s.notice ? (a.byRoom[s.rid]?.pending.length ?? 0) : 0));
+  const count = shownUnread(s);
+  const pending = usePendingAcks(s.rid, s.notice);
   return (
     <button type="button" className="home-row" onClick={() => navigate(roomPath(s))}>
       {dmUser ? (
@@ -61,7 +65,9 @@ function UnreadRow({ s }: { s: Subscription }) {
           {badgeCount(s.tunread.length)}
         </span>
       )}
-      {s.unread > 0 && <span className={mention ? 'badge mention' : s.groupMentions > 0 ? 'badge group' : 'badge'}>{badgeCount(s.unread)}</span>}
+      {count > 0 && <span className={mention ? 'badge mention' : s.groupMentions > 0 ? 'badge group' : 'badge'}>{badgeCount(count)}</span>}
+      {/* Já abriu o canal, mas falta o "Ciente": o número de avisos que esperam a confirmação. */}
+      {count === 0 && pending > 0 && <span className="badge group">{badgeCount(pending)}</span>}
       <Icon name="next" className="home-row-go" />
     </button>
   );
@@ -72,15 +78,17 @@ export function HomePage() {
   const body = useSetting<string>('Layout_Home_Body');
   const me = useStore((s) => s.me)!;
   const subs = useStore((s) => s.subscriptions);
+  const acks = useAcks((a) => a.byRoom);
   const forYou = useForYou(4);
   const [askNotif, setAskNotif] = useState(() => 'Notification' in window && Notification.permission === 'default');
-  const unread = useMemo(
-    () =>
-      Object.values(subs)
-        .filter((s) => s.unread > 0 || s.tunread.length > 0)
-        .sort((a, b) => b.userMentions - a.userMentions || (b._updatedAt ?? '').localeCompare(a._updatedAt ?? '')),
-    [subs],
-  );
+  // Canal de avisos com aviso esperando o "Ciente" fica em Não lidas até a pessoa confirmar (leitura obrigatória), junto
+  // das menções no topo.
+  const unread = useMemo(() => {
+    const pending = (s: Subscription) => (s.notice ? (acks[s.rid]?.pending.length ?? 0) : 0);
+    return Object.values(subs)
+      .filter((s) => s.unread > 0 || s.tunread.length > 0 || pending(s) > 0)
+      .sort((a, b) => b.userMentions + pending(b) - (a.userMentions + pending(a)) || (b._updatedAt ?? '').localeCompare(a._updatedAt ?? ''));
+  }, [subs, acks]);
   const now = new Date();
   return (
     <div className="page home-page">
