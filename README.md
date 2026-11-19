@@ -1138,9 +1138,15 @@ Permissões do RBAC (Papéis e permissões › Arquivos):
 - `create-files-folder`: criar pastas principais (só Administrador). Quem cria a pasta passa a gerenciá-la.
 - `manage-all-files`: ver e mudar qualquer pasta, mesmo fora do compartilhamento (só Administrador).
 
-Cada pasta tem o histórico (envios, downloads, renomeações, compartilhamento, lixeira) para quem a gerencia, e toda
-mudança de compartilhamento entra também no registro de auditoria (`drive.acl.update`). O que vai para a lixeira fica
-`Drive_Trash_Days` dias (padrão 30) e depois é apagado de vez às 4h.
+Cada pasta tem o histórico (envios, downloads, renomeações, compartilhamento com quem ganhou ou perdeu acesso,
+lixeira) para quem a gerencia, com "Ver mais" para os eventos antigos, e toda mudança de compartilhamento entra também
+no registro de auditoria (`drive.acl.update`). O que vai para a lixeira fica `Drive_Trash_Days` dias (padrão 30) e
+depois é apagado de vez às 4h.
+
+Nome repetido não apaga nada: enviar, mover ou restaurar um arquivo com o nome de outro que já está na pasta guarda
+como "nome (2)", e a tela avisa o nome final. Nomes longos são cortados em 120 caracteres (pasta) ou 200 (arquivo),
+mantendo a extensão. No menu "…" de um arquivo, **Copiar link do arquivo** gera um link que abre a pasta já com o
+arquivo selecionado; quem não tem acesso à pasta vê o aviso de sem acesso.
 
 Espaço (Administração › Configurações › Arquivos):
 
