@@ -9,7 +9,7 @@ import { listSettings } from '../src/services/settings';
 import { EMOJI as WEB_EMOJI } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
 import { authorName, continuesGroup, editableKind, editTextOf, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageHref, messageLink, pastTimeLimit, pollMeta, pollShares, unknownSlashCommand } from '../../web/src/lib/messageRules';
-import { ITALIC_SRC } from '@shared/markdownTokens';
+import { EMAIL_SRC, ITALIC_SRC, URL_SRC } from '@shared/markdownTokens';
 import { fromLocalInput, reminderPresets, schedulePresets, toLocalInput, whenText } from '../../web/src/lib/messageTimes';
 import { AHEAD_ERROR, aheadError, POLL_ERRORS, pollInputError, type MessageForward, type MessagePoll } from '@shared/messages';
 import { messagePreviewText } from '@shared/stickers';
@@ -119,6 +119,34 @@ describe('itálico do markdown', () => {
     expect(italics('¯\\_(ツ)_/¯')).toEqual([]);
     expect(italics('isso é _importante_ hoje')).toEqual(['_importante_']);
     expect(italics('__muito__')).toEqual(['__muito__']);
+  });
+});
+
+describe('links e e-mails do markdown', () => {
+  const urls = (t: string) => [...t.matchAll(new RegExp(URL_SRC, 'g'))].map((m) => m[0]);
+  const emails = (t: string) => [...t.matchAll(new RegExp(EMAIL_SRC, 'g'))].map((m) => m[0]);
+  it('o ")" de um par no endereço fica no link; o ")" e a pontuação da frase, não', () => {
+    expect(urls('veja https://pt.wikipedia.org/wiki/Brasil_(desambiguação)')).toEqual(['https://pt.wikipedia.org/wiki/Brasil_(desambiguação)']);
+    expect(urls('(veja https://x.example/a).')).toEqual(['https://x.example/a']);
+    expect(urls('(veja https://x.example/a_(b)) também')).toEqual(['https://x.example/a_(b)']);
+    expect(urls('https://x.example/a)b e https://x.example/(abc fim')).toEqual(['https://x.example/a)b', 'https://x.example/(abc']);
+    expect(urls('link: https://x.example/p?q=1&r=2. www.exemplo.com/x?y=1, e "https://x.example/a"')).toEqual(['https://x.example/p?q=1&r=2', 'www.exemplo.com/x?y=1', 'https://x.example/a']);
+    expect(urls('https://x.example/a?ids[]=1')).toEqual(['https://x.example/a?ids[]=1']);
+  });
+  it('e-mail vira link sem o ponto final; @menção e endereço sem domínio, não', () => {
+    expect(emails('escreva para suporte@empresa.com.br.')).toEqual(['suporte@empresa.com.br']);
+    expect(emails('(rh@empresa.com) ou a.b+c@x.co')).toEqual(['rh@empresa.com', 'a.b+c@x.co']);
+    expect(emails('@ana, ana@localhost, x@@y.com')).toEqual([]);
+  });
+  it('texto longo de parênteses, pontos e arrobas: linear', () => {
+    const t = performance.now();
+    for (const f of ['(', ')', '(a', 'a)', '((a)', 'www.', '@a.', 'a@', 'a.']) {
+      const s = f.repeat(Math.ceil(20000 / f.length));
+      urls(`https://x${s}`);
+      urls(s);
+      emails(s);
+    }
+    expect(performance.now() - t).toBeLessThan(150);
   });
 });
 

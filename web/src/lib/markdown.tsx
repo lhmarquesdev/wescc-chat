@@ -2,12 +2,12 @@ import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { splitHighlights, type HighlightMatcher } from '@shared/highlights';
 import type { Message } from '@shared/index';
-import { BOLD_SRC, CHANNEL_SRC, CODE_SRC, EMOJI_SRC, ITALIC_SRC, MD_LINK_SRC, MENTION_SRC, STRIKE_SRC, URL_SRC } from '@shared/markdownTokens';
+import { BOLD_SRC, CHANNEL_SRC, CODE_SRC, EMAIL_SRC, EMOJI_SRC, ITALIC_SRC, MD_LINK_SRC, MENTION_SRC, STRIKE_SRC, URL_SRC } from '@shared/markdownTokens';
 import { resolveEmoji } from './emoji';
 
 // Renderização das mensagens no estilo do Rocket.Chat, sem HTML bruto:
 // ```bloco```, `código`, *negrito*, **negrito**, _itálico_, ~tachado~, > citação,
-// [texto](url), links automáticos, @menções, #canais e :emoji:.
+// [texto](url), links automáticos, e-mails, @menções, #canais e :emoji:.
 
 interface Opts {
   me?: string;
@@ -43,6 +43,7 @@ const INLINE = new RegExp(
     `(${MENTION_SRC})`, // 7 menção
     `(${CHANNEL_SRC})`, // 8 canal
     `(${EMOJI_SRC})`, // 9 emoji
+    `(${EMAIL_SRC})`, // 10 e-mail (mailto:)
   ].join('|'),
   'g',
 );
@@ -67,7 +68,7 @@ function inline(text: string, o: Opts, keyBase: string): ReactNode[] {
     const idx = m.index ?? 0;
     const k = `${keyBase}-${i++}`;
     if (idx > last) out.push(...hl(text.slice(last, idx), o, `${k}t`));
-    const [all, code, mdLink, url, bold, italic, strike, mention, channel, emoji] = m;
+    const [all, code, mdLink, url, bold, italic, strike, mention, channel, emoji, email] = m;
     if (code) out.push(<code key={k} className="md-code">{code.slice(1, -1)}</code>);
     else if (mdLink) {
       const mm = mdLink.match(/^\[([^\]]+)\]\(([^)]+)\)$/)!;
@@ -120,6 +121,12 @@ function inline(text: string, o: Opts, keyBase: string): ReactNode[] {
       if (e?.unicode) out.push(<span key={k} className="emoji" title={emoji}>{e.unicode}</span>);
       else if (e?.url) out.push(<img key={k} className="emoji custom" src={e.url} alt={emoji} title={emoji} />);
       else out.push(emoji);
+    } else if (email) {
+      out.push(
+        <a key={k} href={`mailto:${email}`}>
+          {email}
+        </a>,
+      );
     } else out.push(all);
     last = idx + all.length;
   }

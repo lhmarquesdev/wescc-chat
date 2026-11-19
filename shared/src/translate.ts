@@ -1,6 +1,6 @@
 // Tradução de mensagens pelo LibreTranslate da empresa: regras puras que o servidor e a web usam iguais (o que nunca é
 // traduzido, como a mensagem é cortada em trechos, idiomas, endereço do servidor) e os tipos da API autoTranslate.*.
-import { CHANNEL_SRC, CODE_SRC, EMOJI_SRC, MD_LINK_SRC, MENTION_SRC, URL_SRC } from './markdownTokens';
+import { CHANNEL_SRC, CODE_SRC, EMAIL_SRC, EMOJI_SRC, MD_LINK_SRC, MENTION_SRC, URL_SRC } from './markdownTokens';
 import { encryptedContent } from './messages';
 
 export const LANG_RE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/;
@@ -144,8 +144,8 @@ export function translateUrlCheck(
 // k: fica como está; t: vai para o tradutor.
 export type Piece = { k: string } | { t: string };
 
-// O que o render mostra como código, link, menção, canal ou emoji (mesmos padrões de web/src/lib/markdown.tsx).
-const KEEP = new RegExp([CODE_SRC, MD_LINK_SRC, URL_SRC, MENTION_SRC, CHANNEL_SRC, EMOJI_SRC].map((s) => `(?:${s})`).join('|'), 'g');
+// O que o render mostra como código, link, e-mail, menção, canal ou emoji (mesmos padrões de web/src/lib/markdown.tsx).
+const KEEP = new RegExp([CODE_SRC, MD_LINK_SRC, URL_SRC, EMAIL_SRC, MENTION_SRC, CHANNEL_SRC, EMOJI_SRC].map((s) => `(?:${s})`).join('|'), 'g');
 // Início de linha que o render trata como marcação: citações, depois título ou item de lista.
 const QUOTES = /^(?:[ \t]*>[ \t]?)*/;
 const HEADING = /^#{1,4}\s+(?=\S)/;
