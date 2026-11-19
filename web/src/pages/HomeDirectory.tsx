@@ -178,7 +178,9 @@ export function DirectoryPage() {
     const t = setTimeout(() => (setQ(text.trim()), setOffset(0)), 250);
     return () => clearTimeout(t);
   }, [text]);
-  const { data, loading, error, reload } = useAsync(() => api.get('directory', { type, text: q, offset, count: 25 }), [type, q, offset]);
+  const { data: got, loading, error, reload } = useAsync(() => api.get('directory', { type, text: q, offset, count: 25 }).then((r) => ({ ...r, type })), [type, q, offset]);
+  // Ao trocar de aba, a resposta da aba anterior não vale enquanto a nova carrega (canais apareciam como pessoas).
+  const data = got?.type === type ? got : null;
   const direct = useDirect();
 
   const openUser = async (username: string) => {
