@@ -1465,6 +1465,18 @@
 .rbac-people-row > svg {
   color: hsl(var(--muted-foreground));
 }
+/* Papel com muitas pessoas: quantas aparecem, "Carregar mais" e o atalho para a lista de usuários com o filtro. */
+.rbac-people-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid hsl(var(--line-1));
+}
+.rbac-people-more > span {
+  margin-right: auto;
+}
 .rbac-history.embedded > .filters {
   margin-bottom: var(--space-4);
 }

@@ -508,11 +508,27 @@ function PowerMap({ perms, onGroup }: { perms: Set<string>; onGroup: (g: string)
 
 // ---------- Pessoas com o papel ----------
 
+const PEOPLE_PAGE = 200;
+
 function RolePeople({ role, grant, onChanged }: { role: RbacRole; grant: Grant; onChanged: () => void }) {
   const can = usePermission(['view-user-administration']);
   const meId = useStore((s) => s.me?._id) ?? '';
   const navigate = useNavigate();
-  const { data, loading, error, reload } = useAsync(() => (can ? api.get('roles.getUsersInRole', { role: role._id, count: 200 }) : Promise.resolve(null)), [role._id, can]);
+  const { data, loading, error, reload } = useAsync(() => (can ? api.get('roles.getUsersInRole', { role: role._id, count: PEOPLE_PAGE }) : Promise.resolve(null)), [role._id, can]);
+  // Papel com mais de 200 pessoas: "Carregar mais" traz as próximas (a lista recomeça quando os dados recarregam).
+  const [more, setMore] = useState<any[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  useEffect(() => setMore([]), [data]);
+  const users: any[] = data ? [...data.users, ...more] : [];
+  const left = data ? Math.max(0, data.total - users.length) : 0;
+  const loadMore = () => {
+    setLoadingMore(true);
+    api
+      .get('roles.getUsersInRole', { role: role._id, count: PEOPLE_PAGE, offset: users.length })
+      .then((r) => setMore((m) => [...m, ...r.users]))
+      .catch(rbacFail)
+      .finally(() => setLoadingMore(false));
+  };
   const [picking, setPicking] = useState(false);
   const [bulk, setBulk] = useState<{ mode: 'add' | 'remove'; userIds: string[] } | null>(null);
   const canAssign = grant.canAssignRoles && !grant.roleLocks[role._id];
@@ -544,11 +560,11 @@ function RolePeople({ role, grant, onChanged }: { role: RbacRole; grant: Grant; 
           <SkeletonTable rows={4} cols={2} />
         ) : error ? (
           <p className="muted small rbac-empty-areas">{error}</p>
-        ) : !data?.users.length ? (
+        ) : !users.length ? (
           <Empty icon="admin-users" title="Ninguém tem este papel" />
         ) : (
           <ul className="rbac-people">
-            {data.users.map((u: any) => {
+            {users.map((u: any) => {
               const userLock = userLockOf(grant, meId, u);
               return (
                 <li key={u._id} className="rbac-people-item">
@@ -568,6 +584,20 @@ function RolePeople({ role, grant, onChanged }: { role: RbacRole; grant: Grant; 
               );
             })}
           </ul>
+        )}
+        {left > 0 && (
+          <div className="rbac-people-more">
+            <span className="muted small">
+              Mostrando {users.length} de {data.total}.
+            </span>
+            <button type="button" className="btn small" disabled={loadingMore} aria-busy={loadingMore || undefined} onClick={loadMore}>
+              Carregar mais {Math.min(left, PEOPLE_PAGE)}
+            </button>
+            <button type="button" className="btn small ghost" onClick={() => navigate(`/admin/users?role=${encodeURIComponent(role._id)}`)}>
+              <Icon name="search" />
+              Buscar na lista de usuários
+            </button>
+          </div>
         )}
       </Section>
       {picking && <GiveRole role={role} grant={grant} onClose={() => setPicking(false)} onPicked={(ids) => (setPicking(false), setBulk({ mode: 'add', userIds: ids }))} />}

@@ -32,7 +32,7 @@ interface Row {
 }
 
 const SOURCE: Record<string, string> = { system: 'Automático', ldap: 'LDAP / AD', oauth: 'OAuth', saml: 'SAML', migration: 'Migração' };
-const FIELD: Record<string, string> = { description: 'Descrição', purpose: 'Para que serve', scope: 'Escopo', mandatory2fa: 'Exigir 2FA', restrictDirect: 'Restrito em conversas diretas' };
+const FIELD: Record<string, string> = { description: 'Nome exibido', purpose: 'Para que serve', scope: 'Escopo', mandatory2fa: 'Exigir 2FA', restrictDirect: 'Restrito em conversas diretas' };
 
 // Lote da matriz: só papéis, só alterações.
 const rolesOnly = (rows: Row[]) => rows.every((r) => r.entityType === 'role' && r.action === 'update');
