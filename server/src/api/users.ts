@@ -295,16 +295,20 @@ export function usersRoutes(app: FastifyInstance) {
     let target = ctx.userId;
     let data: Buffer | null = null;
     let type = '';
+    const allowed = async () => {
+      if (target !== ctx.userId && !(await hasPermission(ctx.userId, 'edit-other-user-avatar'))) throw forbidden();
+      if (target !== ctx.userId) await assertCanManageUser(ctx, target);
+      if (target === ctx.userId && !getSetting('Accounts_AllowUserAvatarChange')) throw forbidden('Alteração de avatar desativada.');
+    };
     if (req.isMultipart()) {
-      const parts = req.parts();
-      for await (const part of parts) {
-        if (part.type === 'file') {
-          data = await part.toBuffer();
-          type = part.mimetype;
-        } else if (part.fieldname === 'userId' && part.value) {
-          target = String(part.value);
-        }
-      }
+      // A permissão é conferida antes de ler o arquivo (com o userId que veio antes dele) e de novo depois.
+      const r = await readAvatarUpload(req, async (fields) => {
+        if (fields.userId) target = fields.userId;
+        await allowed();
+      });
+      if (r.fields.userId) target = r.fields.userId;
+      data = r.data;
+      type = r.type;
     } else {
       const body = b(req);
       if (body.userId) target = body.userId;
@@ -313,9 +317,7 @@ export function usersRoutes(app: FastifyInstance) {
       type = m[1];
       data = Buffer.from(m[2], 'base64');
     }
-    if (target !== ctx.userId && !(await hasPermission(ctx.userId, 'edit-other-user-avatar'))) throw forbidden();
-    if (target !== ctx.userId) await assertCanManageUser(ctx, target);
-    if (target === ctx.userId && !getSetting('Accounts_AllowUserAvatarChange')) throw forbidden('Alteração de avatar desativada.');
+    await allowed();
     if (!data) throw badRequest('error-invalid-image', 'Imagem ausente.');
     await setAvatar(target, type, data);
     return {};
@@ -552,6 +554,39 @@ export function usersRoutes(app: FastifyInstance) {
     if (r.data) return reply.type(r.content_type).send(r.data);
     return reply.type('image/svg+xml').send(initialsSvg(r.fname || r.name || '#'));
   });
+}
+
+const AVATAR_MAX = 5 * 1024 * 1024;
+
+// Foto de usuário ou de sala por multipart: o limite de 5 MB vale no próprio leitor (o geral é de 1 GB), então um
+// arquivo maior é descartado enquanto chega, sem ir inteiro para a memória. beforeFile roda antes de o arquivo ser
+// lido, com os campos que vieram antes dele (a permissão).
+export async function readAvatarUpload(req: any, beforeFile?: (fields: Record<string, string>) => Promise<void>) {
+  const fields: Record<string, string> = {};
+  let data: Buffer | null = null;
+  let type = '';
+  try {
+    for await (const part of req.parts({ limits: { fileSize: AVATAR_MAX, files: 1, fields: 5, parts: 6, fieldSize: 1024 } })) {
+      if (part.type !== 'file') {
+        if (part.value) fields[part.fieldname] = String(part.value);
+        continue;
+      }
+      try {
+        await beforeFile?.(fields);
+      } catch (e) {
+        part.file.resume();
+        throw e;
+      }
+      data = await part.toBuffer();
+      type = part.mimetype;
+    }
+  } catch (e) {
+    const code = (e as any)?.code;
+    if (code === 'FST_REQ_FILE_TOO_LARGE') throw badRequest('error-file-too-large', 'Imagem muito grande (máx. 5 MB).');
+    if (code === 'FST_FILES_LIMIT' || code === 'FST_FIELDS_LIMIT' || code === 'FST_PARTS_LIMIT') throw badRequest('error-invalid-params', 'Envie só uma imagem por vez.');
+    throw e;
+  }
+  return { data, type, fields };
 }
 
 const BULK_MAX = 500;
