@@ -214,8 +214,12 @@ async function subjectLabels(list: { type: DriveSubjectType; id: string }[]) {
 }
 
 export async function storage(): Promise<DriveStorage> {
+  // Na lixeira: o arquivo mandado sozinho e tudo o que está dentro de uma pasta que foi para a lixeira.
   const r = await one<{ used: string; trash: string }>(
-    `SELECT coalesce(sum(size), 0) AS used, coalesce(sum(size) FILTER (WHERE trashed_at IS NOT NULL), 0) AS trash FROM drive_files`,
+    `WITH RECURSIVE t AS (SELECT id FROM drive_folders WHERE trashed_at IS NOT NULL UNION SELECT d.id FROM drive_folders d JOIN t ON d.parent_id = t.id)
+     SELECT coalesce(sum(size), 0) AS used,
+            coalesce(sum(size) FILTER (WHERE trashed_at IS NOT NULL OR folder_id IN (SELECT id FROM t)), 0) AS trash
+     FROM drive_files`,
   );
   let diskFree: number | null = null;
   try {

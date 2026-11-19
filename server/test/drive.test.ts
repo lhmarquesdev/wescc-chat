@@ -439,6 +439,18 @@ describe('nomes, avisos e limites', () => {
     await share(hidden, [{ type: 'user', id: carla.userId, level: 3 }], A, false);
   });
 
+  it('"na lixeira" conta os arquivos de dentro de uma pasta mandada para a lixeira', async () => {
+    const s0 = (await api('GET', 'files.storage', undefined, A)).storage;
+    const lixo = (await api('POST', 'files.folder.create', { name: 'Lixo', parentId: eq }, bruno)).folder;
+    const sub = (await api('POST', 'files.folder.create', { name: 'Dentro', parentId: lixo._id }, bruno)).folder;
+    await up(lixo._id, 'grande.log', 'z'.repeat(10000), bruno);
+    await up(sub._id, 'menor.log', 'z'.repeat(500), bruno);
+    await api('POST', 'files.trash', { folderIds: [lixo._id] }, bruno);
+    const s1 = (await api('GET', 'files.storage', undefined, A)).storage;
+    expect(s1.trash - s0.trash).toBe(10500);
+    expect(s1.used - s0.used).toBe(10500);
+  });
+
   it('histórico com offset ou count fora do normal não dá erro 500', async () => {
     for (const offset of ['1e309', '-5', '1.5', 'abc', '99999999999999999999']) {
       const x = await api('GET', 'files.activity', { folderId: eq, offset }, carla);
