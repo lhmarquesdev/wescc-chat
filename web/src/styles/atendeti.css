@@ -413,6 +413,40 @@
   flex: none;
   color: hsl(var(--muted-foreground) / 0.7);
 }
+/* Cabeçalho que ordena (SortTh): o rótulo vira botão, com a seta da ordem à direita (esmaecida até ser escolhida). */
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline: -6px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  text-transform: inherit;
+  white-space: nowrap;
+}
+.th-sort:hover,
+.table th[aria-sort] > .th-sort {
+  color: hsl(var(--foreground));
+}
+.th-sort:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+.th-sort > .th-sort-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  opacity: 0.45;
+}
+.th-sort:hover > .th-sort-icon {
+  opacity: 0.8;
+}
+.table th[aria-sort] > .th-sort > .th-sort-icon {
+  opacity: 1;
+  color: hsl(var(--brand-ink-2));
+}
 /* Datas e números: 12px tabulares e discretos. */
 .table td.num,
 .table td.date,

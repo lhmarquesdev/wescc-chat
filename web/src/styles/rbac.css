@@ -1670,6 +1670,10 @@
   .rbac-strip-select {
     flex: 1 1 140px;
   }
+  /* A ordem (só no celular) desce para a linha do Novo usuário, com espaço para o texto. */
+  .rbac-strip-select.rbac-sort-select {
+    flex-basis: 200px;
+  }
   .rbac-bulk {
     left: var(--space-3);
     right: var(--space-3);

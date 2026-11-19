@@ -67,6 +67,33 @@ export async function resolveUserParam(params: Record<string, any>) {
   return u;
 }
 
+// Ordenação de users.list, no formato do Rocket.Chat (sort={"lastLogin":-1}). O nome compara sem acento e sem
+// maiúsculas; quem nunca entrou conta como o acesso mais antigo; sem e-mail fica no fim. E-mail e último acesso só
+// para quem administra (os outros não veem esses campos). Pessoas continuam antes dos bots, e o nome de usuário
+// desempata em ordem alfabética (a paginação não repete nem pula ninguém).
+const USER_SORT: Record<string, { col: string; admin?: boolean; nulls?: (asc: boolean) => string }> = {
+  username: { col: 'lower(username)' },
+  name: { col: 'wescc_fold(name)' },
+  createdAt: { col: 'created_at' },
+  email: { col: 'lower(email)', admin: true, nulls: () => ' NULLS LAST' },
+  lastLogin: { col: 'last_login', admin: true, nulls: (asc) => (asc ? ' NULLS FIRST' : ' NULLS LAST') },
+};
+function userListOrder(raw: unknown, admin: boolean) {
+  if (raw === undefined || raw === '') return `(type = 'bot'), username`;
+  let s: unknown;
+  try {
+    s = typeof raw === 'string' ? JSON.parse(raw) : undefined;
+  } catch {
+    s = undefined;
+  }
+  const entries = s && typeof s === 'object' && !Array.isArray(s) ? Object.entries(s) : [];
+  const [key, dir] = entries.length === 1 ? entries[0] : [];
+  const sort = key && Object.hasOwn(USER_SORT, key) ? USER_SORT[key] : undefined;
+  if (!sort || (sort.admin && !admin) || (dir !== 1 && dir !== -1)) throw badRequest('error-invalid-params', 'Não dá para ordenar a lista de usuários por esse campo.');
+  const asc = dir === 1;
+  return `(type = 'bot'), ${sort.col} ${asc ? 'ASC' : 'DESC'}${sort.nulls?.(asc) ?? ''}, username`;
+}
+
 export function usersRoutes(app: FastifyInstance) {
   // ---------- Autenticação ----------
   route(app, 'POST', 'login', { auth: false }, async (req, reply) => {
@@ -354,8 +381,9 @@ export function usersRoutes(app: FastifyInstance) {
     // Desativados não inclui quem aguarda aprovação: cada um tem o seu filtro.
     if (query.status === 'deactivated') w += ' AND NOT active AND NOT pending_approval';
     if (query.status === 'pending') w += ' AND NOT active AND pending_approval';
-    // Pessoas antes dos bots: a lista abre pelas contas que se administram de verdade.
-    const rows = await many(`SELECT *, count(*) OVER() AS total FROM users WHERE ${w} ORDER BY (type = 'bot'), username LIMIT ${count} OFFSET ${offset}`, params);
+    // Pessoas antes dos bots: a lista abre pelas contas que se administram de verdade. sort= ordena por uma coluna.
+    const order = userListOrder(query.sort, admin);
+    const rows = await many(`SELECT *, count(*) OVER() AS total FROM users WHERE ${w} ORDER BY ${order} LIMIT ${count} OFFSET ${offset}`, params);
     // counts=true: os números de cada status (com a busca e o papel), na mesma chamada, para os filtros da tela.
     const counts =
       admin && query.counts === 'true'

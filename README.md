@@ -751,6 +751,9 @@ Em Administração › Usuários:
 - **Excluir conta** não dá para desfazer: as mensagens da pessoa continuam nas salas e nas conversas em grupo (só ela
   sai delas); cada conversa a dois fica arquivada, só para leitura da outra pessoa, com o nome "Fulano (conta
   excluída)"; eventos e reuniões com convidados que ela organizava passam para um dos convidados.
+- **Ordenar**: clique em Nome, E-mail ou Último acesso para ordenar a lista (clicar de novo inverte). Em Último
+  acesso, do mais antigo, quem nunca entrou aparece primeiro. No celular a ordem fica num seletor ao lado do filtro de
+  papel. As pessoas vêm antes dos bots em qualquer ordem, e a exportação CSV segue a ordem da tela.
 - **Exportar CSV** neutraliza textos que começam com `=`, `+`, `-` ou `@` (a planilha não executa fórmulas vindas de
   nomes).
 

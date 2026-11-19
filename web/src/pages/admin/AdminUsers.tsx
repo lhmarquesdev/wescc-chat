@@ -5,7 +5,7 @@ import { formatDateTime, plural, roleLabel, setRoleDescriptions } from '../../li
 import { usePermission, useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, Menu, Modal, Pager, SkeletonTable, Toggle, Tooltip, confirmDialog, useAsync, ThLabel } from '../../components/ui';
-import { ActivePill, RolePills, RowMenu, UserCell, lastSeen } from './parts';
+import { ActivePill, RolePills, RowMenu, SortTh, UserCell, lastSeen, type SortDir } from './parts';
 import type { LockReason } from '@shared/rbac';
 import { BulkRolesDialog } from './rbac/BulkRoles';
 import { loadGrant, lockText, rbacFail, userLockOf } from './rbac/data';
@@ -24,6 +24,19 @@ function origin(u: any) {
 }
 
 type Status = '' | 'active' | 'deactivated' | 'pending';
+
+// Colunas que ordenam a lista (o servidor também aceita o nome de usuário e a data de criação). Sem ordem escolhida,
+// fica a padrão: pessoas antes dos bots, pelo nome de usuário. No celular, as mesmas ordens num seletor.
+type SortKey = 'name' | 'email' | 'lastLogin';
+type Sort = { key: SortKey; dir: SortDir } | null;
+const SORT_OPTIONS: [string, string][] = [
+  ['name:1', 'Nome (A a Z)'],
+  ['name:-1', 'Nome (Z a A)'],
+  ['email:1', 'E-mail (A a Z)'],
+  ['email:-1', 'E-mail (Z a A)'],
+  ['lastLogin:1', 'Acesso mais antigo'],
+  ['lastLogin:-1', 'Acesso mais recente'],
+];
 
 const statusText = (u: any) => (u.active ? 'Ativo' : u.pendingApproval ? 'Aguardando aprovação' : 'Desativado');
 
@@ -68,6 +81,9 @@ function UserList() {
   const [role, setRole] = useState(params.get('role') ?? '');
   const [offset, setOffset] = useState(0);
   const [count, setCount] = useState(25);
+  const [sort, setSort] = useState<Sort>(null);
+  const sortParam = sort ? JSON.stringify({ [sort.key]: sort.dir }) : undefined;
+  const sortBy = (key: SortKey) => (dir: SortDir) => (setSort({ key, dir }), setOffset(0));
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Pessoas já vistas (em qualquer página ou no "Selecionar todos"): a seleção vale entre páginas.
@@ -86,7 +102,7 @@ function UserList() {
     return () => clearTimeout(t);
   }, [search, filter]);
   // As contagens do controle segmentado (com a busca e o papel aplicados) vêm na mesma chamada da lista.
-  const { data, loading, error, reload } = useAsync(() => api.get('users.list', { filter, status, role, offset, count, counts: 'true' }), [filter, status, role, offset, count]);
+  const { data, loading, error, reload } = useAsync(() => api.get('users.list', { filter, status, role, sort: sortParam, offset, count, counts: 'true' }), [filter, status, role, sortParam, offset, count]);
   const roles = useAsync(() => api.get('roles.list').then((r) => (setRoleDescriptions(r.roles), r)), []);
   // Hierarquia de concessão: papéis que quem está usando a tela pode dar ou tirar (os outros aparecem com cadeado).
   const grant = useAsync(loadGrant, []);
@@ -129,7 +145,7 @@ function UserList() {
     try {
       const all: any[] = [];
       for (let o = 0; o < SELECT_MAX; o += 500) {
-        const r = await api.get('users.list', { filter, status, role, offset: o, count: 500 });
+        const r = await api.get('users.list', { filter, status, role, sort: sortParam, offset: o, count: 500 });
         all.push(...r.users);
         if (all.length >= r.total || !r.users.length) break;
       }
@@ -252,7 +268,7 @@ function UserList() {
     try {
       const all: any[] = [];
       for (let o = 0; ; o += 500) {
-        const r = await api.get('users.list', { filter, status, role, offset: o, count: 500 });
+        const r = await api.get('users.list', { filter, status, role, sort: sortParam, offset: o, count: 500 });
         all.push(...r.users);
         if (all.length >= r.total || !r.users.length) break;
       }
@@ -290,6 +306,24 @@ function UserList() {
           {globalRoles.map((r: any) => (
             <option key={r._id} value={r._id}>
               {roleLabel(r._id)}
+            </option>
+          ))}
+        </select>
+        {/* No celular a tabela vira cartões e o cabeçalho some: a ordem fica neste seletor. */}
+        <select
+          className="rbac-strip-select rbac-sort-select mobile-only"
+          aria-label="Ordenar"
+          value={sort ? `${sort.key}:${sort.dir}` : ''}
+          onChange={(e) => {
+            const [key, dir] = e.target.value.split(':');
+            setSort(key ? { key: key as SortKey, dir: Number(dir) as SortDir } : null);
+            setOffset(0);
+          }}
+        >
+          <option value="">Ordem padrão</option>
+          {SORT_OPTIONS.map(([v, label]) => (
+            <option key={v} value={v}>
+              {label}
             </option>
           ))}
         </select>
@@ -350,21 +384,15 @@ function UserList() {
                     onChange={toggleAll}
                   />
                 </th>
-                <th>
-                  <ThLabel>Nome</ThLabel>
-                </th>
-                <th className="col-xl">
-                  <ThLabel>E-mail</ThLabel>
-                </th>
+                <SortTh label="Nome" dir={sort?.key === 'name' ? sort.dir : undefined} onSort={sortBy('name')} />
+                <SortTh label="E-mail" className="col-xl" dir={sort?.key === 'email' ? sort.dir : undefined} onSort={sortBy('email')} />
                 <th className="col-roles col-md">
                   <ThLabel>Papéis</ThLabel>
                 </th>
                 <th className="col-status">
                   <ThLabel>Status</ThLabel>
                 </th>
-                <th className="col-seen col-lg">
-                  <ThLabel>Último acesso</ThLabel>
-                </th>
+                <SortTh label="Último acesso" kind="date" className="col-seen col-lg" dir={sort?.key === 'lastLogin' ? sort.dir : undefined} onSort={sortBy('lastLogin')} />
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>

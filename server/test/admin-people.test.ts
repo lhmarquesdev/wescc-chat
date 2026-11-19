@@ -1,5 +1,6 @@
 // Administração de pessoas: cadastro sem e-mail, excluir sem levar as conversas dos outros, o último administrador
-// ativo, as restrições de segurança de papéis com gente acima de quem edita e o que o editor de usuário mostra.
+// ativo, as restrições de segurança de papéis com gente acima de quem edita, o que o editor de usuário mostra e a
+// ordem da lista.
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pool } from '../src/db/pool';
 import { admin, api, connectWs, login, newUser, sleep, startServer, stopServer, type Auth } from './helpers';
@@ -372,5 +373,53 @@ describe('editor de usuário: própria senha, e-mail verificado e dispositivos',
     expect(mine[0].userId).toBe(A.userId);
     expect(mine[0].roles).toContain('admin');
     expect(r.sessions.find((s: any) => s.userId === u.userId)).toMatchObject({ current: false, roles: ['user'] });
+  });
+});
+
+describe('lista de usuários: ordenar por coluna', () => {
+  it('ordena por nome (sem acento), e-mail e último acesso, com as pessoas antes dos bots; campo inválido é recusado', async () => {
+    const mk = async (username: string, name: string, email: string | null, type = 'user') => {
+      const r = await api('POST', 'users.create', { username, name, email: email ?? '', password: 'senha-forte-1', type }, A);
+      expect(r.success).toBe(true);
+      return r.user._id as string;
+    };
+    const ids = {
+      ordem1: await mk('ordem1', 'Bruno', 'z@ordem.local'),
+      ordem2: await mk('ordem2', 'álvaro', 'b@ordem.local'),
+      ordem3: await mk('ordem3', 'Carla', 'A@ordem.local'),
+      ordem4: await mk('ordem4', 'Ana', null),
+      ordem5: await mk('ordem5', 'Aaa Bot', null, 'bot'),
+    };
+    // ordem2 nunca entrou; o bot também não.
+    const seen: Record<string, string | null> = { ordem1: '1 day', ordem2: null, ordem3: '5 days', ordem4: '0 days', ordem5: null };
+    for (const [u, ago] of Object.entries(seen)) await pool.query(`UPDATE users SET last_login = CASE WHEN $2::interval IS NULL THEN NULL ELSE now() - $2::interval END WHERE id = $1`, [ids[u as keyof typeof ids], ago]);
+
+    const list = async (sort?: unknown, auth: Auth = A, extra: Record<string, string> = {}) => {
+      const r = await api('GET', 'users.list', { filter: 'ordem', ...(sort ? { sort: typeof sort === 'string' ? sort : JSON.stringify(sort) } : {}), ...extra }, auth);
+      return r.users ? r.users.map((u: any) => u.username).join(' ') : r;
+    };
+    expect(await list()).toBe('ordem1 ordem2 ordem3 ordem4 ordem5');
+    expect(await list({ name: 1 })).toBe('ordem2 ordem4 ordem1 ordem3 ordem5');
+    expect(await list({ name: -1 })).toBe('ordem3 ordem1 ordem4 ordem2 ordem5');
+    // Quem nunca entrou conta como o acesso mais antigo.
+    expect(await list({ lastLogin: 1 })).toBe('ordem2 ordem3 ordem1 ordem4 ordem5');
+    expect(await list({ lastLogin: -1 })).toBe('ordem4 ordem1 ordem3 ordem2 ordem5');
+    // Sem e-mail fica no fim, nas duas direções; maiúsculas não contam.
+    expect(await list({ email: 1 })).toBe('ordem3 ordem2 ordem1 ordem4 ordem5');
+    expect(await list({ email: -1 })).toBe('ordem1 ordem2 ordem3 ordem4 ordem5');
+    expect(await list({ createdAt: -1 })).toBe('ordem4 ordem3 ordem2 ordem1 ordem5');
+    // A ordem vale entre as páginas.
+    expect(await list({ name: 1 }, A, { offset: '1', count: '2' })).toBe('ordem4 ordem1');
+
+    for (const bad of [{ roles: 1 }, { name: 2 }, { name: 1, email: 1 }, '["name"]', 'name', '{"__proto__":1}', '{"constructor":1}']) {
+      const r = await list(bad);
+      expect(r.status).toBe(400);
+      expect(r.error).toBe('Não dá para ordenar a lista de usuários por esse campo.');
+    }
+    // Quem não administra não vê e-mail nem último acesso: também não ordena por eles.
+    const plain = await newUser(A);
+    expect((await list({ lastLogin: 1 }, plain)).status).toBe(400);
+    expect((await list({ email: 1 }, plain)).status).toBe(400);
+    expect(await list({ name: -1 }, plain)).toBe('ordem3 ordem1 ordem4 ordem2 ordem5');
   });
 });
