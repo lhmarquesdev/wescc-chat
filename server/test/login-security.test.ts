@@ -98,6 +98,32 @@ describe('tokens de acesso pessoal', () => {
   });
 });
 
+describe('login', () => {
+  it('espaço antes ou depois do usuário é ignorado', async () => {
+    const u = await newUser(A);
+    expect((await api('POST', 'login', { user: `  ${u.username} `, password: PW })).data?.userId).toBe(u.userId);
+    expect((await api('POST', 'login', { user: ` ${u.username}@test.local\t`, password: PW })).data?.userId).toBe(u.userId);
+  });
+
+  it('conta inexistente leva o mesmo tempo que senha errada (o tempo não revela quem tem cadastro)', async () => {
+    const u = await newUser(A);
+    await login(u.username, PW); // aquece o hash de mentira
+    const known: number[] = [];
+    const unknown: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      let t = performance.now();
+      expect((await api('POST', 'login', { user: u.username, password: `errada-${i}` })).status).toBe(401);
+      known.push(performance.now() - t);
+      t = performance.now();
+      expect((await api('POST', 'login', { user: `ninguem-${i}-${Date.now()}`, password: `errada-${i}` })).status).toBe(401);
+      unknown.push(performance.now() - t);
+    }
+    await pool.query('DELETE FROM login_attempts');
+    // Antes: ~3 ms contra ~35 ms (10x). Agora as duas calculam o scrypt.
+    expect(median(unknown)).toBeGreaterThan(median(known) / 3);
+  });
+});
+
 describe('2FA', () => {
   it('o mesmo código do aplicativo não vale duas vezes, nem o da ativação; dois pedidos juntos: só um entra', async () => {
     const u = await newUser(A);

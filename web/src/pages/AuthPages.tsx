@@ -153,7 +153,7 @@ export function LoginPage() {
     setError('');
     const before = getCredentials();
     try {
-      await login(user, password, needCode ? code : undefined);
+      await login(user.trim(), password, needCode ? code : undefined);
       navigate(next, { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.errorType === 'totp-required') setNeedCode(true);

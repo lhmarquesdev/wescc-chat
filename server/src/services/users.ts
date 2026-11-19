@@ -207,7 +207,12 @@ export class TwoFactorRequired extends Error {
   }
 }
 
+// Conta que não existe (ou sem senha local) também calcula um scrypt, com este hash de mentira: senão o tempo de
+// resposta diria quem tem cadastro.
+let dummyHash: Promise<string> | null = null;
+
 export async function login(params: { user: string; password: string; code?: string; device: DeviceInfo }) {
+  const dummy = (dummyHash ??= hashPassword(randomToken()));
   let user = await findUserForLogin(params.user);
   const attemptLogin = user ? `id:${user.id}` : params.user;
   await assertNotBlocked(attemptLogin, params.device.ip);
@@ -221,9 +226,12 @@ export async function login(params: { user: string; password: string; code?: str
     } else if (r.status === 'unavailable' && user && getSetting('LDAP_Login_Fallback')) {
       // Servidor fora do ar: vale a senha local. Recusa do diretório (senha errada, conta desativada) não cai aqui.
       ok = await verifyPassword(params.password, user.password_hash);
+    } else if (r.status === 'unavailable') {
+      // Sem a senha local para conferir: a senha pode estar certa, então não conta como tentativa falha.
+      throw new ApiError(503, 'error-ldap-unavailable', 'O servidor de rede (AD) não respondeu. Tente de novo em alguns minutos.');
     }
-  } else if (user) {
-    ok = await verifyPassword(params.password, user.password_hash);
+  } else {
+    ok = (await verifyPassword(params.password, user?.password_hash || (await dummy))) && !!user?.password_hash;
   }
   if (!ok) user = null;
 

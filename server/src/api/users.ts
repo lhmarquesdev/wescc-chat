@@ -92,10 +92,11 @@ export function usersRoutes(app: FastifyInstance) {
       await audit({ id: u.id, username: u.username, ip: req.ip }, 'auth.login', { sessionId: s.sessionId, method });
       return { status: 'success', data: { userId: u.id, authToken: s.authToken, me: await meResponse(u.id) } };
     }
-    const user = str(body.user ?? body.username ?? body.email, 'user');
+    // Espaço antes ou depois do usuário (sugestão do teclado do celular, copiar e colar) não faz o login falhar.
+    const user = str(body.user ?? body.username ?? body.email, 'user').trim();
     const password = str(body.password, 'password');
     try {
-      const r = await login({ user, password, code: body.code, device: { userAgent: req.headers['user-agent'], ip: req.ip, deviceId: readDeviceId(req.headers.cookie) } });
+      const r = await login({ user, password, code: body.code == null ? undefined : String(body.code), device: { userAgent: req.headers['user-agent'], ip: req.ip, deviceId: readDeviceId(req.headers.cookie) } });
       reply.header('set-cookie', r.deviceCookie);
       return { status: 'success', data: { userId: r.user.id, authToken: r.authToken, me: await meResponse(r.user.id) } };
     } catch (e) {
