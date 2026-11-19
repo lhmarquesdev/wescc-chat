@@ -742,7 +742,8 @@ Em Administração › Usuários:
   são nomes de usuário reservados (@all e @here avisam a sala inteira).
 - **Editor de usuário**: Redefinir 2FA e Remover avatar pedem confirmação; trocar o e-mail desmarca "E-mail
   verificado" (a revisão mostra, e dá para manter marcado na aba Segurança); a sua própria senha você troca em Minha
-  conta › Segurança, com a senha atual.
+  conta › Segurança, com a senha atual. Sair com alterações não salvas, inclusive pelo Voltar do navegador ou do
+  celular, pergunta antes de descartar.
 - **Dispositivos**: a sua sessão aparece como "Esta sessão" (encerrá-la tira você da conta), e as sessões de quem tem
   papel acima do seu ficam com cadeado.
 - **Desativar** impede o acesso e guarda tudo; ninguém desativa a própria conta, e o último administrador ativo não

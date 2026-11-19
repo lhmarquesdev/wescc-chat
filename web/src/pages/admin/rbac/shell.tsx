@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { useNavigate } from 'react-router-dom';
 import { Icon, type IconName } from '../../../components/Icon';
 import { Segmented, Tooltip } from '../../../components/ui';
+import { leaveTo } from './leaveGuard';
 
 const nf = new Intl.NumberFormat('pt-BR');
 
@@ -176,7 +177,7 @@ export function EditorShell<T extends string>({
   }, [index]);
   const back = async () => {
     if (onBack && !(await onBack())) return;
-    navigate(backTo);
+    leaveTo(navigate, backTo);
   };
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
     const n = e.key === 'ArrowRight' ? index + 1 : e.key === 'ArrowLeft' ? index - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? visible.length - 1 : null;
