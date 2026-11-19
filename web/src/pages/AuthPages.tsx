@@ -4,7 +4,7 @@ import type { OAuthProviderPublic, OAuthProviderType } from '@shared/index';
 import { api, ApiError, errorMessage, getCredentials } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
 import { clearLogoutReason, LOGOUT_REASON_ICON, LOGOUT_REASON_TEXT, peekLogoutReason } from '../lib/logoutReason';
-import { login, loginWithOAuth, loginWithSaml } from '../lib/session';
+import { login, loginWithOAuth, loginWithSaml, logout } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
 import { BrandMark, ProviderIcon } from '../components/BrandIcons';
 import { Icon } from '../components/Icon';
@@ -386,21 +386,51 @@ export function ResetPasswordPage() {
   );
 }
 
+// Nome de usuário aceito pelo servidor (validateUsername).
+const USERNAME_RE = /^[0-9a-zA-Z._-]{2,40}$/;
+type RegisterForm = { name: string; username: string; email: string; pass: string; confirm: string };
+
+// Conferência antes de enviar, campo a campo, com o texto que a pessoa entende (o servidor confere de novo).
+function registerErrors(f: RegisterForm): Partial<Record<keyof RegisterForm, string>> {
+  const e: Partial<Record<keyof RegisterForm, string>> = {};
+  if (!f.name.trim()) e.name = 'Preencha o seu nome.';
+  else if (f.name.trim().length > 80) e.name = 'O nome pode ter até 80 caracteres.';
+  if (!f.username) e.username = 'Preencha o nome de usuário.';
+  else if (!USERNAME_RE.test(f.username)) e.username = 'Use de 2 a 40 letras sem acento, números, ponto, hífen ou sublinhado.';
+  if (!f.email.trim()) e.email = 'Preencha o e-mail.';
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) e.email = 'Digite um e-mail válido, como nome@empresa.com.br.';
+  if (!f.pass) e.pass = 'Crie uma senha.';
+  else if (!f.pass.trim()) e.pass = 'A senha não pode ter só espaços.';
+  if (f.pass && f.confirm !== f.pass) e.confirm = 'As senhas não conferem.';
+  return e;
+}
+
 export function RegisterPage() {
   const navigate = useNavigate();
   const { secret } = useParams();
-  const [f, setF] = useState({ name: '', username: '', email: '', pass: '', confirm: '' });
+  const [f, setF] = useState<RegisterForm>({ name: '', username: '', email: '', pass: '', confirm: '' });
   const [error, setError] = useState('');
+  // Erros por campo: aparecem depois da primeira tentativa de enviar e somem conforme a pessoa corrige.
+  const [tried, setTried] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const minLen = useSetting<number>('Accounts_Password_Policy_MinLength');
   const registration = useSetting<string>('Accounts_RegistrationForm');
+  const errs = tried ? registerErrors(f) : {};
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (f.pass !== f.confirm) return setError('As senhas não conferem.');
+    setTried(true);
+    const found = registerErrors(f);
+    const first = (['name', 'username', 'email', 'pass', 'confirm'] as const).find((k) => found[k]);
+    if (first) {
+      document.querySelector<HTMLInputElement>(`.auth-form [name="${first}"]`)?.focus();
+      return;
+    }
+    setBusy(true);
     try {
-      await api.post('users.register', { name: f.name, username: f.username, email: f.email, pass: f.pass, secretURL: secret });
+      await api.post('users.register', { name: f.name.trim(), username: f.username, email: f.email.trim(), pass: f.pass, secretURL: secret });
       try {
         await login(f.username, f.pass);
         navigate('/home');
@@ -409,12 +439,24 @@ export function RegisterPage() {
       }
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      setBusy(false);
     }
   };
 
   if (registration === 'Disabled')
     return (
       <AuthShell title="Cadastro desativado" subtitle="Peça um convite ao administrador.">
+        <Link className="btn lg full" to="/login">
+          <Icon name="back" />
+          Voltar ao login
+        </Link>
+      </AuthShell>
+    );
+  // Só pelo link secreto e o endereço veio sem ele: avisa antes de a pessoa preencher tudo.
+  if (registration === 'Secret' && !secret)
+    return (
+      <AuthShell title="Cadastro só pelo link" subtitle="O cadastro é feito só pelo link enviado pela empresa. Peça o link ao administrador.">
         <Link className="btn lg full" to="/login">
           <Icon name="back" />
           Voltar ao login
@@ -436,24 +478,35 @@ export function RegisterPage() {
     );
   return (
     <AuthShell title="Criar conta" subtitle="Preencha seus dados para entrar no chat da sua equipe.">
-      <form onSubmit={submit} className="form auth-form">
+      <form onSubmit={submit} className="form auth-form" noValidate>
         {error && <FormError>{error}</FormError>}
-        <Field label="Nome">
-          <input autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        <Field label="Nome" error={errs.name}>
+          <input autoFocus name="name" required autoComplete="name" maxLength={80} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         </Field>
-        <Field label="Nome de usuário">
-          <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.replace(/\s/g, '.') })} />
+        <Field label="Nome de usuário" hint={errs.username ? undefined : 'Letras sem acento, números, ponto, hífen e sublinhado (2 a 40).'} error={errs.username}>
+          <input
+            name="username"
+            required
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            value={f.username}
+            onChange={(e) => setF({ ...f, username: e.target.value.replace(/\s/g, '.') })}
+          />
         </Field>
-        <Field label="E-mail">
-          <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+        <Field label="E-mail" error={errs.email}>
+          <input name="email" type="email" required autoComplete="email" autoCapitalize="none" spellCheck={false} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
         </Field>
-        <Field label="Senha" hint={`Mínimo de ${minLen} caracteres.`}>
-          <PasswordInput autoComplete="new-password" value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />
+        <Field label="Senha" hint={errs.pass ? undefined : `Mínimo de ${minLen} caracteres.`} error={errs.pass}>
+          <PasswordInput name="pass" required autoComplete="new-password" value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />
         </Field>
-        <Field label="Confirmar senha">
-          <PasswordInput autoComplete="new-password" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} />
+        <Field label="Confirmar senha" error={errs.confirm}>
+          <PasswordInput name="confirm" required autoComplete="new-password" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} />
         </Field>
-        <button className="btn primary lg full block">Criar conta</button>
+        <button className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy}>
+          {busy && <span className="spinner sm" aria-hidden="true" />}
+          Criar conta
+        </button>
         <div className="auth-alt">
           Já tem conta? <Link to="/login">Entrar</Link>
         </div>
@@ -509,17 +562,24 @@ export function InvitePage({ loggedIn }: { loggedIn: boolean }) {
 }
 
 export function ChangePasswordPage({ onDone }: { onDone: () => void }) {
+  const navigate = useNavigate();
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!p1) return setError('Digite a nova senha.');
     if (p1 !== p2) return setError('As senhas não conferem.');
+    setBusy(true);
+    setError('');
     try {
       await api.post('users.updateOwnBasicInfo', { data: { newPassword: p1, currentPassword: '' } });
       onDone();
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      setBusy(false);
     }
   };
   return (
@@ -529,10 +589,18 @@ export function ChangePasswordPage({ onDone }: { onDone: () => void }) {
         <Field label="Nova senha">
           <PasswordInput autoFocus autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} />
         </Field>
-        <Field label="Confirmar">
+        <Field label="Confirmar nova senha">
           <PasswordInput autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} />
         </Field>
-        <button className="btn primary lg full block">Salvar</button>
+        <button className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !p1}>
+          {busy && <span className="spinner sm" aria-hidden="true" />}
+          Salvar
+        </button>
+        {/* Conta errada ou computador compartilhado: sair sem trocar a senha, como na tela do 2FA obrigatório. */}
+        <button type="button" className="btn ghost full" onClick={() => void logout().then(() => navigate('/login'))}>
+          <Icon name="logout" />
+          Sair
+        </button>
       </form>
     </AuthShell>
   );

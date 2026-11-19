@@ -231,6 +231,11 @@ describe('troca de senha', () => {
   it('a senha nova precisa ser diferente da atual (troca obrigatória e Minha conta); o administrador define qualquer uma', async () => {
     const r = await api('POST', 'users.create', { username: `prov${Date.now()}`, name: 'Prov', email: `prov${Date.now()}@test.local`, password: 'Provisoria123', requirePasswordChange: true }, A);
     const forced = await login(r.user.username, 'Provisoria123');
+    // Salvar com o campo vazio não é mais um 200 que não muda nada.
+    const empty = await api('POST', 'users.updateOwnBasicInfo', { data: { newPassword: '', currentPassword: '' } }, forced);
+    expect([empty.status, empty.error]).toEqual([400, 'Digite a nova senha.']);
+    const spaces = await api('POST', 'users.updateOwnBasicInfo', { data: { newPassword: '          ', currentPassword: '' } }, forced);
+    expect([spaces.status, spaces.error]).toEqual([400, 'A senha não pode ter só espaços.']);
     const same = await api('POST', 'users.updateOwnBasicInfo', { data: { newPassword: 'Provisoria123', currentPassword: '' } }, forced);
     expect([same.status, same.errorType, same.error]).toEqual([400, 'error-password-same', 'A senha nova precisa ser diferente da atual.']);
     expect((await api('GET', 'me', undefined, forced)).requirePasswordChange).toBe(true);
@@ -288,6 +293,34 @@ describe('cadastro', () => {
       await loadSettings();
     }
     expect(getSetting('Accounts_RegistrationForm')).toBe('Disabled');
+  });
+  it('campos com mensagem para quem preenche; nome obrigatório e com limite; senha só de espaços recusada', async () => {
+    await api('POST', 'settings', { settings: { Accounts_RegistrationForm: 'Public' } }, A);
+    try {
+      const reg = (body: Record<string, unknown>) => api('POST', 'users.register', { name: 'Fulano', username: `cad${Date.now()}`, email: `cad${Date.now()}@test.local`, pass: 'senha-forte-1', ...body });
+      expect((await reg({ username: '' })).error).toBe('Informe o nome de usuário.');
+      expect((await reg({ name: '   ' })).error).toBe('Informe o nome.');
+      expect((await reg({ name: undefined })).error).toBe('Informe o nome.');
+      expect((await reg({ name: 'N'.repeat(81) })).error).toBe('O nome pode ter até 80 caracteres.');
+      expect((await reg({ email: ' ' })).error).toBe('Informe o e-mail.');
+      expect((await reg({ pass: '' })).error).toBe('Informe a senha.');
+      expect((await reg({ pass: '          ' })).error).toBe('A senha não pode ter só espaços.');
+      // Espaços nas pontas do nome saem.
+      const ok = await reg({ name: '  Fulana de Tal  ' });
+      expect(ok.user.name).toBe('Fulana de Tal');
+      // Com o cadastro fechado a resposta continua sendo essa, mesmo com campos vazios.
+      await api('POST', 'settings', { settings: { Accounts_RegistrationForm: 'Disabled' } }, A);
+      expect((await reg({ name: '' })).error).toBe('O cadastro está desativado.');
+
+      // O administrador também não cria conta sem nome ou com nome enorme.
+      const create = (name: unknown) => api('POST', 'users.create', { username: `adm${Date.now()}`, name, email: `adm${Date.now()}@test.local`, password: 'senha-forte-1' }, A);
+      expect((await create('  ')).error).toBe('Informe o nome.');
+      expect((await create('N'.repeat(500))).error).toBe('O nome pode ter até 80 caracteres.');
+      expect((await create(' Beltrano ')).user.name).toBe('Beltrano');
+    } finally {
+      await pool.query(`DELETE FROM settings WHERE id = 'Accounts_RegistrationForm'`);
+      await loadSettings();
+    }
   });
 });
 

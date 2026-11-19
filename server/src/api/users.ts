@@ -14,6 +14,7 @@ import { assertCanManageUser, assertRoleChange, effectiveRoles, grantContext, wr
 import { recordHistory } from '../services/rbacHistory';
 import {
   actorOf,
+  cleanName,
   type Ctx,
   createPersonalToken,
   createUser,
@@ -116,8 +117,10 @@ export function usersRoutes(app: FastifyInstance) {
 
   route(app, 'POST', 'users.register', { auth: false }, async (req) => {
     const body = b(req);
+    // Campo vazio ou inválido: registerUser responde com a mensagem do campo, depois de conferir se o cadastro está aberto.
+    const text = (v: unknown) => (typeof v === 'string' ? v : '');
     const row = await registerUser(
-      { username: str(body.username, 'username'), name: str(body.name, 'name'), email: str(body.email, 'email'), pass: str(body.pass, 'pass'), secretURL: body.secretURL },
+      { username: text(body.username), name: text(body.name), email: text(body.email), pass: text(body.pass), secretURL: body.secretURL },
       req.ip,
     );
     return { user: mapUser(row) };
@@ -205,7 +208,8 @@ export function usersRoutes(app: FastifyInstance) {
   // ---------- Perfil próprio ----------
   route(app, 'POST', 'users.updateOwnBasicInfo', {}, async (req, _rep, ctx) => {
     const d = b(req).data ?? {};
-    // Na troca de senha obrigatória só a senha pode ser alterada.
+    // Na troca de senha obrigatória só a senha pode ser alterada (e vazia não é resposta: antes saía 200 sem mudar nada).
+    if (ctx.setup === 'password' && (typeof d.newPassword !== 'string' || !d.newPassword)) throw badRequest('error-invalid-params', 'Digite a nova senha.');
     const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: d.statusText };
     const row = await updateUser(
       ctx,
@@ -397,7 +401,7 @@ export function usersRoutes(app: FastifyInstance) {
     const row = await createUser(
       {
         username: str(body.username, 'username'),
-        name: str(body.name, 'name'),
+        name: cleanName(body.name),
         email: body.email,
         password: str(body.password, 'password'),
         roles,

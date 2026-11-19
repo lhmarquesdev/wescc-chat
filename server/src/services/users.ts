@@ -33,6 +33,7 @@ export function validateUsername(username: string) {
 }
 
 export function validatePassword(password: string) {
+  if (password && !password.trim()) throw badRequest('error-password-policy-not-met', 'A senha não pode ter só espaços.');
   const min = getSetting<number>('Accounts_Password_Policy_MinLength');
   const errs: string[] = [];
   if (password.length < min) errs.push(`mínimo de ${min} caracteres`);
@@ -40,6 +41,17 @@ export function validatePassword(password: string) {
   if (getSetting('Accounts_Password_Policy_AtLeastOneNumber') && !/[0-9]/.test(password)) errs.push('um número');
   if (getSetting('Accounts_Password_Policy_AtLeastOneSpecialCharacter') && !/[^A-Za-z0-9]/.test(password)) errs.push('um caractere especial');
   if (errs.length) throw badRequest('error-password-policy-not-met', `A senha precisa de: ${errs.join(', ')}.`);
+}
+
+const NAME_MAX = 80;
+
+// Nome de quem se cadastra ou é criado pelo administrador: sem espaços nas pontas, obrigatório e com limite (em branco
+// a pessoa some das listas; enorme, quebra as telas). LDAP, SAML e importação trazem o nome do diretório.
+export function cleanName(name: unknown) {
+  const v = typeof name === 'string' ? name.trim() : '';
+  if (!v) throw badRequest('error-invalid-name', 'Informe o nome.');
+  if (v.length > NAME_MAX) throw badRequest('error-invalid-name', `O nome pode ter até ${NAME_MAX} caracteres.`);
+  return v;
 }
 
 export async function getUserById(id: string) {
@@ -112,14 +124,21 @@ export async function registerUser(input: { username: string; name: string; emai
   if (mode === 'Disabled') throw forbidden('O cadastro está desativado.');
   if (mode === 'Secret' && (!input.secretURL || input.secretURL !== getSetting('Accounts_RegistrationForm_SecretURL')))
     throw forbidden('Cadastro permitido somente pelo link secreto.');
+  // Mensagens para quem preenche a tela de cadastro (não o nome do parâmetro da API).
+  const username = input.username.trim();
+  const email = input.email.trim();
+  if (!username) throw badRequest('error-invalid-params', 'Informe o nome de usuário.');
+  const name = cleanName(input.name);
+  if (!email) throw badRequest('error-invalid-params', 'Informe o e-mail.');
+  if (!input.pass) throw badRequest('error-invalid-params', 'Informe a senha.');
   const domains = String(getSetting('Accounts_AllowedDomainsList') ?? '')
     .split(',')
     .map((d) => d.trim().toLowerCase())
     .filter(Boolean);
-  if (domains.length && !domains.includes(input.email.split('@')[1]?.toLowerCase()))
+  if (domains.length && !domains.includes(email.split('@')[1]?.toLowerCase()))
     throw badRequest('error-invalid-domain', 'Domínio de e-mail não permitido.');
   const manual = getSetting<boolean>('Accounts_ManuallyApproveNewUsers');
-  const row = await createUser({ username: input.username, name: input.name, email: input.email, password: input.pass, active: !manual });
+  const row = await createUser({ username, name, email, password: input.pass, active: !manual });
   await audit({ id: row.id, username: row.username, ip }, 'user.registered', { userId: row.id });
   return row;
 }
