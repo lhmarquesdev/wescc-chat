@@ -288,6 +288,12 @@ describe('parâmetros inválidos na API de mensagens', () => {
       ['chat.getMessagesAround', { msgId: m._id, count: 'abc' }],
       ['chat.getThreadMessages', { tmid: m._id, count: 'abc' }],
       ['chat.syncMessages', { roomId: ch._id, lastUpdate: 'x' }],
+      // Datas que o JavaScript aceita e o banco não (dia que não existe, ano 0 ou de 5 dígitos).
+      ['channels.history', { roomId: ch._id, latest: '2026-02-30' }],
+      ['channels.history', { roomId: ch._id, oldest: '2026-04-31T10:00:00Z' }],
+      ['channels.history', { roomId: ch._id, latest: '0000-01-01' }],
+      ['channels.history', { roomId: ch._id, latest: '275760-09-13' }],
+      ['chat.syncMessages', { roomId: ch._id, lastUpdate: '99999-01-01' }],
     ] as const) {
       const r = await api('GET', path, q, A);
       expect([path, r.status, r.errorType]).toEqual([path, 400, 'error-invalid-params']);

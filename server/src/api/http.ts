@@ -141,8 +141,19 @@ export function intParam(v: unknown, name: string, def: number, min: number, max
 export function dateParam(v: unknown, name: string, opts: { optional?: boolean } = {}): string {
   const s = str(v, name, opts);
   if (s === undefined) return s;
-  if (Number.isNaN(Date.parse(s))) throw new ApiError(400, 'error-invalid-params', `O parâmetro "${name}" deve ser uma data (ex.: 2026-11-19T10:00:00Z).`);
-  return /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/i.test(s) ? s : new Date(s).toISOString();
+  const bad = () => new ApiError(400, 'error-invalid-params', `O parâmetro "${name}" deve ser uma data (ex.: 2026-11-19T10:00:00Z).`);
+  const t = Date.parse(s);
+  // O banco não aceita o ano 0 nem anos de mais de 4 dígitos, que o JavaScript aceita.
+  const year = new Date(t).getUTCFullYear();
+  if (Number.isNaN(t) || year < 1 || year > 9999) throw bad();
+  const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/i.exec(s);
+  if (!iso) return new Date(t).toISOString();
+  // Dia que não existe (2026-02-30, 2026-04-31): o JavaScript passa para o mês seguinte, o banco recusa.
+  const [y, m, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
+  const day = new Date(0);
+  day.setUTCFullYear(y, m - 1, d);
+  if (y < 1 || day.getUTCMonth() !== m - 1 || day.getUTCDate() !== d) throw bad();
+  return s;
 }
 
 export function bool(v: unknown): boolean | undefined {
