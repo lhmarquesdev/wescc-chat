@@ -139,11 +139,13 @@
   box-shadow: inset 3px 0 0 var(--ev-bar), 0 0 0 1px hsl(var(--background));
   z-index: var(--z-raised);
 }
+/* Bloco (e não flex): o título cortado ganha as reticências do .ellipsis; o ícone da reunião fica na linha do texto. */
 .cal-ev.block strong {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
+  display: block;
   font-weight: var(--fw-semibold);
+}
+.cal-ev.block strong .icon {
+  margin-right: var(--space-1);
 }
 .cal-ev.block small {
   opacity: 0.85;
@@ -405,17 +407,25 @@
   font-size: var(--fs-13);
   font-weight: var(--fw-semibold);
 }
+/* "+1 dia": termina em outro dia. */
+.cal-list-time small {
+  display: block;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  opacity: 0.85;
+}
 .cal-list-text {
   min-width: 0;
   display: flex;
   flex-direction: column;
 }
 .cal-list-text strong {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5);
+  display: block;
   color: hsl(var(--foreground));
   font-weight: var(--fw-semibold);
+}
+.cal-list-text strong .icon {
+  margin-right: var(--space-1-5);
 }
 .cal-empty {
   margin: 0;
@@ -468,6 +478,28 @@
 }
 .cal-mini-list small {
   font-size: var(--fs-12);
+}
+/* No celular o título do cartão é o botão que abre a lista. */
+.cal-side-toggle {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cal-side-toggle .cal-side-chevron {
+  margin-left: auto;
+  transition: transform var(--dur-1) var(--ease-out);
+}
+.cal-side-toggle[aria-expanded='true'] .cal-side-chevron {
+  transform: rotate(180deg);
 }
 
 /* Botão redondo de nova reunião no celular (acima da barra de abas). */
@@ -753,9 +785,20 @@
     flex: none;
     overflow: visible;
   }
+  /* Os convites sem resposta ficam acima da agenda, numa faixa que abre a lista. */
   .cal-side {
     flex: none;
+    order: -1;
     overflow: visible;
+  }
+  .cal-side-card {
+    padding: var(--space-1) var(--space-3);
+  }
+  .cal-side-card h2 {
+    margin: 0;
+  }
+  .cal-side-card .cal-mini-list {
+    padding-bottom: var(--space-2);
   }
   .cal-toolbar {
     flex-direction: column;

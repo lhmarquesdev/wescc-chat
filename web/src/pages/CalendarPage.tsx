@@ -6,10 +6,14 @@ import {
   addDays,
   calendarApi,
   cap,
+  DAY_MS,
+  dayTimes,
   eventDays,
   fmtDay,
   fmtTime,
   layoutDay,
+  LIST_DAYS,
+  listRange,
   monthFmt,
   monthGrid,
   onDay,
@@ -61,6 +65,7 @@ export function CalendarPage() {
   const [cursor, setCursor] = useState(() => startOfDay(new Date()));
   const [editor, setEditor] = useState<EditorStart | null>(null);
   const [open, setOpen] = useState<CalendarEvent | null>(null);
+  const [invitesOpen, setInvitesOpen] = useState(false);
 
   const setView = (v: View) => {
     setViewState(v);
@@ -80,9 +85,17 @@ export function CalendarPage() {
       const s = startOfWeek(cursor);
       return { from: s, to: addDays(s, 7) };
     }
-    return { from: startOfDay(cursor), to: addDays(startOfDay(cursor), 45) };
+    return { from: startOfDay(cursor), to: addDays(startOfDay(cursor), LIST_DAYS) };
   }, [view, cursor]);
   const { events, error, reload } = useCalendarEvents(span.from, span.to);
+  // Convites sem resposta de agora até um ano à frente, à parte do período na tela: a contagem é a mesma em Mês, Semana
+  // e Lista.
+  const inviteSpan = useMemo(() => {
+    const now = new Date();
+    return { from: now, to: new Date(now.getTime() + 399 * DAY_MS) };
+  }, []);
+  const invites = useCalendarEvents(inviteSpan.from, inviteSpan.to, true);
+  const reloadAll = () => (reload(), invites.reload());
 
   // Os detalhes abertos acompanham a agenda: a cada recarga (resposta de convidado, mudança, cancelamento) trocam pela
   // cópia nova. Fora do período na tela ou cancelado, o evento é buscado de novo; sem acesso (a pessoa saiu da lista), fecha.
@@ -136,7 +149,7 @@ export function CalendarPage() {
   const move = (dir: -1 | 1) => {
     if (view === 'month') setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + dir, 1));
     else if (view === 'week') setCursor(addDays(cursor, 7 * dir));
-    else setCursor(addDays(cursor, 30 * dir));
+    else setCursor(addDays(cursor, LIST_DAYS * dir));
   };
   const title =
     view === 'month'
@@ -149,10 +162,12 @@ export function CalendarPage() {
             const short = new Intl.DateTimeFormat('pt-BR', { month: 'short' });
             return `${s.getDate()} ${short.format(s)} – ${e.getDate()} ${short.format(e)} de ${e.getFullYear()}`;
           })()
-        : 'Próximos eventos';
+        : sameDay(cursor, new Date())
+          ? 'Próximos eventos'
+          : listRange(startOfDay(cursor));
 
   const openNew = (init: EditorStart = {}) => setEditor(init);
-  const pendingInvites = (events ?? []).filter((e) => e.myResponse === 'pending' && new Date(e.endsAt) > new Date());
+  const pendingInvites = (invites.events ?? []).filter((e) => e.myResponse === 'pending' && new Date(e.endsAt) > new Date());
 
   let body;
   if (error && !events)
@@ -172,7 +187,18 @@ export function CalendarPage() {
         </Empty>
       </div>
     );
-  else if (view === 'month') body = <MonthView month={cursor} events={events} onOpen={setOpen} onDay={(d) => (setCursor(d), setView('week'))} onNew={(d) => openNew({ start: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 9) })} />;
+  else if (view === 'month')
+    body = (
+      <MonthView
+        month={cursor}
+        events={events}
+        phone={phone}
+        onOpen={setOpen}
+        // No celular o dia abre na Lista (a semana tem colunas estreitas demais para ler).
+        onDay={(d) => (setCursor(d), setView(phone ? 'list' : 'week'))}
+        onNew={(d) => openNew({ start: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 9) })}
+      />
+    );
   else if (view === 'week') body = <WeekView start={startOfWeek(cursor)} events={events} onOpen={setOpen} onNew={(d, allDay) => openNew({ start: d, allDay })} />;
   else body = <ListView from={startOfDay(cursor)} events={events} onOpen={setOpen} onNew={() => openNew()} />;
 
@@ -226,23 +252,37 @@ export function CalendarPage() {
         {pendingInvites.length > 0 && (
           <aside className="cal-side">
             <section className="cal-side-card" aria-labelledby="cal-inv-title">
-              <h2 id="cal-inv-title">
-                <Icon name="cal-reminder" size={16} />
-                Convites sem resposta
-                <span className="pill small">{pendingInvites.length}</span>
-              </h2>
-              <ul className="cal-mini-list">
-                {pendingInvites.slice(0, 5).map((e) => (
-                  <li key={e._id}>
-                    <button type="button" onClick={() => setOpen(e)}>
-                      <strong className="ellipsis">{e.title}</strong>
-                      <small className="muted">
-                        {whenLabel(e)} · {e.owner.name || e.owner.username}
-                      </small>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              {phone ? (
+                // No celular o cartão fica acima da agenda, como uma faixa: tocar abre a lista dos convites.
+                <h2 id="cal-inv-title">
+                  <button type="button" className="cal-side-toggle" aria-expanded={invitesOpen} aria-controls="cal-inv-list" onClick={() => setInvitesOpen(!invitesOpen)}>
+                    <Icon name="cal-reminder" size={16} />
+                    Convites sem resposta
+                    <span className="pill small">{pendingInvites.length}</span>
+                    <Icon name="chevron-down" size={16} className="cal-side-chevron" />
+                  </button>
+                </h2>
+              ) : (
+                <h2 id="cal-inv-title">
+                  <Icon name="cal-reminder" size={16} />
+                  Convites sem resposta
+                  <span className="pill small">{pendingInvites.length}</span>
+                </h2>
+              )}
+              {(!phone || invitesOpen) && (
+                <ul className="cal-mini-list" id="cal-inv-list">
+                  {pendingInvites.slice(0, 5).map((e) => (
+                    <li key={e._id}>
+                      <button type="button" onClick={() => setOpen(e)}>
+                        <strong className="ellipsis">{e.title}</strong>
+                        <small className="muted">
+                          {whenLabel(e)} · {e.owner.name || e.owner.username}
+                        </small>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           </aside>
         )}
@@ -259,7 +299,7 @@ export function CalendarPage() {
           onSaved={(e) => {
             setEditor(null);
             setOpen(e);
-            reload();
+            reloadAll();
           }}
         />
       )}
@@ -270,7 +310,7 @@ export function CalendarPage() {
           onEdit={() => setEditor({ event: open })}
           onChanged={(e) => {
             setOpen(e);
-            reload();
+            reloadAll();
           }}
         />
       )}
@@ -280,7 +320,21 @@ export function CalendarPage() {
 
 // ---------- Mês ----------
 
-function MonthView({ month, events, onOpen, onDay: openDay, onNew }: { month: Date; events: CalendarEvent[] | null; onOpen: (e: CalendarEvent) => void; onDay: (d: Date) => void; onNew: (d: Date) => void }) {
+function MonthView({
+  month,
+  events,
+  phone,
+  onOpen,
+  onDay: openDay,
+  onNew,
+}: {
+  month: Date;
+  events: CalendarEvent[] | null;
+  phone: boolean;
+  onOpen: (e: CalendarEvent) => void;
+  onDay: (d: Date) => void;
+  onNew: (d: Date) => void;
+}) {
   const days = monthGrid(month);
   const today = new Date();
   const heads = days.slice(0, 7).map((d) => cap(weekdayShort.format(d).replace('.', '')));
@@ -298,8 +352,20 @@ function MonthView({ month, events, onOpen, onDay: openDay, onNew }: { month: Da
           const list = (events ?? []).filter((e) => onDay(e, d));
           const out = d.getMonth() !== month.getMonth();
           return (
-            <div key={d.toISOString()} role="gridcell" className={['cal-cell', out && 'out', sameDay(d, today) && 'today'].filter(Boolean).join(' ')} onDoubleClick={() => onNew(d)}>
-              <button type="button" className="cal-cell-day" aria-label={fmtDay(d)} onClick={() => openDay(d)}>
+            <div
+              key={d.toISOString()}
+              role="gridcell"
+              className={['cal-cell', out && 'out', sameDay(d, today) && 'today'].filter(Boolean).join(' ')}
+              onDoubleClick={() => onNew(d)}
+              // No celular os eventos são só barras: tocar em qualquer lugar do dia abre o dia.
+              onClick={phone ? () => openDay(d) : undefined}
+            >
+              <button
+                type="button"
+                className="cal-cell-day"
+                aria-label={phone && list.length ? `${fmtDay(d)}, ${list.length === 1 ? '1 evento' : `${list.length} eventos`}` : fmtDay(d)}
+                onClick={phone ? undefined : () => openDay(d)}
+              >
                 {d.getDate()}
               </button>
               {!events ? (
@@ -307,14 +373,22 @@ function MonthView({ month, events, onOpen, onDay: openDay, onNew }: { month: Da
               ) : (
                 <>
                   {list.slice(0, 3).map((e) => (
-                    <button key={e._id} type="button" className={`${eventClass(e)} chip`} title={`${e.title} · ${whenLabel(e)}`} onClick={() => onOpen(e)}>
-                      {!e.allDay && <span className="tabular">{fmtTime(e.startsAt)}</span>}
+                    <button
+                      key={e._id}
+                      type="button"
+                      className={`${eventClass(e)} chip`}
+                      title={`${e.title} · ${whenLabel(e)}`}
+                      tabIndex={phone ? -1 : undefined}
+                      aria-hidden={phone || undefined}
+                      onClick={phone ? undefined : () => onOpen(e)}
+                    >
+                      {!e.allDay && dayTimes(e, d).label && <span className="tabular">{dayTimes(e, d).label}</span>}
                       {e.meeting && <Icon name="cal-meeting" size={12} />}
                       <span className="ellipsis">{e.title}</span>
                     </button>
                   ))}
                   {list.length > 3 && (
-                    <button type="button" className="cal-more" onClick={() => openDay(d)}>
+                    <button type="button" className="cal-more" tabIndex={phone ? -1 : undefined} aria-hidden={phone || undefined} onClick={phone ? undefined : () => openDay(d)}>
                       +{list.length - 3} mais
                     </button>
                   )}
@@ -434,6 +508,19 @@ function WeekView({ start, events, onOpen, onNew }: { start: Date; events: Calen
 
 // ---------- Lista ----------
 
+// "22:00–06:00 +1 dia" no dia em que começa; "até 06:00" (ou "Dia todo") no primeiro dia da lista quando começou antes.
+function ListTime({ e, day }: { e: CalendarEvent; day: Date }) {
+  if (e.allDay) return <span className="cal-list-time tabular">Dia todo</span>;
+  const { label, ends } = dayTimes(e, day);
+  if (!sameDay(new Date(e.startsAt), day)) return <span className="cal-list-time tabular">{label || 'Dia todo'}</span>;
+  return (
+    <span className="cal-list-time tabular">
+      {fmtTime(e.startsAt)}–{fmtTime(e.endsAt)}
+      {ends > 0 && <small>{ends === 1 ? '+1 dia' : `+${ends} dias`}</small>}
+    </span>
+  );
+}
+
 function ListView({ from, events, onOpen, onNew }: { from: Date; events: CalendarEvent[] | null; onOpen: (e: CalendarEvent) => void; onNew: () => void }) {
   if (!events)
     return (
@@ -444,7 +531,7 @@ function ListView({ from, events, onOpen, onNew }: { from: Date; events: Calenda
       </div>
     );
   const groups: { day: Date; list: CalendarEvent[] }[] = [];
-  for (let i = 0; i < 45; i++) {
+  for (let i = 0; i < LIST_DAYS; i++) {
     const day = addDays(from, i);
     const list = events.filter((e) => onDay(e, day) && (i === 0 || sameDay(eventDays(e).start, day) || e.allDay));
     if (list.length) groups.push({ day, list });
@@ -475,7 +562,7 @@ function ListView({ from, events, onOpen, onNew }: { from: Date; events: Calenda
             {g.list.map((e) => (
               <li key={e._id}>
                 <button type="button" className={`${eventClass(e)} row`} onClick={() => onOpen(e)}>
-                  <span className="cal-list-time tabular">{e.allDay ? 'Dia todo' : `${fmtTime(e.startsAt)}–${fmtTime(e.endsAt)}`}</span>
+                  <ListTime e={e} day={g.day} />
                   <span className="cal-list-text">
                     <strong className="ellipsis">
                       {e.meeting && <Icon name="cal-meeting" size={14} />}

@@ -86,6 +86,26 @@ export function whenLabel(e: Pick<CalendarEvent, 'allDay' | 'startsAt' | 'endsAt
   return `${dayName(start)}, ${fmtTime(start)} – ${dayName(end)}, ${fmtTime(end)}`;
 }
 
+// A Lista mostra 45 dias; Anterior e Próximo andam o mesmo tanto.
+export const LIST_DAYS = 45;
+const monthShort = new Intl.DateTimeFormat('pt-BR', { month: 'short' });
+
+// Título da Lista fora de hoje: o período na tela, como o da Semana ("20 out. – 3 dez. de 2026").
+export function listRange(from: Date): string {
+  const to = addDays(from, LIST_DAYS - 1);
+  const d = (x: Date) => `${x.getDate()} ${monthShort.format(x)}`;
+  return `${d(from)} – ${d(to)} de ${to.getFullYear()}`;
+}
+
+// Hora de um evento com horário num dia (Mês e Lista): o início no primeiro dia, "até 06:00" no dia em que termina e nada
+// nos dias do meio. ends: no primeiro dia, quantos dias depois ele termina (0 no mesmo dia; fim às 00:00 conta no anterior).
+export function dayTimes(e: Pick<CalendarEvent, 'startsAt' | 'endsAt'>, d: Date): { label: string; ends: number } {
+  const s = new Date(e.startsAt);
+  const last = startOfDay(new Date(new Date(e.endsAt).getTime() - 1));
+  if (sameDay(s, d)) return { label: fmtTime(s), ends: Math.round((last.getTime() - startOfDay(s).getTime()) / DAY_MS) };
+  return { label: sameDay(last, d) ? `até ${fmtTime(e.endsAt)}` : '', ends: 0 };
+}
+
 export function reminderLabel(m: number | null): string {
   if (m === null) return 'Sem lembrete';
   if (m === 0) return 'Na hora';
@@ -98,7 +118,9 @@ export function reminderLabel(m: number | null): string {
 // ---------- API ----------
 
 export const calendarApi = {
-  list: (from: Date, to: Date) => api.get<{ events: CalendarEvent[] }>('calendar.events', { from: from.toISOString(), to: to.toISOString() }).then((r) => r.events),
+  // pending: só os convites ainda sem resposta.
+  list: (from: Date, to: Date, pending?: boolean) =>
+    api.get<{ events: CalendarEvent[] }>('calendar.events', { from: from.toISOString(), to: to.toISOString(), ...(pending ? { pending: true } : {}) }).then((r) => r.events),
   get: (eventId: string) => api.get<{ event: CalendarEvent }>('calendar.event', { eventId }).then((r) => r.event),
   create: (input: CalendarEventInput) => api.post<{ event: CalendarEvent }>('calendar.create', input as any).then((r) => r.event),
   update: (eventId: string, input: Partial<CalendarEventInput>) => api.post<{ event: CalendarEvent }>('calendar.update', { eventId, ...input }).then((r) => r.event),
@@ -111,9 +133,9 @@ export const calendarApi = {
   byRoom: (roomId: string) => api.get<{ event: CalendarEvent | null }>('calendar.meeting.byRoom', { roomId }).then((r) => r.event),
 };
 
-// Eventos de [from, to). Volta a buscar quando a agenda muda (evento, convite, resposta), com 300 ms de
-// folga para juntar vários avisos seguidos. A lista anterior fica na tela enquanto a nova chega.
-export function useCalendarEvents(from: Date, to: Date) {
+// Eventos de [from, to) (com pending, só os convites sem resposta). Volta a buscar quando a agenda muda (evento, convite,
+// resposta), com 300 ms de folga para juntar vários avisos seguidos. A lista anterior fica na tela enquanto a nova chega.
+export function useCalendarEvents(from: Date, to: Date, pending?: boolean) {
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -121,7 +143,7 @@ export function useCalendarEvents(from: Date, to: Date) {
   useEffect(() => {
     let alive = true;
     calendarApi
-      .list(from, to)
+      .list(from, to, pending)
       .then((list) => alive && (setEvents(list), setError(null)))
       .catch((e) => alive && setError(e?.message ?? 'Não foi possível carregar a agenda.'));
     return () => {

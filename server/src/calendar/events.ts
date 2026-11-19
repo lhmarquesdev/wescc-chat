@@ -145,17 +145,19 @@ function rangeOf(fromRaw: unknown, toRaw: unknown): { from: Date; to: Date } {
 }
 
 // Eventos da pessoa que tocam o período [from, to): os dela (do chat e trazidos) e os que a convidaram, sem os que recusou
-// quando pedir (hideDeclined). Cancelados não aparecem.
-export async function listEvents(ctx: Ctx, input: { from?: unknown; to?: unknown; hideDeclined?: boolean }): Promise<CalendarEvent[]> {
+// quando pedir (hideDeclined). Com pending, só os convites ainda sem resposta (o cartão "Convites sem resposta" não
+// depende do período na tela). Cancelados não aparecem.
+export async function listEvents(ctx: Ctx, input: { from?: unknown; to?: unknown; hideDeclined?: boolean; pending?: boolean }): Promise<CalendarEvent[]> {
   assertCalendar();
   const { from, to } = rangeOf(input.from, input.to);
   const rows = await many(
     `SELECT e.* FROM calendar_events e
       WHERE e.status = 'confirmed' AND e.starts_at < $3 AND e.ends_at > $2
-        AND (e.owner_id = $1 OR EXISTS (
-          SELECT 1 FROM calendar_attendees a WHERE a.event_id = e.id AND a.user_id = $1 AND ($4::boolean IS NOT TRUE OR a.response <> 'declined')))
+        AND (($5::boolean IS NOT TRUE AND e.owner_id = $1) OR EXISTS (
+          SELECT 1 FROM calendar_attendees a WHERE a.event_id = e.id AND a.user_id = $1 AND ($4::boolean IS NOT TRUE OR a.response <> 'declined')
+            AND ($5::boolean IS NOT TRUE OR a.response = 'pending')))
       ORDER BY e.starts_at, e.id LIMIT 2000`,
-    [ctx.userId, from, to, input.hideDeclined === true],
+    [ctx.userId, from, to, input.hideDeclined === true, input.pending === true],
   );
   return hydrate(rows, ctx);
 }

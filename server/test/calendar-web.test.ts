@@ -4,7 +4,7 @@ import type { CalendarEvent } from '@shared/calendar';
 // Regras puras da Agenda no navegador (web/src/lib/calendar.ts). O cliente HTTP e o tempo real não são usados aqui.
 vi.mock('../../web/src/lib/api', () => ({ api: {} }));
 vi.mock('../../web/src/lib/realtime', () => ({ realtime: { on: () => () => {} } }));
-const { fromInputs, layoutDay, whenLabel } = await import('../../web/src/lib/calendar');
+const { dayTimes, fromInputs, layoutDay, listRange, whenLabel } = await import('../../web/src/lib/calendar');
 
 let n = 0;
 // Hora local (a grade da semana usa o dia do calendário de quem lê).
@@ -79,5 +79,24 @@ describe('editor: datas digitadas', () => {
     const t = new Date();
     const d = new Date(t.getFullYear(), t.getMonth(), t.getDate() + (t.getMonth() === 11 ? -3 : 3), 10);
     expect(whenLabel({ allDay: false, startsAt: d.toISOString(), endsAt: new Date(d.getTime() + 3_600_000).toISOString() })).not.toContain(String(y));
+  });
+});
+
+describe('mês e lista: evento que vira a noite', () => {
+  it('no dia seguinte mostra "até" o fim; no primeiro dia, quantos dias depois termina', () => {
+    const night = ev(at(29, 22), at(30, 6));
+    expect(dayTimes(night, new Date(2026, 11, 29))).toEqual({ label: '22:00', ends: 1 });
+    expect(dayTimes(night, new Date(2026, 11, 30))).toEqual({ label: 'até 06:00', ends: 0 });
+    // Três dias: nada no dia do meio; até a meia-noite conta como o mesmo dia.
+    const long = ev(at(1, 8), at(3, 17));
+    expect([dayTimes(long, new Date(2026, 11, 1)).ends, dayTimes(long, new Date(2026, 11, 2)).label, dayTimes(long, new Date(2026, 11, 3)).label]).toEqual([2, '', 'até 17:00']);
+    expect(dayTimes(ev(at(10, 22), at(11, 0)), new Date(2026, 11, 10))).toEqual({ label: '22:00', ends: 0 });
+  });
+});
+
+describe('lista: título do período', () => {
+  it('mostra os 45 dias na tela, como o título da semana', () => {
+    expect(listRange(new Date(2026, 9, 20))).toBe('20 out. – 3 dez. de 2026');
+    expect(listRange(new Date(2026, 11, 20))).toBe('20 dez. – 2 fev. de 2027');
   });
 });

@@ -114,6 +114,24 @@ describe('eventos', () => {
     expect(resp).toEqual({ [bruno.userId]: 'pending', [carla.userId]: 'declined' });
   });
 
+  it('convites sem resposta (pending): só os convites pendentes, de qualquer data, sem os eventos da própria pessoa', async () => {
+    const far = await api('POST', 'calendar.create', { title: 'Convite distante', startsAt: at(200 * DAY), endsAt: at(200 * DAY + H), attendeeIds: [carla.userId] }, ana);
+    const near = await api('POST', 'calendar.create', { title: 'Convite próximo', startsAt: at(2 * DAY), endsAt: at(2 * DAY + H), attendeeIds: [carla.userId] }, bruno);
+    const answered = await api('POST', 'calendar.create', { title: 'Convite respondido', startsAt: at(3 * DAY), endsAt: at(3 * DAY + H), attendeeIds: [carla.userId] }, ana);
+    await api('POST', 'calendar.respond', { eventId: answered.event._id, response: 'tentative' }, carla);
+    const own = await api('POST', 'calendar.create', { title: 'Meu', startsAt: at(DAY), endsAt: at(DAY + H), attendeeIds: [ana.userId] }, carla);
+    const r = await api('GET', 'calendar.events', { from: at(0), to: at(399 * DAY), pending: 'true' }, carla);
+    expect(r.success, JSON.stringify(r)).toBe(true);
+    const ids = r.events.map((e: any) => e._id);
+    expect(ids).toEqual(expect.arrayContaining([far.event._id, near.event._id]));
+    expect(ids).not.toContain(answered.event._id);
+    expect(ids).not.toContain(own.event._id);
+    expect(r.events.every((e: any) => e.myResponse === 'pending')).toBe(true);
+    // Sem pending, a lista continua com tudo.
+    const all = (await api('GET', 'calendar.events', { from: at(0), to: at(399 * DAY) }, carla)).events.map((e: any) => e._id);
+    expect(all).toEqual(expect.arrayContaining([answered.event._id, own.event._id]));
+  });
+
   it('cancelar tira o evento da agenda de todos', async () => {
     const c = await api('POST', 'calendar.create', { title: 'Cancelável', startsAt: at(DAY), endsAt: at(DAY + H), attendeeIds: [bruno.userId] }, ana);
     expect((await api('POST', 'calendar.cancel', { eventId: c.event._id }, bruno)).error).toBe(CAL_TEXT.onlyOwner);
