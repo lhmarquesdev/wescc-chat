@@ -56,8 +56,18 @@ export function ListStrip({
   countUnit?: [string, string];
   children?: ReactNode;
 }) {
+  // Sem espaço a faixa quebra em mais linhas: o cabeçalho da tabela, preso logo abaixo dela, acompanha a altura.
+  const strip = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = strip.current;
+    const host = el?.parentElement;
+    if (!el || !host || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => host.style.setProperty('--rbac-strip-h', `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
-    <div className="rbac-strip">
+    <div className="rbac-strip" ref={strip}>
       <div className="rbac-strip-title">
         <span className="rbac-eyebrow">{eyebrow}</span>
         <h1>{title}</h1>

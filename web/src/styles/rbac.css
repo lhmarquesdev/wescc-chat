@@ -831,6 +831,9 @@
 }
 .rbac-list-body.flush {
   padding: 0 0 var(--space-16);
+  /* A tabela fica direto no corpo (sem .table-wrap): ele também responde pelas colunas opcionais (.col-xl, .col-lg,
+     .col-md de admin.css), e a coluna Nome não some em notebook e tablet. */
+  container-name: rbac-list admin-table;
 }
 .rbac-list-body.flush > .table {
   border-radius: 0;
@@ -850,7 +853,7 @@
   margin: var(--space-8);
 }
 .rbac-list-body.flush > .table th {
-  top: 72px;
+  top: var(--rbac-strip-h, 72px);
 }
 .rbac-id {
   white-space: nowrap;
@@ -1706,6 +1709,7 @@
 }
 .rbac-views .seg-nav {
   flex-wrap: nowrap;
+  margin-bottom: 0;
 }
 .rbac-views .seg-nav button {
   white-space: nowrap;
