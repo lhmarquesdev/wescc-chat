@@ -26,7 +26,8 @@ const SELECT = `SELECT i.*, r.name, r.fname, r.t, r.prid, r.team_main, r.notice,
 
 export function inviteStatus(row: any, now = Date.now()): InviteStatus {
   if (row.expires_at && new Date(row.expires_at).getTime() <= now) return 'expired';
-  if (row.max_uses > 0 && row.uses >= row.max_uses) return 'used-up';
+  // Como no UPDATE que gasta o uso: um limite negativo (de antes da validação) não deixa entrar ninguém.
+  if (row.max_uses !== 0 && row.uses >= row.max_uses) return 'used-up';
   if (row.archived) return 'archived';
   const creatorCan =
     row.t !== 'd' && !!row.creator_active && !!row.creator_room_roles && rolesHavePermission([...(row.creator_roles ?? []), ...row.creator_room_roles], 'create-invite-links');

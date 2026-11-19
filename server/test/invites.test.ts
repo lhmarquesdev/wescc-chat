@@ -53,6 +53,12 @@ describe('links de convite', () => {
     expect(await link(owner, rid, 365, 1000)).toMatchObject({ status: 200 });
     expect((await api('POST', 'findOrCreateInvite', { rid }, owner)).days).toBe(1);
     expect((await pool.query('SELECT count(*)::int AS n FROM invites WHERE room_id = $1 AND (days < 0 OR max_uses < 0)', [rid])).rows[0].n).toBe(0);
+    // Um link de antes da validação com limite negativo não deixa entrar, e a tela já diz isso antes do clique.
+    await pool.query(`INSERT INTO invites (id, room_id, user_id, days, max_uses) VALUES ('convitelimitenegativo', $1, $2, 0, -1)`, [rid, owner.userId]);
+    expect(await validate('convitelimitenegativo')).toMatchObject({ valid: false, reason: 'used-up' });
+    const guest = await newUser(A);
+    expect((await use(guest, 'convitelimitenegativo')).status).toBe(400);
+    expect(await membersOf(rid)).not.toContain(guest.userId);
   });
 
   it('quem não participa da sala não cria link para ela, nem com a permissão global', async () => {
