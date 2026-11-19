@@ -5,7 +5,7 @@ import { loadPublicSettings, logout, requestNotificationPermission, signedOutEls
 import { useStore } from './lib/store';
 import { realtime } from './lib/realtime';
 import { Sidebar } from './components/Sidebar';
-import { Topbar } from './components/Topbar';
+import { Topbar, useTrail } from './components/Topbar';
 import { MobileTabBar } from './components/MobileTabBar';
 import { markCallsSeen, useMissedCalls } from './components/navState';
 import { useIsPhone } from './components/overlay';
@@ -39,13 +39,26 @@ function useCustomCss() {
   }, [css]);
 }
 
+// Telas fora da conta (a trilha do topo não cobre).
+const AUTH_TITLES: [RegExp, string][] = [
+  [/^\/login/, 'Entrar'],
+  [/^\/register/, 'Criar conta'],
+  [/^\/forgot-password/, 'Esqueci minha senha'],
+  [/^\/reset-password/, 'Nova senha'],
+  [/^\/invite\//, 'Convite'],
+];
+
 function useTitle() {
   const site = useStore((s) => s.settings.Site_Name as string | undefined);
   const unread = useStore((s) => Object.values(s.subscriptions).reduce((n, x) => n + (x.alert || x.unread ? 1 : 0), 0));
+  const { pathname } = useLocation();
+  const trail = useTrail();
+  // A tela atual na aba e no histórico do navegador: "(2) geral · Wescc Chat", "Agenda · Wescc Chat".
+  const page = AUTH_TITLES.find(([re]) => re.test(pathname))?.[1] ?? trail[trail.length - 1]?.label;
   useEffect(() => {
     // Antes das configurações chegarem fica o título do index.html.
-    if (site) document.title = `${unread ? `(${unread}) ` : ''}${site}`;
-  }, [site, unread]);
+    if (site) document.title = `${unread ? `(${unread}) ` : ''}${page ? `${page} · ` : ''}${site}`;
+  }, [site, unread, page]);
 }
 
 // Tela de abertura: a marca com o indicador de carregamento embaixo.

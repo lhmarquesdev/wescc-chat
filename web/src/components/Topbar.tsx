@@ -29,13 +29,18 @@ const ACCOUNT: Record<string, string> = {
   connected: 'Contas conectadas',
 };
 
-function useTrail(): { label: string; to?: string }[] {
+// Também dá o nome da tela para o título da aba (App.tsx): o último item é a tela atual.
+export function useTrail(): { label: string; to?: string }[] {
   const { pathname } = useLocation();
-  const subs = useStore((s) => s.subscriptions);
   const room = /^\/(channel|group|direct)\/([^/]+)/.exec(pathname);
+  // Só o nome da sala: as outras mudanças nas inscrições (não lidas, última mensagem) não redesenham quem usa a trilha.
+  const roomName = useStore((s) => {
+    if (!room) return undefined;
+    const sub = s.subscriptions[room[2]] ?? Object.values(s.subscriptions).find((x) => x.name === room[2]);
+    return sub?.fname || sub?.name;
+  });
   if (room) {
-    const sub = subs[room[2]] ?? Object.values(subs).find((s) => s.name === room[2]);
-    return [{ label: 'Conversas', to: '/home' }, { label: sub?.fname || sub?.name || 'Conversa' }];
+    return [{ label: 'Conversas', to: '/home' }, { label: roomName || 'Conversa' }];
   }
   const area = AREAS.find(([re]) => re.test(pathname));
   if (!area) return [{ label: 'Início' }];
