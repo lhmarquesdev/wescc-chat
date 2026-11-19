@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { admin, api, newUser, startServer, stopServer, type Auth } from './helpers';
+import { admin, api, connectWs, newUser, startServer, stopServer, type Auth } from './helpers';
 
 // Salas: correções da rodada de testes (times, hierarquia na sala, imagem da sala, leitura, membros, nomes).
 let A: Auth;
@@ -115,5 +115,44 @@ describe('imagem da sala', () => {
     expect(fake.errorType).toBe('error-invalid-image');
     expect((await send(c.channel._id, png(2048))).success).toBe(true);
     expect((await api('GET', 'rooms.info', { roomId: c.channel._id }, ana)).room.avatarETag).toBeTruthy();
+  });
+});
+
+describe('leitura de quem envia', () => {
+  const sub = async (rid: string, who: Auth) => (await api('GET', 'subscriptions.getOne', { roomId: rid }, who)).subscription;
+  it('responder na conversa zera o selo em todas as sessões da pessoa', async () => {
+    const c = await api('POST', 'channels.create', { name: uniq('leitura'), members: [ana.username] }, bia);
+    const rid = c.channel._id;
+    await api('POST', 'chat.sendMessage', { message: { rid, msg: `oi @${ana.username}` } }, bia);
+    await api('POST', 'chat.sendMessage', { message: { rid, msg: 'tudo bem?' } }, bia);
+    expect((await sub(rid, ana)).unread).toBe(2);
+    const ws = connectWs(ana);
+    await ws.ready;
+    // Outra sessão (o celular) responde: esta sessão recebe a inscrição lida.
+    await api('POST', 'chat.sendMessage', { message: { rid, msg: 'tudo!' } }, ana);
+    const ev = await ws.waitFor((e) => e.type === 'subscription' && e.subscription?.rid === rid && e.subscription.unread === 0);
+    expect(ev.subscription.userMentions).toBe(0);
+    ws.close();
+  });
+
+  it('responder só numa thread lê a thread, não a conversa principal', async () => {
+    const c = await api('POST', 'channels.create', { name: uniq('thread'), members: [ana.username] }, bia);
+    const rid = c.channel._id;
+    const root = await api('POST', 'chat.sendMessage', { message: { rid, msg: 'raiz' } }, bia);
+    await api('POST', 'chat.sendMessage', { message: { rid, msg: 'resposta', tmid: root.message._id } }, ana);
+    await api('POST', 'chat.sendMessage', { message: { rid, msg: 'nova na thread', tmid: root.message._id } }, bia);
+    await api('POST', 'chat.sendMessage', { message: { rid, msg: `@${ana.username} olha aqui` } }, bia);
+    const before = await sub(rid, ana);
+    expect(before.unread).toBeGreaterThanOrEqual(1);
+    expect(before.userMentions).toBe(1);
+    expect(before.tunread).toContain(root.message._id);
+    await api('POST', 'chat.sendMessage', { message: { rid, msg: 'respondi na thread', tmid: root.message._id } }, ana);
+    const after = await sub(rid, ana);
+    expect(after.unread).toBe(before.unread);
+    expect(after.userMentions).toBe(1);
+    expect(after.tunread ?? []).not.toContain(root.message._id);
+    // "Também enviar na conversa" conta como resposta na conversa.
+    await api('POST', 'chat.sendMessage', { message: { rid, msg: 'e aqui também', tmid: root.message._id, tshow: true } }, ana);
+    expect((await sub(rid, ana)).unread).toBe(0);
   });
 });
