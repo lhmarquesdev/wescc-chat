@@ -181,7 +181,7 @@ function Profile() {
           <div className="form">
             <div className="two-col">
               <Field label="Nome">
-                <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} disabled={ldap} />
+                <input value={f.name} maxLength={100} onChange={(e) => setF({ ...f, name: e.target.value })} disabled={ldap} />
               </Field>
               <Field label="Nome de usuário">
                 <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} disabled={!allowUsername || ldap} />
@@ -194,7 +194,7 @@ function Profile() {
               <input value={f.statusText} maxLength={120} onChange={(e) => setF({ ...f, statusText: e.target.value })} />
             </Field>
             <Field label="Sobre">
-              <textarea rows={3} value={f.bio} onChange={(e) => setF({ ...f, bio: e.target.value })} />
+              <textarea rows={3} value={f.bio} maxLength={500} onChange={(e) => setF({ ...f, bio: e.target.value })} />
             </Field>
             <div className="form-actions">
               <button className="btn primary" onClick={save} disabled={!dirty}>

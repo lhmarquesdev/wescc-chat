@@ -15,6 +15,7 @@ import { recordHistory } from '../services/rbacHistory';
 import {
   actorOf,
   type Ctx,
+  cleanName,
   createPersonalToken,
   createUser,
   deleteUser,
@@ -417,7 +418,7 @@ export function usersRoutes(app: FastifyInstance) {
     const row = await createUser(
       {
         username: str(body.username, 'username'),
-        name: str(body.name, 'name'),
+        name: cleanName(body.name),
         email: body.email,
         password: sendLink && !body.password ? null : str(body.password, 'password'),
         roles,

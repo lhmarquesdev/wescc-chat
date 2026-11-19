@@ -27,8 +27,22 @@ export const actorOf = (c: Ctx): Actor => ({ id: c.userId, username: c.username,
 const USERNAME_RE = /^[0-9a-zA-Z._-]{2,40}$/;
 export const EMAIL_RE = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)*$/;
 
+// @all e @here avisam a sala inteira, e "system" assina os avisos do próprio chat: ninguém se cadastra com esses nomes.
+const RESERVED_USERNAMES = new Set(['all', 'here', 'system']);
+export const isReservedUsername = (username: string) => RESERVED_USERNAMES.has(username.toLowerCase());
+
 export function validateUsername(username: string) {
   if (!USERNAME_RE.test(username)) throw badRequest('error-invalid-username', 'Nome de usuário inválido (2-40 caracteres: letras, números, ponto, hífen, sublinhado).');
+  if (isReservedUsername(username)) throw badRequest('error-invalid-username', 'Este nome de usuário é reservado. Escolha outro.');
+}
+
+// Nome exibido (aparece em cada mensagem): obrigatório, sem espaços nas pontas e com até 100 caracteres.
+export const NAME_MAX = 100;
+export const BIO_MAX = 500;
+export function cleanName(name: unknown): string {
+  const n = typeof name === 'string' ? name.trim() : '';
+  if (!n || n.length > NAME_MAX) throw badRequest('error-invalid-name', `Informe um nome (até ${NAME_MAX} caracteres).`);
+  return n;
 }
 
 export function validatePassword(password: string) {
@@ -128,7 +142,7 @@ export async function registerUser(input: { username: string; name: string; emai
   if (domains.length && !domains.includes(input.email.split('@')[1]?.toLowerCase()))
     throw badRequest('error-invalid-domain', 'Domínio de e-mail não permitido.');
   const manual = getSetting<boolean>('Accounts_ManuallyApproveNewUsers');
-  const row = await createUser({ username: input.username, name: input.name, email: input.email, password: input.pass, active: !manual });
+  const row = await createUser({ username: input.username, name: cleanName(input.name), email: input.email, password: input.pass, active: !manual });
   // Aprovação manual: a administração vê a conta como "Aguardando aprovação" (não como uma conta desativada).
   if (manual) await query('UPDATE users SET pending_approval = true WHERE id = $1', [row.id]);
   await audit({ id: row.id, username: row.username, ip }, 'user.registered', { userId: row.id });
@@ -507,8 +521,15 @@ export async function updateUser(
     if (other && other.id !== userId) throw badRequest('error-field-unavailable', 'Nome de usuário em uso.');
     sets.push(`username = $${params.push(data.username)}`);
   }
-  if (data.name !== undefined) sets.push(`name = $${params.push(data.name)}`);
-  if (data.bio !== undefined) sets.push(`bio = $${params.push(data.bio)}`);
+  // Nome e bio só são conferidos quando mudam: um valor antigo fora da regra não trava o resto do formulário.
+  let name = data.name === undefined || data.name === u.name ? undefined : cleanName(data.name);
+  if (name === u.name) name = undefined;
+  if (name !== undefined) sets.push(`name = $${params.push(name)}`);
+  const bio = data.bio === undefined ? undefined : String(data.bio ?? '');
+  if (bio !== undefined && bio !== (u.bio ?? '')) {
+    if (bio.length > BIO_MAX) throw badRequest('error-invalid-bio', `A bio pode ter até ${BIO_MAX} caracteres.`);
+    sets.push(`bio = $${params.push(bio)}`);
+  }
   if (data.statusText !== undefined) sets.push(`status_text = $${params.push(data.statusText.slice(0, 120))}`);
   // Campo vazio é "sem e-mail" (NULL, como no cadastro): só a administração tira o e-mail de uma conta.
   const email = data.email === undefined ? undefined : normalizeEmail(data.email);
@@ -557,7 +578,7 @@ export async function updateUser(
     throw isEmailConflict(e) ? badRequest('error-field-unavailable', 'E-mail em uso.') : e;
   });
   if (data.username && data.username !== u.username) await propagateUsername(userId, u.username, data.username);
-  if (data.name !== undefined && data.name !== u.name) await query('UPDATE messages SET user_name = $2 WHERE user_id = $1', [userId, data.name]);
+  if (name !== undefined) await query('UPDATE messages SET user_name = $2 WHERE user_id = $1', [userId, name]);
   if (data.active === false) {
     await revokeAllSessions(userId);
   }

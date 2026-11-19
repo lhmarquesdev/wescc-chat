@@ -258,3 +258,54 @@ describe('cadastros aguardando aprovação', () => {
     await api('POST', 'settings', { settings: { Accounts_ManuallyApproveNewUsers: false } }, A);
   });
 });
+
+describe('dados da pessoa: nome, bio, nomes reservados e nome exibido do papel', () => {
+  it('nome obrigatório (sem só espaços), até 100 caracteres e sem espaços nas pontas; bio até 500', async () => {
+    const u = await newUser(A);
+    for (const name of ['   ', '', 'x'.repeat(101)]) {
+      const r = await api('POST', 'users.update', { userId: u.userId, data: { name } }, A);
+      expect(r.status).toBe(400);
+      expect(r.error).toBe('Informe um nome (até 100 caracteres).');
+    }
+    expect((await api('POST', 'users.update', { userId: u.userId, data: { name: '  Bia Nova  ' } }, A)).user.name).toBe('Bia Nova');
+    const bio = await api('POST', 'users.update', { userId: u.userId, data: { bio: 'b'.repeat(501) } }, A);
+    expect(bio.status).toBe(400);
+    expect(bio.error).toBe('A bio pode ter até 500 caracteres.');
+    expect((await api('POST', 'users.update', { userId: u.userId, data: { bio: 'b'.repeat(500) } }, A)).success).toBe(true);
+    // Cadastro pela administração e pela tela de entrar.
+    const c = await api('POST', 'users.create', { username: 'nome.vazio', name: '   ', email: '', password: 'senha-forte-1' }, A);
+    expect(c.error).toBe('Informe um nome (até 100 caracteres).');
+    await api('POST', 'settings', { settings: { Accounts_RegistrationForm: 'Public' } }, A);
+    expect((await api('POST', 'users.register', { username: 'reg.vazio', name: '  ', email: 'rv@test.local', pass: 'senha-forte-1' })).error).toBe('Informe um nome (até 100 caracteres).');
+    // Minha conta: o próprio nome também, e um nome antigo fora da regra não trava o resto do formulário.
+    expect((await api('POST', 'users.updateOwnBasicInfo', { data: { name: '   ' } }, u)).error).toBe('Informe um nome (até 100 caracteres).');
+    await pool.query('UPDATE users SET name = $2 WHERE id = $1', [u.userId, 'n'.repeat(150)]);
+    expect((await api('POST', 'users.updateOwnBasicInfo', { data: { name: 'n'.repeat(150), statusText: 'De férias' } }, u)).success).toBe(true);
+  });
+
+  it('all, here e system são nomes de usuário reservados', async () => {
+    for (const username of ['all', 'HERE', 'system']) {
+      const r = await api('POST', 'users.create', { username, name: 'Reservado', email: '', password: 'senha-forte-1' }, A);
+      expect(r.status).toBe(400);
+      expect(r.error).toBe('Este nome de usuário é reservado. Escolha outro.');
+    }
+    const u = await newUser(A);
+    expect((await api('POST', 'users.update', { userId: u.userId, data: { username: 'here' } }, A)).error).toBe('Este nome de usuário é reservado. Escolha outro.');
+    await api('POST', 'settings', { settings: { Accounts_RegistrationForm: 'Public' } }, A);
+    expect((await api('POST', 'users.register', { username: 'all', name: 'Todos', email: 'todos@test.local', pass: 'senha-forte-1' })).error).toBe('Este nome de usuário é reservado. Escolha outro.');
+    // "allan" e "here.now" continuam livres.
+    expect((await api('POST', 'users.create', { username: 'allan', name: 'Allan', email: '', password: 'senha-forte-1' }, A)).success).toBe(true);
+  });
+
+  it('nome exibido do papel: sem espaços nas pontas e até 32 caracteres (vazio mostra o identificador)', async () => {
+    const blank = await api('POST', 'rbac.roles.create', { name: 'equipe-branca', description: '   ', scope: 'Users' }, A);
+    expect(blank.success).toBe(true);
+    expect((await pool.query(`SELECT description FROM roles WHERE id = 'equipe-branca'`)).rows[0].description).toBe('');
+    const long = await api('POST', 'rbac.roles.create', { name: 'equipe-longa', description: 'x'.repeat(33), scope: 'Users' }, A);
+    expect(long.status).toBe(400);
+    expect(long.error).toBe('O nome exibido pode ter até 32 caracteres.');
+    expect((await api('POST', 'rbac.roles.update', { roleId: 'equipe-branca', description: 'y'.repeat(40) }, A)).errorType).toBe('RBAC_INVALID_ROLE_LABEL');
+    expect((await api('POST', 'rbac.roles.update', { roleId: 'equipe-branca', description: '  Equipe Branca  ' }, A)).success).toBe(true);
+    expect((await pool.query(`SELECT description FROM roles WHERE id = 'equipe-branca'`)).rows[0].description).toBe('Equipe Branca');
+  });
+});

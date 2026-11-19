@@ -303,8 +303,18 @@ async function assertRoleName(id: string, description: string | undefined, isNew
   if (p) throw rbacError(400, p.code, p.error);
 }
 
+// Nome exibido: sem espaços nas pontas e com até 32 caracteres, como na tela (vazio mostra o identificador).
+const ROLE_LABEL_MAX = 32;
+function cleanRoleLabel(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  const s = String(v).trim();
+  if (s.length > ROLE_LABEL_MAX) throw rbacError(400, 'RBAC_INVALID_ROLE_LABEL', `O nome exibido pode ter até ${ROLE_LABEL_MAX} caracteres.`);
+  return s;
+}
+
 export async function createRole(ctx: Ctx, name: string, input: RoleInput, opts: { canEditPermissions: boolean; batchId?: string; revertsId?: number | null; action?: 'create' | 'rollback' }) {
-  await assertRoleName(name, input.description, true);
+  const description = cleanRoleLabel(input.description) ?? '';
+  await assertRoleName(name, description, true);
   if (await one('SELECT 1 FROM roles WHERE lower(id) = lower($1)', [name])) throw badRequest('error-duplicate-role-names-not-allowed', 'Já existe um papel com esse nome.');
   const scope = input.scope === 'Subscriptions' ? 'Subscriptions' : 'Users';
   const restrictDirect = !!input.restrictDirect;
@@ -326,7 +336,7 @@ export async function createRole(ctx: Ctx, name: string, input: RoleInput, opts:
     const row = (
       await c.query('INSERT INTO roles (id, description, purpose, scope, protected, mandatory_2fa, restrict_direct, delegable_roles) VALUES ($1,$2,$3,$4,false,$5,$6,$7) RETURNING *', [
         name,
-        String(input.description ?? ''),
+        description,
         String(input.purpose ?? '').slice(0, 200),
         scope,
         !!input.mandatory2fa,
@@ -381,7 +391,7 @@ export async function updateRole(ctx: Ctx, id: string, input: RoleInput, opts: {
     }
 
     const purpose = input.purpose === undefined ? undefined : String(input.purpose).slice(0, 200);
-    const meta = { description: input.description, purpose, mandatory2fa: input.mandatory2fa, scope: existing.protected ? undefined : input.scope, restrictDirect: input.restrictDirect };
+    const meta = { description: cleanRoleLabel(input.description), purpose, mandatory2fa: input.mandatory2fa, scope: existing.protected ? undefined : input.scope, restrictDirect: input.restrictDirect };
     const metaChanged =
       (meta.description !== undefined && meta.description !== existing.description) ||
       (meta.purpose !== undefined && meta.purpose !== (existing.purpose ?? '')) ||

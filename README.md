@@ -737,6 +737,8 @@ Em Administração › Usuários:
 - **Aguardando aprovação**: com "Aprovar novos usuários manualmente", quem se cadastra pela tela de entrar aparece
   com esse status e um filtro próprio (separado dos desativados). **Aprovar cadastro** ativa a conta e avisa a pessoa
   por e-mail; **Recusar cadastro** exclui o cadastro.
+- **Nome e nome de usuário**: o nome é obrigatório (até 100 caracteres) e a bio vai até 500. `all`, `here` e `system`
+  são nomes de usuário reservados (@all e @here avisam a sala inteira).
 - **Desativar** impede o acesso e guarda tudo; ninguém desativa a própria conta, e o último administrador ativo não
   é desativado.
 - **Excluir conta** não dá para desfazer: as mensagens da pessoa continuam nas salas e nas conversas em grupo (só ela
