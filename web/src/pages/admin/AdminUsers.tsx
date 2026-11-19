@@ -159,6 +159,7 @@ function UserList() {
         mentionSelf && sk.self ? 'você não foi incluído' : '',
         sk.locked ? `${sk.locked} com cadeado ${sk.locked === 1 ? 'ficou' : 'ficaram'} de fora` : '',
         sk.unchanged ? `${sk.unchanged} já ${sk.unchanged === 1 ? 'estava' : 'estavam'} assim` : '',
+        sk.lastAdmin ? 'o último administrador ativo continua ativo' : '',
       ].filter(Boolean);
       const tail = notes.length ? ` (${notes.join('; ')})` : '';
       if (r.users) ok(`${what}: ${plural(r.users, 'pessoa', 'pessoas')}${tail}.`);

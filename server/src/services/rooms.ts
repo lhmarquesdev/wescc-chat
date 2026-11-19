@@ -74,6 +74,8 @@ async function dmNameFor(room: any, userId: string) {
   const others = room.uids.filter((u: string) => u !== userId);
   const ids = others.length ? others : [userId];
   const users = await many('SELECT id, username, name FROM users WHERE id = ANY($1)', [ids]);
+  // Conversa a dois com uma conta excluída: fica o nome gravado na sala ("Fulano (conta excluída)").
+  if (!users.length && room.fname) return { name: room.fname, fname: room.fname };
   users.sort((a, b) => a.username.localeCompare(b.username));
   return { name: users.map((u) => u.username).join(', '), fname: users.map((u) => u.name || u.username).join(', ') };
 }
@@ -130,7 +132,7 @@ export async function listSubscriptions(userId: string, updatedSince?: string) {
       const others = room.uids.filter((u: string) => u !== userId);
       const us = (others.length ? others : [userId]).map((id: string) => dmUsers.get(id)).filter(Boolean);
       us.sort((a: any, b: any) => a.username.localeCompare(b.username));
-      dm = { name: us.map((u: any) => u.username).join(', '), fname: us.map((u: any) => u.name || u.username).join(', ') };
+      dm = !us.length && room.fname ? { name: room.fname, fname: room.fname } : { name: us.map((u: any) => u.username).join(', '), fname: us.map((u: any) => u.name || u.username).join(', ') };
     }
     return mapSubscription(r, room, user, dm);
   });

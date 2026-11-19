@@ -140,7 +140,12 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
     }
   };
   const remove = async () => {
-    const yes = await confirmDialog({ title: `Excluir @${initial.username}?`, body: 'A conta é apagada. As mensagens dela permanecem nas conversas.', confirmLabel: 'Excluir', danger: true });
+    const yes = await confirmDialog({
+      title: `Excluir @${initial.username}?`,
+      body: 'A conta é apagada e não dá para desfazer. As mensagens dela continuam nas salas e nas conversas em grupo; cada conversa a dois fica arquivada, só para leitura da outra pessoa. Eventos e reuniões com convidados que ela organizava passam para um dos convidados. Para só impedir o acesso, desligue Ativo na aba Segurança.',
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
     if (!yes) return;
     api
       .post('users.delete', { userId: id })

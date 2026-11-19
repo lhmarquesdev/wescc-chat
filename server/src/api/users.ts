@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { many, one, pool } from '../db/pool';
-import { badRequest, forbidden, notFound } from '../lib/errors';
+import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { audit } from '../services/audit';
 import { fingerprintOf, hasUserKeys, resetUserKeys } from '../services/e2e';
 import { readDeviceId } from '../services/loginDevices';
@@ -475,15 +475,23 @@ export function usersRoutes(app: FastifyInstance) {
     const active = !!bool(body.activeStatus);
     const { targets, skipped } = await bulkAccountTargets(ctx, body.userIds);
     let users = 0;
+    let lastAdmin = 0;
     for (const t of targets) {
       if (t.active === active) {
         skipped.unchanged++;
         continue;
       }
-      await updateUser(ctx, t.id, { active }, { asAdmin: true });
+      try {
+        await updateUser(ctx, t.id, { active }, { asAdmin: true });
+      } catch (e) {
+        // O último administrador ativo fica de fora (updateUser recusa), e o resto do lote segue.
+        if (!(e instanceof ApiError && e.errorType === 'error-action-not-allowed')) throw e;
+        lastAdmin++;
+        continue;
+      }
       users++;
     }
-    return { users, skipped };
+    return { users, skipped: { ...skipped, ...(lastAdmin ? { lastAdmin } : {}) } };
   });
   route(app, 'POST', 'users.bulkLogout', { permissions: ['logout-other-user'] }, async (req, _rep, ctx) => {
     const { targets, skipped } = await bulkAccountTargets(ctx, b(req).userIds);

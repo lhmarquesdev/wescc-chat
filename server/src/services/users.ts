@@ -69,13 +69,20 @@ export interface CreateUserInput {
   skipPasswordPolicy?: boolean;
 }
 
+// E-mail vazio (o campo opcional da tela) é "sem e-mail": grava NULL, senão o segundo cadastro sem e-mail esbarra no
+// índice único de lower(email).
+export const normalizeEmail = (email: unknown) => (typeof email === 'string' ? email.trim() : '') || null;
+
+const emailTaken = () => badRequest('error-field-unavailable', 'Este e-mail já está em uso.');
+const isEmailConflict = (e: any) => e?.code === '23505' && e?.constraint === 'users_email_uq';
+
 export async function createUser(input: CreateUserInput, actor?: Actor) {
   validateUsername(input.username);
-  if (input.email && !EMAIL_RE.test(input.email)) throw badRequest('error-invalid-email', 'E-mail inválido.');
+  const email = normalizeEmail(input.email);
+  if (email && !EMAIL_RE.test(email)) throw badRequest('error-invalid-email', 'E-mail inválido.');
   if (input.password && !input.skipPasswordPolicy) validatePassword(input.password);
   if (await getUserByUsername(input.username)) throw badRequest('error-field-unavailable', `O nome de usuário ${input.username} já está em uso.`);
-  if (input.email && (await one('SELECT 1 FROM users WHERE lower(email) = lower($1)', [input.email])))
-    throw badRequest('error-field-unavailable', 'Este e-mail já está em uso.');
+  if (email && (await one('SELECT 1 FROM users WHERE lower(email) = lower($1)', [email]))) throw emailTaken();
   const id = newId();
   const hash = input.password ? await hashPassword(input.password) : null;
   const row = await one(
@@ -85,7 +92,7 @@ export async function createUser(input: CreateUserInput, actor?: Actor) {
       id,
       input.username,
       input.name ?? input.username,
-      input.email ?? null,
+      email,
       input.verified ?? false,
       hash,
       input.active ?? true,
@@ -95,7 +102,10 @@ export async function createUser(input: CreateUserInput, actor?: Actor) {
       input.externalId ?? null,
       input.requirePasswordChange ?? false,
     ],
-  );
+  ).catch((e) => {
+    // Dois cadastros com o mesmo e-mail ao mesmo tempo: a mesma mensagem da conferência acima.
+    throw isEmailConflict(e) ? emailTaken() : e;
+  });
   if (input.joinDefaultChannels !== false) {
     const { joinDefaultChannels } = await import('./rooms');
     await joinDefaultChannels(id);
@@ -494,12 +504,14 @@ export async function updateUser(
   if (data.name !== undefined) sets.push(`name = $${params.push(data.name)}`);
   if (data.bio !== undefined) sets.push(`bio = $${params.push(data.bio)}`);
   if (data.statusText !== undefined) sets.push(`status_text = $${params.push(data.statusText.slice(0, 120))}`);
-  if (data.email !== undefined && data.email !== u.email) {
+  // Campo vazio é "sem e-mail" (NULL, como no cadastro): só a administração tira o e-mail de uma conta.
+  const email = data.email === undefined ? undefined : normalizeEmail(data.email);
+  if (email !== undefined && email !== (u.email || null)) {
     if (!opts.asAdmin && !getSetting('Accounts_AllowEmailChange')) throw forbidden('Alteração de e-mail desativada.');
-    if (!EMAIL_RE.test(data.email)) throw badRequest('error-invalid-email', 'E-mail inválido.');
-    const other = await one('SELECT id FROM users WHERE lower(email) = lower($1)', [data.email]);
+    if ((email === null && !opts.asAdmin) || (email !== null && !EMAIL_RE.test(email))) throw badRequest('error-invalid-email', 'E-mail inválido.');
+    const other = email && (await one('SELECT id FROM users WHERE lower(email) = lower($1)', [email]));
     if (other && other.id !== userId) throw badRequest('error-field-unavailable', 'E-mail em uso.');
-    sets.push(`email = $${params.push(data.email)}`, `email_verified = ${opts.asAdmin && data.verified ? 'true' : 'false'}`);
+    sets.push(`email = $${params.push(email)}`, `email_verified = ${opts.asAdmin && data.verified && email ? 'true' : 'false'}`);
   }
   if (data.password) {
     // Na troca obrigatória (logo após entrar com a senha provisória) a senha atual não é pedida de novo.
@@ -511,6 +523,16 @@ export async function updateUser(
     sets.push(`password_hash = $${params.push(await hashPassword(data.password))}`, 'require_password_change = false');
   }
   if (opts.asAdmin) {
+    if (data.active === false && u.active) {
+      // Como tirar o papel e excluir: ninguém se tranca para fora, e a empresa nunca fica sem administrador ativo.
+      if (self) throw badRequest('error-action-not-allowed', 'Você não pode desativar a própria conta.');
+      const last = await one(
+        `SELECT EXISTS (SELECT 1 FROM roles WHERE is_root AND id = ANY($2::text[]))
+            AND NOT EXISTS (SELECT 1 FROM users WHERE active AND id <> $1 AND roles && ARRAY(SELECT id FROM roles WHERE is_root)) AS last`,
+        [userId, u.roles],
+      );
+      if (last?.last) throw badRequest('error-action-not-allowed', 'Não é possível desativar o último administrador ativo.');
+    }
     if (data.active !== undefined) {
       sets.push(`active = $${params.push(data.active)}`);
       // "Ativo" mudado à mão é decisão do administrador: a sincronização do LDAP só reativa o que ela mesma desativou.
@@ -521,7 +543,9 @@ export async function updateUser(
   }
   if (!sets.length) return u;
   sets.push('updated_at = now()');
-  const row = await one(`UPDATE users SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, params);
+  const row = await one(`UPDATE users SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, params).catch((e) => {
+    throw isEmailConflict(e) ? badRequest('error-field-unavailable', 'E-mail em uso.') : e;
+  });
   if (data.username && data.username !== u.username) await propagateUsername(userId, u.username, data.username);
   if (data.name !== undefined && data.name !== u.name) await query('UPDATE messages SET user_name = $2 WHERE user_id = $1', [userId, data.name]);
   if (data.active === false) {
@@ -538,7 +562,8 @@ export async function updateUser(
 async function propagateUsername(userId: string, oldU: string, newU: string) {
   await query('UPDATE messages SET username = $2 WHERE user_id = $1', [userId, newU]);
   await query(
-    `UPDATE rooms SET usernames = array_replace(usernames, $1, $2), fname = NULL WHERE t = 'd' AND $3 = ANY(uids)`,
+    // A conversa arquivada com uma conta excluída guarda em fname o nome de quem saiu.
+    `UPDATE rooms SET usernames = array_replace(usernames, $1, $2), fname = CASE WHEN archived THEN fname END WHERE t = 'd' AND $3 = ANY(uids)`,
     [oldU, newU, userId],
   );
   await renameInReactions(oldU, newU);
@@ -628,6 +653,8 @@ export async function deleteUser(actor: Ctx, userId: string, opts: { confirmReli
   // Criptografia de ponta a ponta: as chaves da conta saem em cascata; as salas em que ela tinha chave trocam de chave.
   const { markRotate, roomsWithKeysOf } = await import('./e2e');
   let e2eRooms: string[] = [];
+  const keptDms: string[] = [];
+  let calendarPeople: string[] = [];
   await tx(async (c) => {
     e2eRooms = await roomsWithKeysOf(userId, c);
     // Salas onde ele é o único dono: transferem para o membro mais antigo.
@@ -641,7 +668,42 @@ export async function deleteUser(actor: Ctx, userId: string, opts: { confirmReli
         );
       }
     }
-    await c.query(`DELETE FROM rooms WHERE t = 'd' AND $1 = ANY(uids)`, [userId]);
+    // Conversas diretas são também dos outros participantes: a conversa em grupo continua para quem fica, com todo o
+    // histórico (só a pessoa sai dela); a conversa a dois fica arquivada para a outra pessoa reler, com o nome de quem
+    // saiu. Só some a conversa em que não sobra ninguém com conta.
+    const dms = await c.query(
+      `SELECT r.id, r.uids, ARRAY(SELECT x FROM unnest(r.uids) x WHERE x <> $1 AND EXISTS (SELECT 1 FROM users o WHERE o.id = x)) AS rest
+         FROM rooms r WHERE r.t = 'd' AND $1 = ANY(r.uids)`,
+      [userId],
+    );
+    for (const r of dms.rows) {
+      if (!r.rest.length) await c.query('DELETE FROM rooms WHERE id = $1', [r.id]);
+      else if (r.rest.length > 1)
+        await c.query(`UPDATE rooms SET uids = array_remove(uids, $2), usernames = array_remove(usernames, $3), fname = NULL, updated_at = now() WHERE id = $1`, [r.id, userId, u.username]);
+      else await c.query(`UPDATE rooms SET archived = true, fname = $2, updated_at = now() WHERE id = $1`, [r.id, `${u.name || u.username} (conta excluída)`]);
+      if (r.rest.length) keptDms.push(r.id);
+    }
+    // Agenda: o evento com convidados que a pessoa organizava continua, organizado pelo convidado mais antigo (quem
+    // aceitou vem antes), como o dono de sala. Evento só dela sai com a conta.
+    const handed = await c.query(
+      `WITH next AS (
+         SELECT DISTINCT ON (a.event_id) a.event_id, a.user_id FROM calendar_attendees a
+           JOIN calendar_events e ON e.id = a.event_id JOIN users o ON o.id = a.user_id
+          WHERE e.owner_id = $1 AND a.user_id <> $1
+          ORDER BY a.event_id, o.active DESC, (a.response = 'accepted') DESC, a.added_at, a.user_id)
+       UPDATE calendar_events e SET owner_id = next.user_id, updated_at = now() FROM next WHERE e.id = next.event_id
+       RETURNING e.id, next.user_id`,
+      [userId],
+    );
+    if (handed.rowCount) {
+      const ids = handed.rows.map((h) => h.id);
+      await c.query(`DELETE FROM calendar_attendees a USING unnest($1::text[], $2::text[]) h(event_id, user_id) WHERE a.event_id = h.event_id AND a.user_id = h.user_id`, [
+        ids,
+        handed.rows.map((h) => h.user_id),
+      ]);
+      const att = await c.query(`SELECT DISTINCT user_id FROM calendar_attendees WHERE event_id = ANY($1)`, [ids]);
+      calendarPeople = [...new Set([...handed.rows.map((h) => h.user_id as string), ...att.rows.map((a) => a.user_id as string)])];
+    }
     const subs = await c.query('DELETE FROM subscriptions WHERE user_id = $1 RETURNING room_id', [userId]);
     for (const { room_id } of subs.rows) await c.query('UPDATE rooms SET users_count = GREATEST(users_count - 1, 0) WHERE id = $1', [room_id]);
     // Na mesma transação: ninguém pega o @usuário e reage antes de as reações da conta saírem.
@@ -650,7 +712,16 @@ export async function deleteUser(actor: Ctx, userId: string, opts: { confirmReli
   });
   await markRotate(e2eRooms);
   bus.forceLogout({ userId });
-  await audit(actorOf(actor), 'user.deleted', { userId, username: u.username }, { relinquish: !!opts.confirmRelinquish });
+  // Quem ficou nas conversas diretas vê o nome novo (e a conversa arquivada) sem recarregar; a agenda também.
+  if (keptDms.length) {
+    const { notifyRoomUpdated, republishSubscriptions } = await import('./rooms');
+    for (const rid of keptDms) {
+      await notifyRoomUpdated(rid);
+      await republishSubscriptions(rid);
+    }
+  }
+  if (calendarPeople.length) bus.publish({ users: calendarPeople }, { type: 'calendar.changed' });
+  await audit(actorOf(actor), 'user.deleted', { userId, username: u.username }, { relinquish: !!opts.confirmRelinquish, keptDirect: keptDms.length });
 }
 
 // ---------- Avatar ----------
