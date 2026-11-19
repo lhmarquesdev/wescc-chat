@@ -718,8 +718,7 @@
   vertical-align: middle;
 }
 .page-body > .table-wrap,
-.page-body > .pager,
-.page-body > .table-wrap + .table-foot {
+.page-body > .pager {
   width: auto;
   max-width: none;
   margin-inline: calc(var(--space-8) * -1);

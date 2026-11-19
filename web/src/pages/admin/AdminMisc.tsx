@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
-import { formatDateTime, plural } from '../../lib/format';
+import { formatDateTime, formatRelative, plural, roomIconName } from '../../lib/format';
+import { inviteStatusOf } from '../../lib/invites';
 import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, FileButton, Modal, Pager, SearchInput, SkeletonList, SkeletonTable, confirmDialog, useAsync, ThLabel } from '../../components/ui';
@@ -323,13 +324,20 @@ export function AdminEmoji() {
 export function AdminInvites() {
   const { data, loading, reload } = useAsync(() => api.get('listInvites'), []);
   const invites: any[] = data?.invites ?? [];
+  const active = invites.filter((i) => i.status === 'active').length;
   const copy = (id: string) =>
     navigator.clipboard
       .writeText(`${location.origin}/invite/${id}`)
       .then(() => ok('Link copiado.'))
       .catch(fail);
   const revoke = async (i: any) => {
-    const yes = await confirmDialog({ title: 'Revogar o convite?', body: `O link para #${i.roomName} para de funcionar.`, confirmLabel: 'Revogar', danger: true });
+    const live = i.status === 'active';
+    const yes = await confirmDialog({
+      title: live ? 'Revogar o convite?' : 'Excluir o convite?',
+      body: live ? `O link para ${roomLabel(i)} para de funcionar.` : `O link para ${roomLabel(i)} sai da lista. Ele já não funcionava.`,
+      confirmLabel: live ? 'Revogar' : 'Excluir',
+      danger: true,
+    });
     if (yes) api.del(`removeInvite/${i._id}`).then(reload).catch(fail);
   };
   return (
@@ -339,7 +347,7 @@ export function AdminInvites() {
         <SkeletonTable rows={4} cols={5} />
       ) : !invites.length ? (
         <Empty icon="panel-invite" title="Nenhum convite">
-          Os links de convite criados nas salas (menu da sala › Convidar) aparecem aqui.
+          Os links de convite criados nas salas (menu da sala › Link de convite) aparecem aqui.
         </Empty>
       ) : (
         <TableWrap>
@@ -349,7 +357,10 @@ export function AdminInvites() {
                 <th>
                   <ThLabel>Sala</ThLabel>
                 </th>
-                <th className="col-lg">
+                <th>
+                  <ThLabel>Situação</ThLabel>
+                </th>
+                <th className="col-xl">
                   <ThLabel>Link</ThLabel>
                 </th>
                 <th className="num">
@@ -358,52 +369,70 @@ export function AdminInvites() {
                 <th>
                   <ThLabel>Expira</ThLabel>
                 </th>
-                <th className="col-xl">
-                  <ThLabel>Criado</ThLabel>
-                </th>
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>
               </tr>
             </thead>
             <tbody>
-              {invites.map((i: any) => (
-                <tr key={i._id}>
-                  <td>
-                    <RoomCell icon={<Icon name="room-channel" />} name={i.roomName} />
-                  </td>
-                  <td className="mono small ellipsis-cell col-lg" data-label="Link" title={`${location.origin}/invite/${i._id}`}>
-                    {`${location.origin}/invite/${i._id}`}
-                  </td>
-                  <td className="num nowrap" data-label="Usos">
-                    {i.uses}
-                    {i.maxUses ? ` / ${i.maxUses}` : ''}
-                  </td>
-                  <td className="nowrap" data-label="Expira">
-                    {i.expires ? formatDateTime(i.expires) : <span className="muted">Nunca</span>}
-                  </td>
-                  <td className="muted nowrap col-xl" data-label="Criado">
-                    {formatDateTime(i.createdAt)}
-                  </td>
-                  <td className="actions-col">
-                    <div className="row-actions">
-                      <button className="btn small ghost" onClick={() => copy(i._id)}>
-                        <Icon name="copy" />
-                        Copiar link
-                      </button>
-                      <button className="btn small ghost danger" onClick={() => revoke(i)}>
-                        <Icon name="delete" />
-                        Revogar
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {invites.map((i: any) => {
+                const st = inviteStatusOf(i.status);
+                return (
+                  <tr key={i._id}>
+                    <td>
+                      <RoomCell
+                        icon={<Icon name={i.room ? roomIconName(i.room) : 'room-channel'} />}
+                        name={i.room?.fname || i.roomName}
+                        sub={<span title={`Criado em ${formatDateTime(i.createdAt)}`}>{`${i.createdBy ? `por @${i.createdBy.username}` : 'por uma conta excluída'}, ${formatRelative(i.createdAt)}`}</span>}
+                      />
+                    </td>
+                    <td className="nowrap" data-label="Situação">
+                      <span className={`pill ${st.tone}`} title={st.hint}>
+                        {st.label}
+                      </span>
+                    </td>
+                    <td className="mono small ellipsis-cell col-xl" data-label="Link" title={`${location.origin}/invite/${i._id}`}>
+                      {`/invite/${i._id}`}
+                    </td>
+                    <td className="num nowrap" data-label="Usos">
+                      {i.uses}
+                      {i.maxUses ? ` / ${i.maxUses}` : ''}
+                    </td>
+                    <td className="nowrap" data-label="Expira">
+                      {i.expires ? formatDateTime(i.expires) : <span className="muted">Nunca</span>}
+                    </td>
+                    <td className="actions-col">
+                      <div className="row-actions">
+                        {i.status === 'active' && (
+                          <button className="btn small ghost" onClick={() => copy(i._id)} aria-label="Copiar link" title="Copiar link">
+                            <Icon name="copy" />
+                            Copiar
+                          </button>
+                        )}
+                        {i.canRevoke && (
+                          <button className="btn small ghost danger" onClick={() => revoke(i)}>
+                            <Icon name="delete" />
+                            {i.status === 'active' ? 'Revogar' : 'Excluir'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </TableWrap>
       )}
-      {invites.length > 0 && <p className="table-foot muted small">{plural(invites.length, 'convite ativo', 'convites ativos')}.</p>}
+      {invites.length > 0 && (
+        <p className="table-foot muted small">
+          {active === invites.length ? plural(active, 'convite ativo', 'convites ativos') : `${plural(active, 'ativo', 'ativos')} de ${plural(invites.length, 'convite', 'convites')}`}.
+          {invites.some((i) => !i.canRevoke) && ' Revogar convites de outras pessoas pede a permissão Criar links de convite.'}
+        </p>
+      )}
     </>
   );
 }
+
+// "#geral" ou o nome do grupo/discussão, como no resto da Administração.
+const roomLabel = (i: any) => (i.room?.t === 'c' ? `#${i.room?.fname || i.roomName}` : `“${i.room?.fname || i.roomName}”`);

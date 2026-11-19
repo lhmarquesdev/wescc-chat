@@ -1613,3 +1613,64 @@
     display: none;
   }
 }
+
+/* ---------- Link de convite: os links da sala ---------- */
+.invite-links {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid hsl(var(--border));
+}
+.invite-links-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-semibold);
+}
+.invite-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.invite-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
+}
+.invite-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+.invite-top > .spacer {
+  flex: 1;
+}
+.invite-top > .icon-btn,
+.invite-top > .btn {
+  margin-block: -4px;
+}
+.invite-uses {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-semibold);
+  color: hsl(var(--foreground));
+}
+.invite-meta {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: hsl(var(--muted-foreground));
+  overflow-wrap: anywhere;
+}

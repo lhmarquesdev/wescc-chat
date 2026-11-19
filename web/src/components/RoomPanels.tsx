@@ -14,6 +14,7 @@ import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { clearRoomError, resetTranslationViews, useLanguages, useMyLanguage, useRoomTranslate, useTranslations } from '../lib/translate';
 import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
 import { normalizeLang } from '@shared/translate';
+import { inviteStatusOf, inviteUses } from '../lib/invites';
 import { Icon, type IconName } from './Icon';
 import { FileTile } from './MessageItem';
 import { useEscape, useIsPhone } from './overlay';
@@ -1318,21 +1319,30 @@ function TranslatePanel({ room, sub }: Props) {
 }
 
 function InvitePanel({ room }: Props) {
+  const me = useStore((s) => s.me?._id);
   const [days, setDays] = useState(7);
   const [maxUses, setMaxUses] = useState(0);
   const [link, setLink] = useState('');
   const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  // Todos os links da sala (de qualquer pessoa): quem pode criar links aqui também revoga os dos outros.
+  const list = useAsync(() => api.get('listInvites', { rid: room._id }), [room._id]);
+  const invites: any[] = list.data?.invites ?? [];
   useEffect(() => {
     if (!copied) return;
     const t = setTimeout(() => setCopied(false), 1500);
     return () => clearTimeout(t);
   }, [copied]);
   const gen = async () => {
+    setBusy(true);
     try {
       const r = await api.post('findOrCreateInvite', { rid: room._id, days, maxUses });
       setLink(`${location.origin}${r.url}`);
+      list.reload();
     } catch (e) {
       fail(e);
+    } finally {
+      setBusy(false);
     }
   };
   const copy = () =>
@@ -1340,6 +1350,28 @@ function InvitePanel({ room }: Props) {
       () => setCopied(true),
       () => fail(new Error('Não foi possível copiar. Selecione o link e copie.')),
     );
+  const copyOne = (id: string) =>
+    navigator.clipboard?.writeText(`${location.origin}/invite/${id}`).then(
+      () => ok('Link copiado.'),
+      () => fail(new Error('Não foi possível copiar o link.')),
+    );
+  const revoke = async (i: any) => {
+    const active = i.status === 'active';
+    const yes = await confirmDialog({
+      title: active ? 'Revogar o link de convite?' : 'Excluir o link de convite?',
+      body: active ? 'O link para de funcionar para quem ainda não entrou. Quem já entrou continua na sala.' : 'O link sai da lista. Ele já não funcionava.',
+      confirmLabel: active ? 'Revogar' : 'Excluir',
+      danger: true,
+    });
+    if (!yes) return;
+    try {
+      await api.del(`removeInvite/${i._id}`);
+      if (link.endsWith(`/invite/${i._id}`)) setLink('');
+      list.reload();
+    } catch (e) {
+      fail(e);
+    }
+  };
   return (
     <div className="form">
       <Field label="Expira em">
@@ -1361,7 +1393,7 @@ function InvitePanel({ room }: Props) {
           ))}
         </select>
       </Field>
-      <button type="button" className="btn primary" onClick={gen}>
+      <button type="button" className="btn primary" onClick={gen} disabled={busy} aria-busy={busy || undefined}>
         <Icon name="link" />
         Gerar link
       </button>
@@ -1374,6 +1406,53 @@ function InvitePanel({ room }: Props) {
           </button>
         </div>
       )}
+      <p className="muted small">O link só funciona enquanto quem o criou participa da sala e pode convidar. Quem já participa e abre o link não gasta um uso.</p>
+      <section className="invite-links" aria-label="Links desta sala">
+        <h3 className="invite-links-title">
+          Links desta sala
+          {invites.length > 0 && <span className="pill">{invites.length}</span>}
+        </h3>
+        {list.loading && !list.data ? (
+          <SkeletonList n={2} />
+        ) : list.error ? (
+          <p className="muted small">Não foi possível carregar os links. {list.error}</p>
+        ) : !invites.length ? (
+          <p className="muted small">Nenhum link criado nesta sala.</p>
+        ) : (
+          <ul className="invite-list">
+            {invites.map((i) => {
+              const st = inviteStatusOf(i.status);
+              const author = !i.createdBy ? 'uma conta excluída' : i.createdBy._id === me ? 'você' : `@${i.createdBy.username}`;
+              const when = !i.expires ? 'Nunca expira' : `${i.status === 'expired' ? 'Expirou em' : 'Expira em'} ${formatDateTime(i.expires)}`;
+              return (
+                <li key={i._id} className={`invite-item ${i.status}`}>
+                  <div className="invite-top">
+                    <span className={`pill ${st.tone}`} title={st.hint}>
+                      {st.label}
+                    </span>
+                    <span className="invite-uses">{inviteUses(i)}</span>
+                    <span className="spacer" />
+                    {i.status === 'active' && (
+                      <button type="button" className="icon-btn" title="Copiar link" aria-label="Copiar link" onClick={() => copyOne(i._id)}>
+                        <Icon name="copy" />
+                      </button>
+                    )}
+                    {i.canRevoke && (
+                      <button type="button" className="btn small ghost danger" onClick={() => revoke(i)}>
+                        {i.status === 'active' ? 'Revogar' : 'Excluir'}
+                      </button>
+                    )}
+                  </div>
+                  <span className="invite-meta">
+                    {when} · criado por {author}
+                  </span>
+                  {i.status !== 'active' && <span className="invite-meta">{st.hint}</span>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
