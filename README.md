@@ -92,6 +92,11 @@ cd server && NODE_ENV=production node dist/index.js
 
 No Windows, o chat roda como serviço com o instalador de `scripts\windows` (veja a seção abaixo).
 
+O build do web grava, ao lado de cada JS, CSS e SVG, as cópias comprimidas (`.br` e `.gz`): o servidor entrega a que o
+navegador aceitar, e os arquivos de `web/dist/assets` (com o hash do conteúdo no nome) ficam no cache do navegador sem
+revalidar. As respostas JSON da API acima de 1 KB também saem comprimidas. A Administração, a Agenda, Arquivos,
+Chamadas, Lembretes e a página de reunião carregam só quando abertas. Nada disso pede configuração nem proxy na frente.
+
 ## HTTPS e serviço do Windows
 
 Fora de `localhost`, o navegador só libera câmera, microfone, push e o app instalável com o site em HTTPS. O chat

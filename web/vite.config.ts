@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
+import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -26,8 +28,33 @@ function buildInfo(): Plugin {
   };
 }
 
+// Cópias comprimidas (.br e .gz) do JS, do CSS e dos SVGs do build: o servidor entrega a que o navegador aceitar
+// (preCompressed do @fastify/static, server/src/app.ts), sem comprimir a cada pedido. O primeiro acesso cai de cerca de
+// 2 MB para pouco mais de 0,6 MB.
+function precompress(): Plugin {
+  let outDir = '';
+  return {
+    name: 'wescc-precompress',
+    apply: 'build',
+    configResolved(c) {
+      outDir = path.resolve(c.root, c.build.outDir);
+    },
+    writeBundle(_opts, bundle) {
+      for (const name of Object.keys(bundle)) {
+        if (!/\.(js|css|svg|json)$/.test(name)) continue;
+        const file = path.join(outDir, name);
+        const data = fs.readFileSync(file);
+        if (data.length < 1024) continue;
+        // Brotli 10: quase o tamanho do 11 em menos da metade do tempo de build.
+        fs.writeFileSync(`${file}.br`, brotliCompressSync(data, { params: { [constants.BROTLI_PARAM_QUALITY]: 10, [constants.BROTLI_PARAM_SIZE_HINT]: data.length } }));
+        fs.writeFileSync(`${file}.gz`, gzipSync(data, { level: 9 }));
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), buildInfo()],
+  plugins: [react(), buildInfo(), precompress()],
   resolve: { alias: { '@shared': path.resolve(import.meta.dirname, '../shared/src') } },
   server: {
     port: 5173,

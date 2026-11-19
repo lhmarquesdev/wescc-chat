@@ -18,6 +18,7 @@ import { e2eRoutes } from './api/e2e';
 import { messageToolsRoutes } from './api/messageTools';
 import { authenticate, errorHandler } from './api/http';
 import { cleanInput } from './lib/sanitize';
+import { assetCacheHeaders, compressJson } from './lib/compress';
 import { roomsRoutes } from './api/rooms';
 import { usersRoutes } from './api/users';
 import { ApiError } from './lib/errors';
@@ -81,6 +82,7 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
     cleanInput(req.query);
     cleanInput(req.params);
   });
+  app.addHook('onSend', compressJson); // JSON da API comprimido (lib/compress.ts)
   app.setErrorHandler(errorHandler);
 
   usersRoutes(app);
@@ -124,7 +126,8 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   const notFound = (reply: FastifyReply) => reply.status(404).send({ success: false, error: 'Não encontrado.', errorType: 'error-not-found' });
   const webDist = config.webDist ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
   if (fs.existsSync(path.join(webDist, 'index.html'))) {
-    await app.register(fastifyStatic, { root: webDist, wildcard: false, index: false });
+    // preCompressed: as cópias .br/.gz que o build do web grava ao lado de cada arquivo (web/vite.config.ts).
+    await app.register(fastifyStatic, { root: webDist, wildcard: false, index: false, preCompressed: true, setHeaders: (reply, file) => assetCacheHeaders(reply, path.relative(webDist, file)) });
     // Relê o index.html quando o build muda (o nome dos assets muda a cada build).
     const indexPath = path.join(webDist, 'index.html');
     let cached = { mtime: 0, html: Buffer.alloc(0) };
