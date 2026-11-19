@@ -66,6 +66,22 @@ describe('eventos', () => {
     expect((await api('GET', 'calendar.events', { from: range.to, to: range.from }, ana)).error).toBe(CAL_TEXT.range);
   });
 
+  it('recusa fim igual ao início, data que não existe e datas absurdas', async () => {
+    const base = { title: 'A', startsAt: at(DAY), endsAt: at(DAY + H) };
+    expect((await api('POST', 'calendar.create', { ...base, endsAt: base.startsAt }, ana)).error).toBe(CAL_TEXT.end);
+    // Campo de data apagado no navegador virava 01/01/1900; ano digitado errado vai longe no futuro.
+    expect((await api('POST', 'calendar.create', { title: 'A', startsAt: '1900-01-01T10:00:00Z', endsAt: '1900-01-01T11:00:00Z' }, ana)).error).toBe(CAL_TEXT.dateRange);
+    expect((await api('POST', 'calendar.create', { title: 'A', startsAt: at(6 * 366 * DAY), endsAt: at(6 * 366 * DAY + H) }, ana)).error).toBe(CAL_TEXT.dateRange);
+    const feb30 = `${new Date().getUTCFullYear() + 1}-02-30`;
+    expect((await api('POST', 'calendar.create', { title: 'A', allDay: true, startsAt: feb30, endsAt: feb30 }, ana)).error).toBe(CAL_TEXT.start);
+    // Um evento antigo continua editável enquanto o horário não muda (o editor reenvia o mesmo início).
+    const c = await api('POST', 'calendar.create', base, ana);
+    await query(`UPDATE calendar_events SET starts_at = starts_at - interval '800 days', ends_at = ends_at - interval '800 days' WHERE id = $1`, [c.event._id]);
+    const u = await api('POST', 'calendar.update', { eventId: c.event._id, title: 'Antigo' }, ana);
+    expect(u.success, JSON.stringify(u)).toBe(true);
+    expect((await api('POST', 'calendar.update', { eventId: c.event._id, title: 'Antigo 2', startsAt: u.event.startsAt, endsAt: u.event.endsAt }, ana)).success).toBe(true);
+  });
+
   it('dia inteiro guarda do primeiro dia até o dia seguinte ao último', async () => {
     const day = new Date(Date.now() + 3 * DAY).toISOString().slice(0, 10);
     const next = new Date(Date.parse(`${day}T00:00:00Z`) + DAY).toISOString().slice(0, 10);

@@ -18,6 +18,8 @@ export interface EditorStart {
   attendees?: PickedUser[];
 }
 
+const nextDayFmt = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+
 function nextSlot(): Date {
   const d = new Date();
   d.setMinutes(d.getMinutes() < 30 ? 30 : 60, 0, 0);
@@ -72,8 +74,10 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
     }
     const s = fromInputs(date, startTime);
     let e = fromInputs(date, endTime);
-    if (e <= s) e = new Date(e.getTime() + DAY_MS); // terminou depois da meia-noite
-    return { s, e, ok: e.getTime() - s.getTime() <= 24 * 60 * 60_000 };
+    // Fim antes do início: termina depois da meia-noite (o editor mostra o aviso). Fim igual ao início não vale.
+    const overnight = e < s;
+    if (overnight) e = new Date(e.getTime() + DAY_MS);
+    return { s, e, overnight, ok: e > s && e.getTime() - s.getTime() <= 24 * 60 * 60_000 };
   }, [allDay, date, endDate, startTime, endTime]);
 
   // Quem já tem compromisso no horário (só início e fim; o título dos outros nunca chega aqui).
@@ -114,7 +118,16 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
 
   const submit = async () => {
     if (!title.trim()) return setError('Dê um título ao evento.');
-    if (!range.ok) return setError(allDay ? 'O último dia precisa ser igual ou depois do primeiro.' : 'Um evento com horário pode durar até 24 horas. Para mais, use dia inteiro.');
+    if (Number.isNaN(range.s.getTime()) || Number.isNaN(range.e.getTime()) || (!allDay && (!startTime || !endTime)))
+      return setError(allDay ? 'Informe o primeiro dia.' : 'Informe a data e o horário.');
+    if (!range.ok)
+      return setError(
+        allDay
+          ? 'O último dia precisa ser igual ou depois do primeiro.'
+          : range.e.getTime() === range.s.getTime()
+            ? 'O fim precisa ser depois do início.'
+            : 'Um evento com horário pode durar até 24 horas. Para mais, use dia inteiro.',
+      );
     setBusy(true);
     setError(null);
     const input = {
@@ -203,6 +216,12 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
             </>
           )}
         </div>
+        {!allDay && range.overnight && (
+          <p className="muted small cal-conflict cal-overnight" role="status">
+            <Icon name="cal-time" size={14} />
+            <span>Termina no dia seguinte, {nextDayFmt.format(range.e)}.</span>
+          </p>
+        )}
         <Toggle checked={allDay} onChange={setAllDay} label="Dia inteiro" />
 
         <Field label="Convidados" hint={meeting ? 'Entram na sala da reunião e recebem o link.' : 'Recebem o convite na hora e podem aceitar ou recusar.'}>

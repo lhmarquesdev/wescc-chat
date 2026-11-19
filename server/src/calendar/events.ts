@@ -30,6 +30,7 @@ export const CAL_TEXT = {
   start: 'Informe a data e a hora de início.',
   end: 'O fim precisa ser depois do início.',
   tooLong: 'Um evento pode durar até 31 dias.',
+  dateRange: 'Escolha uma data entre um ano atrás e cinco anos à frente.',
   attendees: 'Convide até 200 pessoas por evento.',
   badAttendee: 'Uma das pessoas convidadas não existe ou está desativada.',
   reminder: 'Escolha um lembrete entre 0 minutos e 7 dias antes.',
@@ -196,9 +197,11 @@ const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 // Dia inteiro: datas AAAA-MM-DD com o último dia incluído; grava 00:00 UTC do primeiro dia até 00:00 UTC do dia seguinte.
+// A data precisa existir: 2026-02-30 é recusada (não vira 02/03).
 function utcDay(v: string): Date {
-  const d = new Date(`${v.slice(0, 10)}T00:00:00.000Z`);
-  if (!DATE_ONLY.test(v.slice(0, 10)) || Number.isNaN(d.getTime())) throw badRequest('error-invalid-params', CAL_TEXT.start);
+  const day = v.slice(0, 10);
+  const d = new Date(`${day}T00:00:00.000Z`);
+  if (!DATE_ONLY.test(day) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== day) throw badRequest('error-invalid-params', CAL_TEXT.start);
   return d;
 }
 
@@ -230,6 +233,12 @@ async function clean(ctx: Ctx, input: Partial<CalendarEventInput>, prev?: any): 
   }
   if (endsAt.getTime() <= startsAt.getTime()) throw badRequest('error-invalid-params', CAL_TEXT.end);
   if (endsAt.getTime() - startsAt.getTime() > 31 * DAY) throw badRequest('error-invalid-params', CAL_TEXT.tooLong);
+  // Data absurda (campo de data apagado vira 1900, ano digitado errado): de um ano atrás até cinco anos à frente. Um
+  // evento antigo que não muda de horário continua editável.
+  if (!prev || startsAt.getTime() !== new Date(prev.starts_at).getTime()) {
+    const now = Date.now();
+    if (startsAt.getTime() < now - 366 * DAY || startsAt.getTime() > now + 5 * 366 * DAY) throw badRequest('error-invalid-params', CAL_TEXT.dateRange);
+  }
 
   let attendeeIds: string[] | undefined;
   if (input.attendeeIds !== undefined) {

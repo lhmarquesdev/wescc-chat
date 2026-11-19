@@ -52,15 +52,18 @@ export function onDay(e: CalendarEvent, d: Date): boolean {
 const pad = (n: number) => String(n).padStart(2, '0');
 export const dateInput = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 export const timeInput = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+// Data vazia ou incompleta (campo apagado) vira data inválida, e não 01/01/1900.
 export function fromInputs(date: string, time: string): Date {
   const [y, m, dd] = date.split('-').map(Number);
   const [h, mi] = (time || '00:00').split(':').map(Number);
-  return new Date(y, (m || 1) - 1, dd || 1, h || 0, mi || 0);
+  if (!y || !m || !dd || Number.isNaN(h) || Number.isNaN(mi)) return new Date(Number.NaN);
+  return new Date(y, m - 1, dd, h, mi);
 }
 
 const timeFmt = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const dayFmt = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
 const shortDayFmt = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' });
+const shortDayYearFmt = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 export const monthFmt = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' });
 export const weekdayShort = new Intl.DateTimeFormat('pt-BR', { weekday: 'short' });
 
@@ -68,11 +71,12 @@ export const fmtTime = (d: Date | string) => timeFmt.format(new Date(d));
 export const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 export const fmtDay = (d: Date) => cap(dayFmt.format(d));
 
-// "Hoje, 14:00–15:00", "Amanhã, dia inteiro", "Qui., 30 de out., 09:00–10:30".
+// "Hoje, 14:00–15:00", "Amanhã, dia inteiro", "Qui., 30 de out., 09:00–10:30" (com o ano quando não é o atual).
 export function whenLabel(e: Pick<CalendarEvent, 'allDay' | 'startsAt' | 'endsAt'>): string {
   const { start, end } = eventDays(e);
   const today = startOfDay(new Date());
-  const dayName = (d: Date) => (sameDay(d, today) ? 'Hoje' : sameDay(d, addDays(today, 1)) ? 'Amanhã' : sameDay(d, addDays(today, -1)) ? 'Ontem' : cap(shortDayFmt.format(d)));
+  const dayName = (d: Date) =>
+    sameDay(d, today) ? 'Hoje' : sameDay(d, addDays(today, 1)) ? 'Amanhã' : sameDay(d, addDays(today, -1)) ? 'Ontem' : cap((d.getFullYear() === today.getFullYear() ? shortDayFmt : shortDayYearFmt).format(d));
   if (e.allDay) {
     const last = addDays(end, -1);
     return sameDay(start, last) || last < start ? `${dayName(start)}, dia inteiro` : `${dayName(start)} a ${dayName(last)}, dia inteiro`;
@@ -153,14 +157,15 @@ export interface Placed {
 export function layoutDay(events: CalendarEvent[], day: Date): Placed[] {
   const d0 = startOfDay(day).getTime();
   const d1 = addDays(startOfDay(day), 1).getTime();
+  // Confere o dia pelo horário real antes de cortar nas bordas do dia e de dar a altura mínima: um evento que acabou
+  // antes de 00:00 (ou exatamente às 00:00) não aparece neste dia.
   const items = events
-    .filter((e) => !e.allDay)
+    .filter((e) => !e.allDay && new Date(e.startsAt).getTime() < d1 && new Date(e.endsAt).getTime() > d0)
     .map((e) => {
       const s = Math.max(new Date(e.startsAt).getTime(), d0);
       const en = Math.min(new Date(e.endsAt).getTime(), d1);
       return { e, s, en: Math.max(en, s + 15 * 60_000) };
     })
-    .filter((x) => x.s < d1 && x.en > d0)
     .sort((a, b) => a.s - b.s || b.en - a.en);
   const out: Placed[] = [];
   let group: { item: (typeof items)[number]; col: number }[] = [];
