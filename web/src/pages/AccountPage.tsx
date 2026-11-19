@@ -15,6 +15,7 @@ import { Icon } from '../components/Icon';
 import { SideBrand, TakeoverBack, TakeoverHead } from '../components/Sidebar';
 import { QrCode } from '../components/QrCode';
 import { DeviceCell, NewDevicePill, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
+import { useLeaveGuard } from './admin/rbac/leaveGuard';
 // Figurinhas: o item some com a função desligada.
 import { useStickerCaps } from '../lib/stickers';
 
@@ -118,10 +119,14 @@ export function AccountPage() {
 const NAME_MAX = 100;
 const BIO_MAX = 500;
 const AVATAR_MAX = 5 * 1024 * 1024;
+const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const profileForm = (me: Me) => ({ name: me.name, username: me.username, email: me.email ?? '', bio: me.bio ?? '', statusText: me.statusText ?? '' });
+type ProfileForm = ReturnType<typeof profileForm>;
 
 function Profile() {
   const me = useStore((s) => s.me)!;
+  // Com "Permitir alterar perfil" desligado o formulário fica travado (o servidor recusaria ao salvar).
+  const allowProfile = useSetting<boolean>('Accounts_AllowUserProfileChange') !== false;
   const allowUsername = useSetting<boolean>('Accounts_AllowUsernameChange');
   const allowEmail = useSetting<boolean>('Accounts_AllowEmailChange');
   const allowAvatar = useSetting<boolean>('Accounts_AllowUserAvatarChange');
@@ -132,13 +137,30 @@ function Profile() {
   const [f, setF] = useState(base);
   const [currentPassword, setCurrentPassword] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const file = useRef<HTMLInputElement>(null);
+  // O que mudou por fora com a tela aberta (a mensagem de status pelo menu da foto, outro aparelho) entra nos campos
+  // que a pessoa não mexeu; o que ela está editando fica como está.
+  const fresh = JSON.stringify(profileForm(me));
+  useEffect(() => {
+    if (fresh === JSON.stringify(base)) return;
+    const next: ProfileForm = JSON.parse(fresh);
+    setF((cur) => Object.fromEntries((Object.keys(cur) as (keyof ProfileForm)[]).map((k) => [k, cur[k] === base[k] ? next[k] : cur[k]])) as ProfileForm);
+    setBase(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fresh]);
   const changed = (Object.keys(f) as (keyof typeof f)[]).filter((k) => f[k] !== base[k]);
   const dirty = changed.length > 0;
   // O e-mail recebe o link de "Esqueci minha senha": trocá-lo pede a senha atual.
   const emailChanged = f.email.trim() !== base.email.trim();
   const nameMissing = changed.includes('name') && !/[\p{L}\p{N}]/u.test(f.name);
+  const canSave = allowProfile && dirty && !nameMissing && !(emailChanged && !currentPassword) && !saving;
+  // Trocar de seção, "Voltar às conversas" ou fechar a aba com alterações não salvas pergunta antes.
+  useLeaveGuard(dirty, () => confirmDialog({ title: 'Descartar as alterações?', body: 'O que você mudou no perfil ainda não foi salvo.', confirmLabel: 'Descartar', danger: true }));
   const save = async () => {
+    if (!canSave) return;
+    setSaving(true);
     try {
       const data: Record<string, string> = Object.fromEntries(changed.map((k) => [k, f[k]]));
       if (emailChanged) data.currentPassword = currentPassword;
@@ -153,16 +175,35 @@ function Profile() {
       ok('Perfil atualizado.');
     } catch (e) {
       fail(e);
+    } finally {
+      setSaving(false);
     }
   };
+  // Tipo e tamanho conferidos antes de enviar (o servidor confere de novo, pelo conteúdo do arquivo).
   const upload = async (picked: File) => {
+    if (!AVATAR_TYPES.includes(picked.type)) return fail(new Error('Escolha uma imagem PNG, JPEG, GIF ou WebP.'));
     if (picked.size > AVATAR_MAX) return fail(new Error('A foto pode ter até 5 MB (PNG, JPEG, GIF ou WebP).'));
     const fd = new FormData();
     fd.append('image', picked);
-    await api
-      .post('users.setAvatar', fd)
-      .then(() => ok('Foto atualizada.'))
-      .catch(fail);
+    setUploading(true);
+    try {
+      await api.post('users.setAvatar', fd);
+      ok('Foto atualizada.');
+    } catch (e) {
+      fail(e);
+    } finally {
+      setUploading(false);
+    }
+  };
+  const removeAvatar = async () => {
+    const yes = await confirmDialog({ title: 'Remover a foto?', body: 'No lugar dela aparecem as suas iniciais.', confirmLabel: 'Remover', danger: true });
+    if (!yes) return;
+    try {
+      await api.post('users.resetAvatar');
+      ok('Foto removida.');
+    } catch (e) {
+      fail(e);
+    }
   };
   const ldap = me.authSource === 'ldap';
   // Conta sem senha do chat (só SAML/OAuth): o e-mail vem do provedor.
@@ -180,13 +221,13 @@ function Profile() {
               {allowAvatar && (
                 <div className="row-actions">
                   <input ref={file} type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={(e) => (e.target.files?.[0] && upload(e.target.files[0]), (e.target.value = ''))} />
-                  <button type="button" className="btn small" onClick={() => file.current?.click()}>
-                    <Icon name="image-change" />
-                    Trocar foto
+                  <button type="button" className="btn small" disabled={uploading} aria-busy={uploading || undefined} onClick={() => file.current?.click()}>
+                    {uploading ? <span className="spinner" aria-hidden="true" /> : <Icon name="image-change" />}
+                    {uploading ? 'Enviando…' : 'Trocar foto'}
                   </button>
                   {/* Só há o que remover quando a pessoa enviou uma foto (as iniciais são o padrão). */}
-                  {me.avatarETag && (
-                    <button type="button" className="btn small ghost" onClick={() => api.post('users.resetAvatar').catch(fail)}>
+                  {me.avatarETag && !uploading && (
+                    <button type="button" className="btn small ghost" onClick={() => void removeAvatar()}>
                       <Icon name="image-remove" />
                       Remover
                     </button>
@@ -208,18 +249,25 @@ function Profile() {
             <span>Você entra pelo login da empresa; o e-mail e a senha são mantidos por lá.</span>
           </div>
         )}
+        {!allowProfile && (
+          <div className="callout info">
+            <Icon name="rbac-lock" />
+            <span>O administrador não permite alterar o perfil. Para mudar seus dados, fale com ele.</span>
+          </div>
+        )}
         <div className="card">
-          <div className="form">
+          {/* Formulário de verdade: o Enter num campo salva. */}
+          <form className="form" onSubmit={(e) => (e.preventDefault(), void save())}>
             <div className="two-col">
               <Field label="Nome" required error={nameMissing ? 'Informe seu nome.' : undefined}>
-                <input value={f.name} maxLength={NAME_MAX} required onChange={(e) => setF({ ...f, name: e.target.value })} disabled={ldap} />
+                <input value={f.name} maxLength={NAME_MAX} required onChange={(e) => setF({ ...f, name: e.target.value })} disabled={ldap || !allowProfile} />
               </Field>
-              <Field label="Nome de usuário">
-                <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} disabled={!allowUsername || ldap} />
+              <Field label="Nome de usuário" hint={allowProfile && !ldap && !allowUsername ? 'O administrador não permite trocar o nome de usuário.' : undefined}>
+                <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} disabled={!allowProfile || !allowUsername || ldap} />
               </Field>
             </div>
-            <Field label="E-mail">
-              <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} disabled={!allowEmail || ldap || sso} />
+            <Field label="E-mail" hint={allowProfile && !ldap && !sso && !allowEmail ? 'O administrador não permite trocar o e-mail.' : undefined}>
+              <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} disabled={!allowProfile || !allowEmail || ldap || sso} />
             </Field>
             {emailChanged && (
               <Field label="Senha atual" hint="Para trocar o e-mail, confirme com a sua senha. O endereço antigo recebe um aviso.">
@@ -227,17 +275,17 @@ function Profile() {
               </Field>
             )}
             <Field label="Mensagem de status" hint="Aparece ao lado do seu nome, até 120 caracteres.">
-              <input value={f.statusText} maxLength={120} onChange={(e) => setF({ ...f, statusText: e.target.value })} />
+              <input value={f.statusText} maxLength={120} onChange={(e) => setF({ ...f, statusText: e.target.value })} disabled={!allowProfile} />
             </Field>
             <Field label="Sobre" hint={`${f.bio.length}/${BIO_MAX}`}>
-              <textarea rows={3} value={f.bio} maxLength={BIO_MAX} onChange={(e) => setF({ ...f, bio: e.target.value })} />
+              <textarea rows={3} value={f.bio} maxLength={BIO_MAX} onChange={(e) => setF({ ...f, bio: e.target.value })} disabled={!allowProfile} />
             </Field>
             <div className="form-actions">
-              <button className="btn primary" onClick={save} disabled={!dirty || nameMissing || (emailChanged && !currentPassword)}>
+              <button type="submit" className="btn primary" disabled={!canSave}>
                 Salvar
               </button>
             </div>
-          </div>
+          </form>
         </div>
         {allowDelete && (
           <div className="danger-zone">

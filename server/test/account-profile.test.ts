@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pool } from '../src/db/pool';
-import { admin, api, connectWs, login, newUser, sleep, startServer, stopServer, type Auth } from './helpers';
+import { admin, api, connectWs, login, newUser, raw, sleep, startServer, stopServer, type Auth } from './helpers';
 
 // Minha conta: perfil, senha, e-mail, foto e preferências. Os e-mails ficam numa caixa de saída em memória.
 const outbox = vi.hoisted(() => [] as { to: string; subject: string; text: string }[]);
@@ -202,7 +202,9 @@ describe('preferências', () => {
 });
 
 describe('foto do perfil e da sala', () => {
-  const png = (bytes: number) => new Blob([Buffer.alloc(bytes)], { type: 'image/png' });
+  // Começa com a assinatura do PNG: o servidor confere o conteúdo, não o tipo declarado.
+  const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const png = (bytes: number) => new Blob([Buffer.concat([PNG_SIG, Buffer.alloc(Math.max(0, bytes - PNG_SIG.length))])], { type: 'image/png' });
   it('arquivo acima de 5 MB é recusado com a mensagem em português', async () => {
     const u = await newUser(A);
     const fd = new FormData();
@@ -211,6 +213,24 @@ describe('foto do perfil e da sala', () => {
     const small = new FormData();
     small.append('image', png(1000), 'foto.png');
     expect((await api('POST', 'users.setAvatar', small, u)).success).toBe(true);
+  });
+
+  it('arquivo que não é imagem é recusado, e o tipo gravado é o do conteúdo (com nosniff no /avatar)', async () => {
+    const u = await newUser(A);
+    const pdf = new FormData();
+    pdf.append('image', new Blob([Buffer.from('%PDF-1.4\n%%EOF\n')], { type: 'image/png' }), 'foto.png');
+    expect(err(await api('POST', 'users.setAvatar', pdf, u))).toEqual([400, 'O arquivo não é uma imagem PNG, JPEG, GIF ou WebP.']);
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>').toString('base64');
+    expect(err(await api('POST', 'users.setAvatar', { avatarUrl: `data:image/png;base64,${svg}` }, u))).toEqual([400, 'O arquivo não é uma imagem PNG, JPEG, GIF ou WebP.']);
+    expect((await row(u.userId)).avatar_etag).toBeNull();
+    // Um PNG de verdade declarado como JPEG fica gravado como PNG.
+    const real = new FormData();
+    real.append('image', new Blob([await png(500).arrayBuffer()], { type: 'image/jpeg' }), 'foto.jpg');
+    expect((await api('POST', 'users.setAvatar', real, u)).success).toBe(true);
+    const res = await raw(`/avatar/${u.username}`, u);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect((await raw(`/avatar/uid/${u.userId}`, u)).headers.get('x-content-type-options')).toBe('nosniff');
   });
 
   it('foto da sala: sem permissão é recusada antes de ler o arquivo; acima de 5 MB também', async () => {

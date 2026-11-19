@@ -538,6 +538,8 @@ export function usersRoutes(app: FastifyInstance) {
     if (name.startsWith('room/')) return reply.callNotFound();
     const visible = !!req.ctx || avatarsPublic();
     reply.header('Cache-Control', visible && !req.ctx ? 'public, max-age=300' : 'private, max-age=300');
+    // O navegador segue o tipo gravado (sempre o detectado no conteúdo), sem adivinhar outro.
+    reply.header('X-Content-Type-Options', 'nosniff');
     if (!visible) return reply.type('image/svg+xml').send(initialsSvg(name));
     const u = await one('SELECT u.id, u.username, u.name, a.content_type, a.data, a.updated_at FROM users u LEFT JOIN avatars a ON a.user_id = u.id WHERE lower(u.username) = lower($1)', [name]);
     if (u?.data) return reply.type(u.content_type).send(u.data);
@@ -547,6 +549,7 @@ export function usersRoutes(app: FastifyInstance) {
   app.get('/avatar/uid/:id', async (req: any, reply) => {
     const visible = !!req.ctx || avatarsPublic();
     reply.header('Cache-Control', visible && !req.ctx ? 'public, max-age=300' : 'private, max-age=300');
+    reply.header('X-Content-Type-Options', 'nosniff');
     if (!visible) return reply.type('image/svg+xml').send(initialsSvg('?'));
     const u = await one('SELECT u.id, u.username, u.name, a.content_type, a.data FROM users u LEFT JOIN avatars a ON a.user_id = u.id WHERE u.id = $1', [String(req.params.id)]);
     if (u?.data) return reply.type(u.content_type).send(u.data);
@@ -555,6 +558,7 @@ export function usersRoutes(app: FastifyInstance) {
   app.get('/avatar/room/:rid', async (req: any, reply) => {
     const r = await one('SELECT r.*, a.content_type, a.data FROM rooms r LEFT JOIN room_avatars a ON a.room_id = r.id WHERE r.id = $1', [req.params.rid]);
     reply.header('Cache-Control', 'private, max-age=300');
+    reply.header('X-Content-Type-Options', 'nosniff');
     // Sala privada, DM ou atendimento: só para quem tem acesso. Canal público: segue a configuração de avatares.
     const { canAccessRoom } = await import('../services/rooms');
     const visible = !!r && (r.t === 'c' && avatarsPublic() ? true : !!req.ctx && (await canAccessRoom(req.ctx.userId, r)));

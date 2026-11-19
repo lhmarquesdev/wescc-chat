@@ -562,7 +562,7 @@ describe('foto', () => {
     expect((await userRow('foto.1')).avatar_etag).toBe(etag);
 
     // A pessoa escolhe a própria foto: uma foto nova no AD não passa por cima.
-    const own = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(32, 7)]);
+    const own = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32, 7)]);
     const set = await api('POST', 'users.setAvatar', { userId: (await userRow('foto.1')).id, avatarUrl: `data:image/png;base64,${own.toString('base64')}` }, A);
     expect(set.success).toBe(true);
     f1.photo = jpeg(3);

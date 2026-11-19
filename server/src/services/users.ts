@@ -776,8 +776,12 @@ export async function deleteUser(actor: Ctx, userId: string, opts: { confirmReli
 
 // ---------- Avatar ----------
 
-export async function setAvatar(userId: string, contentType: string, data: Buffer) {
-  if (!/^image\/(png|jpeg|gif|webp)$/.test(contentType)) throw badRequest('error-invalid-image', 'Formato de imagem não suportado.');
+export async function setAvatar(userId: string, _declaredType: string, data: Buffer) {
+  // O tipo vem do conteúdo, não do que o navegador (ou o provedor) declarou: um PDF renomeado para .png virava uma foto
+  // quebrada para todo mundo.
+  const { imageType } = await import('../importer/pending');
+  const contentType = imageType(data);
+  if (!contentType) throw badRequest('error-invalid-image', 'O arquivo não é uma imagem PNG, JPEG, GIF ou WebP.');
   if (data.length > 5 * 1024 * 1024) throw badRequest('error-file-too-large', 'Imagem muito grande (máx. 5 MB).');
   const etag = newId(8);
   await query(
