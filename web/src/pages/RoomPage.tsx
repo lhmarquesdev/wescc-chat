@@ -447,7 +447,7 @@ export function RoomPage() {
             </button>
             <div className="room-title">
               <div className="room-name">
-                <span className="room-name-text">{knownName || 'Sala indisponível'}</span>
+                <h1 className="room-name-text">{knownName || 'Sala indisponível'}</h1>
               </div>
             </div>
           </header>
@@ -629,7 +629,8 @@ export function RoomPage() {
             )}
             <div className="room-title" data-eyebrow={room.t === 'd' ? 'Conversa direta' : room.prid ? 'Discussão' : room.teamMain ? 'Time' : room.notice ? 'Canal de avisos' : room.t === 'p' ? 'Canal privado' : 'Canal'}>
               <div className="room-name">
-                <span className="room-name-text">{name}</span>
+                {/* Título da página para o leitor de tela (o tamanho continua o do cabeçalho). */}
+                <h1 className="room-name-text">{name}</h1>
                 {sub?.f && (
                   <button type="button" className="room-fav" title="Remover dos favoritos" aria-label="Remover dos favoritos" onClick={favorite}>
                     <Icon name="favorite" size={14} fill />

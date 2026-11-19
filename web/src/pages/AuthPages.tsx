@@ -417,13 +417,13 @@ export function RegisterPage() {
       <form onSubmit={submit} className="form auth-form">
         {error && <FormError>{error}</FormError>}
         <Field label="Nome">
-          <input autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+          <input autoFocus autoComplete="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         </Field>
         <Field label="Nome de usuário">
-          <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.replace(/\s/g, '.') })} />
+          <input autoComplete="username" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.replace(/\s/g, '.') })} />
         </Field>
         <Field label="E-mail">
-          <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+          <input type="email" autoComplete="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
         </Field>
         <Field label="Senha" hint={`Mínimo de ${minLen} caracteres.`}>
           <PasswordInput autoComplete="new-password" value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />

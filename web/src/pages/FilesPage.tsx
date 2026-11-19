@@ -256,7 +256,7 @@ export function FilesPage() {
       )}
       <div className={details && !phone ? 'fl-layout with-details' : 'fl-layout'}>
         {!phone && <FilesNav home={home} currentId={folderId ?? null} path={data?.path ?? []} trash={trash} />}
-        <main className="fl-main" aria-label={title}>
+        <section className="fl-main" aria-label={title}>
           {!trash && !search && folderId && <Breadcrumb data={data} />}
           {!trash && !(search.trim().length >= 2) && (folderId ? data : home) && (
             <div className="fl-toolbar">
@@ -319,7 +319,7 @@ export function FilesPage() {
             </div>
           )}
           {body}
-        </main>
+        </section>
         {details && !phone && <aside className="fl-details">{details}</aside>}
       </div>
       {details && phone && (

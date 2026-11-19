@@ -429,6 +429,7 @@ export function SearchInput({
   autoFocus,
   className,
   id,
+  label,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -436,6 +437,7 @@ export function SearchInput({
   autoFocus?: boolean;
   className?: string;
   id?: string;
+  label?: string; // nome para o leitor de tela; sem ele, o texto de exemplo (com id, o <label> de quem chama)
 }) {
   const ref = useRef<HTMLInputElement>(null);
   return (
@@ -446,6 +448,7 @@ export function SearchInput({
         id={id}
         type="search"
         className="search-input"
+        aria-label={label ?? (id ? undefined : placeholder)}
         value={value}
         placeholder={placeholder}
         autoFocus={autoFocus}
