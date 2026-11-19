@@ -257,7 +257,10 @@
 .announcement:where(.open) > .icon {
   margin-top: 1px;
 }
+/* Aberto, um anúncio longo rola dentro da faixa: as mensagens e o campo de envio continuam na tela. */
 .announcement:where(.open) .announcement-text {
+  max-height: 40vh;
+  overflow-y: auto;
   white-space: normal;
   overflow-wrap: anywhere;
 }

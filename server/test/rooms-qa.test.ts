@@ -234,3 +234,62 @@ describe('nomes e limites ao criar', () => {
     expect((await api('POST', 'im.create', { usernames: people.slice(0, 8).join(',') }, ana)).success).toBe(true);
   });
 });
+
+describe('tópico, descrição e anúncio', () => {
+  it('limite de tamanho e só texto, em português; valor antigo maior continua', async () => {
+    const c = await api('POST', 'channels.create', { name: uniq('textos') }, ana);
+    const rid = c.channel._id;
+    const save = (s: Record<string, unknown>) => api('POST', 'rooms.saveRoomSettings', { rid, ...s }, ana);
+    expect((await save({ roomTopic: 't'.repeat(251) })).error).toBe('O tópico pode ter no máximo 250 caracteres (tem 251).');
+    expect((await save({ roomDescription: 'd'.repeat(2001) })).error).toBe('A descrição pode ter no máximo 2.000 caracteres (tem 2.001).');
+    expect((await save({ roomAnnouncement: 'a'.repeat(200000) })).error).toBe('O anúncio pode ter no máximo 5.000 caracteres (tem 200.000).');
+    const obj = await save({ roomDescription: { a: 1 } });
+    expect([obj.status, obj.error]).toEqual([400, 'A descrição precisa ser um texto.']);
+    // Um campo recusado não grava os outros da mesma vez.
+    expect((await save({ roomName: uniq('renomeado'), roomTopic: 't'.repeat(300) })).status).toBe(400);
+    expect((await api('GET', 'rooms.info', { roomId: rid }, ana)).room.name).toBe(c.channel.name);
+    const st = await api('POST', 'channels.setTopic', { roomId: rid, topic: 'x'.repeat(20000) }, ana);
+    expect([st.status, st.error]).toEqual([400, 'O tópico pode ter no máximo 250 caracteres (tem 20.000).']);
+    expect((await api('POST', 'channels.setAnnouncement', { roomId: rid, announcement: 'a'.repeat(5000) }, ana)).success).toBe(true);
+    expect((await save({ roomTopic: 't'.repeat(250), roomDescription: 'd'.repeat(2000) })).success).toBe(true);
+    // null apaga (antes dava erro 500 na coluna NOT NULL).
+    expect((await save({ roomTopic: null })).success).toBe(true);
+    const info = (await api('GET', 'rooms.info', { roomId: rid }, ana)).room;
+    expect([info.topic || '', info.description.length, info.announcement.length]).toEqual(['', 2000, 5000]);
+    // Criar com tópico longo também é recusado.
+    const big = await api('POST', 'channels.create', { name: uniq('grande'), extraData: { topic: 'x'.repeat(251) } }, ana);
+    expect(big.error).toBe('O tópico pode ter no máximo 250 caracteres (tem 251).');
+    // Texto antigo acima do limite (de antes da regra) não impede salvar o resto com o mesmo valor reenviado.
+    const { pool } = await import('../src/db/pool');
+    await pool.query('UPDATE rooms SET topic = $2 WHERE id = $1', [rid, 'v'.repeat(400)]);
+    expect((await save({ roomTopic: 'v'.repeat(400), roomDescription: 'nova' })).success).toBe(true);
+  });
+});
+
+describe('silenciar', () => {
+  it('só quem está na sala; quem saiu continua silenciado e ainda pode ser liberado', async () => {
+    const out = await newUser(A, { roles: ['user'] });
+    const c = await api('POST', 'channels.create', { name: uniq('silencio'), members: [bia.username] }, ana);
+    const rid = c.channel._id;
+    const r = await api('POST', 'rooms.muteUser', { roomId: rid, username: out.username }, ana);
+    expect([r.status, r.error]).toEqual([400, 'Usuário não está na sala.']);
+    const room = async () => (await api('GET', 'rooms.info', { roomId: rid }, ana)).room;
+    const sys = async (t: string) => (await api('GET', 'channels.history', { roomId: rid, count: 100 }, ana)).messages.filter((m: any) => m.t === t);
+    expect((await room()).muted ?? []).not.toContain(out.username);
+    expect(await sys('user-muted')).toHaveLength(0);
+    // Membro: silencia uma vez (repetir não manda outra mensagem de sistema).
+    expect((await api('POST', 'rooms.muteUser', { roomId: rid, userId: bia.userId }, ana)).success).toBe(true);
+    expect((await api('POST', 'rooms.muteUser', { roomId: rid, userId: bia.userId }, ana)).success).toBe(true);
+    expect(await sys('user-muted')).toHaveLength(1);
+    // Sair e voltar não tira o silêncio.
+    expect((await api('POST', 'rooms.leave', { roomId: rid }, bia)).success).toBe(true);
+    expect((await room()).muted).toContain(bia.username);
+    expect((await api('POST', 'channels.join', { roomId: rid }, bia)).success).toBe(true);
+    expect((await api('POST', 'chat.sendMessage', { message: { rid, msg: 'oi' } }, bia)).error).toBe('Você está silenciado nesta sala.');
+    // Fora da sala, ainda dá para liberar.
+    await api('POST', 'rooms.leave', { roomId: rid }, bia);
+    expect((await api('POST', 'rooms.unmuteUser', { roomId: rid, userId: bia.userId }, ana)).success).toBe(true);
+    expect((await room()).muted ?? []).not.toContain(bia.username);
+    expect((await api('POST', 'rooms.unmuteUser', { roomId: rid, userId: out.userId }, ana)).error).toBe('Usuário não está na sala.');
+  });
+});

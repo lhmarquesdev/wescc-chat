@@ -2,7 +2,7 @@ import type { RoomRetention, RoomType, Subscription, SubscriptionNotifyPrefs } f
 import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { LOCK_TEXT } from '@shared/rbac';
-import { roomNameProblem } from '@shared/roomName';
+import { roomNameProblem, roomTextProblem, type RoomTextField } from '@shared/roomName';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
@@ -19,6 +19,17 @@ import { forgetRoomTranslations } from '../translate/forget';
 export function validateRoomName(name: string) {
   const problem = roomNameProblem(name);
   if (problem) throw badRequest('error-invalid-room-name', problem);
+}
+
+// Tópico, descrição ou anúncio novo (null apaga): undefined quando não muda. Só o valor novo passa pelo limite: um texto
+// antigo maior continua até alguém trocá-lo (o formulário da administração reenvia todos os campos).
+function roomText(field: RoomTextField, v: unknown, current: string | null | undefined): string | undefined {
+  if (v === undefined) return undefined;
+  const value = v === null ? '' : v;
+  if (value === (current ?? '')) return undefined;
+  const problem = roomTextProblem(field, value);
+  if (problem) throw badRequest('error-invalid-params', problem);
+  return value as string;
 }
 
 export async function getRoom(rid: string, db?: Queryable) {
@@ -317,6 +328,8 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
     validateRoomName(input.name);
     if (await getRoomByName(input.name)) throw badRequest('error-duplicate-channel-name', `Já existe uma sala chamada ${input.name}.`);
   }
+  const topic = roomText('topic', input.topic, '') ?? '';
+  const description = roomText('description', input.description, '') ?? '';
   // Grupo criado já criptografado (a discussão herda da sala de origem, conferida em createDiscussion).
   if (input.encrypted && !input.prid) {
     if (input.type !== 'p') throw E2E_ERR.roomType();
@@ -337,8 +350,8 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
       input.type,
       input.name,
       input.fname ?? input.name,
-      input.topic ?? '',
-      input.description ?? '',
+      topic,
+      description,
       owner?.id ?? null,
       ro,
       input.broadcast ?? false,
@@ -495,6 +508,10 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
     await assertCanToggleE2e(ctx, room, !!s.encrypted, roles);
     toggleChecked = true;
   }
+  // Antes de gravar qualquer coisa: um texto recusado não deixa a gravação pela metade.
+  const topic = roomText('topic', s.roomTopic, room.topic);
+  const description = roomText('description', s.roomDescription, room.description);
+  const announcement = roomText('announcement', s.roomAnnouncement, room.announcement);
   const sets: string[] = [];
   const params: unknown[] = [rid];
   const sys: [string, string][] = [];
@@ -510,17 +527,17 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
     sys.push(['r', s.roomName]);
     if (room.team_main && room.team_id) await query('UPDATE teams SET name = $2 WHERE id = $1', [room.team_id, s.roomName]);
   }
-  if (s.roomTopic !== undefined && s.roomTopic !== room.topic) {
-    sets.push(`topic = $${params.push(s.roomTopic)}`);
-    sys.push(['room_changed_topic', s.roomTopic]);
+  if (topic !== undefined) {
+    sets.push(`topic = $${params.push(topic)}`);
+    sys.push(['room_changed_topic', topic]);
   }
-  if (s.roomDescription !== undefined && s.roomDescription !== room.description) {
-    sets.push(`description = $${params.push(s.roomDescription)}`);
-    sys.push(['room_changed_description', s.roomDescription]);
+  if (description !== undefined) {
+    sets.push(`description = $${params.push(description)}`);
+    sys.push(['room_changed_description', description]);
   }
-  if (s.roomAnnouncement !== undefined && s.roomAnnouncement !== room.announcement) {
-    sets.push(`announcement = $${params.push(s.roomAnnouncement)}`);
-    sys.push(['room_changed_announcement', s.roomAnnouncement]);
+  if (announcement !== undefined) {
+    sets.push(`announcement = $${params.push(announcement)}`);
+    sys.push(['room_changed_announcement', announcement]);
   }
   if (s.roomType !== undefined && s.roomType !== room.t && room.t !== 'd') {
     if (!can(s.roomType === 'c' ? 'create-c' : 'create-p')) throw forbidden();
@@ -722,7 +739,14 @@ export async function setMuted(ctx: Ctx, rid: string, userId: string, mute: bool
   if (!(await hasPermission(ctx.userId, 'mute-user', rid))) throw forbidden();
   const target = await one('SELECT username FROM users WHERE id = $1', [userId]);
   if (!target) throw notFound('error-invalid-user', 'Usuário não encontrado.');
-  await assertCanActOnOwner(ctx, rid, await getSubscriptionRow(rid, userId));
+  const sub = await getSubscriptionRow(rid, userId);
+  const room = await getRoom(rid);
+  const isMuted = !!room?.muted?.includes(target.username);
+  // Silenciar só quem está na sala. Quem saiu continua silenciado (sair e voltar não tira o silêncio) e ainda dá para tirar.
+  if (!sub && (mute || !isMuted)) throw badRequest('error-user-not-in-room', 'Usuário não está na sala.');
+  await assertCanActOnOwner(ctx, rid, sub);
+  // Nada muda: sem outra mensagem "silenciou fulano" na sala.
+  if (isMuted === mute) return;
   await query(
     mute
       ? 'UPDATE rooms SET muted = array_append(array_remove(muted, $2), $2), updated_at = now() WHERE id = $1'

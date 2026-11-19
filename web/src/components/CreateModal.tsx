@@ -4,7 +4,7 @@ import type { Room } from '@shared/index';
 import { api, ApiError, errorMessage } from '../lib/api';
 import { partyOf, useDirect, type DirectState } from '../lib/direct';
 import { roomPath } from '../lib/format';
-import { ROOM_NAME_MAX, roomNameProblem } from '@shared/roomName';
+import { ROOM_NAME_MAX, roomNameProblem, roomTextProblem } from '@shared/roomName';
 import { usePermission, useSetting, useStore } from '../lib/store';
 import { sendEncrypted } from '../lib/e2e/client';
 import { requireE2eReady } from './e2e/E2eDialogs';
@@ -112,7 +112,8 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
 
   // Canal e time: a mesma regra do servidor, com o motivo embaixo do campo assim que algo foi digitado.
   const nameProblem = kind === 'channel' || kind === 'team' ? roomNameProblem(name) : null;
-  const nameValid = kind === 'dm' ? members.length > 0 : kind === 'discussion' ? name.trim().length > 0 && !!parentRoom : !nameProblem;
+  const topicProblem = kind === 'channel' || kind === 'team' ? roomTextProblem('topic', topic) : null;
+  const nameValid = kind === 'dm' ? members.length > 0 : kind === 'discussion' ? name.trim().length > 0 && !!parentRoom : !nameProblem && !topicProblem;
 
   return (
     <Modal
@@ -154,7 +155,7 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
         )}
         {(kind === 'channel' || kind === 'team') && (
           <>
-            <Field label="Tópico" hint="Opcional. Aparece no cabeçalho, embaixo do nome.">
+            <Field label="Tópico" hint="Opcional. Aparece no cabeçalho, embaixo do nome." error={topicProblem ?? undefined}>
               <input value={topic} onChange={(e) => setTopic(e.target.value)} />
             </Field>
             {/* div, não label: um <label> em volta dos botões passaria o clique do título para o primeiro deles. */}

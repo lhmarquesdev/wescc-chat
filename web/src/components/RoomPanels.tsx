@@ -14,7 +14,7 @@ import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { clearRoomError, resetTranslationViews, useLanguages, useMyLanguage, useRoomTranslate, useTranslations } from '../lib/translate';
 import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
 import { normalizeLang } from '@shared/translate';
-import { ROOM_NAME_MAX, roomNameProblem } from '@shared/roomName';
+import { ROOM_NAME_MAX, roomNameProblem, roomTextProblem } from '@shared/roomName';
 import { Icon, type IconName } from './Icon';
 import { FileTile } from './MessageItem';
 import { useEscape, useIsPhone } from './overlay';
@@ -303,13 +303,15 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
             <input value={f.roomName} maxLength={room.prid ? 200 : ROOM_NAME_MAX} onChange={(e) => setF({ ...f, roomName: e.target.value })} />
           </Field>
         )}
-        <Field label="Tópico">
+        {/* Limite do servidor com o motivo embaixo do campo (sem cortar o que foi colado); um texto antigo maior só avisa
+            quando alguém o muda. */}
+        <Field label="Tópico" error={f.roomTopic !== base.roomTopic ? (roomTextProblem('topic', f.roomTopic) ?? undefined) : undefined}>
           <input value={f.roomTopic} onChange={(e) => setF({ ...f, roomTopic: e.target.value })} />
         </Field>
-        <Field label="Descrição">
+        <Field label="Descrição" error={f.roomDescription !== base.roomDescription ? (roomTextProblem('description', f.roomDescription) ?? undefined) : undefined}>
           <textarea rows={3} value={f.roomDescription} onChange={(e) => setF({ ...f, roomDescription: e.target.value })} />
         </Field>
-        <Field label="Anúncio">
+        <Field label="Anúncio" error={f.roomAnnouncement !== base.roomAnnouncement ? (roomTextProblem('announcement', f.roomAnnouncement) ?? undefined) : undefined}>
           <textarea rows={2} value={f.roomAnnouncement} onChange={(e) => setF({ ...f, roomAnnouncement: e.target.value })} />
         </Field>
         {room.t !== 'd' && (

@@ -14,3 +14,16 @@ export function roomNameProblem(name: string): string | null {
   if (!ALNUM.test(name)) return 'O nome precisa ter pelo menos uma letra ou número.';
   return null;
 }
+
+// Tópico, descrição e anúncio da sala: limites iguais no servidor e na tela (aviso embaixo do campo). O tópico é uma
+// linha no cabeçalho; o anúncio vai até o tamanho padrão de uma mensagem.
+export const ROOM_TEXT_MAX = { topic: 250, description: 2000, announcement: 5000 } as const;
+export type RoomTextField = keyof typeof ROOM_TEXT_MAX;
+const ROOM_TEXT_LABEL: Record<RoomTextField, string> = { topic: 'O tópico', description: 'A descrição', announcement: 'O anúncio' };
+
+export function roomTextProblem(field: RoomTextField, value: unknown): string | null {
+  if (typeof value !== 'string') return `${ROOM_TEXT_LABEL[field]} precisa ser um texto.`;
+  const max = ROOM_TEXT_MAX[field];
+  if (value.length > max) return `${ROOM_TEXT_LABEL[field]} pode ter no máximo ${max.toLocaleString('pt-BR')} caracteres (tem ${value.length.toLocaleString('pt-BR')}).`;
+  return null;
+}
