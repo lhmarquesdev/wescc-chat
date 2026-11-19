@@ -220,6 +220,15 @@ describe('2FA', () => {
       await pool.query(`DELETE FROM login_attempts WHERE key = $1`, [`2fa-disable:${u.userId}`]);
       expect((await off({ code: next, password: PW })).success).toBe(true);
       expect((await pool.query('SELECT totp_enabled FROM users WHERE id = $1', [u.userId])).rows[0].totp_enabled).toBe(false);
+
+      // Conta local vinculada ao AD: a tela não pede a senha (a do chat ficou antiga), então o servidor também não.
+      const l = await newUser(A);
+      const en2 = await api('POST', 'users.2fa.enableTotp', {}, l);
+      await api('POST', 'users.2fa.verifyTotp', { code: totpCode(en2.secret) }, l);
+      await pool.query(`UPDATE users SET auth_source = 'ldap' WHERE id = $1`, [l.userId]);
+      expect((await genToken(l, 'vinculada', { code: totpCode(en2.secret, Date.now() + 30_000) })).token).toBeTruthy();
+      await pool.query('UPDATE users SET totp_last_step = NULL WHERE id = $1', [l.userId]); // o código do token já foi usado
+      expect((await api('POST', 'users.2fa.disableTotp', { code: totpCode(en2.secret) }, l)).success).toBe(true);
     } finally {
       await pool.query('DELETE FROM login_attempts');
       await api('POST', 'settings', { settings: { Accounts_Block_Failed_Login_Attempts: 10 } }, A);

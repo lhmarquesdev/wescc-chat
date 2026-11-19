@@ -223,6 +223,7 @@ async function deactivate(s: SyncScope, user: any, reason: 'removed' | 'disabled
     [user.id, reason],
   );
   await revokeAllSessions(user.id, undefined, 'deactivated');
+  bus.forceLogout({ userId: user.id, reason: 'deactivated' }); // também os sockets abertos com token de acesso pessoal
   bus.publish({ all: true }, { type: 'user', action: 'updated', user: mapUser(row) });
   await audit(s.actor, 'ldap.user.deactivated', { userId: user.id, username: user.username }, { reason });
   s.log.counts.deactivated++;

@@ -54,6 +54,10 @@ export function cleanName(name: unknown) {
   return v;
 }
 
+// Confirmações (gerar token, desligar o 2FA) pedem a senha só de quem entra com a senha do chat, como a tela mostra:
+// a conta local vinculada depois ao AD ou ao SAML guarda a senha antiga, que a pessoa já não usa.
+const asksPassword = (u: any) => !!u.password_hash && (u.auth_source ?? 'local') === 'local';
+
 export async function getUserById(id: string) {
   return one('SELECT * FROM users WHERE id = $1', [id]);
 }
@@ -557,7 +561,7 @@ export async function disableTotp(ctx: Ctx, code: string, password?: string) {
   const fail = async (e: ApiError) => (await countFailure(key, getSetting<number>('Accounts_Block_Failed_Login_Attempts') || 10), e);
   if (await one('SELECT 1 FROM login_attempts WHERE key = $1 AND blocked_until > now()', [key]))
     throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas erradas. Tente novamente em alguns minutos.');
-  if (u.password_hash && !(await verifyPassword(password ?? '', u.password_hash))) throw await fail(badRequest('error-invalid-password', 'Senha atual incorreta.'));
+  if (asksPassword(u) && !(await verifyPassword(password ?? '', u.password_hash))) throw await fail(badRequest('error-invalid-password', 'Senha atual incorreta.'));
   if (!(await check2fa(u, code))) throw await fail(badRequest('invalid-totp', 'Código inválido ou já usado.'));
   await query('DELETE FROM login_attempts WHERE key = $1', [key]);
   await query("UPDATE users SET totp_enabled = false, totp_secret = NULL, backup_codes = '{}', totp_last_step = NULL WHERE id = $1", [ctx.userId]);
@@ -787,7 +791,7 @@ export async function createPersonalToken(ctx: Ctx, name: string, bypass2fa: boo
   if (await one('SELECT 1 FROM personal_access_tokens WHERE user_id = $1 AND name = $2', [ctx.userId, name]))
     throw badRequest('error-token-already-exists', 'Já existe um token com esse nome.');
   const u = await getUserById(ctx.userId);
-  if (u.password_hash && !(await verifyPassword(confirm.password ?? '', u.password_hash))) throw badRequest('error-invalid-password', 'Senha atual incorreta.');
+  if (asksPassword(u) && !(await verifyPassword(confirm.password ?? '', u.password_hash))) throw badRequest('error-invalid-password', 'Senha atual incorreta.');
   if (u.totp_enabled && getSetting('Accounts_TwoFactorAuthentication_Enabled') && !(await check2fa(u, confirm.code ?? '')))
     throw badRequest('invalid-totp', 'Código de verificação inválido ou já usado.');
   await query('INSERT INTO personal_access_tokens (id, user_id, name, token_hash, bypass_2fa) VALUES ($1,$2,$3,$4,$5)', [
