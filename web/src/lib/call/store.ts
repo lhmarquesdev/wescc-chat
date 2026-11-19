@@ -6,6 +6,7 @@ import type { Call, CallJoin, CallKind, CallModerationAction, CallNotice, CallPa
 import { CALL_LIMITS, callEndedReasonText, callNamesLabel, callPeopleLabel, callUserLabel, formatCallDuration } from '@shared/calls';
 import { cameraLimitReached } from '@shared/call-layout';
 import { api, ApiError, errorMessage } from '../api';
+import { roomDisplayName } from '../format';
 import { nameOf } from '../names';
 import { realtime } from '../realtime';
 import { useStore } from '../store';
@@ -293,12 +294,33 @@ export function answerConfirm(ok: boolean) {
   c?.resolve(ok);
 }
 
+// O que a pessoa quer fazer depois de sair da chamada atual: ligar (ou iniciar numa sala), entrar ou atender.
+type LeaveNext = { kind: 'call'; rid: string; room: Room | null; direct: boolean } | { kind: 'join' } | { kind: 'answer' };
+
 // Já em outra chamada: pergunta antes, e a próxima entrada leva leaveCurrent.
-async function leaveFirst(): Promise<boolean> {
+async function leaveFirst(next: LeaveNext = { kind: 'join' }): Promise<boolean> {
   leaveNext = false;
   if (!isInCall()) return true;
-  const name = callRoomName(get().room) || 'outra sala';
-  const ok = await confirmInCall({ title: 'Sair da chamada atual?', body: `Você está em uma chamada em ${name}. Para entrar nesta, você sai da outra.`, confirmLabel: 'Sair e entrar' });
+  const s = get();
+  const cur = s.call!;
+  // A dois: com quem (pelo nome, não pelo login); em grupo: em qual sala.
+  const where = cur.scope === 'direct' ? `com ${label(cur.caller._id === meRef()?._id ? cur.callee : cur.caller)}` : `em ${callRoomName(s.room) || 'outra sala'}`;
+  let then = 'Para entrar nesta, você sai da outra.';
+  let confirmLabel = 'Sair e entrar';
+  if (next.kind === 'call') {
+    const name = roomDisplayName(useStore.getState().subscriptions[next.rid], next.room);
+    if (next.direct) {
+      then = `Para ligar para ${name || 'esta pessoa'}, você sai dela.`;
+      confirmLabel = 'Sair e ligar';
+    } else {
+      then = `Para iniciar uma chamada${name ? ` em ${name}` : ' nesta sala'}, você sai dela.`;
+      confirmLabel = 'Sair e continuar';
+    }
+  } else if (next.kind === 'answer') {
+    then = 'Para atender esta, você sai dela.';
+    confirmLabel = 'Sair e atender';
+  }
+  const ok = await confirmInCall({ title: 'Sair da chamada atual?', body: `Você está em uma chamada ${where}. ${then}`, confirmLabel });
   if (!ok) return false;
   leaveNext = true;
   return true;
@@ -880,13 +902,24 @@ async function getRoom(rid: string): Promise<Room | null> {
   }
 }
 
+// Uma ligação sendo aberta (sala, pergunta, microfone e calls.start): um clique duplo no botão não liga duas vezes.
+let opening = false;
+
 export async function openCall(rid: string, kind: CallKind): Promise<void> {
-  if (get().preflight) return;
-  const room = await getRoom(rid);
-  if (!(await leaveFirst())) return;
-  // Conversa a dois: toca na hora, como sempre (sem tela de entrada).
-  if (isDirectRoom(rid, room)) return startDirect(rid, kind);
-  set({ phase: isInCall() ? get().phase : 'preflight', preflight: { mode: 'start', rid, kind } });
+  if (get().preflight || opening) return;
+  // Já nesta chamada (o botão ainda não mudou): só mostra a janela.
+  if (isInCall() && get().call?.rid === rid) return expandCall();
+  opening = true;
+  try {
+    const room = await getRoom(rid);
+    const direct = isDirectRoom(rid, room);
+    if (!(await leaveFirst({ kind: 'call', rid, room, direct }))) return;
+    // Conversa a dois: toca na hora, como sempre (sem tela de entrada).
+    if (direct) return await startDirect(rid, kind);
+    set({ phase: isInCall() ? get().phase : 'preflight', preflight: { mode: 'start', rid, kind } });
+  } finally {
+    opening = false;
+  }
 }
 
 export async function openJoin(callId: string, rid: string): Promise<void> {
@@ -960,7 +993,7 @@ async function startDirect(rid: string, kind: CallKind) {
 export async function acceptIncoming(callId: string, audioOnly = false): Promise<void> {
   const call = get().incoming.find((c) => c._id === callId);
   if (!call) return;
-  if (!(await leaveFirst())) return;
+  if (!(await leaveFirst({ kind: 'answer' }))) return;
   const leaveCurrent = leaveNext;
   leaveNext = false;
   set((s) => ({ incoming: s.incoming.filter((c) => c._id !== callId) }));
