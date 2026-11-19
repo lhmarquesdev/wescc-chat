@@ -5,7 +5,7 @@ import { encryptedContent } from '@shared/messages';
 import { mediaTypeAllowed, stickerPreviewText } from '@shared/stickers';
 import { localCommandText } from '@shared/e2e';
 import { editEncrypted, quoteOf, sendEncrypted, sendEncryptedFile, type E2eFileMeta } from '../lib/e2e/client';
-import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
+import { api, ApiError, errorMessage, noConnection, uploadTo } from '../lib/api';
 import { slashCommands } from '../lib/commands';
 import { EMOJI, searchEmoji } from '../lib/emoji';
 import { formatBytes, roomPath } from '../lib/format';
@@ -392,7 +392,9 @@ function ComposerView({
       reqSeq.current++;
       setSugs([]);
     } catch (e) {
-      useStore.getState().toast(errorMessage(e), 'error');
+      // Sem conexão: o texto continua no campo para enviar de novo.
+      const why = noConnection(e) ? `Sem conexão com o servidor: ${editing ? 'a edição não foi salva' : 'a mensagem não foi enviada'}. Confira a sua rede e tente de novo.` : errorMessage(e);
+      useStore.getState().toast(why, 'error');
     }
   };
 

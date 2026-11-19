@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
 import { encryptedContent } from '@shared/messages';
 import { e2eToggleVerdict } from '@shared/e2e';
-import { api, ApiError, errorMessage } from '../lib/api';
+import { api, ApiError, errorMessage, noConnection } from '../lib/api';
 import { nameList, roomDisplayName, roomIconName, roomPath } from '../lib/format';
 import { useUserPresence } from '../lib/presence';
 import { namesIn } from '../lib/names';
@@ -228,7 +228,7 @@ export function RoomPage() {
   const roomLive = useStore((s) => s.rooms[rid]);
   const me = useStore((s) => s.me)!;
   const [room, setRoom] = useState<(Room & { muted?: string[]; team?: any; parent?: any; joinCodeRequired?: boolean }) | null>(null);
-  const [error, setError] = useState<{ text: string; missing: boolean } | null>(null);
+  const [error, setError] = useState<{ text: string; missing: boolean; offline?: boolean } | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [quoting, setQuoting] = useState<Message | null>(null);
   const [discussionFrom, setDiscussionFrom] = useState<Message | null>(null);
@@ -284,9 +284,16 @@ export function RoomPage() {
       useStore.getState().upsertRoom(r.room);
       setError(null);
     } catch (e) {
-      setError({ text: errorMessage(e), missing: e instanceof ApiError && e.status < 500 });
+      setError({ text: errorMessage(e), missing: e instanceof ApiError && e.status > 0 && e.status < 500, offline: noConnection(e) });
     }
   }, [rid]);
+
+  // Aberta sem conexão: a conversa carrega sozinha quando o tempo real volta (sem precisar recarregar a página).
+  const connected = useStore((s) => s.connected);
+  const offline = !!error?.offline;
+  useEffect(() => {
+    if (connected && offline) void loadRoom();
+  }, [connected, offline, loadRoom]);
 
   useEffect(() => {
     setRoom(null);
@@ -457,6 +464,24 @@ export function RoomPage() {
                 }
               >
                 Ela pode ter sido apagada ou você não tem acesso.
+              </Empty>
+            ) : error.offline ? (
+              <Empty
+                icon="error"
+                tone="danger"
+                title="Sem conexão com o servidor"
+                action={
+                  <>
+                    <button type="button" className="btn primary" onClick={() => void loadRoom()}>
+                      Tentar de novo
+                    </button>
+                    <button type="button" className="btn" onClick={() => navigate('/home')}>
+                      Voltar às conversas
+                    </button>
+                  </>
+                }
+              >
+                A conversa abre sozinha quando a conexão voltar.
               </Empty>
             ) : (
               <Empty
