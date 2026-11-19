@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pool } from '../src/db/pool';
 import { EXPORT_TZ } from '../src/services/exportRender';
-import { admin, api, startServer, stopServer, type Auth } from './helpers';
+import { admin, api, newUser, startServer, stopServer, type Auth } from './helpers';
 
 // Engajamento no fuso da empresa (TZ do servidor ou America/Sao_Paulo), não no do banco: a mensagem das 11h38 de
 // Brasília contava às 14h e o dia virava às 21h (admsys-12).
@@ -44,5 +44,33 @@ describe('engajamento no fuso da empresa', () => {
     await api('POST', 'chat.sendMessage', { message: { rid: (await api('GET', 'channels.info', { roomName: 'geral' }, A)).channel._id, msg: 'hoje' } }, A);
     const row = (await pool.query('SELECT day::text AS day FROM activity_daily WHERE user_id = $1 ORDER BY day DESC LIMIT 1', [A.userId])).rows[0];
     expect(row.day).toBe(dayIn(new Date().toISOString()));
+  });
+});
+
+describe('engajamento sem linhas vazias (admsys-32)', () => {
+  it('"Pessoas mais ativas" só traz quem mandou mensagem e a aba Canais só salas com mensagens', async () => {
+    // Só entrou (o login também conta em activity_daily), sem mandar nada.
+    const quieto = await newUser(A);
+    const vazia = await api('POST', 'channels.create', { name: `vazia-${Date.now()}` }, A);
+    const ativa = await api('POST', 'channels.create', { name: `ativa-${Date.now()}` }, A);
+    await api('POST', 'chat.sendMessage', { message: { rid: ativa.channel._id, msg: 'oi' } }, A);
+    const today = dayIn(new Date().toISOString());
+    const logins = await pool.query('SELECT sessions, messages FROM activity_daily WHERE user_id = $1', [quieto.userId]);
+    expect(logins.rows[0]).toMatchObject({ messages: 0 });
+    const msgs = await api('GET', 'engagement-dashboard/messages', { start: today, end: today }, A);
+    expect(msgs.topUsers.some((u: any) => u._id === quieto.userId)).toBe(false);
+    expect(msgs.topUsers.every((u: any) => u.messages > 0)).toBe(true);
+    const chans = await api('GET', 'engagement-dashboard/channels', { start: today, end: today, count: 500 }, A);
+    const ids = chans.channels.map((c: any) => c.room._id);
+    expect(ids).toContain(ativa.channel._id);
+    expect(ids).not.toContain(vazia.channel._id);
+    expect(chans.total).toBe(chans.channels.length);
+    // A sala que ficou quieta no período, mas teve mensagens no anterior, continua (mostra a queda).
+    const ontem = new Date(Date.now() - 86400_000).toISOString();
+    const antiga = await api('POST', 'channels.create', { name: `quieta-${Date.now()}` }, A);
+    const m = await api('POST', 'chat.sendMessage', { message: { rid: antiga.channel._id, msg: 'ontem' } }, A);
+    await pool.query('UPDATE messages SET created_at = $2 WHERE id = $1', [m.message._id, ontem]);
+    const again = await api('GET', 'engagement-dashboard/channels', { start: today, end: today, count: 500 }, A);
+    expect(again.channels.find((c: any) => c.room._id === antiga.channel._id)).toMatchObject({ messages: 0, lastWeekMessages: 1, diffFromLastWeek: -1 });
   });
 });

@@ -116,10 +116,11 @@ export async function engagementMessages(start?: string, end?: string) {
      GROUP BY r.id ORDER BY messages DESC LIMIT 10`,
     [s, e, TZ],
   );
+  // Só quem mandou mensagem: activity_daily também guarda os logins, e quem só entrou aparecia com 0 mensagens.
   const topUsers = await many(
     `SELECT u.id, u.username, u.name, sum(a.messages)::int AS messages
      FROM activity_daily a JOIN users u ON u.id = a.user_id
-     WHERE a.day BETWEEN $1 AND $2 GROUP BY u.id ORDER BY messages DESC LIMIT 10`,
+     WHERE a.day BETWEEN $1 AND $2 GROUP BY u.id HAVING sum(a.messages) > 0 ORDER BY messages DESC LIMIT 10`,
     [s, e],
   );
   return {
@@ -133,6 +134,7 @@ export async function engagementMessages(start?: string, end?: string) {
   };
 }
 
+// Só salas com mensagens no período ou no anterior (a que ficou quieta ainda mostra a queda); antes vinham todas, com 0.
 export async function engagementChannels(start?: string, end?: string, offset = 0, count = 25) {
   const [s, e] = range(start, end);
   const rows = await many(
@@ -142,7 +144,9 @@ export async function engagementChannels(start?: string, end?: string, offset = 
         count(*) OVER() AS total
      FROM rooms r LEFT JOIN messages m ON m.room_id = r.id AND m.t IS NULL
      WHERE r.t IN ('c','p')
-     GROUP BY r.id ORDER BY messages DESC, r.name LIMIT $3 OFFSET $4`,
+     GROUP BY r.id
+     HAVING count(m.id) FILTER (WHERE (m.created_at AT TIME ZONE $5)::date BETWEEN ($1::date - ($2::date - $1::date) - 1) AND $2) > 0
+     ORDER BY messages DESC, r.name LIMIT $3 OFFSET $4`,
     [s, e, count, offset, TZ],
   );
   return {

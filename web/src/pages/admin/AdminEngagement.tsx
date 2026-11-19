@@ -234,7 +234,7 @@ function ChannelsTab({ start, end }: { start: string; end: string }) {
   if (!data.channels.length)
     return (
       <Empty icon="room-channel" title="Nenhum canal com mensagens">
-        Os canais aparecem aqui quando recebem mensagens no período.
+        Os canais e grupos privados aparecem aqui quando recebem mensagens no período.
       </Empty>
     );
   return (
@@ -243,7 +243,8 @@ function ChannelsTab({ start, end }: { start: string; end: string }) {
         <thead>
           <tr>
             <th>
-              <ThLabel>Canal</ThLabel>
+              {/* A lista traz também os grupos privados. */}
+              <ThLabel>Canal ou grupo</ThLabel>
             </th>
             <th className="num">
               <ThLabel>Membros</ThLabel>
