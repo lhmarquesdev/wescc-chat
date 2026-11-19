@@ -16,7 +16,7 @@ import { ADMIN_MENU_PERMS } from '../pages/admin/sections';
 import { BrandMark } from './BrandIcons';
 import { CreateModal, type CreateKind } from './CreateModal';
 import { Icon, type IconName } from './Icon';
-import { isMentionBadge, useForYou, type ForYouItem } from './navState';
+import { isMentionBadge, shownUnread, useForYou, type ForYouItem } from './navState';
 // Chamadas em grupo: ponto da sala com chamada viva, "Em chamada" nas conversas a dois e o selo de perdidas.
 import { CallsNavBadge, InCallBadge, RoomLiveDot } from './call/LiveIndicators';
 import { useDirectPeer } from '../lib/roomcall';
@@ -64,7 +64,7 @@ function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPic
   const silenced = !!s.notifications?.disableNotifications;
   const mention = isMentionBadge(s);
   // Sala silenciada ou com o contador oculto: só o selo de menção aparece.
-  const count = s.unread > 0 && (mention || (!silenced && !s.notifications?.hideUnreadStatus)) ? s.unread : 0;
+  const count = shownUnread(s);
   const kind = mention ? 'mention' : s.groupMentions > 0 ? 'group' : '';
   // Canal de avisos já aberto, com aviso esperando o "Ciente": o selo continua até a pessoa confirmar.
   const pending = usePendingAcks(s.rid, s.notice);

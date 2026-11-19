@@ -7,7 +7,7 @@ import { useNoticeAcks } from './lib/acks';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { MobileTabBar } from './components/MobileTabBar';
-import { markCallsSeen, useMissedCalls } from './components/navState';
+import { countsInTitle, markCallsSeen, useMissedCalls } from './components/navState';
 import { useIsPhone } from './components/overlay';
 import { BrandMark } from './components/BrandIcons';
 import { Icon } from './components/Icon';
@@ -41,7 +41,8 @@ function useCustomCss() {
 
 function useTitle() {
   const site = useStore((s) => s.settings.Site_Name as string | undefined);
-  const unread = useStore((s) => Object.values(s.subscriptions).reduce((n, x) => n + (x.alert || x.unread ? 1 : 0), 0));
+  // Sala silenciada ou com o contador oculto só conta com menção (como na barra lateral).
+  const unread = useStore((s) => Object.values(s.subscriptions).reduce((n, x) => n + (countsInTitle(x) ? 1 : 0), 0));
   useEffect(() => {
     // Antes das configurações chegarem fica o título do index.html.
     if (site) document.title = `${unread ? `(${unread}) ` : ''}${site}`;
