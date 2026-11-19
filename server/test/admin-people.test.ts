@@ -362,4 +362,15 @@ describe('editor de usuário: própria senha, e-mail verificado e dispositivos',
     await api('POST', 'users.update', { userId: u.userId, data: { verified: true } }, A);
     await api('POST', 'users.update', { userId: u.userId, data: { email: 'trocado2@test.local', verified: true } }, A);
     expect((await api('GET', 'users.info', { userId: u.userId }, A)).user.emailVerified).toBe(true);
-  });});
+  });
+
+  it('Dispositivos marca a sessão de quem vê e manda os papéis do dono (para o cadeado)', async () => {
+    const u = await newUser(A);
+    const r = await api('GET', 'sessions.list.all', { count: 200 }, A);
+    const mine = r.sessions.filter((s: any) => s.current);
+    expect(mine).toHaveLength(1);
+    expect(mine[0].userId).toBe(A.userId);
+    expect(mine[0].roles).toContain('admin');
+    expect(r.sessions.find((s: any) => s.userId === u.userId)).toMatchObject({ current: false, roles: ['user'] });
+  });
+});

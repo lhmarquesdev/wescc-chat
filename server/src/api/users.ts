@@ -175,10 +175,12 @@ export function usersRoutes(app: FastifyInstance) {
     if (!getSetting('Device_Management_Allow_Logout_All')) throw forbidden();
     return { removed: await revokeAllSessions(ctx.userId, ctx.sessionId) };
   });
-  route(app, 'GET', 'sessions.list.all', { permissions: ['view-device-management'] }, async (req) => {
+  route(app, 'GET', 'sessions.list.all', { permissions: ['view-device-management'] }, async (req, _rep, ctx) => {
     const query = q(req);
     const r = await listSessions({ ...paging(query), search: query.filter, userId: query.userId });
-    return { ...r, count: r.sessions.length, offset: paging(query).offset };
+    // current: a sessão de quem está vendo (encerrar é sair da conta); os papéis de cada dono dizem à tela quais
+    // sessões têm cadeado (dono com papel acima de quem vê), como na lista de usuários.
+    return { ...r, sessions: r.sessions.map((s) => ({ ...s, current: s._id === ctx.sessionId })), count: r.sessions.length, offset: paging(query).offset };
   });
   route(app, 'POST', 'sessions.logout', { permissions: ['view-device-management', 'logout-other-user'] }, async (req, _rep, ctx) => {
     const sid = str(b(req).sessionId, 'sessionId');
