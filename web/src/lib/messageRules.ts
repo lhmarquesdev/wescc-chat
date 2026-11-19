@@ -59,10 +59,18 @@ export function pollMeta(p: MessagePoll, now: Date): string {
   return parts.join(' · ');
 }
 
-// Seta para cima no compositor vazio: a última mensagem da pessoa que o "Editar" do menu também ofereceria.
-export function lastOwnEditable(list: readonly Message[], meId: string, allowEdit: boolean): Message | undefined {
+// Prazo para editar ou apagar a própria mensagem (Message_AllowEditing_BlockEditInMinutes,
+// Message_AllowDeleting_BlockDeleteInMinutes; 0 = sem prazo): já passou? Quem modera e quem tem
+// bypass-time-limit-edit-and-delete não tem prazo (quem chama passa 0).
+export function pastTimeLimit(ts: string, blockMinutes: number | undefined, now = Date.now()) {
+  return !!blockMinutes && blockMinutes > 0 && (now - new Date(ts).getTime()) / 60000 > blockMinutes;
+}
+
+// Seta para cima no compositor vazio: a última mensagem da pessoa que o "Editar" do menu também ofereceria. Passado o
+// prazo de edição, nada (as anteriores são ainda mais velhas): antes a pessoa reescrevia tudo e só então via o erro.
+export function lastOwnEditable(list: readonly Message[], meId: string, allowEdit: boolean, blockMinutes = 0, now = Date.now()): Message | undefined {
   if (!allowEdit) return undefined;
-  for (let i = list.length - 1; i >= 0; i--) if (list[i].u._id === meId && editableKind(list[i])) return list[i];
+  for (let i = list.length - 1; i >= 0; i--) if (list[i].u._id === meId && editableKind(list[i])) return pastTimeLimit(list[i].ts, blockMinutes, now) ? undefined : list[i];
   return undefined;
 }
 

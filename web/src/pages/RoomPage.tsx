@@ -401,11 +401,18 @@ export function RoomPage() {
   const canClosePolls = canWithRoles('delete-message', roles);
   // Editar a mensagem de outra pessoa: a permissão com os papéis da sala (dono, moderador), como o servidor confere.
   const canEditOthers = canWithRoles('edit-message', roles);
+  // Prazo para editar e apagar as próprias mensagens (minutos; 0 = sem prazo). Quem modera (edit-message, delete-message)
+  // e quem tem bypass-time-limit-edit-and-delete não tem prazo, como no servidor.
+  const bypassTime = canWithRoles('bypass-time-limit-edit-and-delete', roles);
+  const editBlock = useSetting<number>('Message_AllowEditing_BlockEditInMinutes') ?? 0;
+  const deleteBlock = useSetting<number>('Message_AllowDeleting_BlockDeleteInMinutes') ?? 0;
+  const editLimit = canEditOthers || bypassTime ? 0 : editBlock;
+  const deleteLimit = canWithRoles('delete-message', roles) || canWithRoles('force-delete-message', roles) || bypassTime ? 0 : deleteBlock;
   // Quem votou: num canal de avisos (ou com a lista oculta) só quem publica ou vê a lista.
   const canSeePollVoters = !(room?.notice || room?.broadcast) || canPostRO || (!!room?.broadcast && !membersHidden);
   const gate = useMemo(
-    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers }),
-    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers],
+    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers, editLimit, deleteLimit }),
+    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers, editLimit, deleteLimit],
   );
 
   const actions = useMemo(
@@ -424,7 +431,7 @@ export function RoomPage() {
   // Seta para cima no compositor vazio: a mesma regra do "Editar" do menu (sem figurinhas nem mensagens de sistema).
   const editLast = () => {
     const { messages, settings } = useStore.getState();
-    const mine = lastOwnEditable(messages[rid]?.list ?? [], me._id, !!settings.Message_AllowEditing);
+    const mine = lastOwnEditable(messages[rid]?.list ?? [], me._id, !!settings.Message_AllowEditing, editLimit);
     // Mensagem cifrada: edita o texto decifrado (sem ele, nada a editar).
     if (mine && mine.e2e) {
       const c = contentOf(mine);

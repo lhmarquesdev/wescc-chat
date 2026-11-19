@@ -1,13 +1,14 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
 import { plural, roomDisplayName } from '../lib/format';
-import { continuesGroup } from '../lib/messageRules';
+import { continuesGroup, lastOwnEditable } from '../lib/messageRules';
+import { contentOf } from '../lib/e2e/client';
 import { useSetting, useStore } from '../lib/store';
 import { Composer } from './Composer';
 import { Icon } from './Icon';
-import { MessageItem } from './MessageItem';
+import { MessageGateContext, MessageItem } from './MessageItem';
 import { PanelHead, refocusRoom, usePanelEscape } from './RoomPanels';
 import { SkeletonMessages } from './ui';
 // Integrações (Jira)
@@ -95,6 +96,16 @@ export function ThreadPanel({
   }, [replies?.length, ephemeral.length, target]);
 
   const actions = { onEdit: setEditing, onQuote: setQuoting, onUserClick };
+  // Seta para cima no compositor do tópico: a última resposta da pessoa, como na sala (RoomPage.editLast).
+  const gate = useContext(MessageGateContext);
+  const editLast = () => {
+    const mine = lastOwnEditable(replies ?? [], me._id, !!useStore.getState().settings.Message_AllowEditing, gate.editLimit);
+    // Mensagem cifrada: edita o texto decifrado (sem ele, nada a editar).
+    if (mine && mine.e2e) {
+      const c = contentOf(mine);
+      if (c) setEditing({ ...mine, msg: c.msg });
+    } else if (mine) setEditing(mine);
+  };
   const name = roomDisplayName(sub, room);
   const where = room.t === 'd' ? name : `#${name}`;
   const count = root?.tcount ?? replies?.length ?? 0;
@@ -170,6 +181,7 @@ export function ThreadPanel({
           setEditing={setEditing}
           quoting={quoting}
           setQuoting={setQuoting}
+          onEditLast={editLast}
         />
       )}
     </aside>

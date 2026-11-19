@@ -423,6 +423,7 @@ function ComposerView({
   const send = async (opts: { asText?: boolean } = {}) => {
     if (sendingRef.current) return;
     const msg = textNow.current.trim();
+    const isEdit = !!editing;
     if (!msg && !pending.length && !fileEdit) return;
     if (msg.length > maxSize) return useStore.getState().toast(`A mensagem excede ${maxSize} caracteres.`, 'error');
     // Salvou sem mudar nada: só sai da edição (não marca "editada").
@@ -464,6 +465,8 @@ function ComposerView({
         warnNotInRoom(r.mentionsNotInRoom);
         commandDone(r.message);
       }
+      // "Também enviar na sala" vale para uma resposta só (como no Rocket.Chat): a seguinte fica no tópico.
+      if (!isEdit && tmid) setAlsoChannel(false);
       clearSent(msg);
     } catch (e) {
       useStore.getState().toast(errorMessage(e), 'error');
@@ -732,6 +735,7 @@ function ComposerView({
     setSugs([]);
     sendTyping(false);
     setQuoting(null);
+    setAlsoChannel(false);
   };
   const ackPending = !!ackOption && askAck && !tmid;
   const cancelPending = () => (setPending([]), setFileDesc(''));
@@ -1057,7 +1061,7 @@ function ComposerView({
           request={request}
           onClose={closePicker}
           onEmoji={(c) => (insertAtCaret(`:${c}: `), closePicker())}
-          onSent={() => setQuoting(null)}
+          onSent={() => (setQuoting(null), setAlsoChannel(false))}
           focusComposer={() => ta.current?.focus({ preventScroll: true })}
         />
       )}

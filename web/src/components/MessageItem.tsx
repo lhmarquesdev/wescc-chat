@@ -23,7 +23,7 @@ import { resolveEmoji } from '../lib/emoji';
 import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
 import { useHighlights } from '../lib/presence';
 import { findHighlight } from '@shared/highlights';
-import { authorName, editableKind, forwardableKind, messageHref } from '../lib/messageRules';
+import { authorName, editableKind, forwardableKind, messageHref, pastTimeLimit } from '../lib/messageRules';
 import { markUnread } from '../lib/markUnread';
 import { canRemoveEverywhere, useStickers } from '../lib/stickers';
 import { useNames } from '../lib/names';
@@ -82,6 +82,9 @@ export type MessageGate = Pick<MessageActions, 'canReact' | 'canReply' | 'canDis
   canSeePollVoters?: boolean;
   // Editar mensagens de outras pessoas: edit-message com os papéis globais e os da sala (dono, moderador).
   canEditOthers?: boolean;
+  // Prazo (minutos) para editar e para apagar as próprias mensagens; 0 = sem prazo para esta pessoa nesta sala.
+  editLimit?: number;
+  deleteLimit?: number;
 };
 
 // As mesmas regras para toda mensagem da sala, inclusive as da thread, que monta as próprias ações.
@@ -920,6 +923,9 @@ interface MenuItem {
   label: string;
   run: () => void;
   danger?: boolean;
+  // Desativado, com o motivo embaixo do rótulo (prazo de edição ou de exclusão).
+  disabled?: boolean;
+  hint?: string;
 }
 // Itens que são componentes (os das figurinhas): recebem o close do menu e o papel da folha.
 type MenuEntry = MenuItem | { key: string; el: (close: () => void, sheetRole?: boolean) => ReactNode };
@@ -998,10 +1004,20 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
   // Mensagem cifrada: só com a criptografia ligada (o texto novo vai cifrado) e depois de decifrar.
   const e2eEditable = !m.e2e || (roomEncrypted && !!e2eContent);
   const canEdit = editableKind(m) && e2eEditable && canReply && ((own && allowEdit) || (!own && (gate.canEditOthers ?? (perms.includes('edit-message') && canModerate))));
+  // Passado o prazo de edição ou de exclusão, o item fica desativado com o motivo (antes a pessoa reescrevia tudo e só
+  // então via o erro do servidor).
+  const editExpired = own && pastTimeLimit(m.ts, gate.editLimit);
+  const deleteExpired = own && pastTimeLimit(m.ts, gate.deleteLimit);
   const opt = (on: unknown, item: MenuEntry) => (on ? item : null);
   const groups = [
     [
-      opt(canEdit, { key: 'edit', icon: 'edit', label: 'Editar', run: () => actions.onEdit?.(m) }),
+      opt(canEdit, {
+        key: 'edit',
+        icon: 'edit',
+        label: 'Editar',
+        run: () => actions.onEdit?.(m),
+        ...(editExpired ? { disabled: true, hint: `O prazo para editar (${gate.editLimit} min) acabou` } : {}),
+      }),
       opt(!m.drid && !inThread && actions.onDiscussion && canDiscuss, { key: 'disc', icon: 'start-discussion', label: 'Iniciar discussão', run: () => actions.onDiscussion?.(m) }),
       opt(perms.includes('forward-message') && forwardableKind(m) && gate.canForwardFrom !== false, { key: 'forward', icon: 'forward', label: 'Encaminhar', run: () => setForwarding(true) }),
     ],
@@ -1048,7 +1064,14 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
         key: 'remove-all',
         el: (close, sheetRole) => <StickerRemoveItem message={m} close={close} sheetRole={sheetRole} />,
       }),
-      opt(own ? allowDelete : canModerate || perms.includes('delete-message'), { key: 'del', icon: 'delete', label: 'Apagar', run: () => void del(), danger: true }),
+      opt(own ? allowDelete : canModerate || perms.includes('delete-message'), {
+        key: 'del',
+        icon: 'delete',
+        label: 'Apagar',
+        run: () => void del(),
+        danger: true,
+        ...(deleteExpired ? { disabled: true, hint: `O prazo para apagar (${gate.deleteLimit} min) acabou` } : {}),
+      }),
     ],
   ]
     .map((g) => g.filter((x): x is MenuEntry => !!x))
@@ -1066,13 +1089,21 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
               type="button"
               role={sheetRole ? 'menuitem' : undefined}
               className={it.danger ? 'danger' : undefined}
+              disabled={it.disabled}
               onClick={() => {
                 close();
                 it.run();
               }}
             >
               <Icon name={it.icon} size={16} />
-              {it.label}
+              {it.hint ? (
+                <span className="menu-text">
+                  {it.label}
+                  <span className="menu-desc">{it.hint}</span>
+                </span>
+              ) : (
+                it.label
+              )}
             </button>
           ),
         )}
