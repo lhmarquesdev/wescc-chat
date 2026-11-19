@@ -8,7 +8,7 @@ import { assertCanBringIn, directParentFor, directPolicyFor } from '../services/
 import { mapRoom, mapTeam } from '../services/mappers';
 import { cleanHistory, createDiscussion, listDiscussions } from '../services/messages';
 import { hasPermission } from '../services/permissions';
-import { getInvite, INVITE_MAX_DAYS, INVITE_MAX_USES, inviteNumber, inviteStatus, listInvites, type InviteStatus } from '../services/invites';
+import { getInvite, INVITE_MAX_DAYS, INVITE_MAX_USES, inviteNumber, inviteStatus, listInvites, oneJoinAtATime, type InviteStatus } from '../services/invites';
 import {
   addUserToRoom,
   adminListRooms,
@@ -590,39 +590,44 @@ export function roomsRoutes(app: FastifyInstance) {
     return { valid: true, room };
   });
   route(app, 'POST', 'useInviteToken', {}, async (req, _rep, ctx) => {
-    const inv = await getInvite(str(b(req).token, 'token'));
-    if (!inv) throw inviteRefused('invalid');
-    if (inv.t === 'd') throw badRequest('error-not-allowed', 'Não é possível adicionar pessoas a uma DM existente.');
-    const out = { room: { rid: inv.room_id, name: inv.name, fname: inv.fname, t: inv.t } };
-    // Quem já participa só é levado para a sala, sem gastar um uso (o link de uso único segue valendo para o convidado).
-    const sub = await getSubscriptionRow(inv.room_id, ctx.userId);
-    if (sub) {
-      if (!sub.open) await updateSubscriptionFlags(ctx, inv.room_id, { open: true });
+    const token = str(b(req).token, 'token');
+    // Clique duplo ou pedidos repetidos da mesma pessoa com o mesmo link: um de cada vez, e o seguinte já a encontra na
+    // sala (não gasta outro uso).
+    return oneJoinAtATime(`${token}:${ctx.userId}`, async () => {
+      const inv = await getInvite(token);
+      if (!inv) throw inviteRefused('invalid');
+      if (inv.t === 'd') throw badRequest('error-not-allowed', 'Não é possível adicionar pessoas a uma DM existente.');
+      const out = { room: { rid: inv.room_id, name: inv.name, fname: inv.fname, t: inv.t } };
+      // Quem já participa só é levado para a sala, sem gastar um uso (o link de uso único segue valendo para o convidado).
+      const sub = await getSubscriptionRow(inv.room_id, ctx.userId);
+      if (sub) {
+        if (!sub.open) await updateSubscriptionFlags(ctx, inv.room_id, { open: true });
+        return out;
+      }
+      const status = inviteStatus(inv);
+      if (status !== 'active') throw inviteRefused(status);
+      // Quem traz a pessoa é quem criou o link.
+      await assertCanBringIn(inv.user_id, await getRoom(inv.room_id), [ctx.userId], { joinerId: ctx.userId });
+      // O uso é reservado antes da entrada, com o limite e o prazo conferidos no próprio UPDATE: pedidos ao mesmo tempo
+      // não passam do limite. Se a entrada falha, o uso volta.
+      const used = await one(
+        `UPDATE invites SET uses = uses + 1 WHERE id = $1 AND (max_uses = 0 OR uses < max_uses) AND (expires_at IS NULL OR expires_at > now()) RETURNING id`,
+        [inv.id],
+      );
+      if (!used) {
+        // Dois cliques: o primeiro pedido já gastou o último uso e pôs a pessoa na sala.
+        if (await getSubscriptionRow(inv.room_id, ctx.userId)) return out;
+        const now = await getInvite(inv.id);
+        throw inviteRefused(now ? inviteStatus(now) : 'invalid');
+      }
+      try {
+        await addUserToRoom(inv.room_id, ctx.userId);
+      } catch (e) {
+        await query('UPDATE invites SET uses = GREATEST(uses - 1, 0) WHERE id = $1', [inv.id]);
+        throw e;
+      }
       return out;
-    }
-    const status = inviteStatus(inv);
-    if (status !== 'active') throw inviteRefused(status);
-    // Quem traz a pessoa é quem criou o link.
-    await assertCanBringIn(inv.user_id, await getRoom(inv.room_id), [ctx.userId], { joinerId: ctx.userId });
-    // O uso é reservado antes da entrada, com o limite e o prazo conferidos no próprio UPDATE: pedidos ao mesmo tempo
-    // não passam do limite. Se a entrada falha, o uso volta.
-    const used = await one(
-      `UPDATE invites SET uses = uses + 1 WHERE id = $1 AND (max_uses = 0 OR uses < max_uses) AND (expires_at IS NULL OR expires_at > now()) RETURNING id`,
-      [inv.id],
-    );
-    if (!used) {
-      // Dois cliques: o primeiro pedido já gastou o último uso e pôs a pessoa na sala.
-      if (await getSubscriptionRow(inv.room_id, ctx.userId)) return out;
-      const now = await getInvite(inv.id);
-      throw inviteRefused(now ? inviteStatus(now) : 'invalid');
-    }
-    try {
-      await addUserToRoom(inv.room_id, ctx.userId);
-    } catch (e) {
-      await query('UPDATE invites SET uses = GREATEST(uses - 1, 0) WHERE id = $1', [inv.id]);
-      throw e;
-    }
-    return out;
+    });
   });
 }
 

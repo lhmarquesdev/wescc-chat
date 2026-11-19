@@ -37,6 +37,21 @@ export async function getInvite(token: string) {
   return one(`${SELECT} WHERE i.id = $1`, [token]);
 }
 
+// Uma entrada por vez para a mesma pessoa com o mesmo link, nesta instância (clique duplo, duas abas, pedidos repetidos
+// pela API): o pedido seguinte já encontra a pessoa na sala e não gasta outro uso.
+const joining = new Map<string, Promise<unknown>>();
+export async function oneJoinAtATime<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = joining.get(key);
+  const run = prev ? prev.then(fn) : fn();
+  const tail = run.catch(() => {});
+  joining.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (joining.get(key) === tail) joining.delete(key);
+  }
+}
+
 // Lista: os links de uma sala (painel da sala), todos (Administração) ou só os da própria pessoa. canRevoke segue a
 // regra de removeInvite: quem criou, ou quem pode criar links naquela sala.
 export async function listInvites(viewerId: string, opts: { rid?: string; all?: boolean }) {

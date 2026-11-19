@@ -145,6 +145,13 @@ describe('links de convite', () => {
     const r3 = await Promise.all(more.map((p) => use(p, inv3._id)));
     expect(r3.filter((r) => r.status === 200)).toHaveLength(3);
     expect(await usesOf(inv3._id)).toBe(3);
+
+    // A mesma pessoa com vários pedidos ao mesmo tempo (clique duplo, duas abas): entra uma vez e gasta um uso só.
+    const inv5 = await link(owner, rid, 7, 5);
+    const twice = await newUser(A);
+    const r5 = await Promise.all(Array.from({ length: 5 }, () => use(twice, inv5._id)));
+    expect(r5.map((r) => r.status)).toEqual([200, 200, 200, 200, 200]);
+    expect(await usesOf(inv5._id)).toBe(1);
   });
 
   it('entrada recusada (Operação) não gasta uso', async () => {
