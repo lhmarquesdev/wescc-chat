@@ -25,6 +25,9 @@ export interface DriveFolder {
   color: string | null;
   inherit: boolean;
   level: DriveLevel;
+  // Nível da pessoa na pasta de cima (0 se não a vê; ausente na pasta principal). Renomear, mover e mandar uma
+  // subpasta para a lixeira valem para quem edita também a de cima.
+  parentLevel?: DriveLevel;
   createdBy: DriveUserRef | null;
   createdAt: string;
   updatedAt: string;

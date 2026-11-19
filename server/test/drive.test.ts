@@ -199,7 +199,7 @@ describe('arquivos', () => {
   it('pasta na lixeira leva tudo de dentro junto e a restauração volta', async () => {
     const f = await api('POST', 'files.folder.create', { name: 'Temporária', parentId: root }, ana);
     await up(f.folder._id, 'x.txt', 'x', ana);
-    expect((await api('POST', 'files.trash', { folderIds: [f.folder._id] }, bruno)).status).toBe(403); // pasta pede gerenciar
+    expect((await api('POST', 'files.trash', { folderIds: [f.folder._id] }, davi)).status).toBe(403); // só vê
     expect((await api('POST', 'files.trash', { folderIds: [f.folder._id] }, ana)).success).toBe(true);
     expect((await folder(f.folder._id, ana)).status).toBe(404);
     expect((await api('GET', 'files.trash.list', undefined, ana)).folders.map((x: any) => x.name)).toContain('Temporária');
@@ -211,6 +211,28 @@ describe('arquivos', () => {
     const r = await purgeExpiredTrash();
     expect(r.folders).toBe(1);
     expect(await one('SELECT 1 FROM drive_folders WHERE id = $1', [f.folder._id])).toBeNull();
+  });
+
+  it('quem edita move e manda para a lixeira subpasta que herda o acesso; principal e restrita pedem gerenciar', async () => {
+    const a = (await api('POST', 'files.folder.create', { name: 'Criada por engano', parentId: root }, bruno)).folder;
+    const b = (await api('POST', 'files.folder.create', { name: 'Destino', parentId: root }, bruno)).folder;
+    expect(a.level).toBe(2);
+    expect(a.parentLevel).toBe(2);
+    expect((await api('POST', 'files.move', { folderIds: [a._id], targetId: b._id }, davi)).status).toBe(403);
+    expect((await api('POST', 'files.move', { folderIds: [a._id], targetId: b._id }, bruno)).success).toBe(true);
+    expect((await folder(a._id, bruno)).path.map((p: any) => p.name)).toEqual(['Financeiro', 'Destino', 'Criada por engano']);
+    expect((await api('POST', 'files.trash', { folderIds: [root] }, bruno)).status).toBe(403);
+    expect((await api('POST', 'files.trash', { folderIds: [b._id] }, bruno)).success).toBe(true);
+    expect((await api('GET', 'files.trash.list', undefined, bruno)).folders.map((x: any) => x.name)).toContain('Destino');
+    expect((await api('POST', 'files.purge', { folderIds: [b._id] }, bruno)).status).toBe(403); // apagar de vez pede gerenciar
+    expect((await api('POST', 'files.restore', { folderIds: [b._id] }, bruno)).success).toBe(true);
+    expect((await folder(a._id, bruno)).folder.level).toBe(2);
+    // Subpasta restrita: mesmo quem edita nela não a move nem a manda para a lixeira.
+    await share(b._id, [{ type: 'user', id: ana.userId, level: 3 }, { type: 'user', id: bruno.userId, level: 2 }], ana, false);
+    expect((await api('POST', 'files.trash', { folderIds: [b._id] }, bruno)).status).toBe(403);
+    expect((await api('POST', 'files.move', { folderIds: [b._id], targetId: a._id }, bruno)).status).toBe(403);
+    expect((await api('POST', 'files.trash', { folderIds: [b._id] }, ana)).success).toBe(true);
+    expect((await api('POST', 'files.purge', { folderIds: [b._id] }, ana)).success).toBe(true);
   });
 
   it('cota cheia recusa o envio com aviso claro', async () => {

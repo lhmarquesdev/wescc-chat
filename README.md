@@ -1121,6 +1121,10 @@ A aba **Arquivos** guarda documentos da empresa em pastas, com permissão por pa
 | Pode editar | Também enviar, renomear, mover, criar subpastas e mandar para a lixeira |
 | Gerencia | Também compartilhar, mudar permissões e apagar de vez da lixeira |
 
+Quem edita renomeia, move e manda para a lixeira as subpastas que herdam o acesso (editando também a pasta de cima).
+Pasta principal e subpasta restrita são de quem gerencia: só quem gerencia muda o nome de uma pasta principal e move
+ou manda para a lixeira uma pasta principal ou restrita (quem edita só muda a cor).
+
 Subpastas herdam o acesso da pasta de cima. Em **Compartilhar**, "Herdar o acesso da pasta de cima" desligado deixa a
 subpasta **restrita**: só quem está na lista dela entra (ex.: "Folha e salários" dentro de "Financeiro"). Quem tem
 acesso só a uma subpasta a vê como pasta principal, sem ver o nome das de cima. Uma pasta com uma subpasta restrita

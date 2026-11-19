@@ -64,6 +64,7 @@ function folderOut(acc: Access, f: FolderRow, users: (id: string | null) => Driv
     color: f.color,
     inherit: f.inherit,
     level: acc.level(f.id),
+    parentLevel: f.parent_id ? acc.level(f.parent_id) : undefined,
     createdBy: users(f.created_by),
     createdAt: iso(f.created_at)!,
     updatedAt: iso(f.updated_at)!,
@@ -367,7 +368,20 @@ export async function updateFolder(ctx: Ctx, folderId: unknown, input: { name?: 
   return {};
 }
 
-// Mover pastas e arquivos para outra pasta. Pasta: gerenciar a pasta e editar o destino; arquivo: editar origem e destino.
+// Mover, mandar para a lixeira ou restaurar uma pasta: quem gerencia, ou quem edita uma subpasta que herda o acesso e a
+// pasta de cima dela (como renomear). Pasta principal e subpasta restrita pedem gerenciar.
+function canRemoveFolder(acc: Access, f: FolderRow) {
+  const lvl = acc.level(f.id);
+  return lvl >= 3 || (lvl >= 2 && !!f.parent_id && f.inherit && acc.level(f.parent_id) >= 2);
+}
+
+function needRemovableFolder(acc: Access, id: unknown, opts: { allowTrashed?: boolean } = {}) {
+  const f = needFolder(acc, id, 2, opts);
+  if (!canRemoveFolder(acc, f)) throw forbidden(DRIVE_TEXT.needManage);
+  return f;
+}
+
+// Mover pastas e arquivos para outra pasta. Pasta: ver canRemoveFolder, e editar o destino; arquivo: editar origem e destino.
 export async function moveItems(ctx: Ctx, input: { fileIds?: string[]; folderIds?: string[]; targetId?: unknown }) {
   const acc = await loadAccess(ctx);
   const targetId = input.targetId ? String(input.targetId) : null;
@@ -379,7 +393,9 @@ export async function moveItems(ctx: Ctx, input: { fileIds?: string[]; folderIds
     throw badRequest('error-invalid-params', 'Escolha a pasta de destino.');
   const touched = new Set<string | null>([targetId]);
   for (const id of folderIds) {
-    const f = needFolder(acc, id, 3);
+    const f = needRemovableFolder(acc, id);
+    // Virar pasta principal deixa quem moveu gerenciando: pede já gerenciar.
+    if (!target && acc.level(f.id) < 3) throw forbidden(DRIVE_TEXT.needManage);
     if (target && acc.subtree(f.id).includes(target.id)) throw badRequest('error-invalid-move', `"${f.name}" não pode ir para dentro dela mesma.`);
     if (f.parent_id === targetId) continue;
     const name = nextFreeName(f.name, await takenFolderNames(targetId, f.id));
@@ -635,7 +651,7 @@ function trashTop(acc: Access, f: FolderRow): FolderRow | null {
 export async function trashItems(ctx: Ctx, input: { fileIds?: string[]; folderIds?: string[] }) {
   const acc = await loadAccess(ctx);
   const touched = new Set<string | null>();
-  const folders = (input.folderIds ?? []).slice(0, 100).map((id) => needFolder(acc, id, 3));
+  const folders = (input.folderIds ?? []).slice(0, 100).map((id) => needRemovableFolder(acc, id));
   for (const f of folders) assertWholeTree(acc, f);
   for (const f of folders) {
     await query('UPDATE drive_folders SET trashed_at = now(), trashed_by = $2 WHERE id = $1', [f.id, ctx.userId]);
@@ -662,7 +678,7 @@ export async function listTrash(ctx: Ctx) {
     const hit = memo.get(f.id);
     if (hit !== undefined) return hit;
     memo.set(f.id, false);
-    let out = acc.trashed(f.id) && (!!f.trashed_at || !f.inherit) && acc.level(f.id) >= 3;
+    let out = acc.trashed(f.id) && (!!f.trashed_at || !f.inherit) && canRemoveFolder(acc, f);
     for (let p = f.parent_id ? acc.folders.get(f.parent_id) : undefined; out && p; p = p.parent_id ? acc.folders.get(p.parent_id) : undefined) if (listed(p)) out = false;
     memo.set(f.id, out);
     return out;
@@ -685,12 +701,12 @@ export async function restoreItems(ctx: Ctx, input: { fileIds?: string[]; folder
   const acc = await loadAccess(ctx);
   const touched = new Set<string | null>();
   for (const id of (input.folderIds ?? []).slice(0, 100)) {
-    const f = needFolder(acc, id, 3, { allowTrashed: true });
+    const f = needRemovableFolder(acc, id, { allowTrashed: true });
     if (!acc.trashed(f.id)) continue;
     if (f.parent_id && acc.trashed(f.parent_id)) {
       // Foi para a lixeira junto com a de cima: restaurar é com quem a gerencia (que talvez a pessoa nem veja).
       const top = trashTop(acc, acc.folders.get(f.parent_id)!)!;
-      if (acc.level(top.id) >= 3) throw badRequest('error-parent-trashed', `A pasta de cima de "${f.name}" também está na lixeira. Restaure "${top.name}" primeiro.`);
+      if (canRemoveFolder(acc, top)) throw badRequest('error-parent-trashed', `A pasta de cima de "${f.name}" também está na lixeira. Restaure "${top.name}" primeiro.`);
       throw badRequest('error-parent-trashed', `A pasta de cima de "${f.name}" está na lixeira. Peça a quem a gerencia para restaurá-la.`);
     }
     const name = nextFreeName(f.name, await takenFolderNames(f.parent_id, f.id));

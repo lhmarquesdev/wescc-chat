@@ -37,6 +37,10 @@ const toneOf = (f: { name: string; type: string }) => {
 };
 const isText = (f: DriveFile) => /^text\//.test(f.type) || /\.(txt|md|csv|log|json|xml|ya?ml|ini|sql)$/i.test(f.name);
 const canPreview = (f: DriveFile) => /^(image|video|audio)\//.test(f.type) || f.type === 'application/pdf' || isText(f);
+// As mesmas regras do servidor (drive.ts): renomear a pasta principal pede gerenciar; subpasta, editar a de cima. Mover e
+// mandar para a lixeira: gerenciar, ou editar uma subpasta que herda o acesso e a de cima.
+const canRenameFolder = (f: DriveFolder) => f.level >= 3 || (!!f.parentId && f.level >= 2 && (f.parentLevel ?? 0) >= 2);
+const canRemoveFolder = (f: DriveFolder) => f.level >= 3 || (!!f.parentId && f.inherit && f.level >= 2 && (f.parentLevel ?? 0) >= 2);
 const LEVEL_ICON: Record<number, IconName> = { 1: 'files-view', 2: 'files-edit', 3: 'files-manage' };
 const COLOR_LABEL: Record<string, string> = { blue: 'Azul', green: 'Verde', amber: 'Âmbar', red: 'Vermelho', purple: 'Roxo', teal: 'Turquesa', gray: 'Cinza' };
 
@@ -1375,21 +1379,22 @@ function useItemActions(opts: {
               Compartilhar
             </button>
           )}
-          {(f.level >= 3 || (parent?.level ?? 0) >= 2) && setDialog && (
+          {f.level >= 2 && setDialog && (
             <button
               type="button"
               onClick={() => {
                 close();
                 setDialog(
                   <NameDialog
-                    title="Renomear pasta"
+                    title={canRenameFolder(f) ? 'Renomear pasta' : 'Cor da pasta'}
                     initial={f.name}
                     initialColor={f.color}
                     withColor
+                    nameLocked={canRenameFolder(f) ? undefined : 'Só quem gerencia a pasta muda o nome dela.'}
                     confirm="Salvar"
                     onClose={() => setDialog(null)}
                     onSave={async (name, color) => {
-                      await filesApi.updateFolder(f._id, { name, color });
+                      await filesApi.updateFolder(f._id, canRenameFolder(f) ? { name, color } : { color });
                       setDialog(null);
                       toast('Pasta atualizada.', 'success');
                       reload?.();
@@ -1399,16 +1404,16 @@ function useItemActions(opts: {
               }}
             >
               <Icon name="edit" />
-              Renomear e cor
+              {canRenameFolder(f) ? 'Renomear e cor' : 'Mudar a cor'}
             </button>
           )}
-          {f.level >= 3 && setDialog && f.parentId && (
+          {canRemoveFolder(f) && setDialog && f.parentId && (
             <button type="button" onClick={() => (close(), move(`Mover a pasta “${f.name}”`, f.parentId, f._id, (t) => run(filesApi.move({ folderIds: [f._id], targetId: t._id }), `Pasta movida para “${t.name}”.`)))}>
               <Icon name="files-move" />
               Mover para…
             </button>
           )}
-          {f.level >= 3 && (
+          {canRemoveFolder(f) && (
             <>
               <hr />
               <button
@@ -1447,6 +1452,7 @@ function NameDialog({
   initialColor = null,
   withColor,
   selectBase,
+  nameLocked,
   confirm,
   onClose,
   onSave,
@@ -1457,6 +1463,8 @@ function NameDialog({
   initialColor?: string | null;
   withColor?: boolean;
   selectBase?: boolean;
+  // O nome não pode mudar (o motivo aparece embaixo do campo): só a cor.
+  nameLocked?: string;
   confirm: string;
   onClose: () => void;
   onSave: (name: string, color: string | null) => Promise<void>;
@@ -1468,7 +1476,7 @@ function NameDialog({
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || el.disabled) return;
     el.focus();
     const dot = initial.lastIndexOf('.');
     if (selectBase && dot > 0) el.setSelectionRange(0, dot);
@@ -1513,7 +1521,8 @@ function NameDialog({
       >
         <label className="field">
           <span className="field-label">Nome</span>
-          <input ref={ref} className="input" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} aria-invalid={!!err} />
+          <input ref={ref} className="input" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} aria-invalid={!!err} disabled={!!nameLocked} />
+          {nameLocked && <span className="field-hint">{nameLocked}</span>}
           {err && <span className="field-error">{err}</span>}
         </label>
         {withColor && (
