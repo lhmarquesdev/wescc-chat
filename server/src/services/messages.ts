@@ -909,8 +909,9 @@ export async function createDiscussion(ctx: Ctx, input: { prid: string; pmid?: s
     if (input.encrypted && !parent.encrypted && !e2eOn()) throw E2E_ERR.disabled(400);
     if (input.reply) throw E2E_ERR.reply();
   }
-  const { createRoom, addUserToRoom } = await import('./rooms');
-  const type = parent.t === 'c' ? 'c' : 'p';
+  const { createRoom, addUserToRoom, isPublicRoom } = await import('./rooms');
+  // A discussão é tão privada quanto a sala de origem: num canal de time privado, ela nasce grupo privado.
+  const type = (await isPublicRoom(parent)) ? 'c' : 'p';
   const room = await createRoom(ctx, {
     type,
     name: newId(),

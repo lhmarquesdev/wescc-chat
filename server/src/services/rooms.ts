@@ -5,7 +5,7 @@ import { LOCK_TEXT } from '@shared/rbac';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
-import { assertCanBringIn, assertCanStartDirect } from './direct';
+import { assertCanBringIn, assertCanStartDirect, isPrivateRoom } from './direct';
 import { announceDeparture, announceRotate, assertCanToggleE2e, E2E_ERR, e2eOn, forgetRoomKeys, hasUserKeys, noteReturn, requestKeyForNewMember } from './e2e';
 import { mapRoom, mapSubscription, visibleStatusCustom } from './mappers';
 import { sendSystemMessage, withExtra } from './messages';
@@ -48,9 +48,23 @@ export async function canAccessRoom(userId: string, room: any): Promise<boolean>
       const team = await one('SELECT type FROM teams WHERE id = $1', [room.team_id]);
       if (team?.type === 1 && !(await one('SELECT 1 FROM team_members WHERE team_id = $1 AND user_id = $2', [room.team_id, userId]))) return false;
     }
+    // Discussão aberta num canal: só quem lê a sala de origem (um canal que virou privado não deixa a discussão aberta).
+    if (room.prid && !(await canAccessRoom(userId, await getRoom(room.prid)))) return false;
     return hasPermission(userId, 'view-c-room');
   }
   return false;
+}
+
+// Sala que qualquer pessoa pode ver sem participar: canal fora de time privado (a discussão segue a sala de origem).
+// Só ela vai para todas as conexões; grupo, DM e canal de time privado ficam com quem participa.
+export async function isPublicRoom(room: any): Promise<boolean> {
+  if (room?.t !== 'c' || (await isPrivateRoom(room))) return false;
+  return !room.prid || isPublicRoom(await getRoom(room.prid));
+}
+
+// O que todas as conexões recebem de um canal público: nunca a prévia da última mensagem.
+function publicRoomView(room: any) {
+  return { ...mapRoom(room), lastMessage: undefined };
 }
 
 export async function loadRoomForUser(ctx: Ctx, rid: string) {
@@ -96,7 +110,28 @@ export async function notifyRoomUpdated(rid: string) {
   const room = await getRoom(rid);
   if (!room) return;
   bus.publish({ room: rid }, { type: 'room', action: 'updated', room: mapRoom(room) });
-  if (room.t === 'c') bus.publish({ all: true }, { type: 'room', action: 'updated', room: mapRoom(room) });
+  // Quem está na sala (ou assiste) já recebeu acima, com a última mensagem.
+  if (await isPublicRoom(room)) bus.publish({ all: true, skipRoom: rid }, { type: 'room', action: 'updated', room: publicRoomView(room) });
+}
+
+// Canal que deixa de ser público sem passar pelas configurações da sala (saiu de um time privado, o time privado foi
+// excluído ou virou sala) e discussões abertas de uma sala que ficou privada: viram grupo privado com os mesmos membros,
+// nunca um canal aberto a todos. Quem só assistia deixa de receber os eventos.
+export async function privatizeRooms(ctx: Ctx, rids: string[]) {
+  if (!rids.length) return;
+  const rows = await many(`UPDATE rooms SET t = 'p', updated_at = now() WHERE id = ANY($1) AND t = 'c' RETURNING id`, [rids]);
+  for (const r of rows) {
+    bus.unwatchRoom(r.id);
+    await sendSystemMessage(r.id, 'room_changed_privacy', { id: ctx.userId, username: ctx.username }, 'private');
+    await notifyRoomUpdated(r.id);
+    await republishSubscriptions(r.id);
+  }
+}
+
+// As salas e as discussões abertas nelas (discussão não tem discussão).
+export async function withDiscussions(rids: string[]): Promise<string[]> {
+  if (!rids.length) return [];
+  return [...rids, ...(await many(`SELECT id FROM rooms WHERE prid = ANY($1)`, [rids])).map((r) => r.id)];
 }
 
 // A sala mudou algo que a inscrição de cada membro mostra (nome, tipo, canal de avisos, sala principal de time):
@@ -349,7 +384,7 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
   for (const u of users) await addUserToRoom(id, u.id, { inviter: owner ?? undefined, silent: true });
   if (ctx) await audit(actorOf(ctx), 'room.created', { rid: id, name: input.name, t: input.type });
   const room = await getRoom(id);
-  if (room.t === 'c') bus.publish({ all: true }, { type: 'room', action: 'inserted', room: mapRoom(room) });
+  if (await isPublicRoom(room)) bus.publish({ all: true }, { type: 'room', action: 'inserted', room: publicRoomView(room) });
   emit('room.created', { room, owner: owner ? { _id: owner.id, username: owner.username } : null });
   return room;
 }
@@ -573,6 +608,14 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   if (!sets.length) return room;
   sets.push('updated_at = now()');
   await query(`UPDATE rooms SET ${sets.join(', ')} WHERE id = $1`, params);
+  if (s.roomType === 'p' && room.t === 'c') {
+    // Ficou privada (na sala principal, o time todo): quem só assistia a sala, os canais do time ou as discussões deixa
+    // de receber, e as discussões abertas viram grupos privados.
+    const team = room.team_main && room.team_id ? (await many('SELECT id FROM rooms WHERE team_id = $1 AND NOT team_main', [room.team_id])).map((r) => r.id) : [];
+    const all = await withDiscussions([rid, ...team]);
+    for (const id of all) bus.unwatchRoom(id);
+    await privatizeRooms(ctx, all.filter((id) => id !== rid && !team.includes(id)));
+  }
   if (s.encrypted === true && !room.encrypted) {
     // Sala criptografada não guarda nem faz traduções: o servidor não pode ler o texto.
     for (const sub of await forgetRoomTranslations(rid)) await notifySubscription(sub.user_id, rid, 'updated', sub);
@@ -609,6 +652,8 @@ export async function deleteRoom(ctx: Ctx, rid: string) {
   if (!(await hasPermission(ctx.userId, perm, rid))) throw forbidden();
   if (room.team_main) throw badRequest('error-not-allowed', 'Exclua o time em vez da sala principal.');
   const subs = await many('SELECT * FROM subscriptions WHERE room_id = $1', [rid]);
+  // Antes de excluir: a discussão consulta a sala de origem, e o canal de time, o time.
+  const isPublic = await isPublicRoom(room);
   const { deleteRoomFiles } = await import('./uploads');
   await deleteRoomFiles(rid);
   // Discussões filhas são removidas em cascata.
@@ -629,7 +674,8 @@ export async function deleteRoom(ctx: Ctx, rid: string) {
     bus.leaveRoom(s.user_id, rid);
     bus.publish({ user: s.user_id }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(s, room) });
   }
-  bus.publish({ all: true }, { type: 'room', action: 'removed', room: mapRoom(room) });
+  // Quem participava já soube pela inscrição; os demais, só de um canal público, e sem o conteúdo dele.
+  if (isPublic) bus.publish({ all: true }, { type: 'room', action: 'removed', room: publicRoomView(room) });
   await audit(actorOf(ctx), 'room.deleted', { rid, name: room.name, t: room.t });
 }
 

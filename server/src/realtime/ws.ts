@@ -42,6 +42,16 @@ export async function cleanupStaleConnections() {
   for (const uid of new Set(stale.map((s) => s.user_id))) await refreshOffline(uid);
 }
 
+// A sala deixou de ser pública: quem a assistia sem participar só volta a receber se ainda puder ler (membro do time,
+// no canal de um time privado).
+bus.onRewatch((conns, rid) => {
+  void (async () => {
+    const room = await getRoom(rid);
+    if (!room) return;
+    for (const c of conns) if (await canAccessRoom(c.userId, room)) c.watched.add(rid);
+  })().catch(() => {});
+});
+
 export function registerWebsocket(app: FastifyInstance) {
   app.get('/websocket', { websocket: true }, (socket: WebSocket, req) => {
     let conn: Conn | null = null;

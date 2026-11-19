@@ -1092,6 +1092,10 @@ como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os teste
 - Avatares exigem login por padrão (`Accounts_AvatarBlockUnauthenticatedAccess`); avatares de salas privadas só para
   quem tem acesso.
 - O LDAP só vincula uma conta local com o mesmo nome de usuário com `LDAP_Merge_Existing_Users` ligado.
+- Discussão é tão privada quanto a sala de origem: num grupo privado, numa conversa direta ou num canal de time
+  privado, ela nasce grupo privado. Canal de time privado que sai do time (tirado do time, time excluído ou convertido
+  em sala) vira grupo privado com os mesmos membros. Quem não participa não recebe nada dessas salas em tempo real
+  (nem nome, nem prévia de mensagem), e quem é removido ou perde o acesso para de receber na hora.
 
 ## Agenda e reuniões
 
