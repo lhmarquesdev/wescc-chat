@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime, plural } from '../../lib/format';
+import { customEmojiUrl } from '../../lib/emoji';
 import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, FileButton, Modal, Pager, SearchInput, SkeletonList, SkeletonTable, confirmDialog, useAsync, ThLabel } from '../../components/ui';
@@ -237,6 +238,8 @@ export function AdminEmoji() {
   const emojis: any[] = data?.emojis.update ?? [];
   const create = async () => {
     if (!file) return;
+    // Mesmo limite do servidor: o emoji é baixado por todo mundo a cada vez que aparece.
+    if (file.size > 256 * 1024) return fail(new Error('A imagem passa de 256 KB. Use uma imagem menor (o emoji aparece pequeno).'));
     const fd = new FormData();
     fd.append('name', name);
     fd.append('aliases', aliases);
@@ -255,7 +258,7 @@ export function AdminEmoji() {
   };
   const remove = async (e: any) => {
     const yes = await confirmDialog({ title: `Remover :${e.name}:?`, body: 'Nas mensagens antigas ele aparece como texto.', confirmLabel: 'Remover', danger: true });
-    if (yes) api.post('emoji-custom.delete', { emojiId: e._id }).then(reload).catch(fail);
+    if (yes) api.post('emoji-custom.delete', { emojiId: e._id }).then(() => (ok('Emoji removido.'), reload())).catch(fail);
   };
   const newButton = (
     <button className="btn primary" onClick={() => setAdding(true)}>
@@ -278,7 +281,7 @@ export function AdminEmoji() {
         <div className="emoji-admin">
           {emojis.map((e: any) => (
             <div key={e._id} className="card emoji-card">
-              <img src={`/emoji-custom/${e.name}?v=${emojiVersion}`} alt={e.name} />
+              <img src={customEmojiUrl(e)} alt={e.name} />
               <code>:{e.name}:</code>
               {e.aliases.length > 0 && <span className="muted small">{e.aliases.join(', ')}</span>}
               <button className="btn small ghost danger" onClick={() => remove(e)}>
@@ -307,10 +310,10 @@ export function AdminEmoji() {
             <Field label="Nome" hint={name ? `Use como :${name}:` : 'Letras minúsculas, números, _ + e -.'}>
               <input autoFocus value={name} onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9_+-]/g, ''))} />
             </Field>
-            <Field label="Apelidos" hint="Separados por vírgula.">
+            <Field label="Apelidos" hint="Outros nomes para o mesmo emoji, separados por vírgula, com as mesmas letras do nome.">
               <input value={aliases} onChange={(e) => setAliases(e.target.value)} />
             </Field>
-            <Field label="Imagem" hint="PNG, GIF, JPEG ou WebP, de preferência quadrada.">
+            <Field label="Imagem" hint="PNG, GIF, JPEG ou WebP de até 256 KB, de preferência quadrada.">
               <FileButton accept="image/png,image/gif,image/jpeg,image/webp" file={file} label="Escolher imagem" onChange={(f) => setFile(f[0] ?? null)} />
             </Field>
           </div>

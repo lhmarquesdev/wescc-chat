@@ -315,8 +315,8 @@ export function applyEvent(ev: ServerEvent) {
     case 'settings.changed': {
       const patch: Record<string, unknown> = {};
       for (const s of ev.settings) {
-        if (s._id === '__emoji') useStore.setState({ emojiVersion: st.emojiVersion + 1 });
-        else patch[s._id] = s.value;
+        // __emoji: session.ts recarrega a lista e só então avisa (emojiVersion), para as telas lerem a lista nova.
+        if (s._id !== '__emoji') patch[s._id] = s.value;
       }
       st.setSettings(patch);
       break;

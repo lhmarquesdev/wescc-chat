@@ -926,6 +926,8 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
   const e2eView = m.e2eView;
   const e2eContent = e2eView?.state === 'ok' ? e2eView.content : undefined;
   const roomEncrypted = useStore((s) => !!s.rooms[m.rid]?.encrypted);
+  // Emoji personalizado criado, trocado ou apagado: a mensagem se redesenha com a lista nova (sem recarregar a página).
+  useStore((s) => s.emojiVersion);
   const me = useStore((s) => s.me)!;
   const navigate = useNavigate();
   const [picker, setPicker] = useState<{ anchor: HTMLElement | null; bar?: boolean } | null>(null);

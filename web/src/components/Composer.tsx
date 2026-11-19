@@ -7,7 +7,7 @@ import { localCommandText } from '@shared/e2e';
 import { editEncrypted, quoteOf, sendEncrypted, sendEncryptedFile, type E2eFileMeta } from '../lib/e2e/client';
 import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
 import { slashCommands } from '../lib/commands';
-import { EMOJI, searchEmoji } from '../lib/emoji';
+import { EMOJI, resolveEmoji, searchEmoji } from '../lib/emoji';
 import { formatBytes, roomPath } from '../lib/format';
 import { mentionGroups, mentionSuggestions } from '../lib/messageRules';
 import { whenText } from '../lib/messageTimes';
@@ -323,7 +323,7 @@ function ComposerView({
         put(
           searchEmoji(term).map((c) => ({
             key: c,
-            lead: <span className="sug-emoji">{EMOJI[c] ?? <img className="emoji custom" src={`/emoji-custom/${c}`} alt="" />}</span>,
+            lead: <span className="sug-emoji">{EMOJI[c] ?? <img className="emoji custom" src={resolveEmoji(c)?.url ?? `/emoji-custom/${encodeURIComponent(c)}`} alt="" />}</span>,
             title: `:${c}:`,
             insert: `:${c}: `,
           })),

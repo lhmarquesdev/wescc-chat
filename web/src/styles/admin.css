@@ -1063,6 +1063,12 @@ h4 .head-count {
   gap: 6px;
   margin: 0;
   text-align: center;
+  min-width: 0;
+}
+/* Nome e apelidos longos quebram dentro do cartão em vez de esticar a grade além da tela. */
+.emoji-card > :is(code, span) {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .emoji-card img {
   width: 48px;

@@ -45,6 +45,7 @@ export interface CustomEmoji {
   name: string;
   aliases: string[];
   extension: string;
+  _updatedAt?: string;
 }
 
 export let customEmoji: CustomEmoji[] = [];
@@ -53,17 +54,22 @@ const customByName = new Map<string, CustomEmoji>();
 export function setCustomEmoji(list: CustomEmoji[]) {
   customEmoji = list;
   customByName.clear();
-  for (const e of list) {
-    customByName.set(e.name, e);
-    for (const a of e.aliases) customByName.set(a, e);
-  }
+  // Primeiro os nomes, depois os apelidos: um apelido nunca toma o lugar do nome de outro emoji.
+  for (const e of list) customByName.set(e.name, e);
+  for (const e of list) for (const a of e.aliases) if (!customByName.has(a)) customByName.set(a, e);
+}
+
+// Endereço com a versão (a data de criação): trocar a imagem de um emoji muda o endereço, sem a antiga no cache.
+export function customEmojiUrl(e: Pick<CustomEmoji, 'name' | '_updatedAt'>) {
+  const v = e._updatedAt ? new Date(e._updatedAt).getTime() : 0;
+  return `/emoji-custom/${encodeURIComponent(e.name)}${v ? `?v=${v}` : ''}`;
 }
 
 export function resolveEmoji(code: string): { unicode?: string; url?: string } | null {
   const name = code.replace(/^:|:$/g, '');
   if (EMOJI[name]) return { unicode: EMOJI[name] };
-  const c = customByName.get(name);
-  if (c) return { url: `/emoji-custom/${encodeURIComponent(c.name)}` };
+  const c = customByName.get(name) ?? customByName.get(name.toLowerCase());
+  if (c) return { url: customEmojiUrl(c) };
   return null;
 }
 
