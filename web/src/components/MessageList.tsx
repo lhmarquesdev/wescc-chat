@@ -218,8 +218,11 @@ export function MessageList({
     const el = scroller.current;
     if (!el) return;
     const last = list[list.length - 1];
-    const appended = !paging.current && !!last && !!lastId.current && last._id !== lastId.current && list.some((x) => x._id === lastId.current);
+    const paged = paging.current;
+    const appended = !paged && !!last && !!lastId.current && last._id !== lastId.current && list.some((x) => x._id === lastId.current);
     paging.current = false;
+    // A página seguinte entrou embaixo: a pessoa fica onde estava (no fim só se a página couber na tela).
+    if (paged) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     if (appended && last.u._id === meId && !jumpRef.current) atBottom.current = true; // quem envia vai para o fim
     if (prepend.current !== null) {
       el.scrollTop = el.scrollHeight - prepend.current;
@@ -295,8 +298,8 @@ export function MessageList({
       const r = await api.get('rooms.history', { roomId: rid, oldest: last.ts, oldestId: last._id, count: 50 });
       const page: Message[] = r.messages.slice().reverse();
       for (const x of page) seen.current?.add(x._id);
-      paging.current = true;
-      atBottom.current = false;
+      // Página vazia (as não lidas eram múltiplo de 50): a pessoa já está na última mensagem, e a sala fica lida.
+      if (page.length) paging.current = true;
       useStore.getState().appendMessages(rid, page, r.messages.length === 50);
     } catch {
       // tenta de novo na próxima rolagem até o fim
