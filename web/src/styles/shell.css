@@ -2290,6 +2290,9 @@ button.side-item {
   flex-shrink: 0;
   color: hsl(var(--sidebar-foreground) / 0.7);
 }
+.topbar .me-silenced {
+  color: hsl(var(--muted-foreground));
+}
 
 /* ---------- Lembretes ---------- */
 .reminders-page .page-body > * {

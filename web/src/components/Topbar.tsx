@@ -4,6 +4,7 @@ import { useStore } from '../lib/store';
 import { ADMIN_SECTIONS } from '../pages/admin/sections';
 import { Icon } from './Icon';
 import { UserMenu, setTheme, useMyStatus } from './Sidebar';
+import { StatusDot } from './ui';
 
 // Barra do topo (padrão Atendeti): recolher o menu, trilha "Wescchat › Área › Página", tema e a pessoa.
 
@@ -65,7 +66,7 @@ function initials(name: string) {
 export function Topbar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const me = useStore((s) => s.me)!;
   const site = useStore((s) => (s.settings.Site_Name as string | undefined) || 'Wescchat');
-  const { line } = useMyStatus();
+  const { status, line, silenced } = useMyStatus();
   const trail = useTrail();
   const toggleLabel = collapsed ? 'Expandir menu' : 'Recolher menu';
   return (
@@ -98,12 +99,18 @@ export function Topbar({ collapsed, onToggle }: { collapsed: boolean; onToggle: 
           placement="bottom-end"
           trigger={
             <button type="button" className="me-btn" title={`${me.name} · ${line}`}>
-              <span className="me-avatar" aria-hidden="true">
-                {initials(me.name || me.username)}
+              {/* O próprio status sempre à vista (o ponto e a linha, com o sino cortado quando silencia): quem fica
+                  Ocupado ou Invisível não esquece. */}
+              <span className="avatar-wrap" aria-hidden="true">
+                <span className="me-avatar">{initials(me.name || me.username)}</span>
+                <StatusDot username={me.username} status={status} statusCustom={me.statusCustom} />
               </span>
               <span className="me-text">
                 <span className="me-name">{me.name}</span>
-                <span className="me-status">{me.email || `@${me.username}`}</span>
+                <span className="me-status">
+                  <span className="me-status-text">{line}</span>
+                  {silenced && <Icon name="notify-silenced" size={12} className="me-silenced" label="Notificações silenciadas" />}
+                </span>
               </span>
               <Icon name="chevron-down" className="me-chevron" />
             </button>
