@@ -501,6 +501,9 @@
 .fl-folder-card:hover .fl-more,
 .fl-file-card:hover .fl-more,
 .fl-row:hover .fl-more,
+.fl-folder-card:focus-visible .fl-more,
+.fl-file-card:focus-visible .fl-more,
+.fl-row:focus-visible .fl-more,
 .fl-more[aria-expanded='true'],
 .fl-more:focus-visible,
 .selected .fl-more {
@@ -586,6 +589,10 @@
 }
 .fl-row.selected {
   background: hsl(var(--primary) / 0.1);
+}
+.fl-row:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
 }
 .fl-row.head {
   min-height: 36px;

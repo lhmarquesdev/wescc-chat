@@ -1,5 +1,5 @@
 // Arquivos: pastas compartilhadas com permissão por pasta. Início (pastas e recentes), pasta, busca e lixeira.
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { FOLDER_COLORS, driveLevelLabel, type DriveActivity, type DriveFile, type DriveFolder, type DriveFolderView, type DriveStorage } from '@shared/drive';
 import { errorMessage } from '../lib/api';
@@ -47,6 +47,13 @@ const canRenameFolder = (f: DriveFolder) => f.level >= 3 || (!!f.parentId && f.l
 const canRemoveFolder = (f: DriveFolder) => f.level >= 3 || (!!f.parentId && f.inherit && f.level >= 2 && (f.parentLevel ?? 0) >= 2);
 const LEVEL_ICON: Record<number, IconName> = { 1: 'files-view', 2: 'files-edit', 3: 'files-manage' };
 const COLOR_LABEL: Record<string, string> = { blue: 'Azul', green: 'Verde', amber: 'Âmbar', red: 'Vermelho', purple: 'Roxo', teal: 'Turquesa', gray: 'Cinza' };
+
+// Enter ou Espaço no próprio cartão ou linha (não nos botões de dentro dele) age como um clique.
+const onActivate = (fn: () => void) => (e: KeyboardEvent<HTMLElement>) => {
+  if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+  e.preventDefault();
+  fn();
+};
 
 function readView(): ViewMode {
   try {
@@ -423,7 +430,7 @@ function TreeNode({ folder, depth, currentId, onPath }: { folder: DriveFolder; d
   return (
     <li role="treeitem" aria-expanded={hasKids ? open : undefined} aria-selected={active}>
       <div className={active ? 'fl-tree-row active' : 'fl-tree-row'} style={{ paddingLeft: 8 + depth * 14 }}>
-        <button type="button" className={open ? 'fl-tree-toggle open' : 'fl-tree-toggle'} aria-label={open ? `Fechar ${folder.name}` : `Abrir ${folder.name}`} tabIndex={-1} onClick={() => setOpen(!open)} style={{ visibility: hasKids ? 'visible' : 'hidden' }}>
+        <button type="button" className={open ? 'fl-tree-toggle open' : 'fl-tree-toggle'} aria-label={open ? `Fechar ${folder.name}` : `Abrir ${folder.name}`} onClick={() => setOpen(!open)} style={{ visibility: hasKids ? 'visible' : 'hidden' }}>
           <Icon name="files-expand" size={14} />
         </button>
         <Link to={`/files/f/${folder._id}`} className="fl-tree-link">
@@ -560,7 +567,7 @@ function FolderCard({ f, selected, onOpen, onSelect, actions, view }: { f: Drive
   );
   if (view === 'list')
     return (
-      <div className={selected ? 'fl-row selected' : 'fl-row'} onClick={onOpen} role="row">
+      <div className={selected ? 'fl-row selected' : 'fl-row'} onClick={onOpen} onKeyDown={onActivate(onOpen)} role="button" tabIndex={0} aria-label={`Abrir ${f.name}`}>
         <span className="fl-row-name">
           <FolderGlyph color={f.color} />
           <span className="ellipsis">{f.name}</span>
@@ -574,7 +581,7 @@ function FolderCard({ f, selected, onOpen, onSelect, actions, view }: { f: Drive
       </div>
     );
   return (
-    <div className={selected ? `fl-folder-card c-${f.color ?? 'blue'} selected` : `fl-folder-card c-${f.color ?? 'blue'}`} onClick={onOpen} onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && onOpen()} role="button" tabIndex={0} aria-label={`Abrir ${f.name}`}>
+    <div className={selected ? `fl-folder-card c-${f.color ?? 'blue'} selected` : `fl-folder-card c-${f.color ?? 'blue'}`} onClick={onOpen} onKeyDown={onActivate(onOpen)} role="button" tabIndex={0} aria-label={`Abrir ${f.name}`}>
       <FolderGlyph color={f.color} size={32} />
       <span className="fl-card-text">
         <strong className="ellipsis" title={f.name}>
@@ -614,13 +621,21 @@ function FileItem({ f, level, selected, onSelect, actions, view, showPath }: { f
         </button>
       }
     >
-      {(close) => actions.fileItems(f, level, close)}
+      {(close) => (
+        <>
+          <button type="button" onClick={() => (close(), onSelect())}>
+            <Icon name="panel-info" />
+            Detalhes e prévia
+          </button>
+          {actions.fileItems(f, level, close)}
+        </>
+      )}
     </Menu>
     </StopCard>
   );
   if (view === 'list')
     return (
-      <div className={selected ? 'fl-row selected' : 'fl-row'} onClick={onSelect} onDoubleClick={() => actions.download(f)} role="row">
+      <div className={selected ? 'fl-row selected' : 'fl-row'} onClick={onSelect} onDoubleClick={() => actions.download(f)} onKeyDown={onActivate(onSelect)} role="button" tabIndex={0} aria-label={f.name}>
         <span className="fl-row-name">
           <FileGlyph file={f} />
           <span className="fl-row-title">
@@ -635,7 +650,7 @@ function FileItem({ f, level, selected, onSelect, actions, view, showPath }: { f
       </div>
     );
   return (
-    <div className={selected ? 'fl-file-card selected' : 'fl-file-card'} onClick={onSelect} onDoubleClick={() => actions.download(f)} onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && onSelect()} role="button" tabIndex={0} aria-label={f.name}>
+    <div className={selected ? 'fl-file-card selected' : 'fl-file-card'} onClick={onSelect} onDoubleClick={() => actions.download(f)} onKeyDown={onActivate(onSelect)} role="button" tabIndex={0} aria-label={f.name}>
       <Thumb file={f} />
       <span className="fl-card-text">
         <strong className="ellipsis" title={f.name}>
@@ -841,7 +856,7 @@ function SearchResults({ text, view, onOpenFile }: { text: string; view: ViewMod
           <h2 className="fl-section-h">Pastas</h2>
           <div className="fl-list">
             {r.folders.map((f) => (
-              <div key={f._id} className="fl-row" role="row" onClick={() => navigate(`/files/f/${f._id}`)}>
+              <div key={f._id} className="fl-row" role="button" tabIndex={0} aria-label={`Abrir ${f.name}`} onClick={() => navigate(`/files/f/${f._id}`)} onKeyDown={onActivate(() => navigate(`/files/f/${f._id}`))}>
                 <span className="fl-row-name">
                   <FolderGlyph color={f.color} />
                   <span className="fl-row-title">
