@@ -17,6 +17,7 @@ import { chatRoutes } from './api/chat';
 import { e2eRoutes } from './api/e2e';
 import { messageToolsRoutes } from './api/messageTools';
 import { authenticate, errorHandler } from './api/http';
+import { cleanInput } from './lib/sanitize';
 import { roomsRoutes } from './api/rooms';
 import { usersRoutes } from './api/users';
 import { ApiError } from './lib/errors';
@@ -72,6 +73,13 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   app.decorateRequest('authUser', null);
   app.addHook('onRequest', async (req) => {
     if (req.url.startsWith('/api/') || req.url.startsWith('/file-upload/') || req.url.startsWith('/avatar/') || req.url.startsWith('/sticker/')) await authenticate(req);
+  });
+  // Corpo, consulta e parâmetros sem U+0000; nomes e tópicos sem controles de direção (lib/sanitize.ts). Corpo cru
+  // (texto ou bytes de webhooks com assinatura) fica como veio.
+  app.addHook('preValidation', async (req) => {
+    if (req.body && typeof req.body === 'object') cleanInput(req.body);
+    cleanInput(req.query);
+    cleanInput(req.params);
   });
   app.setErrorHandler(errorHandler);
 

@@ -214,7 +214,8 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'GET', 'audit.log', { permissions: ['can-audit-log'] }, async (req) => {
     const query2 = q(req);
     const p = paging(query2);
-    return listAuditLog({ start: query2.start, end: query2.end, action: query2.action, actor: query2.actor, ...p });
+    // ?action=a&action=b chega como lista: texto ou 400 (antes, erro interno).
+    return listAuditLog({ start: query2.start, end: query2.end, action: str(query2.action, 'action', { optional: true }), actor: str(query2.actor, 'actor', { optional: true }), ...p });
   });
   route(app, 'GET', 'audit.settings', { permissions: ['can-audit-log'] }, async (req) => {
     const p = paging(q(req));
