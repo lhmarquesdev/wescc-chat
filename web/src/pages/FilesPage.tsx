@@ -1075,7 +1075,12 @@ function TrashRow({ icon, name, where, who, when, canPurge, onRestore, onPurge }
     <div className="fl-row trash" role="row">
       <span className="fl-row-name">
         {icon}
-        <span className="ellipsis">{name}</span>
+        <span className="fl-row-title">
+          <span className="ellipsis">{name}</span>
+          <small className="muted ellipsis fl-trash-sub">
+            Estava em {where || 'Arquivos'} · por {who} · {formatRelative(when)}
+          </small>
+        </span>
       </span>
       <span className="muted ellipsis">{where}</span>
       <span className="muted ellipsis">{who}</span>

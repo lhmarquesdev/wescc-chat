@@ -632,6 +632,10 @@
 .fl-row-title small {
   font-size: var(--fs-12);
 }
+/* Lixeira: de onde veio, quem apagou e quando, embaixo do nome só quando as colunas não cabem. */
+.fl-trash-sub {
+  display: none;
+}
 .fl-trash-actions {
   display: flex;
   justify-content: flex-end;
@@ -1198,22 +1202,19 @@
   .fl-row.head > span:nth-child(4) {
     display: none;
   }
-  .fl-row.trash {
-    grid-template-columns: minmax(0, 1fr) 100px 156px;
-  }
-  .fl-row.trash > span:nth-child(2),
-  .fl-row.trash > span:nth-child(3) {
-    display: none;
-  }
-}
-
-/* Lixeira em área bem estreita: só o nome e as ações. */
-@container fl-main (max-width: 400px) {
+  /* Lixeira: as colunas saem e "Estava em · por · quando" vai para baixo do nome. */
   .fl-row.trash {
     grid-template-columns: minmax(0, 1fr) 156px;
   }
+  .fl-row.trash > span:nth-child(2),
+  .fl-row.trash > span:nth-child(3),
   .fl-row.trash > span:nth-child(4) {
     display: none;
+  }
+  .fl-row-title .fl-trash-sub {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -1324,6 +1325,11 @@
   .fl-row.trash > span:nth-child(4) {
     display: none;
   }
+  .fl-row-title .fl-trash-sub {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .fl-trash-head {
     flex-direction: column;
   }
@@ -1332,6 +1338,10 @@
   }
   .fl-acl li {
     flex-wrap: wrap;
+  }
+  /* Compartilhar: o nome ocupa a linha (ao lado do ícone) e o nível desce para a linha de baixo. */
+  .fl-acl:not(.compact):not(.inherited) li .fl-subject-text {
+    flex: 1 1 calc(100% - 44px);
   }
   .fl-acl li .fl-level-select {
     margin-left: 44px;
