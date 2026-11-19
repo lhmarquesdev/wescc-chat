@@ -234,7 +234,8 @@
   padding: 0 var(--space-6) calc(env(safe-area-inset-bottom) + 48px);
   border: 0;
   border-radius: 0;
-  background: radial-gradient(120% 80% at 50% 0%, hsl(var(--primary) / 0.1) 0%, hsl(var(--background)) 60%);
+  /* O brilho por cima de um fundo sólido: a página por trás não aparece no alto. */
+  background: radial-gradient(120% 80% at 50% 0%, hsl(var(--primary) / 0.1) 0%, transparent 60%), hsl(var(--background));
   box-shadow: none;
   animation: call-fade var(--dur-3) var(--ease-out);
 }
