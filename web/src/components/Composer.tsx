@@ -128,6 +128,10 @@ function ComposerView({
   // Figurinhas: a sala (onde dá para enviar) e o pedido "Ver no seletor" do cartão da figurinha.
   const room = useStore((s) => s.rooms[rid]);
   const sub = useStore((s) => s.subscriptions[rid]);
+  // Upload permitido nesta sala (conversa direta segue FileUpload_Enabled_Direct): vale para o botão, para colar e para
+  // arrastar. Antes, colar ou soltar um arquivo numa DM sem upload abria a janela e só dava erro depois de Enviar.
+  const uploadsHere = !!uploadsOn && !(room?.t === 'd' && uploadsInDirect === false);
+  const uploadsOff = !uploadsOn ? 'Upload de arquivos desativado.' : 'Upload em mensagens diretas desativado.'; // o texto do servidor
   const navigate = useNavigate();
   const whiteList = useSetting<string>('FileUpload_MediaTypeWhiteList') ?? '';
   const blackList = useSetting<string>('FileUpload_MediaTypeBlackList') ?? '';
@@ -187,6 +191,8 @@ function ComposerView({
     if (editing) {
       setText(editTextOf(editing));
       ta.current?.focus();
+      // A mensagem em edição fica à vista: a seta para cima pega a última da pessoa, que pode estar lá em cima.
+      box.current?.closest('.thread-panel, .room-main')?.querySelector(`[id="msg-${editing._id}"]`)?.scrollIntoView({ block: 'nearest' });
     } else if (wasEditing.current) {
       // Fim da edição (salva ou cancelada): volta o rascunho da mensagem nova, que a edição não tocou.
       setText(readDraft());
@@ -214,14 +220,15 @@ function ComposerView({
     el.style.height = `${el.scrollHeight}px`;
   }, [text, phone]);
 
-  // Arrastar um arquivo sobre a sala (ou o painel do tópico) mostra a área de soltar.
+  // Arrastar um arquivo sobre a sala (ou o painel do tópico) mostra a área de soltar. Sem upload aqui, soltar só avisa
+  // (sem isso o navegador abria o arquivo no lugar do chat).
   useEffect(() => {
     const host = box.current?.closest<HTMLElement>('.thread-panel, .room-main');
-    if (!host || !uploadsOn || disabled) return;
+    if (!host || disabled) return;
     let depth = 0;
     const files = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
     const enter = (e: DragEvent) => {
-      if (!files(e)) return;
+      if (!files(e) || !uploadsHere) return;
       e.preventDefault();
       if (depth++ === 0) setDrop(host.getBoundingClientRect());
     };
@@ -229,7 +236,7 @@ function ComposerView({
       if (files(e)) e.preventDefault();
     };
     const leave = (e: DragEvent) => {
-      if (!files(e)) return;
+      if (!files(e) || !uploadsHere) return;
       if (--depth <= 0) {
         depth = 0;
         setDrop(null);
@@ -240,7 +247,8 @@ function ComposerView({
       e.preventDefault();
       depth = 0;
       setDrop(null);
-      if (e.dataTransfer?.files.length) setPending([...e.dataTransfer.files]);
+      if (!uploadsHere) useStore.getState().toast(uploadsOff, 'error');
+      else if (e.dataTransfer?.files.length) setPending([...e.dataTransfer.files]);
     };
     host.addEventListener('dragenter', enter);
     host.addEventListener('dragover', over);
@@ -252,7 +260,7 @@ function ComposerView({
       host.removeEventListener('dragleave', leave);
       host.removeEventListener('drop', dropped);
     };
-  }, [uploadsOn, disabled]);
+  }, [uploadsHere, uploadsOff, disabled]);
 
   const saveDraft = (v: string) => {
     // O texto de uma edição não é rascunho de mensagem nova: depois de uma recarga, o Enter publicaria uma cópia.
@@ -566,8 +574,6 @@ function ComposerView({
     onActivity: sendRecording,
     onSend: (r) => void doUpload([r.file], '', { voice: '1', duration: r.duration.toFixed(1), waveform: r.waveform.join(',') }, 'mensagem de voz'),
   });
-  // Upload permitido nesta sala (conversa direta segue FileUpload_Enabled_Direct).
-  const uploadsHere = !!uploadsOn && !(room?.t === 'd' && uploadsInDirect === false);
   // Caixa vazia: o botão Enviar vira o microfone (como no WhatsApp).
   const micOn = uploadsHere && !editing && !text.trim() && !pending.length;
   // Itens do "+": vídeo (upload permitido e o tipo aceito), enquete (create-poll). Sala criptografada: nenhum dos dois
@@ -886,10 +892,10 @@ function ComposerView({
           onKeyDown={onKeyDown}
           onPaste={(e) => {
             const files = [...e.clipboardData.files];
-            if (files.length && uploadsOn) {
+            if (files.length && uploadsHere) {
               e.preventDefault();
               setPending(files);
-            }
+            } else if (files.length && !e.clipboardData.getData('text')) useStore.getState().toast(uploadsOff, 'error');
           }}
           onBlur={() => setTimeout(() => setSugs([]), 150)}
         />
