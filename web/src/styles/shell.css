@@ -374,11 +374,12 @@
   font-size: var(--fs-14);
   font-weight: var(--fw-medium);
   text-decoration: none;
-  box-shadow: var(--shadow-2);
   transform: translateY(calc(-100% - var(--space-4)));
 }
+/* A sombra só com o link à vista: escondido acima da tela, ela aparecia como uma mancha no alto da página. */
 .skip-link:focus {
   transform: none;
+  box-shadow: var(--shadow-2);
 }
 /* A área principal só recebe o foco pelo "Pular para o conteúdo": sem o anel em volta da tela toda. */
 .main:focus-visible {
