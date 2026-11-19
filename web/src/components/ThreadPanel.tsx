@@ -4,6 +4,7 @@ import { api, errorMessage } from '../lib/api';
 import { plural, roomDisplayName } from '../lib/format';
 import { continuesGroup } from '../lib/messageRules';
 import { useSetting, useStore } from '../lib/store';
+import { onReconnectWhileShown } from '../lib/catchup';
 import { Composer } from './Composer';
 import { Icon } from './Icon';
 import { MessageItem } from './MessageItem';
@@ -65,6 +66,21 @@ export function ThreadPanel({
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tmid]);
+
+  // Reconexão: as respostas (e a contagem do tópico) de enquanto a conexão estava fora.
+  useEffect(
+    () =>
+      onReconnectWhileShown('thread', tmid, () => {
+        void Promise.all([api.get('chat.getMessage', { msgId: tmid }), api.get('chat.getThreadMessages', { tmid, count: 500 })])
+          .then(([m, r]) => {
+            setRoot(m.message);
+            useStore.getState().setThread(tmid, r.messages);
+            setError('');
+          })
+          .catch(() => {});
+      }),
+    [tmid],
+  );
 
   useLayoutEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;

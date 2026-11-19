@@ -369,6 +369,24 @@
   font-weight: var(--fw-medium);
   text-align: center;
 }
+.offline-retry {
+  margin-left: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 1px solid hsl(var(--st-amber-line));
+  border-radius: var(--radius-full);
+  background: hsl(var(--background));
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.offline-retry:hover {
+  background: hsl(var(--st-amber-line));
+}
+@media (pointer: coarse) {
+  .offline-retry {
+    padding: var(--space-1) var(--space-3);
+  }
+}
 /* Erro de renderização (ErrorBoundary): o estado de erro no meio da área. */
 .page > .empty {
   margin: auto;

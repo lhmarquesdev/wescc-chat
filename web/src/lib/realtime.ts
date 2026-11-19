@@ -13,6 +13,7 @@ class Realtime {
   private pingTimer: number | null = null;
   private watched = new Set<string>();
   private onReconnect: (() => void) | null = null;
+  private timer: number | null = null;
   // Id desta conexão no servidor (as chamadas usam para a sinalização).
   connectionId: string | null = null;
 
@@ -21,16 +22,21 @@ class Realtime {
     this.onReconnect = onReconnect;
     this.connect();
     this.setupIdle();
+    this.setupWake();
   }
 
   stop() {
     this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
     this.ws?.close();
     this.ws = null;
     if (this.pingTimer) clearInterval(this.pingTimer);
   }
 
   private connect() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
     const creds = getCredentials();
     if (!creds || this.stopped) return;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -71,11 +77,26 @@ class Realtime {
         location.reload();
         return;
       }
-      const delay = Math.min(30_000, 1000 * 2 ** this.retry++);
-      setTimeout(() => this.connect(), delay);
+      // 1, 2, 4, 8 e depois 10 s (com um pouco de variação, para as abas não voltarem todas juntas).
+      const delay = Math.min(10_000, 1000 * 2 ** this.retry++) * (0.8 + Math.random() * 0.4);
+      this.timer = window.setTimeout(() => this.connect(), delay);
     };
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.pingTimer = window.setInterval(() => this.send({ type: 'ping' }), 25_000);
+  }
+
+  // "Tentar agora", a rede voltou ou a pessoa voltou para a aba: reconecta já, sem esperar a próxima tentativa.
+  reconnectNow() {
+    if (this.stopped || !this.timer) return;
+    this.connect();
+  }
+
+  private setupWake() {
+    window.addEventListener('online', () => this.reconnectNow());
+    window.addEventListener('focus', () => this.reconnectNow());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this.reconnectNow();
+    });
   }
 
   send(ev: ClientEvent) {
