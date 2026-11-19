@@ -48,7 +48,7 @@ describe('chat.search: arquivos', () => {
 
 describe('chat.search: datas', () => {
   it('data que não existe → 400 com o formato; DD/MM/AAAA vale como AAAA-MM-DD', async () => {
-    for (const q of ['after:2026-02-30', 'before:2026-13-01', 'on:2026-11-31', 'on:31/04/2026', 'after:2026-1']) {
+    for (const q of ['after:2026-02-30', 'before:2026-13-01', 'on:2026-11-31', 'on:31/04/2026', 'after:2026-1', 'after:9999-12-31', 'on:0100-01-01', 'on:0099-01-01']) {
       const r = await search(q);
       expect(r.status, q).toBe(400);
       expect(r.errorType).toBe('error-invalid-date');

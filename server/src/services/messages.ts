@@ -834,13 +834,15 @@ function searchZone(tz?: string) {
   return 'UTC';
 }
 
-// Dia de um filtro em AAAA-MM-DD ou DD/MM/AAAA; null se o dia não existe (30 de fevereiro, mês 13).
+// Dia de um filtro em AAAA-MM-DD ou DD/MM/AAAA; null se o dia não existe (30 de fevereiro, mês 13). Anos de 1000 a
+// 9998: fora disso o Date.UTC troca 0099 por 1999 e o dia seguinte de 9999-12-31 não cabe num timestamptz.
 export function parseSearchDay(v: string): [number, number, number] | null {
   let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v);
   let y: number, mo: number, d: number;
   if (m) [y, mo, d] = [+m[1], +m[2], +m[3]];
   else if ((m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v))) [d, mo, y] = [+m[1], +m[2], +m[3]];
   else return null;
+  if (y < 1000 || y > 9998) return null;
   const t = new Date(Date.UTC(y, mo - 1, d));
   if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) return null;
   return [y, mo, d];
