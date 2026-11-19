@@ -160,6 +160,19 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
       }
       return cached;
     };
+    // Cada página .html tem os próprios scripts embutidos (a offline.html tem o do tema e o de tentar de novo): a política
+    // leva os hashes do arquivo servido, não os do index.html.
+    const cspByFile = new Map<string, { mtime: number; csp: string }>();
+    const cspFor = (file: string) => {
+      const src = file.replace(/\.(br|gz)$/, '');
+      if (path.resolve(src) === path.resolve(indexPath)) return indexHtml().csp;
+      const mtime = fs.statSync(src).mtimeMs;
+      const hit = cspByFile.get(src);
+      if (hit && hit.mtime === mtime) return hit.csp;
+      const csp = spaCsp(fs.readFileSync(src, 'utf8'));
+      cspByFile.set(src, { mtime, csp });
+      return csp;
+    };
     // preCompressed: as cópias .br/.gz que o build do web grava ao lado de cada arquivo (web/vite.config.ts).
     await app.register(fastifyStatic, {
       root: webDist,
@@ -168,7 +181,7 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
       preCompressed: true,
       setHeaders: (reply, file) => {
         assetCacheHeaders(reply, path.relative(webDist, file));
-        if (file.endsWith('.html')) reply.header('Content-Security-Policy', indexHtml().csp);
+        if (/\.html(?:\.(?:br|gz))?$/.test(file)) reply.header('Content-Security-Policy', cspFor(file));
       },
     });
     app.setNotFoundHandler((req, reply) => {

@@ -2,7 +2,7 @@
 // Não guarda o app em cache (ele precisa do servidor para funcionar e assim nunca fica com versão velha). Guarda só
 // a página offline.html, mostrada quando o servidor não responde ao abrir o app ou recarregar a página.
 
-const OFFLINE_CACHE = 'wescc-offline-v1'; // mudou a offline.html? troque o número para os navegadores buscarem de novo
+const OFFLINE_CACHE = 'wescc-offline-v2'; // mudou a offline.html? troque o número para os navegadores buscarem de novo
 const OFFLINE_URL = '/offline.html';
 
 // Sem a página guardada (servidor fora na instalação) o service worker instala do mesmo jeito: o push não depende dela.

@@ -13,12 +13,15 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wescc-csp-'));
 const dist = path.join(tmp, 'dist');
 const THEME = "document.documentElement.dataset.theme = 'dark';";
 const INDEX = `<!doctype html><title>Teste</title><script>${THEME}</script><script type="module" crossorigin src="/assets/app-1.js"></script>`;
+const RETRY = "setTimeout(() => location.reload(), 5000);";
+const OFFLINE = `<!doctype html><title>Sem conexão</title><script>${THEME}</script><button>Tentar agora</button><script>${RETRY}</script>`;
 const before = config.webDist;
 let A: Auth;
 
 beforeAll(async () => {
   fs.mkdirSync(path.join(dist, 'assets'), { recursive: true });
   fs.writeFileSync(path.join(dist, 'index.html'), INDEX);
+  fs.writeFileSync(path.join(dist, 'offline.html'), OFFLINE);
   fs.writeFileSync(path.join(dist, 'assets', 'app-1.js'), 'console.log(1)');
   config.webDist = dist;
   await startServer();
@@ -64,6 +67,17 @@ describe('cabeçalhos de segurança', () => {
       expect(csp, p).not.toContain('unsafe-eval');
       expect(csp.split(';').find((x) => x.trim().startsWith('script-src')), p).not.toContain('unsafe-inline');
     }
+  });
+
+  it('a página sem conexão leva os hashes dos próprios scripts, não os do index.html', async () => {
+    const h = (src: string) => `'sha256-${createHash('sha256').update(src).digest('base64')}'`;
+    const res = await fetch(urlOf('/offline.html'));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(OFFLINE);
+    common(res, '/offline.html');
+    const csp = res.headers.get('content-security-policy') ?? '';
+    expect(csp).toContain(`script-src 'self' ${h(THEME)} ${h(RETRY)}`);
+    expect(csp).toContain("frame-ancestors 'self'");
   });
 
   it('API, arquivos do build e avatares levam nosniff, sem a CSP da página', async () => {

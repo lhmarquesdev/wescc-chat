@@ -757,6 +757,9 @@ export async function deleteRoom(ctx: Ctx, rid: string) {
     );
     for (const row of cards) bus.publish({ room: row.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
   }
+  // Quem está com a sala aberta sem participar (membro do time vendo a prévia de um canal de time privado) também fica
+  // sabendo. Só assiste à sala quem pôde abri-la, então nada vaza.
+  if (!isPublic) bus.publish({ room: rid }, { type: 'room', action: 'removed', room: mapRoom(room) });
   for (const s of subs) {
     bus.leaveRoom(s.user_id, rid);
     bus.publish({ user: s.user_id }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(s, room) });

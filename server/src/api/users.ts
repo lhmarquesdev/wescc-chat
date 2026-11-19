@@ -260,7 +260,7 @@ export function usersRoutes(app: FastifyInstance) {
       fields,
       { asAdmin: false, currentPassword: d.currentPassword },
     );
-    if (logoutOthers) return { user: mapUser(row, { full: true }), sessionsEnded: await revokeAllSessions(ctx.userId, ctx.sessionId) };
+    if (logoutOthers) return { user: mapUser(row, { full: true }), sessionsEnded: await revokeAllSessions(ctx.userId, ctx.sessionId, d.newPassword ? 'password-changed' : 'session-revoked') };
     return { user: mapUser(row, { full: true }) };
   });
   route(app, 'POST', 'users.setPreferences', {}, async (req, _rep, ctx) => {
