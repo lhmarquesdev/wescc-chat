@@ -364,3 +364,29 @@ describe('arquivos enviados', () => {
     expect(up.message.attachments[0]).toMatchObject({ title: stored, format: 'PDF' });
   });
 });
+
+describe('comandos de barra', () => {
+  it('/shrug sai com uma barra só', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `shrug-${uniq()}` }, A)).channel;
+    expect((await send(A, ch._id, '/shrug')).message.msg).toBe('¯\\_(ツ)_/¯');
+    expect((await send(A, ch._id, '/shrug tanto faz')).message.msg).toBe('tanto faz ¯\\_(ツ)_/¯');
+  });
+
+  it('sem o @usuário (ou sem a ação do /me) diz como usar; /status e /msg confirmam', async () => {
+    const bruno = await newUser(A, { name: 'Bruno Lima' });
+    const ch = (await api('POST', 'channels.create', { name: `uso-${uniq()}` }, A)).channel;
+    for (const cmd of ['kick', 'invite', 'mute', 'unmute']) {
+      const r = await send(A, ch._id, `/${cmd}`);
+      expect([cmd, r.status, r.error]).toEqual([cmd, 400, `Informe quem: /${cmd} @usuário`]);
+    }
+    const me = await send(A, ch._id, '/me');
+    expect([me.status, me.error]).toEqual([400, 'Informe a ação: /me está chegando']);
+    expect((await api('GET', 'channels.history', { roomId: ch._id, count: 50 }, A)).messages.filter((x: any) => !x.t)).toHaveLength(0);
+    const st = await send(A, ch._id, '/status Em reunião');
+    expect(st.message).toMatchObject({ ok: true, command: 'status', text: 'Status alterado para “Em reunião”.' });
+    const dm = await send(A, ch._id, `/msg @${bruno.username} oi`);
+    expect(dm.message).toMatchObject({ ok: true, command: 'msg', text: 'Mensagem enviada para Bruno Lima.', rid: expect.any(String) });
+    const run = await api('POST', 'commands.run', { roomId: ch._id, command: 'status', params: '' }, A);
+    expect(run.result.text).toBe('Mensagem de status removida.');
+  });
+});

@@ -8,7 +8,8 @@ import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 import { listSettings } from '../src/services/settings';
 import { EMOJI as WEB_EMOJI } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
-import { authorName, continuesGroup, editableKind, editTextOf, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageHref, messageLink, pollMeta, pollShares } from '../../web/src/lib/messageRules';
+import { authorName, continuesGroup, editableKind, editTextOf, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageHref, messageLink, pollMeta, pollShares, unknownSlashCommand } from '../../web/src/lib/messageRules';
+import { ITALIC_SRC } from '@shared/markdownTokens';
 import { fromLocalInput, reminderPresets, schedulePresets, toLocalInput, whenText } from '../../web/src/lib/messageTimes';
 import { AHEAD_ERROR, aheadError, POLL_ERRORS, pollInputError, type MessageForward, type MessagePoll } from '@shared/messages';
 import { messagePreviewText } from '@shared/stickers';
@@ -81,6 +82,32 @@ describe('editar a legenda de um arquivo (editTextOf)', () => {
     const legacy = msg({ msg: '', attachments: [{ type: 'file', title: 'a.png', description: 'Gráfico de setembro' }] as any });
     expect(editTextOf(legacy)).toBe('Gráfico de setembro');
     expect(editTextOf(msg({ msg: '' }))).toBe('');
+  });
+});
+
+describe('comando que não existe (unknownSlashCommand)', () => {
+  const known = ['leave', 'part', 'kick', 'invite', 'me', 'msg', 'status', 'help', 'shrug'];
+  it('erro de digitação sugere o mais parecido; comando certo, caminho e // passam', () => {
+    expect(unknownSlashCommand('/leav', known)).toEqual({ name: 'leav', suggestion: 'leave' });
+    expect(unknownSlashCommand('/Kik @bruno', known)).toEqual({ name: 'kik', suggestion: 'kick' });
+    expect(unknownSlashCommand('/xyzabc', known)).toEqual({ name: 'xyzabc', suggestion: undefined });
+    expect(unknownSlashCommand('/leave', known)).toBeNull();
+    expect(unknownSlashCommand('/status Em reunião', known)).toBeNull();
+    expect(unknownSlashCommand('/home/user/arquivo.txt', known)).toBeNull();
+    expect(unknownSlashCommand('//leav', known)).toBeNull();
+    expect(unknownSlashCommand('/ leav', known)).toBeNull();
+    expect(unknownSlashCommand('olá /leav', known)).toBeNull();
+    // A lista não carregou: quem decide é o servidor.
+    expect(unknownSlashCommand('/leav', [])).toBeNull();
+  });
+});
+
+describe('itálico do markdown', () => {
+  const italics = (t: string) => [...t.matchAll(new RegExp(ITALIC_SRC, 'g'))].map((m) => m[0]);
+  it('não abre logo depois de uma barra: o /shrug aparece como é', () => {
+    expect(italics('¯\\_(ツ)_/¯')).toEqual([]);
+    expect(italics('isso é _importante_ hoje')).toEqual(['_importante_']);
+    expect(italics('__muito__')).toEqual(['__muito__']);
   });
 });
 

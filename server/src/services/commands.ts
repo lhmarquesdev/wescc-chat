@@ -46,6 +46,13 @@ export function registerCommand(cmd: SlashCommand) {
 
 const usernames = (s: string) => [...s.matchAll(/@?([0-9a-zA-Z._-]+)/g)].map((m) => m[1]);
 
+// Comando que age sobre pessoas: sem nenhum @usuário, diz como usar (antes não fazia nada e não avisava).
+function userArgs(args: string, command: string) {
+  const names = usernames(args);
+  if (!names.length) throw badRequest('error-invalid-params', `Informe quem: /${command} @usuário`);
+  return names;
+}
+
 async function userIdsOf(names: string[]) {
   const out: string[] = [];
   for (const n of names) {
@@ -72,7 +79,8 @@ async function assertCanListMembers(ctx: Ctx, room: any) {
   if (room.broadcast && !(await hasPermission(ctx.userId, 'view-broadcast-member-list', room.id))) throw forbidden('Você não pode ver os membros desta sala.');
 }
 
-const ok = (command: string) => ({ ok: true, command });
+// text: confirmação que a web mostra (o comando não deixa nada na sala); rid: a conversa para abrir dali.
+const ok = (command: string, extra: { text?: string; rid?: string } = {}) => ({ ok: true, command, ...extra });
 
 // Comandos que só publicam texto: os textos moram em @shared/e2e (a sala criptografada monta o mesmo no navegador).
 const say = (command: string) => async (ctx: Ctx, room: any, args: string, tmid: string | null) =>
@@ -90,11 +98,11 @@ reg('leave', '', 'Sair da sala atual', async (ctx, room) => {
 });
 commands.set('part', { ...commands.get('leave')!, command: 'part' });
 reg('invite', '@usuário', 'Convidar usuários para a sala', async (ctx, room, args) => {
-  await inviteToRoom(ctx, room.id, await userIdsOf(usernames(args)));
+  await inviteToRoom(ctx, room.id, await userIdsOf(userArgs(args, 'invite')));
   return ok('invite');
 });
 reg('kick', '@usuário', 'Remover um usuário da sala', async (ctx, room, args) => {
-  for (const id of await userIdsOf(usernames(args))) await kickFromRoom(ctx, room.id, id);
+  for (const id of await userIdsOf(userArgs(args, 'kick'))) await kickFromRoom(ctx, room.id, id);
   return ok('kick');
 });
 reg('topic', 'texto', 'Definir o tópico da sala', async (ctx, room, args) => {
@@ -110,11 +118,11 @@ reg('unarchive', '[#canal]', 'Desarquivar a sala', async (ctx, room, args) => {
   return ok('unarchive');
 });
 reg('mute', '@usuário', 'Silenciar um usuário na sala', async (ctx, room, args) => {
-  for (const id of await userIdsOf(usernames(args))) await setMuted(ctx, room.id, id, true);
+  for (const id of await userIdsOf(userArgs(args, 'mute'))) await setMuted(ctx, room.id, id, true);
   return ok('mute');
 });
 reg('unmute', '@usuário', 'Remover silêncio de um usuário', async (ctx, room, args) => {
-  for (const id of await userIdsOf(usernames(args))) await setMuted(ctx, room.id, id, false);
+  for (const id of await userIdsOf(userArgs(args, 'unmute'))) await setMuted(ctx, room.id, id, false);
   return ok('unmute');
 });
 reg('msg', '@usuário mensagem', 'Enviar mensagem direta', async (ctx, _room, args) => {
@@ -122,7 +130,8 @@ reg('msg', '@usuário mensagem', 'Enviar mensagem direta', async (ctx, _room, ar
   if (!m) throw badRequest('error-invalid-params', 'Uso: /msg @usuário mensagem');
   const dm = await createDirect(ctx, [m[1]]);
   await sendMessage(ctx, { rid: dm.id, msg: m[2] }, { skipCommands: true });
-  return ok('msg');
+  const to = await one('SELECT name, username FROM users WHERE lower(username) = lower($1)', [m[1]]);
+  return ok('msg', { text: `Mensagem enviada para ${to?.name || `@${to?.username ?? m[1]}`}.`, rid: dm.id });
 });
 reg('create', '#canal [private]', 'Criar um canal', async (ctx, _room, args) => {
   const m = args.match(/^#?([^\s]+)(\s+private)?/);
@@ -154,7 +163,7 @@ reg('hide', '', 'Ocultar a sala da barra lateral', async (ctx, room) => {
 });
 reg('status', 'texto', 'Definir mensagem de status', async (ctx, _room, args) => {
   await setStatus(ctx.userId, undefined, args);
-  return ok('status');
+  return ok('status', { text: args ? `Status alterado para “${args.slice(0, 120)}”.` : 'Mensagem de status removida.' });
 });
 reg('away', '', 'Ficar ausente', async (ctx) => {
   await setStatus(ctx.userId, 'away');
@@ -168,7 +177,10 @@ reg('online', '', 'Ficar online', async (ctx) => {
   await setStatus(ctx.userId, 'online');
   return ok('online');
 });
-reg('me', 'ação', 'Mensagem em terceira pessoa', say('me'));
+reg('me', 'ação', 'Mensagem em terceira pessoa', async (ctx, room, args, tmid) => {
+  if (!args) throw badRequest('error-invalid-params', 'Informe a ação: /me está chegando');
+  return say('me')(ctx, room, args, tmid);
+});
 reg('shrug', '[mensagem]', '¯\\_(ツ)_/¯', say('shrug'));
 reg('tableflip', '[mensagem]', '(╯°□°）╯︵ ┻━┻', say('tableflip'));
 reg('unflip', '[mensagem]', '┬─┬ ノ( ゜-゜ノ)', say('unflip'));

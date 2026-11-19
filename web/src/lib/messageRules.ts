@@ -73,6 +73,36 @@ export function editTextOf(m: Message): string {
   return m.attachments?.find((a) => a.type === 'file' && a.description)?.description ?? '';
 }
 
+// Texto que começa com /nome e não é um comando desta pessoa: o nome e o comando mais parecido, para "Você quis dizer".
+// Fora: "//texto", "/ texto", caminhos ("/home/x") e lista vazia (não carregou; o servidor decide).
+export function unknownSlashCommand(text: string, known: readonly string[]): { name: string; suggestion?: string } | null {
+  const m = /^\/([a-z0-9-]+)(?:\s|$)/i.exec(text);
+  if (!m || !known.length) return null;
+  const name = m[1].toLowerCase();
+  if (known.includes(name)) return null;
+  const limit = name.length <= 3 ? 1 : 2;
+  let suggestion: string | undefined;
+  let best = limit + 1;
+  for (const k of known) {
+    const d = editDistance(name, k);
+    if (d < best || (d === best && suggestion && k.length < suggestion.length)) {
+      best = d;
+      suggestion = k;
+    }
+  }
+  return { name, suggestion: best <= limit ? suggestion : undefined };
+}
+
+function editDistance(a: string, b: string) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
 // Nome de quem escreveu, como no cabeçalho da mensagem: o alias (webhooks) vem antes do usuário.
 export const authorName = (m: Message) => m.alias || m.u.name || m.u.username;
 

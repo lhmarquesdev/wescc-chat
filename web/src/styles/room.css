@@ -1906,7 +1906,45 @@ a.att-title {
 }
 .upload-list li.blocked :is(.upload-name, .upload-size) {
   color: hsl(var(--muted-foreground));
-}.drop-overlay {
+}
+/* /help: um comando por linha; no celular a descrição desce para baixo do nome. */
+.commands-help li {
+  padding: 0;
+}
+.commands-help button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  width: 100%;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.commands-help button:hover {
+  background: hsl(var(--surface-3));
+}
+.commands-help code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: hsl(var(--foreground));
+}
+.commands-help-params {
+  font-weight: var(--fw-regular);
+  color: hsl(var(--muted-foreground));
+}
+.commands-help-desc {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: hsl(var(--muted-foreground));
+}
+.drop-overlay {
   position: fixed;
   z-index: var(--z-popover);
   display: flex;

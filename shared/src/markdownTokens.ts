@@ -8,7 +8,8 @@ export const MD_LINK_SRC = '\\[[^\\[\\]\\n]+\\]\\((?:https?:\\/\\/|\\/)(?:[^)\\s
 export const CODE_SRC = '`[^`\\n]+`';
 export const URL_SRC = "(?:https?:\\/\\/|www\\.)[^\\s<]+[^\\s<.,;:!?)\\]'\"]";
 export const BOLD_SRC = '\\*\\*[^*\\n]+\\*\\*|\\*[^*\\s][^*\\n]*\\*';
-export const ITALIC_SRC = '__[^_\\n]+__|(?<![\\w])_[^_\\s][^_\\n]*_(?![\\w])';
+// Itálico não abre logo depois de "\": ¯\_(ツ)_/¯ (o /shrug) aparece como é, e não com "(ツ)" em itálico.
+export const ITALIC_SRC = '__[^_\\n]+__|(?<![\\w\\\\])_[^_\\s][^_\\n]*_(?![\\w])';
 export const STRIKE_SRC = '~~[^~\\n]+~~|~[^~\\s][^~\\n]*~';
 export const MENTION_SRC = '(?<![\\w@])@[0-9a-zA-Z._-]+';
 export const CHANNEL_SRC = '(?<![\\w#&])#[0-9a-zA-Z\\u00C0-\\u017F._-]+';

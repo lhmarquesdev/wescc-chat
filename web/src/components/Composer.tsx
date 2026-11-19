@@ -6,10 +6,10 @@ import { mediaTypeAllowed, stickerPreviewText } from '@shared/stickers';
 import { localCommandText } from '@shared/e2e';
 import { editEncrypted, quoteOf, sendEncrypted, sendEncryptedFile, type E2eFileMeta } from '../lib/e2e/client';
 import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
-import { slashCommands } from '../lib/commands';
+import { slashCommands, type SlashCommand } from '../lib/commands';
 import { EMOJI, searchEmoji } from '../lib/emoji';
 import { formatBytes, nameList, roomPath } from '../lib/format';
-import { editTextOf, mentionGroups, mentionSuggestions } from '../lib/messageRules';
+import { editTextOf, mentionGroups, mentionSuggestions, unknownSlashCommand } from '../lib/messageRules';
 import { whenText } from '../lib/messageTimes';
 import { realtime } from '../lib/realtime';
 import { clientMessageId, registerComposer, useStickers } from '../lib/stickers';
@@ -114,6 +114,8 @@ function ComposerView({
   const [alsoChannel, setAlsoChannel] = useState(false);
   const [pending, setPending] = useState<File[]>([]);
   const [fileDesc, setFileDesc] = useState('');
+  // /help: a lista de comandos num modal (antes, um aviso enorme que sumia sozinho).
+  const [help, setHelp] = useState<SlashCommand[] | null>(null);
   const [askAck, setAskAck] = useState(true);
   const [drop, setDrop] = useState<DOMRect | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
@@ -401,9 +403,26 @@ function ComposerView({
     st.toast(text, 'warning', { duration: 10000, action: canAdd ? { label: 'Adicionar à sala', onClick: () => void add() } : undefined });
   };
 
-  const send = async () => {
+  // Comando que não deixa nada na sala (/status, /msg): a confirmação que o servidor manda.
+  const commandDone = (r?: { ok?: boolean; command?: string; text?: string; rid?: string }) => {
+    if (!r?.ok || !r.command || !r.text) return;
+    const to = r.rid;
+    useStore.getState().toast(r.text, 'success', to ? { action: { label: 'Abrir conversa', onClick: () => navigate(roomPath({ _id: to, t: 'd' })) } } : undefined);
+  };
+
+  const clearSent = (msg: string) => {
+    // O que a pessoa começou a escrever enquanto a mensagem saía fica no compositor.
+    if (textNow.current.trim() !== msg) return;
+    setText('');
+    saveDraft('');
+    reqSeq.current++;
+    setSugs([]);
+  };
+
+  // asText: "Enviar como texto" do aviso de comando que não existe.
+  const send = async (opts: { asText?: boolean } = {}) => {
     if (sendingRef.current) return;
-    let msg = text.trim();
+    const msg = textNow.current.trim();
     if (!msg && !pending.length && !fileEdit) return;
     if (msg.length > maxSize) return useStore.getState().toast(`A mensagem excede ${maxSize} caracteres.`, 'error');
     // Salvou sem mudar nada: só sai da edição (não marca "editada").
@@ -412,6 +431,20 @@ function ComposerView({
     sendingRef.current = true;
     setSending(true);
     try {
+      if (!editing && !opts.asText && msg.startsWith('/')) {
+        const list = await slashCommands(me._id);
+        if (/^\/help(?:\s|$)/i.test(msg) && list.length) {
+          setHelp(list);
+          return clearSent(msg);
+        }
+        // Erro de digitação (/leav): o texto fica na caixa e não vai para a sala como mensagem.
+        const unknown = unknownSlashCommand(msg, list.map((c) => c.command));
+        if (unknown) {
+          const hint = unknown.suggestion ? ` Você quis dizer /${unknown.suggestion}?` : '';
+          useStore.getState().toast(`O comando /${unknown.name} não existe.${hint}`, 'warning', { duration: 8000, action: { label: 'Enviar como texto', onClick: () => void send({ asText: true }) } });
+          return;
+        }
+      }
       if (room?.encrypted) {
         if (!(await sendE2e(msg))) return;
       } else if (editing) {
@@ -429,14 +462,9 @@ function ComposerView({
         // A lista longe do fim (link para uma antiga, primeira não lida): volta para as últimas, onde a mensagem aparece.
         if (!tmid) useStore.getState().sentFromRoom(rid);
         warnNotInRoom(r.mentionsNotInRoom);
+        commandDone(r.message);
       }
-      // O que a pessoa começou a escrever enquanto a mensagem saía fica no compositor.
-      if (textNow.current.trim() === msg) {
-        setText('');
-        saveDraft('');
-        reqSeq.current++;
-        setSugs([]);
-      }
+      clearSent(msg);
     } catch (e) {
       useStore.getState().toast(errorMessage(e), 'error');
     } finally {
@@ -462,7 +490,8 @@ function ComposerView({
       const local = localCommandText(name, args);
       if (local !== null) text = local;
       else if ((await slashCommands(me._id)).some((c) => c.command === name)) {
-        await api.post('commands.run', { roomId: rid, command: name, params: args, tmid });
+        const r = await api.post('commands.run', { roomId: rid, command: name, params: args, tmid });
+        commandDone(r.result);
         return true;
       }
     }
@@ -956,7 +985,7 @@ function ComposerView({
             <button type="button" className="btn small ghost" onClick={cancelEdit}>
               Cancelar
             </button>
-            <button type="button" className="btn primary small send save" onClick={send} disabled={(!text.trim() && !fileEdit) || over || sending} aria-busy={sending || undefined}>
+            <button type="button" className="btn primary small send save" onClick={() => void send()} disabled={(!text.trim() && !fileEdit) || over || sending} aria-busy={sending || undefined}>
               Salvar
             </button>
           </span>
@@ -1082,6 +1111,28 @@ function ComposerView({
           {descOver && <p className="upload-problem">{`A descrição excede ${maxSize} caracteres (${fileDesc.trim().length}).`}</p>}
         </Modal>
       )}
+      {help && <CommandsHelp commands={help} onPick={(c) => (setHelp(null), setText(`/${c} `), requestAnimationFrame(() => ta.current?.focus()))} onClose={() => setHelp(null)} />}
     </div>
+  );
+}
+
+// /help: os comandos desta pessoa, um por linha, com os parâmetros. Clicar põe o comando na caixa.
+function CommandsHelp({ commands, onPick, onClose }: { commands: SlashCommand[]; onPick: (command: string) => void; onClose: () => void }) {
+  return (
+    <Modal title="Comandos disponíveis" description="Digite / no campo de mensagem para ver a lista enquanto escreve." onClose={onClose}>
+      <ul className="plain-list commands-help">
+        {commands.map((c) => (
+          <li key={c.command}>
+            <button type="button" onClick={() => onPick(c.command)}>
+              <code>
+                /{c.command}
+                {c.params && <span className="commands-help-params"> {c.params}</span>}
+              </code>
+              <span className="commands-help-desc">{c.description}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Modal>
   );
 }
