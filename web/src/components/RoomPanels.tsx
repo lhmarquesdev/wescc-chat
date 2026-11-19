@@ -183,8 +183,12 @@ function ResultHead({ m }: { m: Message }) {
 function MessageResult({ m: raw }: { m: Message }) {
   const m = useE2eMessage(raw);
   const navigate = useNavigate();
+  // Resposta de tópico (que não foi também para a sala) não está na conversa: abre o tópico e destaca a resposta lá.
+  const inThread = !!m.tmid && !(m as { tshow?: boolean }).tshow;
+  const base = location.pathname.split('/thread/')[0];
+  const open = () => (inThread ? navigate(`${base}/thread/${m.tmid}`, { state: { reply: m._id } }) : navigate(`${base}?msg=${m._id}`));
   return (
-    <button type="button" className="result" onClick={() => navigate(`${location.pathname.split('/thread/')[0]}?msg=${m._id}`)}>
+    <button type="button" className="result" onClick={open}>
       <ResultHead m={m} />
       <div className="result-body">{m.sticker ? <StickerView sticker={m.sticker} size="small" /> : resultBody(m)}</div>
     </button>
