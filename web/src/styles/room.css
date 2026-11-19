@@ -393,6 +393,20 @@
 .msg-flag.star {
   color: hsl(var(--warning));
 }
+/* Linha agrupada (sem cabeçalho): as marcas vão no fim do texto, como o "editada", ou numa linha embaixo. */
+.msg-body .msg-flag {
+  margin-left: 6px;
+  vertical-align: -1px;
+}
+.msg-flags {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+.own > .msg-main > .msg-body .msg-flag {
+  color: inherit;
+  opacity: 0.85;
+}
 .receipt {
   display: inline-flex;
   align-self: center;

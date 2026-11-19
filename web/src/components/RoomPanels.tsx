@@ -10,6 +10,7 @@ import { useUserPresence } from '../lib/presence';
 import { renderMarkdown } from '../lib/markdown';
 import { authorName, messageHref } from '../lib/messageRules';
 import { useNames } from '../lib/names';
+import { realtime } from '../lib/realtime';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { clearRoomError, resetTranslationViews, useLanguages, useMyLanguage, useRoomTranslate, useTranslations } from '../lib/translate';
 import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
@@ -141,7 +142,7 @@ export function RoomPanel(p: Props) {
         {p.id === 'members' && <MembersPanel {...p} />}
         {p.id === 'search' && <SearchPanel {...p} />}
         {p.id === 'files' && <FilesPanel {...p} />}
-        {(p.id === 'pinned' || p.id === 'starred' || p.id === 'mentions') && <FlagPanel {...p} />}
+        {(p.id === 'pinned' || p.id === 'starred' || p.id === 'mentions') && <FlagPanel key={`${p.id}:${p.room._id}`} {...p} />}
         {p.id === 'notifications' && <NotificationsPanel {...p} />}
         {p.id === 'invite' && <InvitePanel {...p} />}
         {p.id === 'prune' && <PrunePanel {...p} />}
@@ -1183,8 +1184,32 @@ const FLAG_EMPTY: Record<'pinned' | 'starred' | 'mentions', [IconName, string, s
 
 function FlagPanel({ id, room }: Props) {
   const path = id === 'pinned' ? 'chat.getPinnedMessages' : id === 'starred' ? 'chat.getStarredMessages' : 'chat.getMentionedMessages';
-  const { data, loading } = useAsync(() => api.get(path, { roomId: room._id, count: 100 }), [room._id, id]);
-  if (loading) return <SkeletonList />;
+  const { data, loading, reload } = useAsync(() => api.get(path, { roomId: room._id, count: 100 }), [room._id, id]);
+  const meId = useStore((s) => s.me?._id);
+  // O painel acompanha a sala: fixar, favoritar ou ser mencionado (e desfazer, editar ou apagar uma que está na lista)
+  // aparece sem fechar e abrir de novo. Vários eventos seguidos viram uma busca só.
+  const shown = useRef(new Set<string>());
+  shown.current = new Set((data?.messages ?? []).map((m: Message) => m._id));
+  useEffect(() => {
+    let timer: number | undefined;
+    const later = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(reload, 300);
+    };
+    const off = realtime.on((ev) => {
+      if (ev.type === 'message.deleted' && ev.rid === room._id && shown.current.has(ev._id)) later();
+      if (ev.type !== 'message' || ev.message.rid !== room._id) return;
+      const m = ev.message;
+      const flagged = id === 'pinned' ? !!m.pinned : id === 'starred' ? !!m.starred?.some((s) => s._id === meId) : !!m.mentions?.some((u) => u._id === meId);
+      if (flagged || shown.current.has(m._id)) later();
+    });
+    return () => {
+      off();
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room._id, id, meId]);
+  if (loading && !data) return <SkeletonList />;
   if (!data?.messages.length) {
     const [icon, title, text] = FLAG_EMPTY[id as keyof typeof FLAG_EMPTY];
     return (

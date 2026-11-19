@@ -1213,6 +1213,23 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
         editada
       </span>
     ) : null;
+  // Fixada e favoritada: no cabeçalho; na linha agrupada (sem cabeçalho), no fim do texto, como o "editada", ou numa
+  // linha própria embaixo quando não há texto (arquivo, figurinha, enquete).
+  const flags =
+    m.pinned || starred ? (
+      <>
+        {m.pinned && (
+          <span className="msg-flag pin" title="Fixada" role="img" aria-label="Fixada">
+            <Icon name="pin" size={12} />
+          </span>
+        )}
+        {starred && (
+          <span className="msg-flag star" title="Favoritada" role="img" aria-label="Favoritada">
+            <Icon name="star" size={12} fill />
+          </span>
+        )}
+      </>
+    ) : null;
   const receipt =
     receiptsOn && own && !m.t ? (
       <span className={`receipt ${m.unread ? '' : 'read'}`} title={m.unread ? 'Enviada' : 'Lida por todos'} role="img" aria-label={m.unread ? 'Enviada' : 'Lida por todos'}>
@@ -1250,6 +1267,7 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
         <div className="msg-body">
           {withCopy(renderMarkdown(forward.comment, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick, highlights: own ? null : hlm }))}
           {grouped && edited}
+          {grouped && flags}
         </div>
       )}
       <ForwardCard f={forward}>
@@ -1268,12 +1286,14 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
             {body}
             {grouped && edited}
             {grouped && <TranslationMark tr={tr} />}
+            {grouped && text && flags}
           </div>
         ))}
       {!stickerView && !call && <TranslationLine tr={tr} />}
       {attachments}
     </>
   );
+  const flagsInText = forward ? !!forward.comment : !poll && !stickerView && !call && !!text;
 
   const cls = [
     'msg',
@@ -1346,16 +1366,7 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
             </time>
             {edited}
             <TranslationMark tr={tr} />
-            {m.pinned && (
-              <span className="msg-flag pin" title="Fixada" role="img" aria-label="Fixada">
-                <Icon name="pin" size={12} />
-              </span>
-            )}
-            {starred && (
-              <span className="msg-flag star" title="Favoritada" role="img" aria-label="Favoritada">
-                <Icon name="star" size={12} fill />
-              </span>
-            )}
+            {flags}
             {receipt}
           </div>
         )}
@@ -1383,6 +1394,7 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
         ) : (
           content
         )}
+        {grouped && flags && !flagsInText && <div className="msg-flags">{flags}</div>}
         {/* Integrações (Jira): cartões depois do corpo e antes das reações; mensagem removida não mostra cartão */}
         {!m.t && m.jira && <JiraCard jira={m.jira} message={m} />}
         {!m.t && m.meeting && <MeetingCard meeting={m.meeting} />}
