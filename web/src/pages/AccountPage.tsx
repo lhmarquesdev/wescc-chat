@@ -15,7 +15,7 @@ import { useMedia } from '../components/overlay';
 import { Icon } from '../components/Icon';
 import { SideBrand, TakeoverBack, TakeoverHead } from '../components/Sidebar';
 import { QrCode } from '../components/QrCode';
-import { DeviceCell, NewDevicePill, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
+import { DeviceCell, NewDevicePill, PageHead, TableWrap, deviceLabel, lastSeen, useActiveNavInView } from './admin/parts';
 // Figurinhas: o item some com a função desligada.
 import { useStickerCaps } from '../lib/stickers';
 
@@ -846,6 +846,14 @@ function Devices() {
       .then((r) => (ok(`${plural(r.removed, 'sessão encerrada', 'sessões encerradas')}.`), reload()))
       .catch(fail);
   };
+  const logoutOne = async (s: any) => {
+    const yes = await confirmDialog({ title: 'Encerrar a sessão?', body: `${deviceLabel(s.device)} sai da conta e precisa entrar de novo.`, confirmLabel: 'Encerrar sessão', danger: true });
+    if (!yes) return;
+    api
+      .post('sessions.logout.me', { sessionId: s._id })
+      .then(() => (ok('Sessão encerrada.'), reload()))
+      .catch(fail);
+  };
   return (
     <>
       <PageHead title="Dispositivos" />
@@ -911,7 +919,7 @@ function Devices() {
                   <td className="actions-col">
                     {!s.current && (
                       <div className="row-actions">
-                        <button className="btn small ghost danger" onClick={() => api.post('sessions.logout.me', { sessionId: s._id }).then(reload).catch(fail)}>
+                        <button className="btn small ghost danger" onClick={() => void logoutOne(s)}>
                           <Icon name="logout" />
                           Encerrar
                         </button>
