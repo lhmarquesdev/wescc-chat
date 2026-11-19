@@ -806,7 +806,11 @@ export async function resetAvatar(userId: string) {
 
 export async function createPersonalToken(ctx: Ctx, name: string, bypass2fa: boolean) {
   const token = randomToken();
-  if (await one('SELECT 1 FROM personal_access_tokens WHERE user_id = $1 AND name = $2', [ctx.userId, name]))
+  // Espaços sobrando não contam, e o nome não se repete mudando só maiúsculas ou espaços: na lista ficariam iguais.
+  name = name.replace(/\s+/g, ' ').trim();
+  if (!name) throw badRequest('error-invalid-params', 'Informe o nome do token.');
+  const same = (other: string) => other.replace(/\s+/g, ' ').trim().toLowerCase() === name.toLowerCase();
+  if ((await many<{ name: string }>('SELECT name FROM personal_access_tokens WHERE user_id = $1', [ctx.userId])).some((t) => same(t.name)))
     throw badRequest('error-token-already-exists', 'Já existe um token com esse nome.');
   await query('INSERT INTO personal_access_tokens (id, user_id, name, token_hash, bypass_2fa) VALUES ($1,$2,$3,$4,$5)', [
     newId(),

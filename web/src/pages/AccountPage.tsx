@@ -1057,14 +1057,14 @@ function Tokens() {
         <div className="card token-form">
           <div className="form">
             <Field label="Nome do token" hint="Para reconhecer onde ele é usado, como “Relatório diário”.">
-              <input ref={input} placeholder="Nome do token" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && name && generate()} />
+              <input ref={input} placeholder="Nome do token" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && name.trim() && generate()} />
             </Field>
             <Toggle checked={bypass} onChange={setBypass} label="Ignorar 2FA" description="O token funciona sem pedir o código do autenticador." />
             <div className="form-actions">
               <button className="btn" onClick={() => (setCreating(false), setName(''))}>
                 Cancelar
               </button>
-              <button className="btn primary" disabled={!name} onClick={generate}>
+              <button className="btn primary" disabled={!name.trim()} onClick={generate}>
                 Gerar
               </button>
             </div>

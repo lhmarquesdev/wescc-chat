@@ -323,3 +323,17 @@ describe('troca de senha em Minha conta', () => {
     expect((await api('GET', 'me', undefined, third)).username).toBe(u.username);
   });
 });
+
+describe('tokens de acesso', () => {
+  it('nome obrigatório sem os espaços sobrando e único sem diferenciar maiúsculas', async () => {
+    const u = await newUser(A);
+    const gen = (tokenName: string) => api('POST', 'users.generatePersonalAccessToken', { tokenName }, u);
+    expect(err(await gen('   '))).toEqual([400, 'Informe o nome do token.']);
+    expect((await gen('  Relatório   diário ')).success).toBe(true);
+    const dup = [400, 'Já existe um token com esse nome.'];
+    for (const n of ['Relatório diário', 'relatório diário', 'RELATÓRIO DIÁRIO ', ' Relatório\tdiário']) expect(err(await gen(n))).toEqual(dup);
+    expect((await gen('Relatório semanal')).success).toBe(true);
+    const list = await api('GET', 'users.getPersonalAccessTokens', undefined, u);
+    expect(list.tokens.map((t: any) => t.name)).toEqual(['Relatório diário', 'Relatório semanal']);
+  });
+});
