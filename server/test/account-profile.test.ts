@@ -337,3 +337,12 @@ describe('tokens de acesso', () => {
     expect(list.tokens.map((t: any) => t.name)).toEqual(['Relatório diário', 'Relatório semanal']);
   });
 });
+
+describe('limites dos campos do usuário', () => {
+  it('mensagem de status gigante não é gravada inteira', async () => {
+    const u = await newUser(A);
+    expect((await profile(u, { statusText: 'S'.repeat(500_000) })).status).not.toBe(500);
+    expect(((await row(u.userId)).status_text ?? '').length).toBeLessThanOrEqual(120);
+    expect(err(await api('POST', 'users.update', { userId: u.userId, data: { bio: 'B'.repeat(10_000) } }, A))).toEqual([400, 'O campo Sobre pode ter no máximo 500 caracteres.']);
+  });
+});
