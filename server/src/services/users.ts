@@ -566,18 +566,48 @@ async function renameInReactions(oldU: string, newU: string | null, db?: Queryab
   );
 }
 
+// As preferências que users.setPreferences aceita e os valores de cada uma (highlights e language têm validação
+// própria, abaixo). Preferência nova: acrescente aqui, senão o servidor a recusa.
+const PREFERENCE_VALUES: Record<string, readonly string[] | 'boolean'> = {
+  theme: ['auto', 'light', 'dark'],
+  desktopNotifications: ['all', 'mentions', 'nothing'],
+  emailNotificationMode: ['mentions', 'nothing'],
+  stickerAnimation: ['system', 'auto', 'hover', 'never'],
+  notificationSound: 'boolean',
+  sendOnEnter: 'boolean',
+  showThreadsInMainChannel: 'boolean',
+  sidebarGroupByType: 'boolean',
+  sidebarShowUnread: 'boolean',
+  hideReadReceipts: 'boolean',
+  stickerSuggestions: 'boolean',
+  stickerTabSeen: 'boolean',
+  stickerHintSeen: 'boolean',
+};
+
 // Preferências da pessoa (merge no jsonb). As palavras destacadas são validadas e normalizadas aqui. Qualquer mudança
 // vai para as outras abas da pessoa pelo evento "user" (só para ela: os outros nunca veem preferences).
 export async function setPreferences(ctx: Ctx, prefs: UserPreferences) {
   if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) throw badRequest('error-invalid-params', 'Preferências inválidas.');
   const data: Record<string, unknown> = { ...prefs };
+  // Só as preferências conhecidas, com valores válidos (um valor qualquer desligava as notificações sem aviso, e
+  // chaves inventadas iam no /me de cada abertura). null tira a chave: a preferência volta ao padrão.
+  const remove: string[] = [];
+  for (const [k, v] of Object.entries(data)) {
+    if (k === 'highlights' || k === 'language') continue;
+    const allowed = Object.hasOwn(PREFERENCE_VALUES, k) ? PREFERENCE_VALUES[k] : undefined;
+    if (v === null) {
+      delete data[k];
+      remove.push(k);
+    } else if (!allowed) throw badRequest('error-invalid-params', `Preferência desconhecida: ${k.slice(0, 60)}.`);
+    else if (allowed === 'boolean' ? typeof v !== 'boolean' : !allowed.includes(v as string)) throw badRequest('error-invalid-params', `Valor inválido para a preferência ${k}.`);
+  }
   if ('highlights' in data) {
     const r = normalizeHighlights(data.highlights);
     if (!r.ok) throw badRequest('error-invalid-highlights', r.error);
     data.highlights = r.words;
   }
   // Idioma da pessoa (destino das traduções de mensagens). Vazio volta ao padrão da empresa: a chave sai.
-  const drop: string[] = [];
+  const drop: string[] = remove;
   if ('language' in data) {
     const v = data.language;
     if (v === '' || v === null || v === undefined) {
