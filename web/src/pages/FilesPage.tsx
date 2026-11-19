@@ -1216,11 +1216,11 @@ function FolderDetails({ folder, actions, onClose }: { folder: DriveFolder; acti
             Quem tem acesso
           </h3>
           <ul className="fl-acl compact">
-            {acl.map((e) => (
-              <li key={`${e.from?._id ?? ''}:${e.type}:${e.id}`}>
+            {acl.map((e, i) => (
+              <li key={`${i}:${e.type}:${e.id}`}>
                 <span className="fl-subject-text">
                   <strong className="ellipsis">{e.label}</strong>
-                  <small className="muted ellipsis">{e.from ? `de “${e.from.name}”` : (e.sublabel ?? '')}</small>
+                  <small className="muted ellipsis">{e.from ? (e.from.name ? `de “${e.from.name}”` : 'de uma pasta de cima') : (e.sublabel ?? '')}</small>
                 </span>
                 <span className={`fl-level l${e.level}`}>{driveLevelLabel(e.level)}</span>
               </li>

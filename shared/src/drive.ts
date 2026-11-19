@@ -63,7 +63,7 @@ export interface DriveAclEntry {
   level: 1 | 2 | 3;
   label: string;
   sublabel?: string;
-  // Herdada de uma pasta de cima (só leitura aqui; muda lá).
+  // Herdada de uma pasta de cima (só leitura aqui; muda lá). _id e name vazios: de uma pasta de cima que a pessoa não vê.
   from?: { _id: string; name: string } | null;
   missing?: boolean;
 }

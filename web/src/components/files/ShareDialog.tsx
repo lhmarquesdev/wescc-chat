@@ -195,13 +195,13 @@ export function ShareDialog({ folder, acl, onClose, onSaved }: { folder: DriveFo
         <>
           <h3 className="fl-share-h">Herdado das pastas de cima</h3>
           <ul className="fl-acl inherited">
-            {inherited.map((e) => (
-              <li key={`${e.from!._id}:${e.type}:${e.id}`}>
+            {inherited.map((e, i) => (
+              <li key={`${i}:${e.type}:${e.id}`}>
                 <SubjectIcon e={e} />
                 <span className="fl-subject-text">
                   <strong className="ellipsis">{e.label}</strong>
                   <small className="muted ellipsis">
-                    {e.sublabel ?? TYPE_LABEL[e.type]} · de “{e.from!.name}”
+                    {e.sublabel ?? TYPE_LABEL[e.type]} · {e.from!.name ? `de “${e.from!.name}”` : 'de uma pasta de cima'}
                   </small>
                 </span>
                 <span className="pill small">{DRIVE_LEVELS.find((l) => l.level === e.level)?.label}</span>

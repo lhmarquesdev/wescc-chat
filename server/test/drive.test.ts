@@ -317,6 +317,22 @@ describe('subpasta restrita dentro de uma pasta que outra pessoa gerencia', () =
     expect((await folder(rh, carla)).folders.map((f: any) => f.name)).toContain('Demissões sigilosas');
   });
 
+  it('quem gerencia só a subpasta vê quem herda o acesso, mas não o nome da pasta de cima', async () => {
+    const top = (await api('POST', 'files.folder.create', { name: 'Diretoria confidencial' }, A)).folder._id;
+    await share(top, [{ type: 'user', id: A.userId, level: 3 }, { type: 'user', id: bruno.userId, level: 2 }], A);
+    const atas = (await api('POST', 'files.folder.create', { name: 'Atas para a qualidade', parentId: top }, A)).folder._id;
+    await share(atas, [{ type: 'user', id: carla.userId, level: 3 }], A);
+    const v = await folder(atas, carla);
+    expect(v.path.map((p: any) => p.name)).toEqual(['Atas para a qualidade']);
+    expect(JSON.stringify(v)).not.toContain('Diretoria confidencial');
+    const inherited = v.acl.filter((e: any) => e.from);
+    expect(inherited.map((e: any) => e.label).sort()).toEqual(['Administrador', 'Bruno Lima']);
+    expect(inherited.every((e: any) => e.from._id === '' && e.from.name === '')).toBe(true);
+    // A resposta de salvar o compartilhamento segue a mesma regra; quem vê a pasta de cima vê o nome.
+    expect(JSON.stringify(await share(atas, [{ type: 'user', id: carla.userId, level: 3 }], carla))).not.toContain('Diretoria confidencial');
+    expect((await folder(atas, A)).acl.find((e: any) => e.from).from.name).toBe('Diretoria confidencial');
+  });
+
   it('evento antigo, sem o id da subpasta, também some pelo nome', async () => {
     await query("INSERT INTO drive_activity (id, folder_id, actor_id, actor_username, action, data) VALUES ('legadoAAAAAAAAAAA', $1, $2, 'admin', 'folder.add', $3)", [
       rh,

@@ -188,7 +188,8 @@ async function aclView(acc: Access, f: FolderRow): Promise<DriveAclEntry[]> {
     .sort((a, b) => order.get(a.folder_id)! - order.get(b.folder_id)! || b.level - a.level)
     .map((r) => {
       const l = labels.get(`${r.subject_type}:${r.subject_id}`);
-      const from = r.folder_id === f.id ? null : { _id: r.folder_id, name: acc.folders.get(r.folder_id)!.name };
+      // Herdada de uma pasta de cima que a pessoa não vê: quem tem acesso aparece (entra nesta pasta), o nome dela não.
+      const from = r.folder_id === f.id ? null : acc.level(r.folder_id) > 0 ? { _id: r.folder_id, name: acc.folders.get(r.folder_id)!.name } : { _id: '', name: '' };
       return { type: r.subject_type, id: r.subject_id, level: r.level, label: l?.label ?? r.subject_id, sublabel: l?.sublabel, from, missing: !l };
     });
 }
