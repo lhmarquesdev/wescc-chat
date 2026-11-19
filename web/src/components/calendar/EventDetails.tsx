@@ -5,6 +5,7 @@ import type { AttendeeResponse, CalendarEvent } from '@shared/calendar';
 import { RESPONSE_LABEL } from '@shared/calendar';
 import { errorMessage } from '../../lib/api';
 import { calendarApi, reminderLabel, whenLabel } from '../../lib/calendar';
+import { linkify } from '../../lib/markdown';
 import { useStore } from '../../lib/store';
 import { Icon, type IconName } from '../Icon';
 import { confirmDialog, Modal, UserAvatar } from '../ui';
@@ -127,7 +128,7 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
         {event.location && <Row icon="cal-location">{event.location}</Row>}
         {event.description && (
           <Row icon="info">
-            <p className="cal-desc">{event.description}</p>
+            <p className="cal-desc">{linkify(event.description)}</p>
           </Row>
         )}
 

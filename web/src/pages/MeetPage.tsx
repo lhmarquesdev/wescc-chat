@@ -7,6 +7,7 @@ import { api, errorMessage } from '../lib/api';
 import { calendarApi, whenLabel } from '../lib/calendar';
 import { openCall, openJoin } from '../lib/call/store';
 import { roomPath } from '../lib/format';
+import { linkify } from '../lib/markdown';
 import { explainCall } from '../lib/roomcall';
 import { useSetting } from '../lib/store';
 import { Icon } from '../components/Icon';
@@ -90,7 +91,7 @@ export function MeetPage() {
           <UserAvatar username={e.owner.username} size={20} />
           Organizada por {e.owner.name || e.owner.username}
         </p>
-        {e.description && <p className="meet-desc">{e.description}</p>}
+        {e.description && <p className="meet-desc">{linkify(e.description)}</p>}
         {canceled ? (
           <div className="callout warn">
             <Icon name="cal-canceled" />

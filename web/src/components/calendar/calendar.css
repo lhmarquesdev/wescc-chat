@@ -695,6 +695,7 @@
   overflow-y: auto;
   color: hsl(var(--text-2));
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .meet-actions {
   width: 100%;
