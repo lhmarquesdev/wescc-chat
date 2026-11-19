@@ -1,12 +1,18 @@
 import { many, one, query } from '../db/pool';
 import { bus } from '../realtime/bus';
+import { EXPORT_TZ } from './exportRender';
+
+// Dias e horas do engajamento no fuso da empresa (TZ do servidor ou America/Sao_Paulo, como as exportações e a Agenda),
+// não no do banco (UTC no Docker): a mensagem das 11h de Brasília contava às 14h e o dia virava às 21h.
+const TZ = EXPORT_TZ;
+const dayKey = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
 
 export async function recordActivity(userId: string, kind: 'message' | 'session') {
   const col = kind === 'message' ? 'messages' : 'sessions';
   await query(
-    `INSERT INTO activity_daily (day, user_id, ${col}) VALUES (current_date, $1, 1)
+    `INSERT INTO activity_daily (day, user_id, ${col}) VALUES ((now() AT TIME ZONE $2)::date, $1, 1)
      ON CONFLICT (day, user_id) DO UPDATE SET ${col} = activity_daily.${col} + 1`,
-    [userId],
+    [userId, TZ],
   ).catch(() => {});
 }
 
@@ -47,8 +53,11 @@ export async function workspaceStatistics() {
 
 // ---------- Dashboard de engajamento ----------
 
+// Mensagens do período: de 0h do primeiro dia até 0h do dia seguinte ao último, no fuso da empresa ($1, $2 e $3 = fuso).
+const IN_RANGE = (col: string) => `${col} >= ($1::date::timestamp AT TIME ZONE $3) AND ${col} < (($2::date + 1)::timestamp AT TIME ZONE $3)`;
+
 function range(start?: string, end?: string) {
-  const e = end ? new Date(end) : new Date();
+  const e = end ? new Date(end) : new Date(`${dayKey.format(new Date())}T00:00:00Z`);
   const s = start ? new Date(start) : new Date(e.getTime() - 29 * 86400_000);
   return [s.toISOString().slice(0, 10), e.toISOString().slice(0, 10)];
 }
@@ -60,20 +69,20 @@ export async function engagementUsers(start?: string, end?: string) {
         (SELECT count(DISTINCT user_id) FROM activity_daily a WHERE a.day = d::date)::int AS dau,
         (SELECT count(DISTINCT user_id) FROM activity_daily a WHERE a.day BETWEEN d::date - 6 AND d::date)::int AS wau,
         (SELECT count(DISTINCT user_id) FROM activity_daily a WHERE a.day BETWEEN d::date - 29 AND d::date)::int AS mau,
-        (SELECT count(*) FROM users u WHERE u.created_at::date = d::date)::int AS new_users
+        (SELECT count(*) FROM users u WHERE (u.created_at AT TIME ZONE $3)::date = d::date)::int AS new_users
      FROM generate_series($1::date, $2::date, interval '1 day') d ORDER BY d`,
-    [s, e],
+    [s, e, TZ],
   );
   const activeInPeriod = await one('SELECT count(DISTINCT user_id)::int AS n FROM activity_daily WHERE day BETWEEN $1 AND $2', [s, e]);
   const busiest = await many(
-    `SELECT extract(hour from created_at)::int AS hour, count(*)::int AS messages
-     FROM messages WHERE created_at::date BETWEEN $1 AND $2 AND t IS NULL GROUP BY 1 ORDER BY 1`,
-    [s, e],
+    `SELECT extract(hour from created_at AT TIME ZONE $3)::int AS hour, count(*)::int AS messages
+     FROM messages WHERE ${IN_RANGE('created_at')} AND t IS NULL GROUP BY 1 ORDER BY 1`,
+    [s, e, TZ],
   );
   const weekday = await many(
-    `SELECT extract(isodow from created_at)::int AS weekday, count(*)::int AS messages
-     FROM messages WHERE created_at::date BETWEEN $1 AND $2 AND t IS NULL GROUP BY 1 ORDER BY 1`,
-    [s, e],
+    `SELECT extract(isodow from created_at AT TIME ZONE $3)::int AS weekday, count(*)::int AS messages
+     FROM messages WHERE ${IN_RANGE('created_at')} AND t IS NULL GROUP BY 1 ORDER BY 1`,
+    [s, e, TZ],
   );
   return {
     start: s,
@@ -90,26 +99,28 @@ export async function engagementMessages(start?: string, end?: string) {
   const daily = await many(
     `SELECT d::date AS day, coalesce(m.n, 0)::int AS messages
      FROM generate_series($1::date, $2::date, interval '1 day') d
-     LEFT JOIN (SELECT created_at::date AS day, count(*) AS n FROM messages WHERE t IS NULL GROUP BY 1) m ON m.day = d::date
+     LEFT JOIN (SELECT (created_at AT TIME ZONE $3)::date AS day, count(*) AS n FROM messages WHERE ${IN_RANGE('created_at')} AND t IS NULL GROUP BY 1) m
+       ON m.day = d::date
      ORDER BY d`,
-    [s, e],
+    [s, e, TZ],
   );
   const byType = await many(
     `SELECT r.t, count(*)::int AS messages FROM messages m JOIN rooms r ON r.id = m.room_id
-     WHERE m.created_at::date BETWEEN $1 AND $2 AND m.t IS NULL GROUP BY r.t`,
-    [s, e],
+     WHERE ${IN_RANGE('m.created_at')} AND m.t IS NULL GROUP BY r.t`,
+    [s, e, TZ],
   );
   const topRooms = await many(
     `SELECT r.id, r.t, coalesce(r.fname, r.name) AS name, count(*)::int AS messages, r.users_count
      FROM messages m JOIN rooms r ON r.id = m.room_id
-     WHERE m.created_at::date BETWEEN $1 AND $2 AND m.t IS NULL AND r.t IN ('c','p')
+     WHERE ${IN_RANGE('m.created_at')} AND m.t IS NULL AND r.t IN ('c','p')
      GROUP BY r.id ORDER BY messages DESC LIMIT 10`,
-    [s, e],
+    [s, e, TZ],
   );
+  // Só quem mandou mensagem: activity_daily também guarda os logins, e quem só entrou aparecia com 0 mensagens.
   const topUsers = await many(
     `SELECT u.id, u.username, u.name, sum(a.messages)::int AS messages
      FROM activity_daily a JOIN users u ON u.id = a.user_id
-     WHERE a.day BETWEEN $1 AND $2 GROUP BY u.id ORDER BY messages DESC LIMIT 10`,
+     WHERE a.day BETWEEN $1 AND $2 GROUP BY u.id HAVING sum(a.messages) > 0 ORDER BY messages DESC LIMIT 10`,
     [s, e],
   );
   return {
@@ -123,17 +134,20 @@ export async function engagementMessages(start?: string, end?: string) {
   };
 }
 
+// Só salas com mensagens no período ou no anterior (a que ficou quieta ainda mostra a queda); antes vinham todas, com 0.
 export async function engagementChannels(start?: string, end?: string, offset = 0, count = 25) {
   const [s, e] = range(start, end);
   const rows = await many(
     `SELECT r.id, r.t, r.name, r.fname, r.users_count, r.created_at, r.team_main,
-        count(m.id) FILTER (WHERE m.created_at::date BETWEEN $1 AND $2)::int AS messages,
-        count(m.id) FILTER (WHERE m.created_at::date BETWEEN ($1::date - ($2::date - $1::date) - 1) AND ($1::date - 1))::int AS previous,
+        count(m.id) FILTER (WHERE (m.created_at AT TIME ZONE $5)::date BETWEEN $1 AND $2)::int AS messages,
+        count(m.id) FILTER (WHERE (m.created_at AT TIME ZONE $5)::date BETWEEN ($1::date - ($2::date - $1::date) - 1) AND ($1::date - 1))::int AS previous,
         count(*) OVER() AS total
      FROM rooms r LEFT JOIN messages m ON m.room_id = r.id AND m.t IS NULL
      WHERE r.t IN ('c','p')
-     GROUP BY r.id ORDER BY messages DESC, r.name LIMIT $3 OFFSET $4`,
-    [s, e, count, offset],
+     GROUP BY r.id
+     HAVING count(m.id) FILTER (WHERE (m.created_at AT TIME ZONE $5)::date BETWEEN ($1::date - ($2::date - $1::date) - 1) AND $2) > 0
+     ORDER BY messages DESC, r.name LIMIT $3 OFFSET $4`,
+    [s, e, count, offset, TZ],
   );
   return {
     total: Number(rows[0]?.total ?? 0),

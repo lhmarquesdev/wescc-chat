@@ -1,6 +1,6 @@
 // Seletor de emoji: no computador, painel ancorado no botão que abriu (em portal); no celular, folha que sobe de baixo.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { customEmoji, EMOJI, EMOJI_CATEGORIES, searchEmoji } from '../lib/emoji';
+import { customEmoji, EMOJI, EMOJI_CATEGORIES, resolveEmoji, searchEmoji } from '../lib/emoji';
 import { Icon, type IconName } from './Icon';
 import { Portal, Sheet, useAnchored, useEscape, useIsPhone, type Placement } from './overlay';
 
@@ -41,7 +41,7 @@ const CAT_ICON: Record<string, IconName> = {
 };
 
 function Glyph({ code }: { code: string }) {
-  return EMOJI[code] ? <>{EMOJI[code]}</> : <img src={`/emoji-custom/${encodeURIComponent(code)}`} alt={code} />;
+  return EMOJI[code] ? <>{EMOJI[code]}</> : <img src={resolveEmoji(code)?.url ?? `/emoji-custom/${encodeURIComponent(code)}`} alt={code} />;
 }
 
 // Setas movem o foco pela grade, pela posição na tela (as seções não têm o mesmo número de itens).

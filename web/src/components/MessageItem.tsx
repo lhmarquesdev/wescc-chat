@@ -599,14 +599,14 @@ function ReportModal({ m, onClose }: { m: Message; onClose: () => void }) {
           <button type="button" className="btn ghost" onClick={onClose}>
             Cancelar
           </button>
-          <button type="button" className="btn danger solid" disabled={busy} onClick={send}>
+          <button type="button" className="btn danger solid" disabled={busy || text.trim().length < 3} onClick={send}>
             Denunciar
           </button>
         </>
       }
     >
-      <Field label="Motivo" hint={encrypted ? 'Esta conversa é criptografada: a moderação não vê a mensagem. Descreva o problema no motivo.' : undefined}>
-        <textarea rows={4} placeholder="Descreva o motivo" value={text} onChange={(e) => setText(e.target.value)} />
+      <Field label="Motivo" hint={encrypted ? 'Esta conversa é criptografada: a moderação não vê a mensagem. Descreva o problema no motivo.' : 'Obrigatório: conte aos moderadores o que há de errado.'}>
+        <textarea rows={4} placeholder="Descreva o motivo" value={text} maxLength={1000} onChange={(e) => setText(e.target.value)} />
       </Field>
     </Modal>
   );
@@ -968,6 +968,8 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
   const e2eView = m.e2eView;
   const e2eContent = e2eView?.state === 'ok' ? e2eView.content : undefined;
   const roomEncrypted = useStore((s) => !!s.rooms[m.rid]?.encrypted);
+  // Emoji personalizado criado, trocado ou apagado: a mensagem se redesenha com a lista nova (sem recarregar a página).
+  useStore((s) => s.emojiVersion);
   const me = useStore((s) => s.me)!;
   const navigate = useNavigate();
   const [picker, setPicker] = useState<{ anchor: HTMLElement | null; bar?: boolean } | null>(null);

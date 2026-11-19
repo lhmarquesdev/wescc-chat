@@ -680,6 +680,16 @@ h4 .head-count {
 .setting-revert {
   margin-left: calc(var(--space-2) * -1);
 }
+/* "Desfazer" e "Restaurar padrão" lado a lado, embaixo do controle (a margem negativa fica no grupo). */
+.setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-left: calc(var(--space-2) * -1);
+}
+.setting-actions > .setting-revert {
+  margin-left: 0;
+}
 .setting-name > .setting-dot {
   display: inline-block;
   margin-right: var(--space-1-5);
@@ -1064,6 +1074,12 @@ h4 .head-count {
   gap: 6px;
   margin: 0;
   text-align: center;
+  min-width: 0;
+}
+/* Nome e apelidos longos quebram dentro do cartão em vez de esticar a grade além da tela. */
+.emoji-card > :is(code, span) {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .emoji-card img {
   width: 48px;
@@ -1120,6 +1136,17 @@ h4 .head-count {
 .report-meta .icon {
   vertical-align: -1px;
   margin-right: 2px;
+}
+/* Ações de cada denúncia (abrir, descartar, apagar): quebram de linha no celular. */
+.report-actions {
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+/* No celular, os três botões do rodapé da Moderação quebram de linha em vez de cortar o texto. */
+@media (pointer: coarse) {
+  .modal.report-modal .modal-foot > .btn {
+    flex: 1 1 auto;
+  }
 }
 .history-list > li {
   padding: var(--space-3) 0;

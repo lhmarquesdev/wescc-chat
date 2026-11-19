@@ -5,10 +5,11 @@ import { formatDateTime, roomIconName, roomPath } from '../../lib/format';
 import { useStore } from '../../lib/store';
 import { UserPicker, type PickedUser } from '../../components/Pickers';
 import { Icon } from '../../components/Icon';
-import { Empty, Field, Modal, Pager, SearchInput, SkeletonTable, Toggle, confirmDialog, useAsync, ThLabel } from '../../components/ui';
+import { Empty, Field, Modal, Pager, SearchInput, SkeletonList, SkeletonTable, Toggle, confirmDialog, useAsync, ThLabel } from '../../components/ui';
 import { PageHead, RoomCell, TableWrap, num } from './parts';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
+const ok = (t: string) => useStore.getState().toast(t);
 
 const TYPE_LABEL: Record<string, string> = { c: 'Canal público', p: 'Grupo privado', d: 'Mensagem direta' };
 
@@ -145,7 +146,35 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
     featured: room.featured,
   });
   const [add, setAdd] = useState<PickedUser[]>([]);
+  const [nameError, setNameError] = useState('');
+  const [busy, setBusy] = useState(false);
+  // Donos da sala: começam com os de hoje; tirar e pôr gente aqui troca o dono (ex.: quando o dono sai da empresa).
+  const manageOwners = room.t === 'c' || room.t === 'p';
+  const prefix = room.t === 'p' ? 'groups' : 'channels';
+  const info = useAsync(() => (manageOwners ? api.get('rooms.adminRooms.getRoom', { rid: room._id }) : Promise.resolve(null)), [room._id]);
+  const [owners, setOwners] = useState<PickedUser[] | null>(null);
+  const currentOwners: PickedUser[] = info.data?.owners ?? [];
+  const shownOwners = owners ?? currentOwners;
+  const saveOwners = async () => {
+    if (!owners) return;
+    const added = owners.filter((o) => !currentOwners.some((c) => c._id === o._id));
+    const removed = currentOwners.filter((c) => !owners.some((o) => o._id === c._id));
+    // Primeiro os novos donos (quem não está na sala entra), depois saem os antigos: a sala nunca fica sem dono.
+    for (const u of added) {
+      try {
+        await api.post(`${prefix}.addOwner`, { roomId: room._id, userId: u._id });
+      } catch (e: any) {
+        if (e?.errorType !== 'error-user-not-in-room') throw e;
+        await api.post('rooms.adminRooms.addUser', { roomId: room._id, userId: u._id });
+        await api.post(`${prefix}.addOwner`, { roomId: room._id, userId: u._id });
+      }
+    }
+    for (const u of removed) await api.post(`${prefix}.removeOwner`, { roomId: room._id, userId: u._id });
+  };
   const save = async () => {
+    if (room.t !== 'd' && !String(f.roomName ?? '').trim()) return setNameError('Informe o nome da sala.');
+    if (manageOwners && owners && !owners.length) return fail(new Error('A sala precisa de pelo menos um dono.'));
+    setBusy(true);
     try {
       const body: any = { rid: room._id, ...f };
       if (room.t === 'd') {
@@ -160,10 +189,38 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
       }
       await api.post('rooms.saveRoomSettings', body);
       for (const u of add) await api.post('rooms.adminRooms.addUser', { roomId: room._id, userId: u._id });
+      await saveOwners();
+      ok('Sala salva.');
       onSaved();
       onClose();
     } catch (e) {
       fail(e);
+      // Parte pode ter sido gravada (as configurações antes dos donos): a lista mostra o que ficou.
+      onSaved();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const archive = async () => {
+    const archiving = !room.archived;
+    if (archiving) {
+      const yes = await confirmDialog({
+        title: `Arquivar ${room.fname || room.name}?`,
+        body: 'Ninguém escreve mais na sala; o histórico continua visível para quem é membro. Dá para desarquivar depois.',
+        confirmLabel: 'Arquivar',
+      });
+      if (!yes) return;
+    }
+    setBusy(true);
+    try {
+      await api.post(`${prefix}.${archiving ? 'archive' : 'unarchive'}`, { roomId: room._id });
+      ok(archiving ? 'Sala arquivada.' : 'Sala desarquivada.');
+      onSaved();
+      onClose();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
     }
   };
   const remove = async () => {
@@ -174,7 +231,9 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
       danger: true,
     });
     if (!yes) return;
-    (room.teamMain ? api.post('teams.delete', { teamId: room.teamId }) : api.post('rooms.delete', { roomId: room._id })).then(() => (onSaved(), onClose())).catch(fail);
+    (room.teamMain ? api.post('teams.delete', { teamId: room.teamId }) : api.post('rooms.delete', { roomId: room._id }))
+      .then(() => (ok(room.teamMain ? 'Time excluído.' : 'Sala excluída.'), onSaved(), onClose()))
+      .catch(fail);
   };
   return (
     <Modal
@@ -182,15 +241,21 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
       onClose={onClose}
       footer={
         <>
-          <button className="btn danger left" onClick={remove}>
+          <button className="btn danger left" disabled={busy} onClick={remove}>
             <Icon name="delete" />
             Excluir
           </button>
+          {manageOwners && (
+            <button className="btn" disabled={busy} onClick={archive}>
+              <Icon name={room.archived ? 'unarchive' : 'archive'} />
+              {room.archived ? 'Desarquivar' : 'Arquivar'}
+            </button>
+          )}
           <button className="btn" onClick={() => navigate(roomPath(room))}>
             <Icon name="open-external" />
             Abrir
           </button>
-          <button className="btn primary" onClick={save}>
+          <button className="btn primary" disabled={busy} onClick={save}>
             Salvar
           </button>
         </>
@@ -198,8 +263,8 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
     >
       <div className="form">
         {room.t !== 'd' && (
-          <Field label="Nome">
-            <input value={f.roomName} onChange={(e) => setF({ ...f, roomName: e.target.value })} />
+          <Field label="Nome" error={nameError || undefined}>
+            <input value={f.roomName} onChange={(e) => (setF({ ...f, roomName: e.target.value }), setNameError(''))} />
           </Field>
         )}
         <Field label="Tópico">
@@ -237,6 +302,11 @@ function RoomEdit({ room, onClose, onSaved }: { room: any; onClose: () => void; 
         {room.t !== 'd' && (
           <Field label="Adicionar usuários">
             <UserPicker value={add} onChange={setAdd} />
+          </Field>
+        )}
+        {manageOwners && (
+          <Field label="Donos" hint="Quem é dono gerencia a sala. Para trocar o dono, adicione a nova pessoa e tire a antiga; quem não está na sala entra nela.">
+            {info.loading && !info.data ? <SkeletonList n={1} /> : <UserPicker value={shownOwners} onChange={setOwners} placeholder="Adicionar dono" />}
           </Field>
         )}
       </div>

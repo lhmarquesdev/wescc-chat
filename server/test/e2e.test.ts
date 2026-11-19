@@ -1434,7 +1434,8 @@ describe('criptografia: discussões, administração, retenção e integrações
 
   it('35. administrador fora do grupo não recebe chave; a auditoria mostra só o envelope', async () => {
     const ana = await person();
-    const room = await encryptedGroup(ana);
+    const bia = await person();
+    const room = await encryptedGroup(ana, [bia]);
     const m = (await sendE2e(ana, room, 'segredo da auditoria')).message;
     const r = await api('GET', 'e2e.fetchRoomKeys', { rid: room.rid }, A);
     expect([r.status, r.errorType]).toEqual([403, 'error-e2e-not-member']);
@@ -1443,8 +1444,8 @@ describe('criptografia: discussões, administração, retenção e integrações
     const row = a.messages.find((x: any) => x._id === m._id);
     expect(row).toMatchObject({ msg: '', e2e: m.e2e });
     expect(JSON.stringify(a)).not.toContain('segredo');
-    // Denúncia de mensagem cifrada: a moderação vê só que é cifrada.
-    await api('POST', 'chat.reportMessage', { messageId: m._id, description: 'ofensiva' }, ana);
+    // Denúncia de mensagem cifrada: a moderação vê só que é cifrada (quem denuncia é outra pessoa da conversa).
+    expect((await api('POST', 'chat.reportMessage', { messageId: m._id, description: 'ofensiva' }, bia)).status).toBe(200);
     const rep = await api('GET', 'moderation.userReports', { userId: ana.userId }, A);
     expect(rep.reports[0]).toMatchObject({ messageId: m._id, msg: '', e2e: true });
   });

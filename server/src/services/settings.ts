@@ -9,7 +9,8 @@ import { bus } from '../realtime/bus';
 import { roleScope } from './permissions';
 
 // validate devolve o texto do erro (mostrado ao administrador) ou null quando o valor serve.
-type Def = Omit<Setting, '_id' | 'value'> & { default: unknown; validate?: (value: unknown) => string | null };
+// generated: valor criado pelo próprio servidor (chaves do push); a tela não oferece "Restaurar padrão".
+type Def = Omit<Setting, '_id' | 'value'> & { default: unknown; generated?: boolean; validate?: (value: unknown) => string | null | Promise<string | null> };
 
 const defs = new Map<string, Def>();
 let sorter = 0;
@@ -41,11 +42,63 @@ function validateLdapMap(v: unknown): string | null {
   return null;
 }
 
+const intRange = (min: number, max: number) => (v: unknown) =>
+  Number.isInteger(Number(v)) && Number(v) >= min && Number(v) <= max ? null : `Use um número inteiro entre ${min} e ${max}.`;
+// Tamanhos em bytes em que 0 quer dizer "sem limite" (uploads.ts, importer/operations.ts).
+const bytesOrZero = (v: unknown) => (Number.isInteger(Number(v)) && Number(v) >= 0 ? null : 'Use 0 (sem limite) ou um tamanho em bytes.');
+// A URL do site monta os links dos e-mails (redefinir senha), o retorno do SSO e as origens aceitas. Vazia, os links
+// diretos para mensagens não saem (messagePermalink) e o resto usa http://localhost:3000 (sso.ts).
+function validateHttpUrl(v: unknown): string | null {
+  if (!String(v ?? '').trim()) return null;
+  try {
+    const u = new URL(String(v ?? '').trim());
+    if ((u.protocol === 'http:' || u.protocol === 'https:') && !u.username && !u.password) return null;
+  } catch {
+    /* abaixo */
+  }
+  return 'Use um endereço completo com http:// ou https://, por exemplo https://chat.empresa.com.br.';
+}
+// Remetente: e-mail puro ou "Nome <e-mail>" (chat@localhost, o padrão, vale).
+function validateFromEmail(v: unknown): string | null {
+  const s = String(v ?? '').trim();
+  const email = s.match(/^[^<>]*<([^<>]+)>$/)?.[1] ?? s;
+  return /^[^\s@<>",;]+@[^\s@<>",;]+$/.test(email) ? null : 'Use um e-mail, como chat@empresa.com.br, ou Nome <chat@empresa.com.br>.';
+}
+const validateSiteName = (v: unknown) => {
+  const s = String(v ?? '').trim();
+  return !s ? 'Informe o nome.' : s.length > 80 ? 'Use no máximo 80 caracteres.' : null;
+};
+const validateLdapUrl = (v: unknown) => (!String(v ?? '').trim() || /^ldaps?:\/\/[^\s/]+/i.test(String(v).trim()) ? null : 'Use ldap:// ou ldaps://, por exemplo ldaps://ad.empresa.local:636.');
+// Origens do CORS: * ou o endereço do site (esquema, servidor e porta), separadas por vírgula (origins.ts).
+function validateCorsOrigins(v: unknown): string | null {
+  for (const item of String(v ?? '').split(',').map((x) => x.trim().replace(/\/+$/, '')).filter(Boolean)) {
+    if (item === '*') continue;
+    let ok = false;
+    try {
+      const u = new URL(item);
+      ok = (u.protocol === 'http:' || u.protocol === 'https:') && u.origin === item;
+    } catch {
+      ok = false;
+    }
+    if (!ok) return `Origem inválida: ${item}. Use * ou o endereço do site, como https://intranet.empresa.com.br.`;
+  }
+  return null;
+}
+
+// Canais padrão: cada nome precisa ser um canal ou grupo que existe (rooms.ts aplica a lista na marca "Padrão").
+async function validateDefaultChannels(v: unknown): Promise<string | null> {
+  const names = String(v ?? '').split(',').map((x) => x.trim().replace(/^#/, '')).filter(Boolean);
+  if (!names.length) return null;
+  const rows = await many<{ n: string }>(`SELECT lower(name) AS n FROM rooms WHERE lower(name) = ANY($1::text[]) AND t IN ('c','p') AND prid IS NULL`, [names.map((n) => n.toLowerCase())]);
+  const missing = names.find((n) => !rows.some((r) => r.n === n.toLowerCase()));
+  return missing ? `Canal não encontrado: ${missing}.` : null;
+}
+
 // ---------- Geral ----------
-add('General', 'Workspace', 'Site_Name', 'string', 'Wescc Chat', { public: true, label: 'Nome do workspace' });
-add('General', 'Workspace', 'Site_Url', 'string', process.env.SITE_URL ?? 'http://localhost:3000', { public: true, label: 'URL do site' });
+add('General', 'Workspace', 'Site_Name', 'string', 'Wescc Chat', { public: true, label: 'Nome do workspace', validate: validateSiteName });
+add('General', 'Workspace', 'Site_Url', 'string', process.env.SITE_URL ?? 'http://localhost:3000', { public: true, label: 'URL do site', validate: validateHttpUrl });
 add('General', 'Workspace', 'Language', 'string', 'pt-BR', { public: true, label: 'Idioma padrão (destino das traduções de mensagens)' });
-add('General', 'Workspace', 'Default_Channels', 'string', 'geral', { label: 'Canais padrão (separados por vírgula)' });
+add('General', 'Workspace', 'Default_Channels', 'string', 'geral', { label: 'Canais padrão (separados por vírgula)', validate: validateDefaultChannels });
 add('Layout', 'Home', 'Layout_Home_Title', 'string', 'Início', { public: true, label: 'Título da página inicial' });
 add('Layout', 'Home', 'Layout_Home_Body', 'multiline', 'Boas-vindas ao chat interno.', { public: true, label: 'Conteúdo da página inicial (Markdown)' });
 // Tamanho do logo no topo do menu lateral, em pixels de altura: um valor para o menu aberto e outro para o recolhido.
@@ -89,15 +142,15 @@ add('Accounts', 'Profile', 'Accounts_AvatarBlockUnauthenticatedAccess', 'boolean
 add('Accounts', 'Profile', 'Accounts_AllowDeleteOwnAccount', 'boolean', false, { public: true, label: 'Permitir excluir a própria conta' });
 add('Accounts', 'Two Factor', 'Accounts_TwoFactorAuthentication_Enabled', 'boolean', true, { public: true, label: 'Autenticação em dois fatores' });
 add('Accounts', 'Two Factor', 'Accounts_TwoFactorAuthentication_Enforce', 'boolean', false, { public: true, label: 'Exigir 2FA de todos os usuários' });
-add('Accounts', 'Password', 'Accounts_Password_Policy_MinLength', 'int', 8, { public: true, label: 'Tamanho mínimo da senha' });
+add('Accounts', 'Password', 'Accounts_Password_Policy_MinLength', 'int', 8, { public: true, label: 'Tamanho mínimo da senha', validate: intRange(1, 128) });
 add('Accounts', 'Password', 'Accounts_Password_Policy_AtLeastOneUppercase', 'boolean', false, { public: true, label: 'Exigir letra maiúscula' });
 add('Accounts', 'Password', 'Accounts_Password_Policy_AtLeastOneNumber', 'boolean', false, { public: true, label: 'Exigir número' });
 add('Accounts', 'Password', 'Accounts_Password_Policy_AtLeastOneSpecialCharacter', 'boolean', false, { public: true, label: 'Exigir caractere especial' });
-add('Accounts', 'Session', 'Accounts_LoginExpiration', 'int', 90, { label: 'Validade do login (dias)' });
-add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Attempts', 'int', 10, { label: 'Bloquear o login após N tentativas falhas (0 = nunca)' });
-add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Attempts_By_Ip', 'int', 50, { label: 'Bloquear o IP após N tentativas falhas (0 = nunca)' });
-add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Minutes', 'int', 5, { label: 'Minutos de bloqueio após tentativas falhas' });
-add('Accounts', 'Presence', 'Accounts_Default_Away_Minutes', 'int', 5, { public: true, label: 'Minutos de inatividade para "ausente"' });
+add('Accounts', 'Session', 'Accounts_LoginExpiration', 'int', 90, { label: 'Validade do login (dias)', validate: intRange(1, 3650) });
+add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Attempts', 'int', 10, { label: 'Bloquear o login após N tentativas falhas (0 = nunca)', validate: intRange(0, 1000) });
+add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Attempts_By_Ip', 'int', 50, { label: 'Bloquear o IP após N tentativas falhas (0 = nunca)', validate: intRange(0, 100000) });
+add('Accounts', 'Session', 'Accounts_Block_Failed_Login_Minutes', 'int', 5, { label: 'Minutos de bloqueio após tentativas falhas', validate: intRange(1, 1440) });
+add('Accounts', 'Presence', 'Accounts_Default_Away_Minutes', 'int', 5, { public: true, label: 'Minutos de inatividade para "ausente"', validate: intRange(1, 1440) });
 add('Accounts', 'Direct Messages', 'Direct_Restriction_Scope', 'select', 'any', {
   public: true,
   label: 'Bloqueio de conversas diretas entre pessoas com papel restrito',
@@ -109,26 +162,24 @@ add('Accounts', 'Direct Messages', 'Direct_Restriction_Scope', 'select', 'any', 
 
 // ---------- Mensagens ----------
 add('Message', 'Editing', 'Message_AllowEditing', 'boolean', true, { public: true, label: 'Permitir editar mensagens' });
-add('Message', 'Editing', 'Message_AllowEditing_BlockEditInMinutes', 'int', 0, { public: true, label: 'Bloquear edição após N minutos (0 = nunca)' });
+add('Message', 'Editing', 'Message_AllowEditing_BlockEditInMinutes', 'int', 0, { public: true, label: 'Bloquear edição após N minutos (0 = nunca)', validate: intRange(0, 525600) });
 add('Message', 'Editing', 'Message_AllowDeleting', 'boolean', true, { public: true, label: 'Permitir apagar mensagens' });
-add('Message', 'Editing', 'Message_AllowDeleting_BlockDeleteInMinutes', 'int', 0, { public: true, label: 'Bloquear exclusão após N minutos (0 = nunca)' });
+add('Message', 'Editing', 'Message_AllowDeleting_BlockDeleteInMinutes', 'int', 0, { public: true, label: 'Bloquear exclusão após N minutos (0 = nunca)', validate: intRange(0, 525600) });
 add('Message', 'Features', 'Message_AllowPinning', 'boolean', true, { public: true, label: 'Permitir fixar mensagens' });
 add('Message', 'Features', 'Message_AllowStarring', 'boolean', true, { public: true, label: 'Permitir favoritar mensagens' });
-add('Message', 'Features', 'Message_MaxAllowedSize', 'int', 5000, { public: true, label: 'Tamanho máximo da mensagem' });
+add('Message', 'Features', 'Message_MaxAllowedSize', 'int', 5000, { public: true, label: 'Tamanho máximo da mensagem', validate: intRange(100, 50000) });
 add('Message', 'Features', 'Message_ShowEditedStatus', 'boolean', true, { public: true, label: 'Mostrar "editada"' });
 add('Message', 'Features', 'Message_KeepHistory', 'boolean', true, { label: 'Manter histórico de edições' });
 add('Message', 'Features', 'Threads_enabled', 'boolean', true, { public: true, label: 'Threads' });
 add('Message', 'Features', 'Discussion_enabled', 'boolean', true, { public: true, label: 'Discussões' });
-add('Message', 'Features', 'Message_GroupingPeriod', 'int', 300, { public: true, label: 'Agrupar mensagens do mesmo autor (segundos)' });
-add('Message', 'Mentions', 'Message_MaxAll', 'int', 0, { label: 'Máximo de membros para @all (0 = sem limite)' });
+add('Message', 'Features', 'Message_GroupingPeriod', 'int', 300, { public: true, label: 'Agrupar mensagens do mesmo autor (segundos)', validate: intRange(0, 86400) });
+add('Message', 'Mentions', 'Message_MaxAll', 'int', 0, { label: 'Máximo de membros para @all (0 = sem limite)', validate: intRange(0, 100000) });
 add('Message', 'Read Receipts', 'Message_Read_Receipt_Enabled', 'boolean', true, { public: true, label: 'Confirmação de leitura' });
 add('Message', 'Read Receipts', 'Message_Read_Receipt_Store_Users', 'boolean', true, { public: true, label: 'Guardar quem leu cada mensagem' });
 add('Message', 'Bad Words', 'Message_AllowBadWordsFilter', 'boolean', false, { label: 'Filtro de palavrões' });
 add('Message', 'Bad Words', 'Message_BadWordsFilterList', 'string', '', { label: 'Lista de palavras bloqueadas (vírgula)' });
 
 // ---------- Figurinhas ----------
-const intRange = (min: number, max: number) => (v: unknown) =>
-  Number.isInteger(Number(v)) && Number(v) >= min && Number(v) <= max ? null : `Use um número inteiro entre ${min} e ${max}.`;
 // Ids de papéis globais separados por vírgula (um erro de digitação não pode passar calado).
 const globalRoleList = (v: unknown) => {
   for (const id of String(v ?? '').split(',').map((s) => s.trim()).filter(Boolean)) {
@@ -183,7 +234,7 @@ add('Accounts', 'Privacy', 'UserData_Download_Expiration_Hours', 'int', 72, {
 
 // ---------- Upload ----------
 add('FileUpload', 'General', 'FileUpload_Enabled', 'boolean', true, { public: true, label: 'Upload de arquivos' });
-add('FileUpload', 'General', 'FileUpload_MaxFileSize', 'int', 104857600, { public: true, label: 'Tamanho máximo (bytes)' });
+add('FileUpload', 'General', 'FileUpload_MaxFileSize', 'int', 104857600, { public: true, label: 'Tamanho máximo (bytes; 0 = sem limite)', validate: bytesOrZero });
 add('FileUpload', 'General', 'FileUpload_MediaTypeWhiteList', 'string', '', { public: true, label: 'Tipos permitidos (vírgula; vazio = todos)' });
 add('FileUpload', 'General', 'FileUpload_MediaTypeBlackList', 'string', 'image/svg+xml', { public: true, label: 'Tipos bloqueados (vírgula)' });
 add('FileUpload', 'General', 'FileUpload_Enabled_Direct', 'boolean', true, { public: true, label: 'Upload em mensagens diretas' });
@@ -191,11 +242,11 @@ add('FileUpload', 'General', 'FileUpload_Enabled_Direct', 'boolean', true, { pub
 // ---------- Retenção ----------
 add('RetentionPolicy', 'Global', 'RetentionPolicy_Enabled', 'boolean', false, { public: true, label: 'Política de retenção ativa' });
 add('RetentionPolicy', 'Global', 'RetentionPolicy_AppliesToChannels', 'boolean', false, { public: true, label: 'Aplicar a canais públicos' });
-add('RetentionPolicy', 'Global', 'RetentionPolicy_TTL_Channels', 'int', 30, { public: true, label: 'Dias (canais públicos)' });
+add('RetentionPolicy', 'Global', 'RetentionPolicy_TTL_Channels', 'int', 30, { public: true, label: 'Dias (canais públicos)', validate: intRange(1, 36500) });
 add('RetentionPolicy', 'Global', 'RetentionPolicy_AppliesToGroups', 'boolean', false, { public: true, label: 'Aplicar a grupos privados' });
-add('RetentionPolicy', 'Global', 'RetentionPolicy_TTL_Groups', 'int', 30, { public: true, label: 'Dias (grupos privados)' });
+add('RetentionPolicy', 'Global', 'RetentionPolicy_TTL_Groups', 'int', 30, { public: true, label: 'Dias (grupos privados)', validate: intRange(1, 36500) });
 add('RetentionPolicy', 'Global', 'RetentionPolicy_AppliesToDMs', 'boolean', false, { public: true, label: 'Aplicar a mensagens diretas' });
-add('RetentionPolicy', 'Global', 'RetentionPolicy_TTL_DMs', 'int', 30, { public: true, label: 'Dias (mensagens diretas)' });
+add('RetentionPolicy', 'Global', 'RetentionPolicy_TTL_DMs', 'int', 30, { public: true, label: 'Dias (mensagens diretas)', validate: intRange(1, 36500) });
 add('RetentionPolicy', 'Global', 'RetentionPolicy_DoNotPrunePinned', 'boolean', true, { public: true, label: 'Não apagar mensagens fixadas' });
 add('RetentionPolicy', 'Global', 'RetentionPolicy_DoNotPruneDiscussion', 'boolean', true, { public: true, label: 'Não apagar mensagens de discussão' });
 add('RetentionPolicy', 'Global', 'RetentionPolicy_DoNotPruneThreads', 'boolean', true, { public: true, label: 'Não apagar threads' });
@@ -212,15 +263,15 @@ add('RetentionPolicy', 'Global', 'RetentionPolicy_Precision', 'select', '0 * * *
 
 // ---------- E-mail ----------
 add('Email', 'SMTP', 'SMTP_Host', 'string', '', { label: 'Servidor SMTP' });
-add('Email', 'SMTP', 'SMTP_Port', 'int', 587, { label: 'Porta' });
+add('Email', 'SMTP', 'SMTP_Port', 'int', 587, { label: 'Porta', validate: intRange(1, 65535) });
 add('Email', 'SMTP', 'SMTP_Username', 'string', '', { label: 'Usuário' });
 add('Email', 'SMTP', 'SMTP_Password', 'password', '', { label: 'Senha' });
-add('Email', 'SMTP', 'From_Email', 'string', 'chat@localhost', { label: 'Remetente' });
+add('Email', 'SMTP', 'From_Email', 'string', 'chat@localhost', { label: 'Remetente', validate: validateFromEmail });
 add('Email', 'Notifications', 'Email_Notifications_Enabled', 'boolean', false, { label: 'Enviar notificações por e-mail para menções offline' });
 
 // ---------- LDAP ----------
 add('LDAP', 'Connection', 'LDAP_Enable', 'boolean', false, { public: true, label: 'Ativar LDAP' });
-add('LDAP', 'Connection', 'LDAP_Url', 'string', 'ldap://localhost:389', { label: 'URL do servidor (ldap:// ou ldaps://)' });
+add('LDAP', 'Connection', 'LDAP_Url', 'string', 'ldap://localhost:389', { label: 'URL do servidor (ldap:// ou ldaps://)', validate: validateLdapUrl });
 add('LDAP', 'Connection', 'LDAP_Reject_Unauthorized', 'boolean', true, { label: 'Rejeitar certificados inválidos' });
 add('LDAP', 'Connection', 'LDAP_CA_Certificate', 'multiline', '', { label: 'Certificado da autoridade certificadora (CA) do servidor, em PEM (opcional)' });
 add('LDAP', 'Authentication', 'LDAP_Authentication_UserDN', 'string', '', { label: 'DN do usuário de serviço' });
@@ -243,7 +294,10 @@ add('LDAP', 'Sync', 'LDAP_Background_Sync_Import_New_Users', 'boolean', true, { 
 add('LDAP', 'Sync', 'LDAP_Sync_User_Active_State', 'boolean', true, { label: 'Desativar usuários removidos do LDAP' });
 add('LDAP', 'Sync', 'LDAP_Sync_AD_Disabled', 'boolean', true, { label: 'Desativar contas desativadas no Active Directory (userAccountControl)' });
 add('LDAP', 'Sync', 'LDAP_Sync_Reactivate_Users', 'boolean', true, { label: 'Reativar contas que voltarem ao diretório ou forem reativadas no Active Directory' });
-add('LDAP', 'Sync', 'LDAP_Sync_Max_Deactivation_Percent', 'int', 50, { label: 'Não desativar ninguém se a sincronização for desativar mais que este % dos usuários do LDAP (0 = sem limite)' });
+add('LDAP', 'Sync', 'LDAP_Sync_Max_Deactivation_Percent', 'int', 50, {
+  label: 'Não desativar ninguém se a sincronização for desativar mais que este % dos usuários do LDAP (0 = sem limite)',
+  validate: intRange(0, 100),
+});
 add('LDAP', 'Sync Roles', 'LDAP_Enable_Role_Mapping', 'boolean', false, { label: 'Mapear grupos e OUs para papéis' });
 add('LDAP', 'Sync Roles', 'LDAP_Role_Mapping', 'code', '{}', { label: 'Mapa grupo/OU → papéis (JSON)', validate: validateLdapMap });
 add('LDAP', 'Sync Roles', 'LDAP_Group_Filter', 'string', '(&(objectclass=groupOfNames)(member=#{userdn}))', { label: 'Filtro de grupos' });
@@ -279,8 +333,11 @@ add('SAML', 'Mapping', 'SAML_Merge_By_Email', 'boolean', false, { label: 'Vincul
 // ---------- Segurança / API ----------
 add('Security', 'Rate Limiter', 'API_Enable_Rate_Limiter', 'boolean', true, { label: 'Limite de requisições na API' });
 add('Security', 'CORS', 'API_Enable_CORS', 'boolean', false, { label: 'Permitir chamadas à API de outros sites (CORS)' });
-add('Security', 'CORS', 'API_CORS_Origin', 'string', '', { label: 'Origens permitidas, separadas por vírgula (ex.: https://intranet.empresa.com.br; * libera todas)' });
-add('Security', 'Rate Limiter', 'API_Enable_Rate_Limiter_Limit_Calls_Default', 'int', 300, { label: 'Chamadas por minuto' });
+add('Security', 'CORS', 'API_CORS_Origin', 'string', '', {
+  label: 'Origens permitidas, separadas por vírgula (ex.: https://intranet.empresa.com.br; * libera todas)',
+  validate: validateCorsOrigins,
+});
+add('Security', 'Rate Limiter', 'API_Enable_Rate_Limiter_Limit_Calls_Default', 'int', 300, { label: 'Chamadas por minuto', validate: intRange(10, 100000) });
 add('Security', 'Device Management', 'Device_Management_Allow_Logout_All', 'boolean', true, { public: true, label: 'Permitir encerrar todas as sessões' });
 // Só sai com o SMTP configurado e nunca no primeiro dispositivo da conta (server/src/services/loginDevices.ts).
 add('Security', 'Device Management', 'Device_Management_Enable_Login_Emails', 'boolean', true, { label: 'Avisar por e-mail quando alguém entrar na conta por um dispositivo novo' });
@@ -294,11 +351,11 @@ add('Security', 'E2E Encryption', 'E2E_Enable', 'boolean', false, {
 });
 add('Security', 'Push', 'Push_enable', 'boolean', true, { public: true, label: 'Notificações push no navegador e no app instalado' });
 add('Security', 'Push', 'Push_Privacy_Hide_Content', 'boolean', false, { public: true, label: 'Ocultar conteúdo nas notificações push' });
-add('Security', 'Push', 'Push_VAPID_Public_Key', 'string', '', { public: true, label: 'Chave pública VAPID (gerada automaticamente)' });
+add('Security', 'Push', 'Push_VAPID_Public_Key', 'string', '', { public: true, label: 'Chave pública VAPID (gerada automaticamente)', generated: true });
 add('Security', 'Push', 'Push_VAPID_Private_Key', 'password', '', { label: 'Chave privada VAPID (gerada automaticamente)' });
 
 // ---------- Chamadas ----------
-// intRange vem do bloco das figurinhas (mesma regra e mesmo texto).
+// intRange vem do começo do catálogo (mesma regra e mesmo texto).
 // Com a variável de ambiente definida, a configuração não vale: o segredo fica fora do banco.
 const envLocked = (name: string, set: () => boolean) => (_v: unknown) =>
   set() ? `Definido no servidor pela variável ${name}. Para mudar, altere a variável e reinicie o chat.` : null;
@@ -357,15 +414,15 @@ add('VideoConf', 'Jitsi', 'VideoConf_Jitsi_Domain', 'string', 'meet.jit.si', { p
 add('VideoConf', 'Jitsi', 'VideoConf_Jitsi_Prefix', 'string', 'wescc', { public: true, label: 'Prefixo das salas' });
 
 // ---------- Importação ----------
-add('Import', 'General', 'Import_MaxFileSize', 'int', 1073741824, { label: 'Tamanho máximo do arquivo de importação (bytes)' });
-add('Import', 'General', 'Import_Pending_Files_Concurrency', 'int', 3, { label: 'Downloads simultâneos de arquivos pendentes' });
+add('Import', 'General', 'Import_MaxFileSize', 'int', 1073741824, { label: 'Tamanho máximo do arquivo de importação (bytes; 0 = sem limite)', validate: bytesOrZero });
+add('Import', 'General', 'Import_Pending_Files_Concurrency', 'int', 3, { label: 'Downloads simultâneos de arquivos pendentes', validate: intRange(1, 20) });
 
 // ---------- Integrações ----------
 add('Integrations', 'General', 'Integrations_Enabled', 'boolean', true, { label: 'Ativar integrações (webhooks)' });
 add('Integrations', 'Scripts', 'Integrations_Scripts_Enabled', 'boolean', false, {
   label: 'Permitir scripts nas integrações (código JavaScript escrito por administradores)',
 });
-add('Integrations', 'Outgoing', 'Integrations_Outgoing_Timeout', 'int', 10, { label: 'Tempo limite das chamadas de saída (segundos)' });
+add('Integrations', 'Outgoing', 'Integrations_Outgoing_Timeout', 'int', 10, { label: 'Tempo limite das chamadas de saída (segundos)', validate: intRange(1, 120) });
 
 // Integração com o Jira: telas próprias em Administração → Integrações. Segredos ficam em integration_secrets (cifrados).
 // Nenhuma destas configurações é pública (settings.public não pede login); o cliente logado usa integrations.me.
@@ -481,12 +538,13 @@ function coerce(def: Def, value: unknown): unknown {
     case 'boolean':
       return value === true || value === 'true';
     case 'int': {
-      const n = Number(value);
-      if (!Number.isFinite(n)) throw new Error('invalid-int');
-      return Math.trunc(n);
+      // Campo vazio não vira 0 nem 30,5 vira 30: o administrador vê o erro com o nome do campo.
+      const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+      if (!Number.isInteger(n)) throw new Error(`${def.label}: use um número inteiro.`);
+      return n;
     }
     case 'select':
-      if (def.values && !def.values.some((v) => v.key === value)) throw new Error('invalid-option');
+      if (def.values && !def.values.some((v) => v.key === value)) throw new Error(`${def.label}: opção inválida.`);
       return String(value);
     default:
       return value == null ? '' : String(value);
@@ -501,7 +559,7 @@ export async function updateSettings(values: Record<string, unknown>) {
     if (!def) continue;
     if (def.type === 'password' && raw === '********') continue;
     const value = coerce(def, raw);
-    const err = def.validate?.(value);
+    const err = await def.validate?.(value);
     if (err) throw new Error(`${def.label}: ${err}`);
     accepted.push([id, value]);
   }
@@ -531,8 +589,9 @@ export function listSettings(opts: { publicOnly?: boolean } = {}): Setting[] {
     let value = getSetting(id);
     if (def.type === 'password' && opts.publicOnly) continue;
     if (def.type === 'password' && value) value = '********';
-    const { default: _d, validate: _v, ...rest } = def;
-    out.push({ _id: id, value, ...rest });
+    const { default: packageValue, validate: _v, generated, ...rest } = def;
+    // O padrão vai junto (a tela mostra "Padrão: …" e "Restaurar padrão"), menos o das senhas e dos valores gerados.
+    out.push({ _id: id, value, ...rest, ...(opts.publicOnly || generated || def.type === 'password' ? {} : { packageValue }) });
   }
   return out;
 }

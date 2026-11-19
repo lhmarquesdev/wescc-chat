@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
-import { useStore } from '../../lib/store';
+import { usePermission, useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, Modal, Pager, SkeletonList, SkeletonTable, Tabs, Toggle, confirmDialog, useAsync, ThLabel } from '../../components/ui';
 import { ActivePill, PageHead, RoomCell, TableWrap } from './parts';
@@ -43,7 +43,16 @@ const OUTGOING_SCRIPT = `class Script {
 
 type Kind = 'webhook-incoming' | 'webhook-outgoing';
 
-const STEP_LABEL: Record<string, string> = { sent: 'Enviado', failed: 'Falhou', 'script-error': 'Erro no script' };
+const STEP_LABEL: Record<string, string> = {
+  sent: 'Enviado',
+  received: 'Recebido',
+  failed: 'Falhou',
+  retrying: 'Tentando de novo',
+  'script-error': 'Erro no script',
+  'skipped-by-script': 'Ignorado pelo script',
+  'replied-by-script': 'Respondido pelo script',
+};
+const STEP_PILL: Record<string, string> = { sent: 'ok', received: 'ok', 'replied-by-script': 'ok', failed: 'err', 'script-error': 'err', retrying: 'warn' };
 
 export function AdminIntegrations() {
   const [tab, setTab] = useState<Kind>('webhook-incoming');
@@ -128,12 +137,10 @@ export function AdminIntegrations() {
                   </td>
                   <td className="actions-col">
                     <div className="row-actions">
-                      {tab === 'webhook-outgoing' && (
-                        <button className="btn small ghost" onClick={(e) => (e.stopPropagation(), setHistoryOf(i))}>
-                          <Icon name="last-seen" />
-                          Histórico
-                        </button>
-                      )}
+                      <button className="btn small ghost" onClick={(e) => (e.stopPropagation(), setHistoryOf(i))}>
+                        <Icon name="last-seen" />
+                        Histórico
+                      </button>
                       <button className="btn small ghost" onClick={(e) => (e.stopPropagation(), setEdit(i))}>
                         <Icon name="edit" />
                         Editar
@@ -155,10 +162,13 @@ export function AdminIntegrations() {
 
 function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose: () => void; onSaved: () => void }) {
   const incoming = initial.type === 'webhook-incoming';
+  // Sem "Gerenciar todas as integrações", a integração publica como a própria pessoa e só nas salas de que ela participa.
+  const all = usePermission('manage-integrations');
+  const me = useStore((s) => s.me);
   const [f, setF] = useState({
     name: initial.name ?? '',
     enabled: initial.enabled ?? true,
-    username: initial.username ?? 'admin',
+    username: (all ? initial.username : undefined) ?? me?.username ?? initial.username ?? '',
     channel: (initial.channel ?? []).join(', '),
     event: initial.event ?? 'sendMessage',
     urls: (initial.urls ?? []).join('\n'),
@@ -212,6 +222,7 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
     if (!yes) return;
     try {
       await api.post('integrations.remove', { type: initial.type, integrationId: initial._id });
+      ok('Integração excluída.');
       onSaved();
       onClose();
     } catch (e) {
@@ -259,12 +270,21 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
         )}
         <Field
           label={incoming ? 'Canal de destino' : 'Canais observados (vazio = todos)'}
-          hint={incoming ? '#canal ou @usuário; vários separados por vírgula.' : '#canal, @usuário, all_public_channels, all_private_groups ou all_direct_messages.'}
+          hint={
+            incoming
+              ? '#canal ou @usuário; vários separados por vírgula.'
+              : all
+                ? '#canal, @usuário, all_public_channels, all_private_groups ou all_direct_messages.'
+                : '#canal ou @usuário de conversas de que você participa, ou all_public_channels. Vazio = todas as salas que você lê.'
+          }
         >
           <input value={f.channel} onChange={(e) => set({ channel: e.target.value })} />
         </Field>
-        <Field label="Publicar como (usuário)" hint="As mensagens aparecem com este usuário. Ele precisa participar dos canais privados.">
-          <input value={f.username} onChange={(e) => set({ username: e.target.value.replace(/^@/, '') })} />
+        <Field
+          label="Publicar como (usuário)"
+          hint={all ? 'As mensagens aparecem com este usuário. Ele precisa participar dos canais privados.' : 'As mensagens aparecem com o seu usuário. Só quem gerencia todas as integrações escolhe outro.'}
+        >
+          <input value={f.username} readOnly={!all} onChange={(e) => set({ username: e.target.value.replace(/^@/, '') })} />
         </Field>
         {!incoming && (
           <>
@@ -283,7 +303,7 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
             <Field label="Responder em outra sala (opcional)" hint="#canal ou @usuário. Vazio = responde na sala do evento.">
               <input value={f.targetRoom} onChange={(e) => set({ targetRoom: e.target.value })} />
             </Field>
-            <Toggle checked={f.impersonateUser} onChange={(v) => set({ impersonateUser: v })} label="Responder como o usuário que disparou" />
+            {(all || f.impersonateUser) && <Toggle checked={f.impersonateUser} onChange={(v) => set({ impersonateUser: v })} label="Responder como o usuário que disparou" />}
             <Toggle checked={f.retryFailedCalls} onChange={(v) => set({ retryFailedCalls: v })} label="Tentar de novo quando falhar" />
             {f.retryFailedCalls && (
               <div className="two-col">
@@ -312,7 +332,7 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
         <Field label="URL do avatar (opcional)">
           <input value={f.avatar} onChange={(e) => set({ avatar: e.target.value })} />
         </Field>
-        <Toggle checked={f.scriptEnabled} onChange={(v) => set({ scriptEnabled: v })} label="Usar script" />
+        {(all || f.scriptEnabled) && <Toggle checked={f.scriptEnabled} onChange={(v) => set({ scriptEnabled: v })} label="Usar script" />}
         {f.scriptEnabled && (
           <Field label="Script" hint="Só roda se a configuração Integrações › Permitir scripts estiver ligada.">
             <textarea className="mono" rows={12} value={f.script} onChange={(e) => set({ script: e.target.value })} />
@@ -341,15 +361,26 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
 }
 
 function History({ integration, onClose }: { integration: any; onClose: () => void }) {
+  const incoming = integration.type === 'webhook-incoming';
   const [offset, setOffset] = useState(0);
   const { data, loading, reload } = useAsync(() => api.get('integrations.history', { id: integration._id, offset, count: 25 }), [offset]);
+  const clear = async () => {
+    const yes = await confirmDialog({
+      title: 'Limpar o histórico?',
+      body: `Todas as chamadas registradas de ${integration.name} saem da lista. Não dá para desfazer.`,
+      confirmLabel: 'Limpar histórico',
+      danger: true,
+    });
+    if (!yes) return;
+    api.post('integrations.clearHistory', { integrationId: integration._id }).then(() => (ok('Histórico limpo.'), setOffset(0), reload())).catch(fail);
+  };
   return (
     <Modal
       wide
       title={`Histórico: ${integration.name}`}
       onClose={onClose}
       footer={
-        <button className="btn" disabled={!data?.history.length} onClick={() => api.post('integrations.clearHistory', { integrationId: integration._id }).then(reload).catch(fail)}>
+        <button className="btn" disabled={!data?.history.length} onClick={clear}>
           Limpar histórico
         </button>
       }
@@ -358,22 +389,23 @@ function History({ integration, onClose }: { integration: any; onClose: () => vo
         <SkeletonList n={4} />
       ) : !data?.history.length ? (
         <Empty icon="last-seen" title="Nenhuma chamada ainda">
-          Cada disparo deste webhook aparece aqui, com a resposta do sistema chamado.
+          {incoming ? 'Cada chamada recebida por este webhook aparece aqui, com o conteúdo enviado e o erro, se houver.' : 'Cada disparo deste webhook aparece aqui, com a resposta do sistema chamado.'}
         </Empty>
       ) : (
         <ul className="plain-list history-list">
           {data.history.map((h: any) => (
             <li key={h._id}>
               <div className="history-head">
-                <span className={h.step === 'sent' ? 'pill ok dot' : h.step === 'failed' || h.step === 'script-error' ? 'pill err dot' : 'pill dot'}>{STEP_LABEL[h.step] ?? h.step}</span>
+                <span className={`pill dot ${STEP_PILL[h.step] ?? ''}`}>{STEP_LABEL[h.step] ?? h.step}</span>
                 <span className="muted small">
-                  {EVENT_LABEL[h.event] ?? h.event} · {formatDateTime(h._createdAt)}
+                  {h.event === 'incoming' ? 'Chamada recebida' : (EVENT_LABEL[h.event] ?? h.event)} · {formatDateTime(h._createdAt)}
                 </span>
                 {h.httpStatus ? <span className="pill tag">HTTP {h.httpStatus}</span> : null}
               </div>
               {h.url && <div className="mono small">{h.url}</div>}
               {h.error && <div className="neg small">{h.error}</div>}
               {h.response && <pre className="md-pre small">{h.response.slice(0, 600)}</pre>}
+              {incoming && h.data != null && <pre className="md-pre small">{(typeof h.data === 'string' ? h.data : JSON.stringify(h.data, null, 2)).slice(0, 600)}</pre>}
             </li>
           ))}
         </ul>

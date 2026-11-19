@@ -25,6 +25,7 @@ import { usersRoutes } from './api/users';
 import { ApiError } from './lib/errors';
 import { registerWebsocket } from './realtime/ws';
 import { isCorsOriginAllowed } from './services/origins';
+import { hasPermission } from './services/permissions';
 import { getSetting } from './services/settings';
 import { MAX_HEADER_SIZE, safeReq } from './tls';
 
@@ -58,11 +59,14 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   });
   await app.register(rateLimit, {
     global: true,
-    max: () => (getSetting('API_Enable_Rate_Limiter') ? getSetting<number>('API_Enable_Rate_Limiter_Limit_Calls_Default') : 1_000_000),
+    // Um valor salvo antes da validação (0, negativo) não trava todo mundo: no mínimo 10 por minuto.
+    max: () => (getSetting('API_Enable_Rate_Limiter') ? Math.max(10, Number(getSetting('API_Enable_Rate_Limiter_Limit_Calls_Default')) || 300) : 1_000_000),
     timeWindow: 60_000,
     // Usuário autenticado (o hook de autenticação roda antes) ou IP; nunca o cabeçalho x-user-id sem token.
     keyGenerator: (req) => req.ctx?.userId || req.ip,
-    allowList: (req) => !req.url.startsWith('/api/'),
+    // As configurações ficam fora para quem pode alterá-las: sempre dá para desfazer um limite baixo demais.
+    allowList: async (req) =>
+      !req.url.startsWith('/api/') || (!!req.ctx?.userId && /^\/api\/v1\/settings(\?|$)/.test(req.url) && (await hasPermission(req.ctx.userId, 'edit-privileged-setting'))),
     // O plugin lança o que este construtor devolve: um ApiError passa pelo errorHandler com o texto e o errorType
     // (um objeto comum saía como { error: undefined, errorType: 'error' } e a web mostrava "Erro 429").
     errorResponseBuilder: (_req, ctx) => {

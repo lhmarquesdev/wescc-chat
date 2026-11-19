@@ -327,6 +327,8 @@ export interface Setting {
   description?: string;
   values?: { key: string; label: string }[];
   sorter?: number;
+  // Valor padrão (só na lista de Administração › Configurações; as senhas ficam sem).
+  packageValue?: unknown;
 }
 
 export interface DeviceSession {

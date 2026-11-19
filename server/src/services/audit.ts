@@ -1,5 +1,6 @@
 import { newId } from '../lib/ids';
 import { many, query } from '../db/pool';
+import { escapeLike } from '@shared/search';
 
 export interface Actor {
   id?: string | null;
@@ -20,8 +21,13 @@ export async function listAuditLog(opts: { start?: string; end?: string; action?
   const params: unknown[] = [];
   if (opts.start) where.push(`created_at >= $${params.push(opts.start)}`);
   if (opts.end) where.push(`created_at <= $${params.push(opts.end)}`);
-  if (opts.action) where.push(`action LIKE $${params.push(opts.action.replace(/\*/g, '%'))}`);
-  if (opts.actor) where.push(`actor_username = $${params.push(opts.actor)}`);
+  // Sem diferença de maiúsculas e por trecho: "settings" acha settings.changed; com *, vale o padrão (settings.*).
+  if (opts.action) {
+    const action = escapeLike(opts.action.trim());
+    where.push(`action ILIKE $${params.push(action.includes('*') ? action.replace(/\*/g, '%') : `%${action}%`)}`);
+  }
+  // Quem fez: por trecho do nome de usuário, com ou sem o @.
+  if (opts.actor) where.push(`actor_username ILIKE $${params.push(`%${escapeLike(opts.actor.trim().replace(/^@/, ''))}%`)}`);
   const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const count = Math.min(opts.count ?? 50, 500);
   const rows = await many(

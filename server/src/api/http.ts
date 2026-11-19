@@ -236,6 +236,31 @@ export function dateParam(v: unknown, name: string, opts: { optional?: boolean }
   return s;
 }
 
+// Data de filtro (AAAA-MM-DD ou data e hora ISO). Inválida vira 400 "Data inválida." em vez de erro do banco (500).
+// AAAA-MM-DD segue como veio (o banco a lê como antes); com hora, segue como instante ISO.
+export function filterDateParam(v: unknown, name: string, opts: { optional?: boolean } = {}): string | undefined {
+  if (v === undefined || v === null || v === '') {
+    if (opts.optional) return undefined;
+    throw new ApiError(400, 'error-invalid-params', `O parâmetro "${name}" é obrigatório.`);
+  }
+  const s = typeof v === 'string' ? v.trim() : '';
+  // O dia é conferido no calendário também com hora (o JavaScript aceitava 2026-02-30T10:00 como 2 de março).
+  const day = /^(\d{4})-(\d{2})-(\d{2})(T.*)?$/.exec(s);
+  if (day) {
+    const [y, m, d] = [Number(day[1]), Number(day[2]), Number(day[3])];
+    const t = new Date(Date.UTC(y, m - 1, d));
+    const real = t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+    if (real && !day[4]) return s;
+    if (real && !Number.isNaN(new Date(s).getTime())) return new Date(s).toISOString();
+  }
+  throw new ApiError(400, 'error-invalid-date', 'Data inválida.', { param: name });
+}
+
+// Início depois do fim: recusa em vez de devolver uma lista vazia sem explicação.
+export function assertDateOrder(start: string | undefined, end: string | undefined) {
+  if (start && end && new Date(start).getTime() > new Date(end).getTime()) throw new ApiError(400, 'error-invalid-date', 'A data inicial é depois da final.');
+}
+
 export function bool(v: unknown): boolean | undefined {
   if (v === undefined || v === null || v === '') return undefined;
   return v === true || v === 'true' || v === 1 || v === '1';

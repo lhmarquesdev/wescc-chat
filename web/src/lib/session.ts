@@ -36,7 +36,10 @@ export async function loadPermissionMap() {
 
 export async function loadCustomEmoji() {
   const r = await api.get('emoji-custom.list').catch(() => null);
-  if (r) setCustomEmoji(r.emojis.update);
+  if (r) {
+    setCustomEmoji(r.emojis.update);
+    useStore.setState((s) => ({ emojiVersion: s.emojiVersion + 1 }));
+  }
 }
 
 let started = false;
