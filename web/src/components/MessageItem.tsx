@@ -26,7 +26,7 @@ import { findHighlight } from '@shared/highlights';
 import { authorName, editableKind, forwardableKind } from '../lib/messageRules';
 import { canRemoveEverywhere, useStickers } from '../lib/stickers';
 import { useNames } from '../lib/names';
-import { avatarBust, useSetting, useStore } from '../lib/store';
+import { useSetting, useStore } from '../lib/store';
 import { useMessageTranslation, type MessageTranslationView } from '../lib/translate';
 import { languageLabel } from '../lib/translateRules';
 import { EmojiPicker, recentEmoji } from './EmojiPicker';
@@ -803,12 +803,12 @@ function useReplyFaces(m: Message): { id: string; src: string }[] {
     const known = new Map<string, string>();
     for (const x of s.threads[m._id] ?? []) known.set(x.u._id, x.u.username);
     for (const x of s.messages[m.rid]?.list ?? []) if (!known.has(x.u._id)) known.set(x.u._id, x.u.username);
-    return ids.map((id) => `${id}:${known.get(id) ?? ''}`).join(' ');
+    return ids.map((id) => `${id}:${known.get(id) ?? ''}:${s.avatarEtags[known.get(id) ?? ''] ?? ''}`).join(' ');
   });
   if (!key) return [];
   return key.split(' ').map((pair) => {
-    const [id, username] = pair.split(':');
-    return { id, src: username ? `/avatar/${encodeURIComponent(username)}?v=${avatarBust[username] ?? ''}` : `/avatar/uid/${encodeURIComponent(id)}` };
+    const [id, username, bust] = pair.split(':');
+    return { id, src: username ? `/avatar/${encodeURIComponent(username)}?v=${bust}` : `/avatar/uid/${encodeURIComponent(id)}` };
   });
 }
 

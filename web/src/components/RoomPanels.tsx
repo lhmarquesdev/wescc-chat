@@ -768,7 +768,10 @@ function TeamPanel({ room, roles }: Props) {
 // Dono primeiro; o resto na ordem do servidor.
 const ROLE_ORDER = ['owner', 'moderator', 'leader', 'publisher'];
 
-function MemberRow({ m, muted, onClick }: { m: any; muted: boolean; onClick: () => void }) {
+function MemberRow({ m: listed, muted, onClick }: { m: any; muted: boolean; onClick: () => void }) {
+  // Nome ou @usuário trocado depois que a lista carregou: vale o novo (evento "user").
+  const renamed = useStore((s) => s.userNames[listed._id]);
+  const m = renamed ? { ...listed, ...renamed } : listed;
   const roles = [...(m.roles as string[])].sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b));
   // A presença ao vivo vale por cima da lista; o rótulo diz o status personalizado ("Em reunião").
   const pres = useUserPresence(m.username, { status: m.status, statusCustom: m.statusCustom });

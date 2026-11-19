@@ -16,7 +16,7 @@ import {
   type RefObject,
 } from 'react';
 import { createRoot } from 'react-dom/client';
-import { avatarBust, useStore, type ToastItem } from '../lib/store';
+import { useStore, type ToastItem } from '../lib/store';
 import { useUserPresence } from '../lib/presence';
 import { Icon, type IconName } from './Icon';
 import { Portal, Sheet, focusables, useAnchored, useEscape, useFocusTrap, useIsPhone, useScrollLock, useSheetDrag, type Placement } from './overlay';
@@ -52,7 +52,9 @@ export function useDelay(ms = 250) {
 // ---------- Avatares e presença ----------
 
 export function Avatar({ username, size = 32, rid, etag }: { username?: string; size?: number; rid?: string; etag?: string | null }) {
-  const bust = username ? avatarBust[username] ?? etag ?? '' : etag ?? '';
+  // A versão que chegou pelo evento "user" vale por cima da que veio com a tela: a foto nova aparece sem recarregar.
+  const live = useStore((s) => (username ? s.avatarEtags[username] : undefined));
+  const bust = live ?? etag ?? '';
   const src = rid ? `/avatar/room/${rid}?v=${bust}` : `/avatar/${encodeURIComponent(username ?? '')}?v=${bust}`;
   const ref = useRef<HTMLImageElement>(null);
   // Imagem que já veio do cache aparece direto; a que ainda carrega entra com um fade curto.
