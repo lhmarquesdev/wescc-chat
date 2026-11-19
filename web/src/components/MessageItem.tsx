@@ -217,7 +217,7 @@ function Lightbox({ src, title, download, m, blobName, onClose }: { src: string;
           if (!(e.target as HTMLElement).closest('.lightbox-img, .lightbox-bar a, .lightbox-bar button')) onClose();
         }}
       >
-        <img className="lightbox-img" src={src} alt={title ?? ''} />
+        <img className="lightbox-img" src={src} alt={title ?? ''} referrerPolicy="no-referrer" />
         <div className="lightbox-bar">
           <div className="lightbox-who">
             {m && (
@@ -276,7 +276,7 @@ export function ImageView({
   return (
     <span className={`${thumb ? 'att-thumb-box' : 'att-image-box'}${loaded ? ' loaded' : ''}`}>
       <button type="button" className="att-image-open" onClick={() => setOpen(true)} aria-label={title ? `Ampliar ${title}` : 'Ampliar imagem'}>
-        <img className={thumb ? 'att-thumb' : 'att-image'} src={src} alt={title ?? ''} loading="lazy" onLoad={done} onError={done} />
+        <img className={thumb ? 'att-thumb' : 'att-image'} src={src} alt={title ?? ''} loading="lazy" referrerPolicy="no-referrer" onLoad={done} onError={done} />
       </button>
       {!thumb && (
         <span className="att-image-actions">
@@ -357,7 +357,7 @@ function RichAttachment({ a, m }: { a: Attachment; m?: Message }) {
   const fields = (a.fields ?? []).filter((f) => f && (f.title || f.value));
   const author = a.author_name || authorIcon ? (
     <div className="att-author">
-      {authorIcon && <img src={authorIcon} alt="" width={16} height={16} loading="lazy" />}
+      {authorIcon && <img src={authorIcon} alt="" width={16} height={16} loading="lazy" referrerPolicy="no-referrer" />}
       {a.author_name &&
         (authorLink ? (
           <a href={authorLink} target="_blank" rel="noopener noreferrer">

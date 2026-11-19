@@ -31,7 +31,9 @@ export async function getMessageRow(id: string) {
   return one('SELECT * FROM messages WHERE id = $1', [id]);
 }
 
-async function parseMentions(msg: string, room: any) {
+// userId: quem escreve. Um #nome só vira link para a sala que essa pessoa pode ler (grupo privado ou canal de time
+// privado de que ela não participa fica texto, sem revelar que existe).
+async function parseMentions(msg: string, room: any, userId: string) {
   const names = new Set<string>();
   for (const m of msg.matchAll(MENTION_RE)) names.add(trimEndChars(m[1], '.'));
   const mentions: UserRef[] = [];
@@ -55,9 +57,12 @@ async function parseMentions(msg: string, room: any) {
   }
   const chNames = new Set<string>();
   for (const m of msg.matchAll(CHANNEL_RE)) chNames.add(m[1].toLowerCase());
-  const channels = chNames.size
-    ? (await many(`SELECT id, name FROM rooms WHERE lower(name) = ANY($1) AND t IN ('c','p')`, [[...chNames]])).map((r) => ({ _id: r.id, name: r.name }))
-    : [];
+  const channels: { _id: string; name: string }[] = [];
+  if (chNames.size) {
+    for (const r of await many(`SELECT * FROM rooms WHERE lower(name) = ANY($1) AND t IN ('c','p')`, [[...chNames]])) {
+      if (await canAccessRoom(userId, r)) channels.push({ _id: r.id, name: r.name });
+    }
+  }
   void room;
   return { mentions, channels };
 }
@@ -162,6 +167,9 @@ async function assertDirectOpen(ctx: Ctx, room: any) {
 // ---------- Anexos enviados pelo cliente ----------
 
 export const safeUrl = (v: unknown) => (typeof v === 'string' && v.length <= 2048 && (/^https?:\/\//i.test(v) || /^\/(?!\/)/.test(v)) ? v : undefined);
+// Imagem, áudio e vídeo que o navegador de quem lê baixa sozinho: só do próprio chat (/file-upload, /avatar...). Um
+// endereço de fora contaria a outro site quem abriu a sala, quando e de qual IP. Integrações (webhooks, robôs) podem.
+const localUrl = (v: unknown) => (typeof v === 'string' && /^\/(?![/\\])/.test(v) ? safeUrl(v) : undefined);
 const text = (v: unknown, max: number) => (typeof v === 'string' || typeof v === 'number' ? truncate(String(v), max) : undefined);
 
 function quotedMessageId(link: string) {
@@ -183,8 +191,11 @@ async function quoteAttachment(ctx: Ctx, link: string): Promise<Attachment | nul
   return { text: rowPreview({ ...m, files }, { withName: false }), author_name: m.username, ...aliasOf(m), ts: m.created_at, message_link: `?msg=${m.id}` };
 }
 
-export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Attachment[]> {
+// external: anexos de integração (webhook de entrada, conta de robô) ou já gravados no chat (encaminhar), que podem
+// mostrar imagens de outros endereços.
+export async function sanitizeAttachments(ctx: Ctx, list: unknown, opts: { external?: boolean } = {}): Promise<Attachment[]> {
   if (!Array.isArray(list)) return [];
+  const media = opts.external ? safeUrl : localUrl;
   const out: Attachment[] = [];
   for (const a of list.slice(0, 20) as any[]) {
     if (!a || typeof a !== 'object') continue;
@@ -197,16 +208,16 @@ export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Atta
       title: text(a.title, 500),
       title_link: safeUrl(a.title_link),
       type: a.type === 'file' ? 'file' : undefined,
-      image_url: safeUrl(a.image_url),
-      audio_url: safeUrl(a.audio_url),
-      video_url: safeUrl(a.video_url),
+      image_url: media(a.image_url),
+      audio_url: media(a.audio_url),
+      video_url: media(a.video_url),
       description: text(a.description, 5000),
       text: text(a.text, 5000),
       pretext: text(a.pretext, 5000),
       author_name: text(a.author_name, 200),
       author_link: safeUrl(a.author_link),
-      author_icon: safeUrl(a.author_icon),
-      thumb_url: safeUrl(a.thumb_url),
+      author_icon: media(a.author_icon),
+      thumb_url: media(a.thumb_url),
       footer: text(a.footer, 5000),
       color: text(a.color, 30),
       size: typeof a.size === 'number' ? a.size : undefined,
@@ -261,7 +272,9 @@ export async function sendMessage(
   let msg = (input.msg ?? '').trim();
   const max = getSetting<number>('Message_MaxAllowedSize');
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
-  const attachments = opts.internalAttachments ? (input.attachments ?? []) : await sanitizeAttachments(ctx, input.attachments);
+  const attachments = opts.internalAttachments
+    ? (input.attachments ?? [])
+    : await sanitizeAttachments(ctx, input.attachments, { external: opts.trusted || roles.includes('bot') });
   const rich = opts.integration && (input.jira || input.meeting);
   const forward = opts.forward ? input.forward : undefined;
   const poll = opts.poll ? input.poll : undefined;
@@ -297,7 +310,7 @@ export async function sendMessage(
   // Encaminhada: o texto levado nunca menciona nem destaca ninguém de novo; só o comentário de quem encaminhou (com as
   // mesmas regras de @all e @here). Cifrada: as menções vêm da web e nada é destacado (o servidor não lê o texto).
   const mentionText = e2e ? '' : opts.forward ? (forward?.comment ?? '') : msg;
-  let { mentions, channels } = await parseMentions(e2e ? e2eMentionText(input.e2eMentions) : mentionText, room);
+  let { mentions, channels } = await parseMentions(e2e ? e2eMentionText(input.e2eMentions) : mentionText, room, ctx.userId);
   // Integrações (Jira): texto de fora não menciona ninguém; só o responsável escolhido pelo servidor. Nunca @all, @here, times ou #sala.
   if (opts.integration) {
     const allowed = new Set((input.mentionsAllowed ?? []).map((u) => u.toLowerCase()));
@@ -489,6 +502,15 @@ function minutesSince(ts: string) {
   return (Date.now() - new Date(ts).getTime()) / 60000;
 }
 
+// Editar não é outro jeito de mandar @all ou @here: as regras do envio valem para a menção que a mensagem não tinha.
+function assertEditGroupMentions(roles: string[], room: any, before: UserRef[], after: UserRef[]) {
+  const added = (id: string) => after.some((x) => x._id === id) && !before.some((x) => x._id === id);
+  if (added('all') && !rolesHavePermission(roles, 'mention-all')) throw forbidden('Sem permissão para mencionar @all.');
+  if (added('here') && !rolesHavePermission(roles, 'mention-here')) throw forbidden('Sem permissão para mencionar @here.');
+  const maxAll = getSetting<number>('Message_MaxAll');
+  if (added('all') && maxAll > 0 && room.users_count > maxAll) throw forbidden(`@all não é permitido em salas com mais de ${maxAll} membros.`);
+}
+
 // e2e: edição de mensagem cifrada (o texto novo vai cifrado; as menções vêm da web, como no envio).
 export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?: string, e2eEdit?: { envelope: unknown; mentions?: unknown }) {
   const m = await getMessageRow(msgId);
@@ -515,6 +537,8 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   const e2e = room.encrypted || e2eEdit ? await checkE2eInput(ctx, room, { _id: m.id, e2e: e2eEdit?.envelope, msg: text }) : null;
   const msg = e2e ? '' : filterBadWords(text.trim());
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
+  const { mentions, channels } = await parseMentions(e2e ? e2eMentionText(e2eEdit?.mentions) : msg, room, ctx.userId);
+  assertEditGroupMentions(roles, room, m.mentions ?? [], mentions);
   if (getSetting('Message_KeepHistory')) {
     await query('INSERT INTO message_history (message_id, room_id, msg, edited_by, e2e) VALUES ($1,$2,$3,$4,$5)', [
       m.id,
@@ -524,7 +548,6 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
       m.e2e ? JSON.stringify(m.e2e) : null,
     ]);
   }
-  const { mentions, channels } = await parseMentions(e2e ? e2eMentionText(e2eEdit?.mentions) : msg, room);
   const row = await one(
     `UPDATE messages SET msg = $2, mentions = $3, channels = $4, edited_at = now(), edited_by = $5, e2e = $6, updated_at = now() WHERE id = $1 RETURNING *`,
     [m.id, msg, JSON.stringify(mentions), JSON.stringify(e2e ? [] : channels), JSON.stringify({ _id: ctx.userId, username: ctx.username }), e2e ? JSON.stringify(e2e) : null],
@@ -909,8 +932,9 @@ export async function createDiscussion(ctx: Ctx, input: { prid: string; pmid?: s
     if (input.encrypted && !parent.encrypted && !e2eOn()) throw E2E_ERR.disabled(400);
     if (input.reply) throw E2E_ERR.reply();
   }
-  const { createRoom, addUserToRoom } = await import('./rooms');
-  const type = parent.t === 'c' ? 'c' : 'p';
+  const { createRoom, addUserToRoom, isPublicRoom } = await import('./rooms');
+  // A discussão é tão privada quanto a sala de origem: num canal de time privado, ela nasce grupo privado.
+  const type = (await isPublicRoom(parent)) ? 'c' : 'p';
   const room = await createRoom(ctx, {
     type,
     name: newId(),

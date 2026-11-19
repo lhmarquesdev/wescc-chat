@@ -13,11 +13,12 @@ export type Target =
   | { room: string }
   | { user: string }
   | { users: string[] }
-  | { all: true };
+  | { all: true; skipRoom?: string }; // skipRoom: menos quem está na sala ou a assiste (já recebeu o evento completo)
 
 type Internal =
   | { type: '_join'; userId: string; rid: string }
   | { type: '_leave'; userId: string; rid: string }
+  | { type: '_unwatch'; rid: string }
   | { type: '_settings'; settings: { _id: string; value: unknown }[] }
   | { type: '_permissions' }
   | { type: '_logout'; sessionIds?: string[]; userId?: string; reason?: LogoutReason };
@@ -44,13 +45,17 @@ class Bus {
   private listener: pg.Client | null = null;
   private stopping = false;
   private retry: NodeJS.Timeout | null = null;
-  private hooks: { settings?: (s: { _id: string; value: unknown }[]) => void; permissions?: () => void } = {};
+  private hooks: { settings?: (s: { _id: string; value: unknown }[]) => void; permissions?: () => void; rewatch?: (conns: Conn[], rid: string) => void } = {};
 
   onSettings(fn: (s: { _id: string; value: unknown }[]) => void) {
     this.hooks.settings = fn;
   }
   onPermissions(fn: () => void) {
     this.hooks.permissions = fn;
+  }
+  // Confere de novo quem assistia uma sala que deixou de ser pública (quem ainda pode ler volta a assistir).
+  onRewatch(fn: (conns: Conn[], rid: string) => void) {
+    this.hooks.rewatch = fn;
   }
 
   async start() {
@@ -160,7 +165,8 @@ class Bus {
 
   private deliverLocal(target: Target, ev: ServerEvent) {
     if ('all' in target) {
-      for (const c of this.conns.values()) c.send(ev);
+      const skip = target.skipRoom;
+      for (const c of this.conns.values()) if (!skip || !(c.rooms.has(skip) || c.watched.has(skip))) c.send(ev);
     } else if ('conn' in target) {
       this.conns.get(target.conn)?.send(ev);
     } else if ('user' in target) {
@@ -180,8 +186,23 @@ class Bus {
         for (const c of this.byUser.get(i.userId) ?? []) c.rooms.add(i.rid);
         break;
       case '_leave':
-        for (const c of this.byUser.get(i.userId) ?? []) c.rooms.delete(i.rid);
+        // Fora da sala, nem como pré-visualização: um canal público volta a ser assistido quando a página pede de novo.
+        for (const c of this.byUser.get(i.userId) ?? []) {
+          c.rooms.delete(i.rid);
+          c.watched.delete(i.rid);
+        }
         break;
+      case '_unwatch': {
+        // A sala deixou de ser pública: quem só assistia para de receber na hora; a conferência devolve quem ainda lê.
+        const dropped: Conn[] = [];
+        for (const c of this.conns.values()) {
+          if (!c.watched.has(i.rid) || c.rooms.has(i.rid)) continue;
+          c.watched.delete(i.rid);
+          dropped.push(c);
+        }
+        if (dropped.length) this.hooks.rewatch?.(dropped, i.rid);
+        break;
+      }
       case '_settings':
         this.hooks.settings?.(i.settings);
         break;
@@ -214,6 +235,10 @@ class Bus {
   }
   leaveRoom(userId: string, rid: string) {
     this.internal({ type: '_leave', userId, rid });
+  }
+  // Em todas as instâncias: a sala ficou privada (grupo, canal de time privado, discussão de sala privada).
+  unwatchRoom(rid: string) {
+    this.internal({ type: '_unwatch', rid });
   }
   // Todas as alterações vão para o cache das outras instâncias; só as públicas chegam aos clientes.
   publishSettings(settings: { _id: string; value: unknown }[], publicSettings: { _id: string; value: unknown }[]) {

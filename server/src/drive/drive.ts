@@ -441,10 +441,13 @@ export async function searchSubjects(ctx: Ctx, text: unknown): Promise<DriveSubj
   const roles = await many("SELECT id, description FROM roles WHERE scope = 'Users' AND id NOT IN ('anonymous', 'app') AND (id ILIKE $1 OR description ILIKE $1) ORDER BY protected DESC, id LIMIT 12", [like]);
   out.push(...roles.map((r) => ({ type: 'role' as const, id: r.id, label: r.description || r.id, sublabel: 'Papel' })));
   const all = await hasAnyPermission(ctx.userId, ['manage-all-files']);
+  // As regras de canAccessRoom: canal de time privado só aparece para quem é do time.
   const rooms = await many(
     `SELECT r.id, r.t, r.name, r.fname FROM rooms r
      WHERE r.t IN ('c','p') AND NOT r.archived AND (coalesce(r.fname, r.name) ILIKE $1)
-       AND ($3 OR r.t = 'c' OR EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = r.id AND s.user_id = $2))
+       AND ($3 OR EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = r.id AND s.user_id = $2)
+            OR (r.t = 'c' AND (r.team_id IS NULL OR r.team_main OR NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = r.team_id AND t.type = 1)
+                OR EXISTS (SELECT 1 FROM team_members m WHERE m.team_id = r.team_id AND m.user_id = $2))))
      ORDER BY lower(coalesce(r.fname, r.name)) LIMIT 12`,
     [like, ctx.userId, all],
   );

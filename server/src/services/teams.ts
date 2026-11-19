@@ -4,7 +4,8 @@ import { newId } from '../lib/ids';
 import { audit } from './audit';
 import { mapRoom, mapTeam } from './mappers';
 import { hasPermission } from './permissions';
-import { addUserToRoom, createRoom, deleteRoom, getRoom, getRoomByName, notifyRoomUpdated, removeUserFromRoom, republishSubscriptions } from './rooms';
+import { addUserToRoom, createRoom, deleteRoom, getRoom, getRoomByName, notifyRoomUpdated, privatizeRooms, removeUserFromRoom, republishSubscriptions, withDiscussions } from './rooms';
+import { bus } from '../realtime/bus';
 import { sendSystemMessage } from './messages';
 import { actorOf, type Ctx } from './users';
 
@@ -120,6 +121,13 @@ export async function addRoomsToTeam(ctx: Ctx, team: any, rids: string[]) {
     await query('UPDATE rooms SET team_id = $2, updated_at = now() WHERE id = $1', [rid, team.id]);
     await sendSystemMessage(team.room_id, 'user-added-room-to-team', { id: ctx.userId, username: ctx.username }, room.fname ?? room.name);
     await notifyRoomUpdated(rid);
+    // Num time privado o canal passa a ser só do time: quem só assistia deixa de receber, e as discussões abertas nele
+    // viram grupos privados.
+    if (team.type === 1 && room.t === 'c') {
+      const all = await withDiscussions([rid]);
+      for (const id of all) bus.unwatchRoom(id);
+      await privatizeRooms(ctx, all.filter((id) => id !== rid));
+    }
   }
 }
 
@@ -136,7 +144,15 @@ export async function removeRoomFromTeam(ctx: Ctx, team: any, rid: string) {
   if (!room || room.team_id !== team.id || room.team_main) throw badRequest('error-invalid-room', 'Sala inválida.');
   await query(`UPDATE rooms SET team_id = NULL, custom_fields = custom_fields - 'teamDefault', updated_at = now() WHERE id = $1`, [rid]);
   await sendSystemMessage(team.room_id, 'user-removed-room-from-team', { id: ctx.userId, username: ctx.username }, room.fname ?? room.name);
+  // Canal de time privado fora do time: grupo privado com os mesmos membros, nunca um canal aberto a todos.
+  if (team.type === 1) await privatizeRooms(ctx, await withDiscussions([rid]));
   await notifyRoomUpdated(rid);
+}
+
+// Canais de um time privado que vai deixar de existir (excluído ou convertido em sala).
+async function privateTeamChannels(team: any): Promise<string[]> {
+  if (team.type !== 1) return [];
+  return withDiscussions((await many('SELECT id FROM rooms WHERE team_id = $1 AND NOT team_main', [team.id])).map((r) => r.id));
 }
 
 export async function updateTeamRoom(ctx: Ctx, rid: string, isDefault: boolean) {
@@ -195,7 +211,9 @@ export async function deleteTeam(ctx: Ctx, team: any, roomsToRemove: string[] = 
     const r = await getRoom(rid);
     if (r?.team_id === team.id && !r.team_main) await deleteRoom(ctx, rid).catch(() => {});
   }
+  const keep = await privateTeamChannels(team);
   await query(`UPDATE rooms SET team_id = NULL WHERE team_id = $1 AND NOT team_main`, [team.id]);
+  await privatizeRooms(ctx, keep);
   await query('UPDATE rooms SET team_main = false WHERE id = $1', [team.room_id]);
   await query('DELETE FROM teams WHERE id = $1', [team.id]);
   await deleteRoom(ctx, team.room_id);
@@ -224,7 +242,9 @@ export async function convertRoomToTeam(ctx: Ctx, rid: string) {
 
 export async function convertTeamToRoom(ctx: Ctx, team: any) {
   if (!(await hasPermission(ctx.userId, 'edit-team', team.room_id))) throw forbidden();
+  const keep = await privateTeamChannels(team);
   await query(`UPDATE rooms SET team_id = NULL WHERE team_id = $1 AND NOT team_main`, [team.id]);
+  await privatizeRooms(ctx, keep);
   await query('UPDATE rooms SET team_id = NULL, team_main = false, updated_at = now() WHERE id = $1', [team.room_id]);
   await query('DELETE FROM teams WHERE id = $1', [team.id]);
   await sendSystemMessage(team.room_id, 'user-converted-to-channel', { id: ctx.userId, username: ctx.username }, team.name);

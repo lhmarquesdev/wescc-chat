@@ -383,13 +383,18 @@ export function roomsRoutes(app: FastifyInstance) {
   });
   route(app, 'GET', 'rooms.autocomplete.channelAndPrivate', {}, async (req, _rep, ctx) => {
     const term = String(q(req).term ?? '');
+    // As regras de canAccessRoom: canal de time privado só para quem é do time. Só o que o seletor mostra (nunca o
+    // tópico, o anúncio ou a última mensagem).
     const rows = await many(
-      `SELECT r.* FROM rooms r WHERE r.t IN ('c','p') AND r.prid IS NULL AND r.name ILIKE $1
-         AND (r.t = 'c' OR EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = r.id AND s.user_id = $2))
+      `SELECT r.id, r.t, r.name, r.fname, r.team_main, r.notice FROM rooms r LEFT JOIN teams t ON t.id = r.team_id
+       WHERE r.t IN ('c','p') AND r.prid IS NULL AND r.name ILIKE $1
+         AND (EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = r.id AND s.user_id = $2)
+              OR (r.t = 'c' AND (r.team_id IS NULL OR r.team_main OR t.type IS DISTINCT FROM 1
+                  OR EXISTS (SELECT 1 FROM team_members m WHERE m.team_id = r.team_id AND m.user_id = $2))))
        ORDER BY r.name LIMIT 15`,
       [`${term}%`, ctx.userId],
     );
-    return { items: rows.map(mapRoom) };
+    return { items: rows.map((r) => ({ _id: r.id, t: r.t, name: r.name, fname: r.fname, teamMain: r.team_main, notice: !!r.notice })) };
   });
   // Busca da barra lateral (Ctrl+K): pessoas e canais públicos que ainda não estão na lista de quem pergunta.
   route(app, 'GET', 'spotlight', {}, async (req, _rep, ctx) => spotlight(ctx, str(q(req).query, 'query', { optional: true, max: 200 }) ?? ''));
