@@ -359,8 +359,13 @@ export async function sendMessage(
     const existing = await getMessageRow(input._id!);
     if (existing) return sameE2eMessage(ctx, room, existing, e2e);
   }
+  // A mesma mensagem enviada de novo (Enter duas vezes com a rede lenta, a resposta que se perdeu): o mesmo _id da mesma
+  // pessoa na mesma sala volta a que já existe, sem cópia.
+  const clientId = !e2e && !sticker && input._id && /^[A-Za-z0-9]{10,24}$/.test(input._id) ? input._id : null;
+  const sentBefore = clientId ? await getMessageRow(clientId) : null;
+  if (sentBefore && sentBefore.user_id === ctx.userId && sentBefore.room_id === room.id) return withExtra(sentBefore);
   // Figurinha: sendSticker já conferiu o _id; um conflito volta como erro de chave para o envio idempotente, nunca como cópia.
-  const id = e2e ? input._id! : input._id && /^[A-Za-z0-9]{10,24}$/.test(input._id) && (sticker || !(await getMessageRow(input._id))) ? input._id : newId();
+  const id = e2e ? input._id! : sticker && input._id && /^[A-Za-z0-9]{10,24}$/.test(input._id) ? input._id : clientId && !sentBefore ? clientId : newId();
   const receipts = getSetting<boolean>('Message_Read_Receipt_Enabled');
   const extra: Record<string, unknown> = {};
   if (input.tshow && tmid) extra.tshow = true;
@@ -404,8 +409,10 @@ export async function sendMessage(
     row = await insert();
   } catch (e) {
     // Duas cópias da mesma mensagem cifrada ao mesmo tempo: a segunda vê a primeira.
-    const existing = e2e && (e as { code?: string })?.code === '23505' ? await getMessageRow(id) : null;
-    if (existing) return sameE2eMessage(ctx, room, existing, e2e!);
+    const existing = (e2e || id === clientId) && (e as { code?: string })?.code === '23505' ? await getMessageRow(id) : null;
+    if (existing && e2e) return sameE2eMessage(ctx, room, existing, e2e);
+    // Os dois envios repetidos chegaram juntos: o segundo devolve o primeiro.
+    if (existing && existing.user_id === ctx.userId && existing.room_id === room.id) return withExtra(existing);
     throw e;
   }
   if (opts.onInserted) {

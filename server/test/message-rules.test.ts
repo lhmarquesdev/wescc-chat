@@ -134,3 +134,22 @@ describe('cópias do texto (fixação e citações)', () => {
     expect((await api('GET', 'chat.getMessage', { msgId: q._id }, A)).message.attachments[0].text).toBe('meu CPF está no cadastro');
   });
 });
+
+describe('envio repetido', () => {
+  it('o mesmo _id da mesma pessoa volta a mensagem que já existe, sem cópia', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `duplo-${uniq()}` }, A)).channel;
+    const _id = `cli${uniq()}`.replace(/[^A-Za-z0-9]/g, '').padEnd(17, 'x').slice(0, 17);
+    const [a, b] = await Promise.all([send(A, ch._id, 'Confirmo a reunião de amanhã', { _id }), send(A, ch._id, 'Confirmo a reunião de amanhã', { _id })]);
+    const c = await send(A, ch._id, 'Confirmo a reunião de amanhã', { _id });
+    expect([a.message._id, b.message._id, c.message._id]).toEqual([_id, _id, _id]);
+    const hist = (await api('GET', 'channels.history', { roomId: ch._id, count: 50 }, A)).messages.filter((x: any) => !x.t);
+    expect(hist.map((x: any) => x.msg)).toEqual(['Confirmo a reunião de amanhã']);
+    expect((await api('GET', 'rooms.info', { roomId: ch._id }, A)).room.msgs).toBe(1);
+    // O _id de outra pessoa não devolve a mensagem dela: a nova sai com outro _id.
+    const u = await newUser(A);
+    await api('POST', 'channels.invite', { roomId: ch._id, userId: u.userId }, A);
+    const other = await send(u, ch._id, 'minha', { _id });
+    expect(other.message._id).not.toBe(_id);
+    expect(other.message.msg).toBe('minha');
+  });
+});

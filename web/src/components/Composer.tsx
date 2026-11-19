@@ -12,7 +12,7 @@ import { formatBytes, roomPath } from '../lib/format';
 import { mentionGroups, mentionSuggestions } from '../lib/messageRules';
 import { whenText } from '../lib/messageTimes';
 import { realtime } from '../lib/realtime';
-import { registerComposer, useStickers } from '../lib/stickers';
+import { clientMessageId, registerComposer, useStickers } from '../lib/stickers';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { namesIn, useNames } from '../lib/names';
 import { Icon, type IconName } from './Icon';
@@ -135,6 +135,12 @@ function ComposerView({
   const [scheduleSheet, setScheduleSheet] = useState(false);
   const [scheduleCustom, setScheduleCustom] = useState(false);
   const sendPress = useRef<{ timer: number; fired: boolean } | null>(null);
+  // Envio em andamento (rede lenta): Enter e o botão não mandam de novo. O _id vem daqui; reenviar o mesmo texto depois
+  // de uma falha usa o mesmo, e o servidor devolve a mensagem que já tinha saído, sem cópia.
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const sendKey = useRef<{ key: string; id: string } | null>(null);
+  const textNow = useRef('');
   // Folha "Agendar envio" aberta pelo toque longo: o clique que vem ao soltar o dedo cai em cima dela e é descartado.
   const swallowSheetClicks = useRef(0);
   const pickerRequest = useStickers((s) => s.pickerRequest);
@@ -369,12 +375,16 @@ function ComposerView({
   };
 
   const over = text.length > maxSize;
+  textNow.current = text;
 
   const send = async () => {
+    if (sendingRef.current) return;
     let msg = text.trim();
     if (!msg && !pending.length) return;
     if (msg.length > maxSize) return useStore.getState().toast(`A mensagem excede ${maxSize} caracteres.`, 'error');
     sendTyping(false);
+    sendingRef.current = true;
+    setSending(true);
     try {
       if (room?.encrypted) {
         if (!(await sendE2e(msg))) return;
@@ -384,15 +394,25 @@ function ComposerView({
       } else {
         const attachments = quoting ? [{ text: quoting.msg, author_name: quoting.u.username, ts: quoting.ts, message_link: `?msg=${quoting._id}` }] : undefined;
         const ackRequired = ackOption && askAck && !tmid ? true : undefined;
-        await api.post('chat.sendMessage', { message: { rid, msg, tmid, tshow: tmid ? alsoChannel || undefined : undefined, attachments, ackRequired } });
+        const key = JSON.stringify([rid, tmid ?? '', msg, quoting?._id ?? '', !!alsoChannel, !!ackRequired]);
+        const _id = sendKey.current?.key === key ? sendKey.current.id : clientMessageId();
+        sendKey.current = { key, id: _id };
+        await api.post('chat.sendMessage', { message: { _id, rid, msg, tmid, tshow: tmid ? alsoChannel || undefined : undefined, attachments, ackRequired } });
+        sendKey.current = null;
         if (quoting) setQuoting(null);
       }
-      setText('');
-      saveDraft('');
-      reqSeq.current++;
-      setSugs([]);
+      // O que a pessoa começou a escrever enquanto a mensagem saía fica no compositor.
+      if (textNow.current.trim() === msg) {
+        setText('');
+        saveDraft('');
+        reqSeq.current++;
+        setSugs([]);
+      }
     } catch (e) {
       useStore.getState().toast(errorMessage(e), 'error');
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
   };
 
@@ -900,7 +920,7 @@ function ComposerView({
             <button type="button" className="btn small ghost" onClick={cancelEdit}>
               Cancelar
             </button>
-            <button type="button" className="btn primary small send save" onClick={send} disabled={!text.trim() || over}>
+            <button type="button" className="btn primary small send save" onClick={send} disabled={!text.trim() || over || sending} aria-busy={sending || undefined}>
               Salvar
             </button>
           </span>
@@ -921,12 +941,13 @@ function ComposerView({
               type="button"
               className="btn primary send"
               onClick={onSendClick}
-              disabled={!text.trim() || over}
-              title={phone && schedulable ? 'Enviar (segure para agendar)' : 'Enviar'}
+              disabled={!text.trim() || over || sending}
+              aria-busy={sending || undefined}
+              title={sending ? 'Enviando…' : phone && schedulable ? 'Enviar (segure para agendar)' : 'Enviar'}
               {...sendPressProps}
             >
-              <Icon name="send" size={18} />
-              <span className="visually-hidden">Enviar</span>
+              {sending ? <span className="spinner" aria-hidden="true" /> : <Icon name="send" size={18} />}
+              <span className="visually-hidden">{sending ? 'Enviando…' : 'Enviar'}</span>
             </button>
             {!phone && schedulable && <ScheduleArrow onPick={(at) => void schedule(at)} onCustom={() => setScheduleCustom(true)} />}
           </span>
