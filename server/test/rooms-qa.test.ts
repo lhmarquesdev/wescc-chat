@@ -155,6 +155,17 @@ describe('leitura de quem envia', () => {
     await api('POST', 'chat.sendMessage', { message: { rid, msg: 'e aqui também', tmid: root.message._id, tshow: true } }, ana);
     expect((await sub(rid, ana)).unread).toBe(0);
   });
+
+  it('resposta só na thread, sem nada novo na conversa: fica "lida por todos" quando os outros leem', async () => {
+    const c = await api('POST', 'channels.create', { name: uniq('recibo'), members: [ana.username] }, bia);
+    const rid = c.channel._id;
+    const root = await api('POST', 'chat.sendMessage', { message: { rid, msg: 'raiz' } }, bia);
+    await api('POST', 'subscriptions.read', { rid }, ana);
+    const rep = await api('POST', 'chat.sendMessage', { message: { rid, msg: 'só na thread', tmid: root.message._id } }, ana);
+    await api('POST', 'subscriptions.read', { rid }, bia);
+    const m = await api('GET', 'chat.getMessage', { msgId: rep.message._id }, bia);
+    expect(m.message.unread).toBeFalsy();
+  });
 });
 
 describe('membros ao vivo', () => {
@@ -223,6 +234,19 @@ describe('nomes e limites ao criar', () => {
     const d = await api('POST', 'rooms.createDiscussion', { prid: c.channel._id, t_name: 'x'.repeat(250) }, ana);
     expect(d.error).toBe('O nome da discussão pode ter no máximo 200 caracteres.');
     expect((await api('POST', 'rooms.createDiscussion', { prid: c.channel._id, t_name: '' }, ana)).error).toBe('Informe o nome da discussão.');
+    // Renomear a discussão segue o mesmo limite.
+    const disc = (await api('POST', 'rooms.createDiscussion', { prid: c.channel._id, t_name: 'Escala' }, ana)).discussion;
+    expect((await api('POST', 'rooms.saveRoomSettings', { rid: disc._id, roomName: 'x'.repeat(201) }, ana)).error).toBe('O nome da discussão pode ter no máximo 200 caracteres.');
+    expect((await api('POST', 'rooms.saveRoomSettings', { rid: disc._id, roomName: ' ' }, ana)).error).toBe('Informe o nome da discussão.');
+    expect((await api('POST', 'rooms.saveRoomSettings', { rid: disc._id, roomName: 'Escala de dezembro' }, ana)).success).toBe(true);
+  });
+
+  it('nome que não é texto: 400 com o motivo, não erro interno', async () => {
+    const c = await create(uniq('renomear'));
+    const r1 = await api('POST', 'rooms.saveRoomSettings', { rid: c.channel._id, roomName: { a: 1 } }, ana);
+    expect([r1.status, r1.error]).toEqual([400, 'O nome precisa ser um texto.']);
+    const r2 = await api('POST', 'channels.rename', { roomId: c.channel._id, name: 123 }, ana);
+    expect([r2.status, r2.error]).toEqual([400, 'O nome precisa ser um texto.']);
   });
 
   it('mensagem direta com mais de 8 pessoas além de você', async () => {

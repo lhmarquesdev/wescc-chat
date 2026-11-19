@@ -522,7 +522,9 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
       validateRoomName(s.roomName);
       const other = await getRoomByName(s.roomName);
       if (other && other.id !== rid) throw badRequest('error-duplicate-channel-name', 'Já existe uma sala com esse nome.');
-    }
+    } else if (typeof s.roomName !== 'string' || !s.roomName.trim()) throw badRequest('error-invalid-params', 'Informe o nome da discussão.');
+    // Discussão: o mesmo limite de quando ela é criada.
+    else if (s.roomName.length > 200) throw badRequest('error-invalid-params', 'O nome da discussão pode ter no máximo 200 caracteres.');
     sets.push(`name = $${params.push(s.roomName)}`, `fname = $${params.length}`);
     sys.push(['r', s.roomName]);
     if (room.team_main && room.team_id) await query('UPDATE teams SET name = $2 WHERE id = $1', [room.team_id, s.roomName]);

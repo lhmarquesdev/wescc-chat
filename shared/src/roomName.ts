@@ -6,8 +6,9 @@ export const ROOM_NAME_MAX = 64;
 const ALNUM = /[0-9a-zA-ZÀ-ÖØ-öø-ſ]/;
 const ALLOWED = /[0-9a-zA-ZÀ-ÖØ-öø-ſ._-]/;
 
-export function roomNameProblem(name: string): string | null {
-  if (!name) return 'Informe o nome.';
+export function roomNameProblem(name: unknown): string | null {
+  if (name === undefined || name === null || name === '') return 'Informe o nome.';
+  if (typeof name !== 'string') return 'O nome precisa ser um texto.';
   if (name.length > ROOM_NAME_MAX) return `O nome pode ter no máximo ${ROOM_NAME_MAX} caracteres.`;
   const bad = [...name].find((c) => !ALLOWED.test(c));
   if (bad) return /\s/.test(bad) ? 'O nome não pode ter espaços.' : `O caractere “${bad}” não é permitido. Use letras, números, ponto, hífen ou sublinhado.`;
