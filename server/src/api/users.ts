@@ -33,6 +33,7 @@ import {
   resetPasswordWithToken,
   resetAvatar,
   revokeAllSessions,
+  revokePersonalTokens,
   revokeSession,
   setAvatar,
   setPreferences,
@@ -189,9 +190,11 @@ export function usersRoutes(app: FastifyInstance) {
   route(app, 'GET', 'users.getPersonalAccessTokens', { permissions: ['create-personal-access-tokens'] }, async (_req, _rep, ctx) => ({
     tokens: await listPersonalTokens(ctx.userId),
   }));
-  route(app, 'POST', 'users.generatePersonalAccessToken', { permissions: ['create-personal-access-tokens'] }, async (req, _rep, ctx) => ({
-    token: await createPersonalToken(ctx, str(b(req).tokenName, 'tokenName', { max: 100 }), !!bool(b(req).bypassTwoFactor)),
-  }));
+  route(app, 'POST', 'users.generatePersonalAccessToken', { permissions: ['create-personal-access-tokens'] }, async (req, _rep, ctx) => {
+    const body = b(req);
+    const confirm = { password: typeof body.password === 'string' ? body.password : undefined, code: typeof body.code === 'string' ? body.code : undefined };
+    return { token: await createPersonalToken(ctx, str(body.tokenName, 'tokenName', { max: 100 }), !!bool(body.bypassTwoFactor), confirm) };
+  });
   route(app, 'POST', 'users.removePersonalAccessToken', {}, async (req, _rep, ctx) => {
     await removePersonalToken(ctx.userId, str(b(req).tokenName, 'tokenName'));
     return {};
@@ -465,8 +468,10 @@ export function usersRoutes(app: FastifyInstance) {
     if (userId !== ctx.userId && !(await hasPermission(ctx.userId, 'logout-other-user'))) throw forbidden();
     if (userId !== ctx.userId) await assertCanManageUser(ctx, userId);
     const n = await revokeAllSessions(userId);
-    await audit(actorOf(ctx), 'user.logout.all', { userId }, { sessions: n });
-    return { message: `Sessões encerradas: ${n}` };
+    // Encerrar as sessões de outra pessoa (conta invadida, desligamento) também revoga os tokens de acesso dela.
+    const tokens = userId !== ctx.userId ? await revokePersonalTokens(userId) : 0;
+    await audit(actorOf(ctx), 'user.logout.all', { userId }, { sessions: n, tokens });
+    return { message: `Sessões encerradas: ${n}${tokens ? `. Tokens de acesso revogados: ${tokens}` : ''}` };
   });
   // Ativar, desativar e encerrar sessões em lote (a tela seleciona até 500 pessoas): uma chamada só, sem esbarrar no
   // limite de chamadas por minuto. Ficam de fora quem tem cadeado (papéis acima dos seus) e a própria conta.
@@ -488,12 +493,15 @@ export function usersRoutes(app: FastifyInstance) {
   route(app, 'POST', 'users.bulkLogout', { permissions: ['logout-other-user'] }, async (req, _rep, ctx) => {
     const { targets, skipped } = await bulkAccountTargets(ctx, b(req).userIds);
     let sessions = 0;
+    let tokens = 0;
     for (const t of targets) {
       const n = await revokeAllSessions(t.id);
-      await audit(actorOf(ctx), 'user.logout.all', { userId: t.id }, { sessions: n, bulk: true });
+      const k = await revokePersonalTokens(t.id);
+      await audit(actorOf(ctx), 'user.logout.all', { userId: t.id }, { sessions: n, tokens: k, bulk: true });
       sessions += n;
+      tokens += k;
     }
-    return { users: targets.length, sessions, skipped };
+    return { users: targets.length, sessions, tokens, skipped };
   });
   route(app, 'POST', 'users.resetTOTP', { permissions: ['edit-other-user-totp'] }, async (req, _rep, ctx) => {
     const userId = str(b(req).userId, 'userId');

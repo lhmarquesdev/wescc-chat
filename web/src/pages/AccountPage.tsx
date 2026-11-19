@@ -759,6 +759,7 @@ export function TwoFactorCard() {
 
 function Devices() {
   const { data, loading, reload } = useAsync(() => api.get('sessions.list', { count: 100 }), []);
+  const canTokens = useStore((s) => s.me?.permissions.includes('create-personal-access-tokens'));
   const allowAll = useSetting<boolean>('Device_Management_Allow_Logout_All');
   const others = (data?.sessions ?? []).filter((s: any) => !s.current).length;
   const logoutOthers = async () => {
@@ -774,6 +775,12 @@ function Devices() {
       <PageHead title="Dispositivos" />
       <p className="page-lead">
         Cada login cria uma sessão. Encerre as que você não reconhece. “Dispositivo novo” marca o primeiro acesso da conta por um navegador ou programa.
+        {canTokens && (
+          <>
+            {' '}
+            Tokens de acesso (scripts e integrações) não aparecem aqui e continuam valendo: revogue-os em <NavLink to="/account/tokens">Tokens de acesso</NavLink>.
+          </>
+        )}
       </p>
       {/* Abaixo do texto, não no cabeçalho: a barra de 56px fica igual à das outras páginas da conta. */}
       {allowAll && others > 0 && (
@@ -849,16 +856,24 @@ function Tokens() {
   const { data, loading, reload } = useAsync(() => api.get('users.getPersonalAccessTokens'), []);
   const me = useStore((s) => s.me)!;
   const [name, setName] = useState('');
-  const [bypass, setBypass] = useState(false);
   const [token, setToken] = useState('');
   const [creating, setCreating] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const tokens: any[] = data?.tokens ?? [];
+  // Criar pede a senha (e o código do 2FA): uma sessão esquecida aberta não vira acesso permanente à API.
+  const twoFAOn = useSetting<boolean>('Accounts_TwoFactorAuthentication_Enabled') !== false;
+  const needsPassword = !me.authSource || me.authSource === 'local';
+  const needsCode = !!me.twoFactorEnabled && twoFAOn;
+  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const ready = !!name.trim() && (!needsPassword || !!password) && (!needsCode || !!code);
+  const close = () => (setCreating(false), setName(''), setPassword(''), setCode(''));
   const generate = () =>
     api
-      .post('users.generatePersonalAccessToken', { tokenName: name, bypassTwoFactor: bypass })
-      .then((r) => (setToken(r.token), setName(''), setCreating(false), reload()))
+      .post('users.generatePersonalAccessToken', { tokenName: name, password: needsPassword ? password : undefined, code: needsCode ? code : undefined })
+      .then((r) => (setToken(r.token), close(), reload()))
       .catch(fail);
+  const onEnter = (e: React.KeyboardEvent) => e.key === 'Enter' && ready && generate();
   const revoke = async (t: any) => {
     const yes = await confirmDialog({ title: `Revogar o token "${t.name}"?`, body: 'Scripts e integrações que usam este token param de funcionar.', confirmLabel: 'Revogar', danger: true });
     if (!yes) return;
@@ -921,14 +936,35 @@ function Tokens() {
         <div className="card token-form">
           <div className="form">
             <Field label="Nome do token" hint="Para reconhecer onde ele é usado, como “Relatório diário”.">
-              <input ref={input} placeholder="Nome do token" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && name && generate()} />
+              <input ref={input} placeholder="Nome do token" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={onEnter} />
             </Field>
-            <Toggle checked={bypass} onChange={setBypass} label="Ignorar 2FA" description="O token funciona sem pedir o código do autenticador." />
+            {needsPassword && (
+              <Field label="Sua senha" hint="Para confirmar que é você.">
+                <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={onEnter} />
+              </Field>
+            )}
+            {needsCode && (
+              <Field label="Código do 2FA" hint="O código do aplicativo autenticador ou um código de backup.">
+                <input
+                  className="otp-input"
+                  autoComplete="one-time-code"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  maxLength={11}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\s/g, ''))}
+                  onKeyDown={onEnter}
+                />
+              </Field>
+            )}
+            <p className="muted small">
+              O token usa a API com as suas permissões, sem pedir o código do 2FA. Ele é revogado se a sua senha for redefinida ou se um administrador encerrar as suas sessões.
+            </p>
             <div className="form-actions">
-              <button className="btn" onClick={() => (setCreating(false), setName(''))}>
+              <button className="btn" onClick={close}>
                 Cancelar
               </button>
-              <button className="btn primary" disabled={!name} onClick={generate}>
+              <button className="btn primary" disabled={!ready} onClick={generate}>
                 Gerar
               </button>
             </div>
@@ -980,7 +1016,6 @@ function Tokens() {
                       </span>
                       <div>
                         <span className="cell-name">{t.name}</span>
-                        {t.bypassTwoFactor && <span className="cell-sub">Ignora 2FA</span>}
                       </div>
                     </div>
                   </td>

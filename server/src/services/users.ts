@@ -330,6 +330,14 @@ export async function revokeAllSessions(userId: string, exceptSessionId?: string
   return rows.length;
 }
 
+// Tokens de acesso pessoal saem junto quando a conta é retomada (senha redefinida, senha trocada ou sessões
+// encerradas pelo administrador): senão quem invadiu continuaria na API. Os sockets abertos com eles fecham.
+export async function revokePersonalTokens(userId: string) {
+  const rows = await many('DELETE FROM personal_access_tokens WHERE user_id = $1 RETURNING id', [userId]);
+  if (rows.length) bus.forceLogout({ sessionIds: rows.map((r) => `pat:${r.id}`) });
+  return rows.length;
+}
+
 // ---------- Redefinição de senha por e-mail ----------
 
 const RESET_TTL_MIN = 60;
@@ -396,16 +404,17 @@ export async function resetPasswordWithToken(token: string, password: string, ip
   await query('UPDATE users SET password_hash = $2, require_password_change = false, updated_at = now() WHERE id = $1', [u.id, await hashPassword(password)]);
   await query('DELETE FROM password_resets WHERE user_id = $1', [u.id]);
   await query('DELETE FROM login_attempts WHERE key = $1', [loginKey(`id:${u.id}`)]);
-  // Quem estava com a senha antiga (inclusive um invasor) sai de todos os dispositivos.
+  // Quem estava com a senha antiga (inclusive um invasor) sai de todos os dispositivos e perde os tokens de acesso.
   await revokeAllSessions(u.id);
-  await audit({ id: u.id, username: u.username, ip }, 'user.password.reset', { userId: u.id });
+  const tokens = await revokePersonalTokens(u.id);
+  await audit({ id: u.id, username: u.username, ip }, 'user.password.reset', { userId: u.id }, { tokensRevoked: tokens });
   if (u.email) {
     const { sendMail } = await import('./mailer');
     const site = getSetting<string>('Site_Name');
     void sendMail({
       to: u.email,
       subject: `[${site}] Sua senha foi alterada`,
-      text: `Olá, ${u.name || u.username}.\n\nA senha da sua conta no ${site} acabou de ser redefinida e todas as sessões foram encerradas. Se não foi você, fale com o administrador imediatamente.`,
+      text: `Olá, ${u.name || u.username}.\n\nA senha da sua conta no ${site} acabou de ser redefinida: todas as sessões foram encerradas e os tokens de acesso foram revogados. Se não foi você, fale com o administrador imediatamente.`,
     });
   }
 }
@@ -526,8 +535,13 @@ export async function updateUser(
   if (data.name !== undefined && data.name !== u.name) await query('UPDATE messages SET user_name = $2 WHERE user_id = $1', [userId, data.name]);
   if (data.active === false) {
     await revokeAllSessions(userId);
+    // Também os sockets abertos com token de acesso pessoal (a API já recusa a conta desativada).
+    bus.forceLogout({ userId });
   }
-  if (data.password && !self) await revokeAllSessions(userId);
+  if (data.password && !self) {
+    await revokeAllSessions(userId);
+    await revokePersonalTokens(userId);
+  }
   if (!self || data.active !== undefined) {
     await audit(actorOf(actor), 'user.updated', { userId, username: row.username }, { fields: Object.keys(data).filter((k) => k !== 'password'), passwordChanged: !!data.password });
   }
@@ -677,10 +691,16 @@ export async function resetAvatar(userId: string) {
 
 // ---------- Tokens pessoais ----------
 
-export async function createPersonalToken(ctx: Ctx, name: string, bypass2fa: boolean) {
+// Pede a senha (contas com senha local) e o código do 2FA (quando ligado), como redefinir a criptografia: uma sessão
+// roubada não vira um acesso à API que fica depois de a pessoa recuperar a conta.
+export async function createPersonalToken(ctx: Ctx, name: string, bypass2fa: boolean, confirm: { password?: string; code?: string } = {}) {
   const token = randomToken();
   if (await one('SELECT 1 FROM personal_access_tokens WHERE user_id = $1 AND name = $2', [ctx.userId, name]))
     throw badRequest('error-token-already-exists', 'Já existe um token com esse nome.');
+  const u = await getUserById(ctx.userId);
+  if (u.password_hash && !(await verifyPassword(confirm.password ?? '', u.password_hash))) throw badRequest('error-invalid-password', 'Senha atual incorreta.');
+  if (u.totp_enabled && getSetting('Accounts_TwoFactorAuthentication_Enabled') && !(await check2fa(u, confirm.code ?? '')))
+    throw badRequest('invalid-totp', 'Código de verificação inválido ou já usado.');
   await query('INSERT INTO personal_access_tokens (id, user_id, name, token_hash, bypass_2fa) VALUES ($1,$2,$3,$4,$5)', [
     newId(),
     ctx.userId,
@@ -698,7 +718,8 @@ export async function listPersonalTokens(userId: string) {
 }
 
 export async function removePersonalToken(userId: string, name: string) {
-  await query('DELETE FROM personal_access_tokens WHERE user_id = $1 AND name = $2', [userId, name]);
+  const rows = await many('DELETE FROM personal_access_tokens WHERE user_id = $1 AND name = $2 RETURNING id', [userId, name]);
+  if (rows.length) bus.forceLogout({ sessionIds: rows.map((r) => `pat:${r.id}`) });
 }
 
 // ---------- Primeira execução ----------

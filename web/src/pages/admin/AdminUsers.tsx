@@ -185,7 +185,7 @@ function UserList() {
   const logoutSelected = async () => {
     const yes = await confirmDialog({
       title: `Encerrar as sessões de ${plural(others.length, 'pessoa', 'pessoas')}?`,
-      body: `Elas saem da conta em todos os dispositivos e precisam entrar de novo.${selfNote}`,
+      body: `Elas saem da conta em todos os dispositivos e precisam entrar de novo. Os tokens de acesso delas também são revogados.${selfNote}`,
       confirmLabel: 'Encerrar sessões',
       danger: true,
     });
@@ -211,7 +211,7 @@ function UserList() {
   const logoutOne = async (u: any) => {
     const yes = await confirmDialog({
       title: `Encerrar as sessões de @${u.username}?`,
-      body: 'A pessoa sai da conta em todos os dispositivos e precisa entrar de novo.',
+      body: 'A pessoa sai da conta em todos os dispositivos e precisa entrar de novo. Os tokens de acesso dela também são revogados.',
       confirmLabel: 'Encerrar sessões',
       danger: true,
     });

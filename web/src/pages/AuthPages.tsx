@@ -328,7 +328,7 @@ export function ResetPasswordPage() {
       <AuthShell title="Senha redefinida">
         <div className="callout ok">
           <Icon name="success" />
-          <span>Por segurança, todas as sessões abertas foram encerradas.</span>
+          <span>Por segurança, todas as sessões abertas foram encerradas e os tokens de acesso foram revogados.</span>
         </div>
         <Link className="btn primary lg full block" to="/login">
           Entrar

@@ -307,7 +307,7 @@ function Security({
   const [e2eKeys, setE2eKeys] = useState(user.e2eConfigured !== false);
   const list = sessions.data ?? [];
   const logout = async () => {
-    const yes = await confirmDialog({ title: `Encerrar as sessões de @${user.username}?`, body: 'A pessoa sai da conta em todos os dispositivos e precisa entrar de novo.', confirmLabel: 'Encerrar sessões', danger: true });
+    const yes = await confirmDialog({ title: `Encerrar as sessões de @${user.username}?`, body: 'A pessoa sai da conta em todos os dispositivos e precisa entrar de novo. Os tokens de acesso dela também são revogados.', confirmLabel: 'Encerrar sessões', danger: true });
     if (yes)
       api
         .post('users.logout', { userId: id })
