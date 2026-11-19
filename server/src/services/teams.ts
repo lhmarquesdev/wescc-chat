@@ -203,6 +203,10 @@ export async function removeTeamMember(ctx: Ctx, team: any, userId: string, room
   const owners = await one(`SELECT count(*)::int AS n FROM team_members WHERE team_id = $1 AND 'owner' = ANY(roles) AND user_id <> $2`, [team.id, userId]);
   const target = await one('SELECT roles FROM team_members WHERE team_id = $1 AND user_id = $2', [team.id, userId]);
   if (!target) throw badRequest('error-user-not-in-team', 'Usuário não está no time.');
+  // Como na sala: dono só sai pela mão de quem define donos (outro dono ou administrador), não de um moderador.
+  if (ctx.userId !== userId && (target.roles.includes('owner') || (await getSubscriptionRow(team.room_id, userId))?.roles.includes('owner'))) {
+    if (!(await hasPermission(ctx.userId, 'set-owner', team.room_id))) throw forbidden('Só donos podem silenciar ou remover outro dono.');
+  }
   if (target.roles.includes('owner') && owners.n === 0) throw badRequest('error-you-are-last-owner', 'Não é possível remover o último dono do time.');
   await removeUserFromRoom(team.room_id, userId, { by: { id: ctx.userId, username: ctx.username } });
   for (const rid of rooms) {

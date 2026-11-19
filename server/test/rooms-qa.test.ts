@@ -91,6 +91,20 @@ describe('moderador e dono', () => {
     expect((await api('POST', 'rooms.muteUser', { roomId: rid, userId: d.userId }, bia)).success).toBe(true);
     expect((await api('POST', 'channels.kick', { roomId: rid, userId: d.userId }, bia)).success).toBe(true);
   });
+
+  it('no time, o moderador também não tira um dono pelo teams.removeMember', async () => {
+    const t = (await api('POST', 'teams.create', { name: uniq('time-hier'), type: 0 }, ana)).team;
+    expect((await api('POST', 'teams.addMembers', { teamId: t._id, members: [{ userId: bia.userId }, { userId: caio.userId }] }, ana)).success).toBe(true);
+    expect((await api('POST', 'channels.addModerator', { roomId: t.roomId, userId: bia.userId }, ana)).success).toBe(true);
+    expect((await api('POST', 'channels.addOwner', { roomId: t.roomId, userId: caio.userId }, ana)).success).toBe(true);
+    const r = await api('POST', 'teams.removeMember', { teamId: t._id, userId: caio.userId }, bia);
+    expect([r.status, r.error]).toEqual([403, 'Só donos podem silenciar ou remover outro dono.']);
+    // Membro comum o moderador tira; outro dono tira o dono.
+    const d = await newUser(A, { roles: ['user'] });
+    await api('POST', 'teams.addMembers', { teamId: t._id, members: [{ userId: d.userId }] }, ana);
+    expect((await api('POST', 'teams.removeMember', { teamId: t._id, userId: d.userId }, bia)).success).toBe(true);
+    expect((await api('POST', 'teams.removeMember', { teamId: t._id, userId: caio.userId }, ana)).success).toBe(true);
+  });
 });
 
 describe('imagem da sala', () => {
