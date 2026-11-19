@@ -1106,7 +1106,7 @@ const ACTIVITY_TEXT: Record<string, (d: Record<string, any>) => string> = {
   'file.download': (d) => `baixou ${d.name}`,
   'file.rename': (d) => `renomeou ${d.from} para ${d.to}`,
   'file.move.in': (d) => `trouxe ${d.name}${d.from ? ` de ${d.from}` : ''}`,
-  'file.move.out': (d) => `levou ${d.name} para ${d.to}`,
+  'file.move.out': (d) => `levou ${d.name} para ${d.to ?? 'outra pasta'}`,
   'file.trash': (d) => `mandou ${d.name} para a lixeira`,
   'file.restore': (d) => `restaurou ${d.name}`,
   'file.purge': (d) => `apagou ${d.name} de vez`,

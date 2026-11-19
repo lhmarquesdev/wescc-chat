@@ -241,3 +241,45 @@ describe('arquivos', () => {
     expect(audit).not.toBeNull();
   });
 });
+
+describe('subpasta restrita dentro de uma pasta que outra pessoa gerencia', () => {
+  let rh = '';
+  let secret = '';
+  beforeAll(async () => {
+    rh = (await api('POST', 'files.folder.create', { name: 'RH' }, A)).folder._id;
+    await share(rh, [{ type: 'user', id: A.userId, level: 3 }, { type: 'user', id: bruno.userId, level: 3 }, { type: 'user', id: carla.userId, level: 2 }], A);
+    secret = (await api('POST', 'files.folder.create', { name: 'Demissões sigilosas', parentId: rh }, A)).folder._id;
+    const s = await share(secret, [{ type: 'user', id: carla.userId, level: 3 }], A, false);
+    expect(s.success, JSON.stringify(s)).toBe(true);
+    expect((await up(secret, 'desligamento-fulano.pdf', 'sigilo', carla, 'application/pdf')).success).toBe(true);
+  });
+
+  it('o histórico da pasta de cima não mostra nada da subpasta restrita para quem não a acessa', async () => {
+    // carla leva um arquivo de RH para a subpasta restrita: RH registra para onde foi.
+    const f = await up(rh, 'carta.txt', 'carta', carla);
+    expect((await api('POST', 'files.move', { fileIds: [f.file._id], targetId: secret }, carla)).success).toBe(true);
+    const r = await api('GET', 'files.activity', { folderId: rh }, bruno);
+    expect(r.success, JSON.stringify(r)).toBe(true);
+    const text = JSON.stringify(r.events);
+    expect(text).not.toContain('desligamento-fulano');
+    expect(text).not.toContain('Demissões sigilosas');
+    expect(text).not.toContain(secret);
+    expect(r.events.find((e: any) => e.action === 'file.move.out').data.to).toBe('uma pasta que você não acessa');
+    expect(r.total).toBe(r.events.length);
+    // Quem gerencia todas as pastas vê tudo.
+    const all = JSON.stringify((await api('GET', 'files.activity', { folderId: rh }, A)).events);
+    expect(all).toContain('desligamento-fulano');
+    expect(all).toContain('Demissões sigilosas');
+  });
+
+  it('evento antigo, sem o id da subpasta, também some pelo nome', async () => {
+    await query("INSERT INTO drive_activity (id, folder_id, actor_id, actor_username, action, data) VALUES ('legadoAAAAAAAAAAA', $1, $2, 'admin', 'folder.add', $3)", [
+      rh,
+      A.userId,
+      JSON.stringify({ name: 'Demissões sigilosas' }),
+    ]);
+    const r = await api('GET', 'files.activity', { folderId: rh }, bruno);
+    expect(r.events.map((e: any) => e._id)).not.toContain('legadoAAAAAAAAAAA');
+    expect((await api('GET', 'files.activity', { folderId: rh }, A)).events.map((e: any) => e._id)).toContain('legadoAAAAAAAAAAA');
+  });
+});

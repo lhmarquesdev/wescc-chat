@@ -251,23 +251,49 @@ export async function recent(ctx: Ctx) {
   return { files: rows.map((r) => fileOut(r, users, { path: acc.path(r.folder_id), level: acc.level(r.folder_id) })) };
 }
 
+const MOVE_ACTIONS = new Set(['file.move.in', 'file.move.out', 'folder.move']);
+
 export async function activity(ctx: Ctx, folderId: unknown, opts: { offset?: number; count?: number }) {
   const acc = await loadAccess(ctx);
   const f = needFolder(acc, folderId, 3, { allowTrashed: true });
   const count = Math.min(opts.count ?? 50, 200);
+  // O histórico é de quem gerencia cada pasta: subpasta restrita que a pessoa não gerencia fica de fora. Os eventos da
+  // pasta de cima que citam uma subpasta que ela nem vê (criada, mandada para a lixeira, apagada) também saem; os
+  // antigos, sem o id da subpasta (sub), pelo nome.
+  const tree = acc.subtree(f.id);
+  const hidden = tree.filter((id) => acc.level(id) === 0);
+  const hiddenNames = hidden.map((id) => `${acc.folders.get(id)!.parent_id}/${acc.folders.get(id)!.name.toLowerCase()}`);
   const rows = await many(
     `SELECT a.*, u.name AS actor_name, count(*) OVER() AS total FROM drive_activity a LEFT JOIN users u ON u.id = a.actor_id
-     WHERE a.folder_id = ANY($1) ORDER BY a.created_at DESC LIMIT ${count} OFFSET ${Number(opts.offset ?? 0)}`,
-    [acc.subtree(f.id)],
+     WHERE a.folder_id = ANY($1)
+       AND NOT coalesce(a.data->>'sub' = ANY($2), false)
+       AND NOT (a.action IN ('folder.add', 'folder.trash', 'folder.purge') AND NOT a.data ? 'sub' AND a.folder_id || '/' || lower(a.data->>'name') = ANY($3))
+       AND ($4 OR a.action <> 'folder.purge' OR a.data->>'restricted' IS DISTINCT FROM 'true')
+     ORDER BY a.created_at DESC LIMIT ${count} OFFSET ${Number(opts.offset ?? 0)}`,
+    [tree.filter((id) => acc.level(id) >= 3), hidden, hiddenNames, acc.all],
   );
-  const events: DriveActivity[] = rows.map((r) => ({
-    _id: r.id,
-    action: r.action,
-    actor: { _id: r.actor_id, username: r.actor_username, name: r.actor_name || undefined },
-    fileId: r.file_id,
-    data: { ...r.data, folder: r.folder_id !== f.id ? acc.folders.get(r.folder_id)?.name : undefined },
-    ts: iso(r.created_at)!,
-  }));
+  // De onde veio ou para onde foi (mover): pasta que a pessoa não vê não tem o nome mostrado. Eventos antigos, sem o id
+  // (fromId/toId), pelo nome.
+  const seen = new Set<string>();
+  const unseen = new Set<string>();
+  for (const x of acc.folders.values()) (acc.level(x.id) > 0 ? seen : unseen).add(x.name.toLowerCase());
+  const shown = (id: unknown, name: unknown) =>
+    typeof id === 'string' ? acc.level(id) > 0 : typeof name !== 'string' || !unseen.has(name.toLowerCase()) || seen.has(name.toLowerCase());
+  const events: DriveActivity[] = rows.map((r) => {
+    const { sub: _sub, restricted: _restricted, fromId, toId, ...data } = r.data ?? {};
+    if (MOVE_ACTIONS.has(r.action)) {
+      if (data.from && !shown(fromId, data.from)) data.from = 'uma pasta que você não acessa';
+      if (data.to && !shown(toId, data.to)) data.to = 'uma pasta que você não acessa';
+    }
+    return {
+      _id: r.id,
+      action: r.action,
+      actor: { _id: r.actor_id, username: r.actor_username, name: r.actor_name || undefined },
+      fileId: r.file_id,
+      data: { ...data, folder: r.folder_id !== f.id ? acc.folders.get(r.folder_id)?.name : undefined },
+      ts: iso(r.created_at)!,
+    };
+  });
   return { total: Number(rows[0]?.total ?? 0), events };
 }
 
@@ -315,7 +341,7 @@ export async function createFolder(ctx: Ctx, input: { parentId?: unknown; name?:
     throw e;
   }
   await logActivity(ctx, id, null, 'folder.create', { name });
-  if (parentId) await logActivity(ctx, parentId, null, 'folder.add', { name });
+  if (parentId) await logActivity(ctx, parentId, null, 'folder.add', { name, sub: id });
   changed(parentId, id);
   const fresh = await loadAccess(ctx);
   return (await foldersOut(fresh, [fresh.folders.get(id)!]))[0];
@@ -360,7 +386,7 @@ export async function moveItems(ctx: Ctx, input: { fileIds?: string[]; folderIds
     await query('UPDATE drive_folders SET parent_id = $2, name = $3, updated_at = now() WHERE id = $1', [f.id, targetId, name]);
     // Pasta que vira principal precisa de alguém que gerencie: quem moveu.
     if (!targetId) await query("INSERT INTO drive_acl (folder_id, subject_type, subject_id, level, granted_by) VALUES ($1,'user',$2,3,$2) ON CONFLICT DO NOTHING", [f.id, ctx.userId]);
-    await logActivity(ctx, f.id, null, 'folder.move', { from: f.parent_id ? acc.folders.get(f.parent_id)?.name : null, to: target?.name ?? null });
+    await logActivity(ctx, f.id, null, 'folder.move', { from: f.parent_id ? acc.folders.get(f.parent_id)?.name : null, to: target?.name ?? null, fromId: f.parent_id, toId: targetId });
     touched.add(f.parent_id).add(f.id);
   }
   if (fileIds.length) {
@@ -373,8 +399,8 @@ export async function moveItems(ctx: Ctx, input: { fileIds?: string[]; folderIds
       const name = nextFreeName(r.name, taken);
       taken.add(name.toLowerCase());
       await query('UPDATE drive_files SET folder_id = $2, name = $3, updated_at = now() WHERE id = $1', [r.id, target!.id, name]);
-      await logActivity(ctx, r.folder_id, r.id, 'file.move.out', { name: r.name, to: target!.name });
-      await logActivity(ctx, target!.id, r.id, 'file.move.in', { name, from: acc.folders.get(r.folder_id)?.name });
+      await logActivity(ctx, r.folder_id, r.id, 'file.move.out', { name: r.name, to: target!.name, toId: target!.id });
+      await logActivity(ctx, target!.id, r.id, 'file.move.in', { name, from: acc.folders.get(r.folder_id)?.name, fromId: r.folder_id });
       touched.add(r.folder_id);
     }
   }
@@ -588,7 +614,7 @@ export async function trashItems(ctx: Ctx, input: { fileIds?: string[]; folderId
     const f = needFolder(acc, id, 3);
     await query('UPDATE drive_folders SET trashed_at = now(), trashed_by = $2 WHERE id = $1', [f.id, ctx.userId]);
     await logActivity(ctx, f.id, null, 'folder.trash', { name: f.name });
-    if (f.parent_id) await logActivity(ctx, f.parent_id, null, 'folder.trash', { name: f.name });
+    if (f.parent_id) await logActivity(ctx, f.parent_id, null, 'folder.trash', { name: f.name, sub: f.id });
     touched.add(f.parent_id).add(f.id);
   }
   for (const id of (input.fileIds ?? []).slice(0, 500)) {
@@ -663,7 +689,8 @@ export async function purgeItems(ctx: Ctx, input: { fileIds?: string[]; folderId
     const f = needFolder(acc, id, 3, { allowTrashed: true });
     if (!f.trashed_at) throw badRequest('error-not-in-trash', 'Mande para a lixeira antes de apagar de vez.');
     removed += await purgeFolderTree(acc.subtree(f.id));
-    if (f.parent_id) await logActivity(ctx, f.parent_id, null, 'folder.purge', { name: f.name });
+    // Depois de apagada não dá mais para saber quem a via: restrita, só quem gerencia todas as pastas vê o evento.
+    if (f.parent_id) await logActivity(ctx, f.parent_id, null, 'folder.purge', { name: f.name, sub: f.id, restricted: !f.inherit });
     await audit({ id: ctx.userId, username: ctx.username, ip: ctx.ip }, 'drive.folder.purge', { folderId: f.id, name: f.name });
   }
   for (const id of fileIds) {
