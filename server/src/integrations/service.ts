@@ -91,6 +91,26 @@ async function assertOwnTarget(ctx: Ctx, target: string, outgoing: boolean) {
   if (!room || !(await canAccessRoom(ctx.userId, room))) throw badRequest('error-invalid-channel', `Canal não encontrado ou sem acesso: ${c}. Escolha uma sala de que você participa.`);
 }
 
+// Destino que não existe (ou grupo privado sem o usuário da integração) era aceito ao salvar e toda chamada falhava
+// depois. "publish": o usuário da integração publica ali (webhook de entrada e "Responder em outra sala").
+async function assertTarget(target: string, user: { id: string; username: string }, publish: boolean) {
+  const c = target.trim();
+  if (ALL_TARGETS.includes(c)) {
+    if (publish) throw badRequest('error-invalid-channel', `Escolha um canal (#canal) ou uma pessoa (@usuário) em vez de ${c}.`);
+    return;
+  }
+  if (c.startsWith('@')) {
+    if (!(await one('SELECT 1 FROM users WHERE lower(username) = lower($1) AND active', [c.slice(1)]))) throw badRequest('error-invalid-channel', `Usuário não encontrado: ${c}`);
+    return;
+  }
+  const name = c.replace(/^#/, '');
+  const room = (await getRoom(name)) ?? (await getRoomByName(name));
+  if (!room) throw badRequest('error-invalid-channel', `Canal não encontrado: ${c}`);
+  if (publish && room.t !== 'c' && !(await getSubscriptionRow(room.id, user.id))) {
+    throw badRequest('error-not-member', `O usuário @${user.username} não participa de ${c}. Adicione-o à sala ou escolha outra.`);
+  }
+}
+
 function normalizeChannels(v: unknown): string[] {
   const list = Array.isArray(v) ? v : String(v ?? '').split(',');
   return list.map((c) => String(c).trim()).filter(Boolean);
@@ -137,6 +157,11 @@ async function validate(ctx: Ctx, input: IntegrationInput) {
   if (input.type === 'webhook-incoming' && !channels.length) throw badRequest('error-invalid-channel', 'Informe o canal de destino (#canal ou @usuário).');
   if (input.type === 'webhook-outgoing') {
     if (!OUTGOING_EVENTS.includes(input.event as OutgoingEvent)) throw badRequest('error-invalid-event', 'Evento inválido.');
+    // Antes, 99 tentativas viravam 10 sem aviso.
+    if (input.retryFailedCalls !== false && input.retryCount !== undefined) {
+      const n = Number(input.retryCount);
+      if (!Number.isInteger(n) || n < 0 || n > 10) throw badRequest('error-invalid-retry-count', 'Tentativas: use um número inteiro de 0 a 10.');
+    }
     const urls = (input.urls ?? []).map((u) => u.trim()).filter(Boolean);
     if (!urls.length) throw badRequest('error-invalid-urls', 'Informe ao menos uma URL.');
     for (const u of urls) {
@@ -155,6 +180,8 @@ async function validate(ctx: Ctx, input: IntegrationInput) {
     if (outgoing && input.impersonateUser) throw badRequest('error-not-allowed', 'Só quem gerencia todas as integrações pode responder como o usuário que disparou.');
     if (input.scriptEnabled) throw badRequest('error-not-allowed', 'Só quem gerencia todas as integrações pode usar scripts.');
   }
+  for (const c of channels) await assertTarget(c, user, input.type === 'webhook-incoming');
+  if (input.type === 'webhook-outgoing' && input.targetRoom?.trim()) await assertTarget(input.targetRoom, user, true);
   if (input.script) compileScript(input.script); // erros de sintaxe voltam ao administrador
   return { user, channels };
 }
@@ -420,36 +447,56 @@ export async function handleIncoming(id: string, token: string, req: { body: unk
   if (!row || row.token !== token) throw notFound('error-invalid-integration', 'Integração não encontrada.');
   if (!row.enabled) throw badRequest('error-integration-disabled', 'Integração desativada.');
   let body: any = req.body ?? {};
-  // Formato do Slack: payload=<json> em form-urlencoded.
-  if (typeof body === 'object' && typeof body.payload === 'string') {
-    try {
-      body = JSON.parse(body.payload);
-    } catch {
-      throw badRequest('error-invalid-payload', 'payload inválido.');
+  // Cada chamada fica no histórico do webhook (antes só os erros de script, que a tela nem mostrava).
+  let step = 'failed';
+  let scriptError: string | undefined;
+  const log = (s: string, extra: { status?: number; error?: string }) => history(row.id, 'incoming', s, { data: received(body), finished: true, ...extra }).catch(() => {});
+  try {
+    // Formato do Slack: payload=<json> em form-urlencoded.
+    if (typeof body === 'object' && typeof body.payload === 'string') {
+      try {
+        body = JSON.parse(body.payload);
+      } catch {
+        throw badRequest('error-invalid-payload', 'payload inválido.');
+      }
     }
-  }
-  let content: PostContent = typeof body === 'object' ? body : { text: String(body) };
-  const restricted = await restrictedRow(row);
-  if (row.script_enabled && !restricted) {
-    const r = runScript(row, 'process_incoming_request', { request: { url: { href: req.url, query: req.query }, headers: req.headers, content: body, content_raw: JSON.stringify(body) } });
-    if (!r.ok) {
-      await history(row.id, 'incoming', 'script-error', { data: body, error: r.error });
-      throw badRequest('error-running-script', 'Erro ao executar o script da integração.');
+    let content: PostContent = typeof body === 'object' ? body : { text: String(body) };
+    const restricted = await restrictedRow(row);
+    if (row.script_enabled && !restricted) {
+      const r = runScript(row, 'process_incoming_request', { request: { url: { href: req.url, query: req.query }, headers: req.headers, content: body, content_raw: JSON.stringify(body) } });
+      if (!r.ok) {
+        step = 'script-error';
+        scriptError = r.error;
+        throw badRequest('error-running-script', 'Erro ao executar o script da integração.');
+      }
+      if (r.result?.error) throw badRequest('error-script', String(r.result.error.message ?? 'Rejeitado pelo script.'));
+      if (r.result === null) {
+        await log('skipped-by-script', { status: 200 });
+        return { success: true };
+      }
+      if (r.result?.content) content = r.result.content;
     }
-    if (r.result?.error) throw badRequest('error-script', String(r.result.error.message ?? 'Rejeitado pelo script.'));
-    if (r.result === null) return { success: true };
-    if (r.result?.content) content = r.result.content;
+    if (!content.text && !content.msg && !content.attachments?.length) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+    // Integração própria: o channel/roomId do payload só escolhe entre os canais configurados nela.
+    if (restricted && (content.roomId || content.channel)) {
+      const key = (c: string) => c.trim().replace(/^#/, '').toLowerCase();
+      const configured = new Set<string>(row.channels.map(key));
+      const asked = content.roomId ? [String(content.roomId)] : normalizeChannels(content.channel);
+      if (asked.some((c) => !configured.has(key(c)))) throw forbidden('Esta integração só publica nos canais configurados nela.');
+    }
+    const messages = await postAs(row, content, row.channels);
+    await log('received', { status: 200 });
+    return { success: true, messages: messages.length };
+  } catch (e: any) {
+    await log(step, { status: e?.statusCode ?? 500, error: scriptError ?? String(e?.message ?? e) });
+    throw e;
   }
-  if (!content.text && !content.msg && !content.attachments?.length) throw badRequest('error-invalid-message', 'Mensagem vazia.');
-  // Integração própria: o channel/roomId do payload só escolhe entre os canais configurados nela.
-  if (restricted && (content.roomId || content.channel)) {
-    const key = (c: string) => c.trim().replace(/^#/, '').toLowerCase();
-    const configured = new Set<string>(row.channels.map(key));
-    const asked = content.roomId ? [String(content.roomId)] : normalizeChannels(content.channel);
-    if (asked.some((c) => !configured.has(key(c)))) throw forbidden('Esta integração só publica nos canais configurados nela.');
-  }
-  const messages = await postAs(row, content, row.channels);
-  return { success: true, messages: messages.length };
+}
+
+// O que chegou fica no histórico até 4 KB: o corpo pode ter até 2 MB e o histórico guarda 200 chamadas.
+function received(body: unknown) {
+  const raw = JSON.stringify(body ?? null) ?? 'null';
+  return raw.length > 4000 ? `${raw.slice(0, 4000)}…` : (body ?? null);
 }
 
 // ---------- Saída ----------

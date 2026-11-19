@@ -43,7 +43,16 @@ const OUTGOING_SCRIPT = `class Script {
 
 type Kind = 'webhook-incoming' | 'webhook-outgoing';
 
-const STEP_LABEL: Record<string, string> = { sent: 'Enviado', failed: 'Falhou', 'script-error': 'Erro no script' };
+const STEP_LABEL: Record<string, string> = {
+  sent: 'Enviado',
+  received: 'Recebido',
+  failed: 'Falhou',
+  retrying: 'Tentando de novo',
+  'script-error': 'Erro no script',
+  'skipped-by-script': 'Ignorado pelo script',
+  'replied-by-script': 'Respondido pelo script',
+};
+const STEP_PILL: Record<string, string> = { sent: 'ok', received: 'ok', 'replied-by-script': 'ok', failed: 'err', 'script-error': 'err', retrying: 'warn' };
 
 export function AdminIntegrations() {
   const [tab, setTab] = useState<Kind>('webhook-incoming');
@@ -128,12 +137,10 @@ export function AdminIntegrations() {
                   </td>
                   <td className="actions-col">
                     <div className="row-actions">
-                      {tab === 'webhook-outgoing' && (
-                        <button className="btn small ghost" onClick={(e) => (e.stopPropagation(), setHistoryOf(i))}>
-                          <Icon name="last-seen" />
-                          Histórico
-                        </button>
-                      )}
+                      <button className="btn small ghost" onClick={(e) => (e.stopPropagation(), setHistoryOf(i))}>
+                        <Icon name="last-seen" />
+                        Histórico
+                      </button>
                       <button className="btn small ghost" onClick={(e) => (e.stopPropagation(), setEdit(i))}>
                         <Icon name="edit" />
                         Editar
@@ -354,6 +361,7 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
 }
 
 function History({ integration, onClose }: { integration: any; onClose: () => void }) {
+  const incoming = integration.type === 'webhook-incoming';
   const [offset, setOffset] = useState(0);
   const { data, loading, reload } = useAsync(() => api.get('integrations.history', { id: integration._id, offset, count: 25 }), [offset]);
   const clear = async () => {
@@ -381,22 +389,23 @@ function History({ integration, onClose }: { integration: any; onClose: () => vo
         <SkeletonList n={4} />
       ) : !data?.history.length ? (
         <Empty icon="last-seen" title="Nenhuma chamada ainda">
-          Cada disparo deste webhook aparece aqui, com a resposta do sistema chamado.
+          {incoming ? 'Cada chamada recebida por este webhook aparece aqui, com o conteúdo enviado e o erro, se houver.' : 'Cada disparo deste webhook aparece aqui, com a resposta do sistema chamado.'}
         </Empty>
       ) : (
         <ul className="plain-list history-list">
           {data.history.map((h: any) => (
             <li key={h._id}>
               <div className="history-head">
-                <span className={h.step === 'sent' ? 'pill ok dot' : h.step === 'failed' || h.step === 'script-error' ? 'pill err dot' : 'pill dot'}>{STEP_LABEL[h.step] ?? h.step}</span>
+                <span className={`pill dot ${STEP_PILL[h.step] ?? ''}`}>{STEP_LABEL[h.step] ?? h.step}</span>
                 <span className="muted small">
-                  {EVENT_LABEL[h.event] ?? h.event} · {formatDateTime(h._createdAt)}
+                  {h.event === 'incoming' ? 'Chamada recebida' : (EVENT_LABEL[h.event] ?? h.event)} · {formatDateTime(h._createdAt)}
                 </span>
                 {h.httpStatus ? <span className="pill tag">HTTP {h.httpStatus}</span> : null}
               </div>
               {h.url && <div className="mono small">{h.url}</div>}
               {h.error && <div className="neg small">{h.error}</div>}
               {h.response && <pre className="md-pre small">{h.response.slice(0, 600)}</pre>}
+              {incoming && h.data != null && <pre className="md-pre small">{(typeof h.data === 'string' ? h.data : JSON.stringify(h.data, null, 2)).slice(0, 600)}</pre>}
             </li>
           ))}
         </ul>
