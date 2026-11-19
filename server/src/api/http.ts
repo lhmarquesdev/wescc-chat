@@ -113,8 +113,13 @@ export function errorHandler(err: any, req: FastifyRequest, reply: FastifyReply)
 export const q = (req: FastifyRequest<any>) => (req.query ?? {}) as Record<string, string>;
 export const b = (req: FastifyRequest<any>) => (req.body ?? {}) as Record<string, any>;
 
+// Números fora do normal (1e309 vira Infinity, 1.5, -3) não chegam ao SQL.
 export function paging(query: Record<string, string>) {
-  return { offset: Math.max(0, Number(query.offset ?? 0) || 0), count: Math.max(1, Math.min(500, Number(query.count ?? 25) || 25)) };
+  const int = (v: unknown, def: number) => {
+    const n = Number(v ?? def);
+    return Number.isNaN(n) ? def : Number.isFinite(n) ? Math.floor(n) : n > 0 ? Number.MAX_SAFE_INTEGER : 0;
+  };
+  return { offset: Math.min(1_000_000, Math.max(0, int(query.offset, 0))), count: Math.max(1, Math.min(500, int(query.count, 25) || 25)) };
 }
 
 export function str(v: unknown, name: string, opts: { optional?: boolean; max?: number } = {}): string {

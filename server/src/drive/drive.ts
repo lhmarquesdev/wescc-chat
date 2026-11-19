@@ -259,7 +259,8 @@ const MOVE_ACTIONS = new Set(['file.move.in', 'file.move.out', 'folder.move']);
 export async function activity(ctx: Ctx, folderId: unknown, opts: { offset?: number; count?: number }) {
   const acc = await loadAccess(ctx);
   const f = needFolder(acc, folderId, 3, { allowTrashed: true });
-  const count = Math.min(opts.count ?? 50, 200);
+  const count = Math.min(Math.max(1, Math.floor(opts.count ?? 50)), 200);
+  const offset = Math.min(Math.max(0, Math.floor(opts.offset ?? 0)), 1_000_000);
   // O histórico é de quem gerencia cada pasta: subpasta restrita que a pessoa não gerencia fica de fora. Os eventos da
   // pasta de cima que citam uma subpasta que ela nem vê (criada, mandada para a lixeira, apagada) também saem; os
   // antigos, sem o id da subpasta (sub), pelo nome.
@@ -272,8 +273,8 @@ export async function activity(ctx: Ctx, folderId: unknown, opts: { offset?: num
        AND NOT coalesce(a.data->>'sub' = ANY($2), false)
        AND NOT (a.action IN ('folder.add', 'folder.trash', 'folder.purge') AND NOT a.data ? 'sub' AND a.folder_id || '/' || lower(a.data->>'name') = ANY($3))
        AND ($4 OR a.action <> 'folder.purge' OR a.data->>'restricted' IS DISTINCT FROM 'true')
-     ORDER BY a.created_at DESC LIMIT ${count} OFFSET ${Number(opts.offset ?? 0)}`,
-    [tree.filter((id) => acc.level(id) >= 3), hidden, hiddenNames, acc.all],
+     ORDER BY a.created_at DESC LIMIT $5 OFFSET $6`,
+    [tree.filter((id) => acc.level(id) >= 3), hidden, hiddenNames, acc.all, count, offset],
   );
   // De onde veio ou para onde foi (mover): pasta que a pessoa não vê não tem o nome mostrado. Eventos antigos, sem o id
   // (fromId/toId), pelo nome.

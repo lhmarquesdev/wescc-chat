@@ -428,3 +428,23 @@ describe('subpasta restrita dentro de uma pasta que outra pessoa gerencia', () =
     expect((await api('GET', 'files.activity', { folderId: rh }, A)).events.map((e: any) => e._id)).toContain('legadoAAAAAAAAAAA');
   });
 });
+
+describe('nomes, avisos e limites', () => {
+  let eq = '';
+  let hidden = '';
+  beforeAll(async () => {
+    eq = (await api('POST', 'files.folder.create', { name: 'Equipe' }, A)).folder._id;
+    await share(eq, [{ type: 'user', id: A.userId, level: 3 }, { type: 'user', id: bruno.userId, level: 2 }, { type: 'user', id: carla.userId, level: 3 }], A);
+    hidden = (await api('POST', 'files.folder.create', { name: 'Avaliações individuais', parentId: eq }, A)).folder._id;
+    await share(hidden, [{ type: 'user', id: carla.userId, level: 3 }], A, false);
+  });
+
+  it('histórico com offset ou count fora do normal não dá erro 500', async () => {
+    for (const offset of ['1e309', '-5', '1.5', 'abc', '99999999999999999999']) {
+      const x = await api('GET', 'files.activity', { folderId: eq, offset }, carla);
+      expect(x.status, offset).toBe(200);
+    }
+    expect((await api('GET', 'files.activity', { folderId: eq, offset: '1e309' }, carla)).events).toEqual([]);
+    expect((await api('GET', 'files.activity', { folderId: eq, count: '1e309' }, carla)).events.length).toBeGreaterThan(0);
+  });
+});
