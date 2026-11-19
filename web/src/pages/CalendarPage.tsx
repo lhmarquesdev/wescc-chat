@@ -21,7 +21,8 @@ import {
   weekdayShort,
   whenLabel,
 } from '../lib/calendar';
-import { usePermission, useStore } from '../lib/store';
+import { ApiError } from '../lib/api';
+import { usePermission, useSetting, useStore } from '../lib/store';
 import { EventDetails } from '../components/calendar/EventDetails';
 import { EventEditor, type EditorStart } from '../components/calendar/EventEditor';
 import { Icon } from '../components/Icon';
@@ -55,6 +56,7 @@ export function CalendarPage() {
   const location = useLocation();
   const toast = useStore((s) => s.toast);
   const canMeet = usePermission('create-calendar-meeting');
+  const calendarOn = useSetting<boolean>('Calendar_Enabled') !== false;
   const [view, setViewState] = useState<View>(() => readView(phone));
   const [cursor, setCursor] = useState(() => startOfDay(new Date()));
   const [editor, setEditor] = useState<EditorStart | null>(null);
@@ -82,6 +84,25 @@ export function CalendarPage() {
   }, [view, cursor]);
   const { events, error, reload } = useCalendarEvents(span.from, span.to);
 
+  // Os detalhes abertos acompanham a agenda: a cada recarga (resposta de convidado, mudança, cancelamento) trocam pela
+  // cópia nova. Fora do período na tela ou cancelado, o evento é buscado de novo; sem acesso (a pessoa saiu da lista), fecha.
+  const openId = open?._id;
+  useEffect(() => {
+    if (!openId || !events) return;
+    const swap = (e: CalendarEvent | null) => setOpen((cur) => (cur?._id === openId ? e : cur));
+    const fresh = events.find((e) => e._id === openId);
+    if (fresh) return void swap(fresh);
+    let alive = true;
+    calendarApi
+      .get(openId)
+      .then((e) => alive && swap(e))
+      .catch((e) => alive && e instanceof ApiError && e.status === 404 && swap(null));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
+
   // ?evento=<id> (push, convite) abre o evento.
   const handled = useRef<string | null>(null);
   useEffect(() => {
@@ -92,6 +113,25 @@ export function CalendarPage() {
     if (id) void calendarApi.get(id).then(setOpen).catch(() => toast('Esse evento não existe mais ou não é seu.', 'warning'));
     if (id) navigate({ pathname: location.pathname, search: '' }, { replace: true });
   }, [location.key, location.search, location.pathname, navigate, toast]);
+
+  // Agenda desligada pelo administrador: um aviso claro, sem "Tentar de novo" e sem os botões de criar.
+  if (!calendarOn)
+    return (
+      <div className="page cal-page">
+        <header className="page-head cal-head">
+          <h1 data-eyebrow="Organização">Agenda</h1>
+        </header>
+        <div className="cal-layout">
+          <div className="cal-main">
+            <div className="card cal-empty">
+              <Empty icon="nav-calendar" title="A Agenda está desativada">
+                A Agenda está desativada neste chat. Fale com o administrador.
+              </Empty>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
 
   const move = (dir: -1 | 1) => {
     if (view === 'month') setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + dir, 1));

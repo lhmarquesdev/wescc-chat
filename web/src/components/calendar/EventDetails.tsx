@@ -70,7 +70,8 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
     }
   };
 
-  const canRespond = event.myResponse !== 'organizer';
+  const canceled = event.status === 'canceled';
+  const canRespond = event.myResponse !== 'organizer' && !canceled;
   const meetPath = event.meeting ? `/meet/${event.meeting.code}` : null;
 
   return (
@@ -80,7 +81,7 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
       className="cal-details"
       description={event.meeting ? 'Reunião do chat' : undefined}
       footer={
-        event.canEdit ? (
+        event.canEdit && !canceled ? (
           <>
             <button type="button" className="btn ghost danger" disabled={!!busy} aria-busy={busy === 'cancel' || undefined} onClick={() => void cancel()}>
               {event.meeting ? 'Cancelar reunião' : 'Cancelar evento'}
@@ -94,12 +95,18 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
       }
     >
       <div className="cal-detail">
+        {canceled && (
+          <div className="callout warn" role="status">
+            <Icon name="cal-canceled" />
+            <span>{event.meeting ? 'Esta reunião foi cancelada.' : 'Este evento foi cancelado.'}</span>
+          </div>
+        )}
         <Row icon="cal-time">
           <strong>{whenLabel(event)}</strong>
           {event.reminderMinutes !== null && <small className="muted">Lembrete: {reminderLabel(event.reminderMinutes)}</small>}
         </Row>
 
-        {event.meeting && (
+        {event.meeting && !canceled && (
           <div className="cal-meet-box">
             <div className="cal-meet-link">
               <Icon name="cal-meeting" size={18} />

@@ -17,6 +17,7 @@ export function MeetPage() {
   const { code = '' } = useParams();
   const navigate = useNavigate();
   const callsOn = useSetting<boolean>('Calls_Enabled') !== false;
+  const calendarOn = useSetting<boolean>('Calendar_Enabled') !== false;
   const { data, error, reload } = useAsync<MeetingInfo>(() => calendarApi.meeting(code), [code]);
   const [busy, setBusy] = useState<'video' | 'chat' | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -42,7 +43,13 @@ export function MeetPage() {
   };
 
   let body;
-  if (error)
+  if (!calendarOn)
+    body = (
+      <Empty icon="nav-calendar" title="A Agenda está desativada">
+        A Agenda e as reuniões estão desativadas neste chat. Fale com o administrador.
+      </Empty>
+    );
+  else if (error)
     body = (
       <Empty
         icon="cal-canceled"
@@ -137,7 +144,7 @@ export function MeetPage() {
     <div className="page meet-page">
       <div className="meet-wrap">
         {body}
-        {error && (
+        {error && calendarOn && (
           <button type="button" className="btn ghost small" onClick={reload}>
             Tentar de novo
           </button>
