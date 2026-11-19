@@ -1,5 +1,5 @@
 import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { OAuthProviderPublic, OAuthProviderType } from '@shared/index';
 import { api, ApiError, errorMessage, getCredentials } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
@@ -127,6 +127,9 @@ export function LoginPage() {
   // entrar ou ir para outra tela. Apagar ao abrir perderia o aviso no recarregamento que vem logo depois da saída.
   const [reason] = useState(peekLogoutReason);
   useEffect(() => clearLogoutReason, []);
+  // Já conectado (/login nos favoritos): vai direto para o chat em vez de mostrar o formulário e abrir mais uma sessão.
+  // Se a sessão guardada não vale mais, a API recusa, a credencial sai e a pessoa volta para cá com o aviso.
+  const [signedIn] = useState(() => !!getCredentials() && !params.get('saml') && !params.get('oauth'));
 
   useEffect(() => {
     void api
@@ -174,6 +177,7 @@ export function LoginPage() {
     }
   };
 
+  if (signedIn) return <Navigate to={next} replace />;
   return (
     <AuthShell
       title={needCode ? 'Verificação em duas etapas' : 'Bem-vindo de volta'}
