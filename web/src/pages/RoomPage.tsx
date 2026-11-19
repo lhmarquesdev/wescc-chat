@@ -24,6 +24,7 @@ import { MessageList } from '../components/MessageList';
 import { NoticeBar } from '../components/NoticeBar';
 import { RoomPanel, type PanelId } from '../components/RoomPanels';
 import { ThreadPanel } from '../components/ThreadPanel';
+import { JoinCodeDialog } from '../components/JoinCodeDialog';
 import { UserCard } from '../components/UserCard';
 import { useIsPhone } from '../components/overlay';
 import { Empty, GroupAvatar, Menu, Skeleton, SkeletonMessages, UserAvatar, confirmDialog, useDelay } from '../components/ui';
@@ -233,6 +234,7 @@ export function RoomPage() {
   const [quoting, setQuoting] = useState<Message | null>(null);
   const [discussionFrom, setDiscussionFrom] = useState<Message | null>(null);
   const [userCard, setUserCard] = useState<{ username: string; anchor: HTMLElement | null } | null>(null);
+  const [askCode, setAskCode] = useState(false);
   const [roomRoles, setRoomRoles] = useState<string[]>([]);
   const panel = params.get('tab') as PanelId | null;
   const presence = useStore((s) => (room?.t === 'd' && sub && !sub.name.includes(',') ? s.presence[sub.name] : undefined));
@@ -485,9 +487,9 @@ export function RoomPage() {
 
   const name = roomDisplayName(sub, room);
   const join = async () => {
+    if (room.joinCodeRequired) return setAskCode(true);
     try {
-      const code = room.joinCodeRequired ? prompt('Esta sala exige um código de acesso:') ?? undefined : undefined;
-      await api.post('channels.join', { roomId: rid, joinCode: code });
+      await api.post('channels.join', { roomId: rid });
     } catch (e) {
       useStore.getState().toast(errorMessage(e), 'error');
     }
@@ -772,12 +774,15 @@ export function RoomPage() {
             />
           ) : (
             <div className="join-bar">
-              {room.t === 'c' ? (
+              {room.t === 'c' && room.archived ? (
+                <span>{hashName} está arquivado: dá para ler o histórico, mas não para entrar.</span>
+              ) : room.t === 'c' ? (
                 <>
                   <span>Você está vendo uma prévia de {hashName}</span>
                   <button className="btn primary" onClick={join}>
                     Entrar no canal
                   </button>
+                  {askCode && <JoinCodeDialog rid={rid} name={room.fname || room.name || ''} onClose={() => setAskCode(false)} onJoined={() => setAskCode(false)} />}
                 </>
               ) : (
                 <span>Você não participa desta sala.</span>

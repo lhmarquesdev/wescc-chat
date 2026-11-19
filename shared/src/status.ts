@@ -17,6 +17,18 @@ export const STATUS_TYPES: UserStatus[] = ['online', 'away', 'busy', 'offline'];
 export const MAX_CUSTOM_STATUSES = 30;
 export const STATUS_NAME_MAX = 40;
 export const RESERVED_STATUS_NAMES = ['Disponível', 'Ausente', 'Ocupado', 'Offline', 'Invisível'];
+// Mensagem de status: 120 como o maxLength dos campos (unidades UTF-16), cortada sem partir um emoji no meio (a metade
+// que sobrava virava "�").
+export const STATUS_TEXT_MAX = 120;
+export function clampStatusText(s: string): string {
+  if (s.length <= STATUS_TEXT_MAX) return s;
+  let out = '';
+  for (const ch of s) {
+    if (out.length + ch.length > STATUS_TEXT_MAX) break;
+    out += ch;
+  }
+  return out;
+}
 const RESERVED = new Set(RESERVED_STATUS_NAMES.map(foldText));
 
 export const isStatusType = (v: unknown): v is UserStatus => typeof v === 'string' && (STATUS_TYPES as string[]).includes(v);
@@ -50,13 +62,19 @@ export function shownCustomStatus(p: { status: UserStatus; statusCustom?: string
 // base, só a mensagem (o ponto colorido já diz o resto). Sem mensagem, o rótulo.
 export const statusLine = (label: string, custom: boolean, text?: string | null) => (text ? (custom ? `${label} · ${text}` : text) : label);
 
-// NFC, espaços colapsados, 1..40; não pode ser (sem acento) um nome reservado.
+// NFC, espaços colapsados, 1..40, com pelo menos uma letra ou número; não pode ser (sem acento) um nome reservado.
+// Caracteres invisíveis (largura zero, controle) saem antes: um nome só com eles virava uma linha vazia no menu, e
+// "Em pausa" com um deles no meio passava por outro nome. Fica só o ZWJ entre dois emojis, onde ele os junta
+// (👩‍💻); colado numa letra ("Ocupado" + ZWJ) ele sai também.
+const LOOSE_ZWJ = /(^|[^\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F])\u200d|\u200d(?!\p{Extended_Pictographic})/gu;
 export function normalizeStatusName(
   raw: unknown,
 ): { ok: true; name: string } | { ok: false; error: string; code: 'error-invalid-name' | 'error-status-name-reserved' } {
-  const name = typeof raw === 'string' ? raw.normalize('NFC').replace(/\s+/g, ' ').trim() : '';
+  const name = typeof raw === 'string' ? raw.normalize('NFC').replace(/[\p{Cc}\p{Cf}]/gu, (c) => (/\s/.test(c) ? ' ' : c === '\u200d' ? c : '')).replace(LOOSE_ZWJ, '$1').replace(/\s+/g, ' ').trim() : '';
   const len = [...name].length;
-  if (len < 1 || len > STATUS_NAME_MAX) return { ok: false, code: 'error-invalid-name', error: `O nome precisa ter de 1 a ${STATUS_NAME_MAX} caracteres.` };
+  const typed = typeof raw === 'string' && !!raw.trim();
+  if (len > STATUS_NAME_MAX || (len < 1 && !typed)) return { ok: false, code: 'error-invalid-name', error: `O nome precisa ter de 1 a ${STATUS_NAME_MAX} caracteres.` };
+  if (!/[\p{L}\p{N}]/u.test(name)) return { ok: false, code: 'error-invalid-name', error: 'Use letras ou números no nome.' };
   if (RESERVED.has(foldText(name))) return { ok: false, code: 'error-status-name-reserved', error: 'Esse nome já é de um status padrão.' };
   return { ok: true, name };
 }

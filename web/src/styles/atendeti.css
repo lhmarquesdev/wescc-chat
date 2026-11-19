@@ -723,6 +723,10 @@
   max-width: none;
   margin-inline: calc(var(--space-8) * -1);
 }
+/* O rodapé ("1 convite ativo.") sangra como a tabela e devolve o recuo: o texto alinha com a primeira coluna. */
+.page-body > .table-wrap + .table-foot {
+  padding-inline: var(--space-8);
+}
 .page-body > .page-head + .table-wrap,
 .page-body > .page-head + .table {
   margin-top: calc(var(--space-6) * -1);
@@ -750,6 +754,44 @@
 }
 :where(.card .table-wrap .table td:first-child) {
   background: hsl(var(--card));
+}
+/* A tabela sangra só o recuo que a página tem em cada largura (24px no tablet, 16px no celular): com os 32px do
+   desktop ela passava da borda da tela e cortava os cartões. */
+@media (max-width: 1199px) {
+  .page-body > .table-wrap,
+  .page-body > .pager,
+  .page-body > .table-wrap + .table-foot {
+    margin-inline: calc(var(--space-6) * -1);
+  }
+  .page-body > .table-wrap .table :where(th, td):first-child {
+    padding-left: var(--space-6);
+  }
+  .page-body > .table-wrap .table :where(th, td):last-child {
+    padding-right: var(--space-6);
+  }
+  .page-body > .table-wrap + .table-foot {
+    padding-inline: var(--space-6);
+  }
+}
+@media (max-width: 760px) {
+  .page-body > .table-wrap,
+  .page-body > .pager,
+  .page-body > .table-wrap + .table-foot {
+    margin-inline: calc(var(--space-4) * -1);
+  }
+  .page-body > .table-wrap .table :where(th, td):first-child {
+    padding-left: var(--space-4);
+  }
+  .page-body > .table-wrap .table :where(th, td):last-child {
+    padding-right: var(--space-4);
+  }
+  .page-body > .table-wrap + .table-foot {
+    padding-inline: var(--space-4);
+  }
+  /* Em cartões (.stack) o recuo é o da linha: a primeira célula alinha com os rótulos das outras. */
+  .page-body > .table-wrap .table.stack td:where(:first-child, :last-child) {
+    padding-inline: 0;
+  }
 }
 
 /* Papéis: a faixa nunca quebra; o contador some antes de apertar as peças. */

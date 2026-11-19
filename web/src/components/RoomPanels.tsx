@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Message, Room, Subscription } from '@shared/index';
-import { stickerPreviewText } from '@shared/stickers';
+import { messagePreviewText, stickerPreviewText } from '@shared/stickers';
 import { statusLine } from '@shared/status';
 import { api, errorMessage } from '../lib/api';
 import { partyOf, useDirect } from '../lib/direct';
@@ -163,6 +163,21 @@ function resultBody(m: ReturnType<typeof useE2eMessage<Message>>) {
   const v = m.e2eView;
   if (v && v.state !== 'ok') return <em className="msg-e2e">{E2E_PLACEHOLDER[v.state]}</em>;
   if (v?.content?.file && !m.msg) return `📎 ${v.content.file.name}`;
+  // Arquivo sem texto: o nome (ou "Mensagem de voz") e a legenda, que a busca também acha.
+  if (!m.msg && m.files?.length) {
+    const caption = m.attachments?.find((a) => a.description)?.description;
+    return (
+      <>
+        {messagePreviewText(m)}
+        {caption && (
+          <>
+            <br />
+            {caption}
+          </>
+        )}
+      </>
+    );
+  }
   return renderMarkdown(m.msg, { me: useStore.getState().me?.username, mentions: m.mentions });
 }
 
@@ -184,8 +199,12 @@ function ResultHead({ m }: { m: Message }) {
 function MessageResult({ m: raw }: { m: Message }) {
   const m = useE2eMessage(raw);
   const navigate = useNavigate();
+  // Resposta de tópico (que não foi também para a sala) não está na conversa: abre o tópico e destaca a resposta lá.
+  const inThread = !!m.tmid && !(m as { tshow?: boolean }).tshow;
+  const base = location.pathname.split('/thread/')[0];
+  const open = () => (inThread ? navigate(`${base}/thread/${m.tmid}`, { state: { reply: m._id } }) : navigate(`${base}?msg=${m._id}`));
   return (
-    <button type="button" className="result" onClick={() => navigate(`${location.pathname.split('/thread/')[0]}?msg=${m._id}`)}>
+    <button type="button" className="result" onClick={open}>
       <ResultHead m={m} />
       <div className="result-body">{m.sticker ? <StickerView sticker={m.sticker} size="small" /> : resultBody(m)}</div>
     </button>
@@ -897,11 +916,32 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
   );
 }
 
-// Termos a destacar nos resultados: sem operadores (from:, has:…) nem /regex/; aspas viram uma frase.
+// Termos a destacar nos resultados: sem operadores (from:, has:…) nem /regex/; aspas viram uma frase. Dobrados
+// (foldText), como a busca: "reuniao" destaca "Reunião".
 function searchTerms(q: string) {
   return [...q.matchAll(/"([^"]+)"|(\S+)/g)]
-    .map((m) => (m[1] ?? m[2]).toLowerCase())
-    .filter((t) => t.length > 1 && !/^[a-z]+:/i.test(t) && !/^\/.*\/[a-z]*$/i.test(t));
+    .map((m) => m[1] ?? m[2])
+    // Um símbolo sozinho ("%", "!") também se destaca: é o que a busca achou.
+    .filter((t) => (t.length > 1 || /[^\p{L}\p{N}]/u.test(t)) && !/^[a-z]+:/i.test(t) && !/^\/.*\/[a-z]*$/i.test(t))
+    .map(foldText);
+}
+
+// Texto dobrado com, para cada posição, onde começa e onde termina no original o caractere de onde ela veio.
+function foldWithMap(s: string) {
+  let text = '';
+  const from: number[] = [];
+  const to: number[] = [];
+  for (let i = 0; i < s.length; ) {
+    const len = (s.codePointAt(i) ?? 0) > 0xffff ? 2 : 1;
+    const f = foldText(s.slice(i, i + len));
+    for (let k = 0; k < f.length; k++) {
+      from.push(i);
+      to.push(i + len);
+    }
+    text += f;
+    i += len;
+  }
+  return { text, from, to };
 }
 
 // Destaque com a CSS Custom Highlight API: não mexe no DOM que o React desenha. Sem suporte, fica sem destaque.
@@ -915,12 +955,12 @@ function useHighlight(ref: RefObject<HTMLElement | null>, terms: string[], key: 
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       if (!n.parentElement?.closest('.result-body')) continue;
-      const text = (n.textContent ?? '').toLowerCase();
+      const { text, from, to } = foldWithMap(n.textContent ?? '');
       for (const t of terms) {
         for (let i = text.indexOf(t); i >= 0; i = text.indexOf(t, i + t.length)) {
           const r = document.createRange();
-          r.setStart(n, i);
-          r.setEnd(n, i + t.length);
+          r.setStart(n, from[i]);
+          r.setEnd(n, to[i + t.length - 1]);
           ranges.push(r);
         }
       }
@@ -985,20 +1025,59 @@ function E2eSearchPanel({ room }: Props) {
   );
 }
 
+// Uma página de resultados; os filtros de data valem no fuso do navegador (o das horas que a pessoa vê).
+const SEARCH_PAGE = 50;
+const NO_RESULTS: Message[] = [];
+const searchPage = (roomId: string, searchText: string, offset: number) =>
+  api.get('chat.search', { roomId, searchText, count: SEARCH_PAGE, offset, tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
+
+// Filtro escolhido e ainda sem valor ("from:@", "after:"): o que falta digitar. A busca espera em vez de procurar o
+// operador como texto.
+function pendingFilter(q: string) {
+  const op = /(?:^|\s)(from:@?|in:#?|before:|after:|on:)$/i.exec(q)?.[1];
+  if (!op) return '';
+  if (/^from/i.test(op)) return `Digite o usuário depois de ${op} (ex.: from:@ana.souza).`;
+  if (/^in/i.test(op)) return `Digite o nome do canal depois de ${op}.`;
+  return `Digite a data depois de ${op} (AAAA-MM-DD ou DD/MM/AAAA).`;
+}
+
 function ServerSearchPanel({ room }: Props) {
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
   const list = useRef<HTMLDivElement>(null);
+  const filters = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const t = setTimeout(() => setQ(text.trim()), 300);
     return () => clearTimeout(t);
   }, [text]);
-  const { data, loading, error } = useAsync(() => (q ? api.get('chat.search', { roomId: room._id, searchText: q, count: 50 }) : Promise.resolve(null)), [q, room._id]);
+  const pending = pendingFilter(q);
+  const { data, loading, error } = useAsync(() => (q && !pending ? searchPage(room._id, q, 0) : Promise.resolve(null)), [q, room._id]);
+  // Escolher um filtro põe o operador na busca e volta ao campo com o cursor no fim, pronto para o nome ou a data.
+  const addTip = (op: string) => {
+    setText((t) => `${t.trim()} ${op}`.trim() + (op.endsWith(':') || op.endsWith('@') ? '' : ' '));
+    requestAnimationFrame(() => {
+      const input = filters.current?.querySelector('input');
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  };
+  // Páginas seguintes ("Carregar mais resultados"), da busca da primeira página.
+  const [more, setMore] = useState<{ of: unknown; messages: Message[]; loading: boolean; error: string }>({ of: null, messages: NO_RESULTS, loading: false, error: '' });
+  const extra = more.of === data ? more : { of: data, messages: NO_RESULTS, loading: false, error: '' };
+  const shown = useMemo(() => (data ? [...data.messages, ...extra.messages] : []), [data, extra.messages]);
+  const loadMore = () => {
+    const base = data;
+    setMore({ ...extra, loading: true, error: '' });
+    searchPage(room._id, q, shown.length)
+      .then((r) => setMore((x) => (x.of === base ? { ...x, messages: [...x.messages, ...r.messages], loading: false } : x)))
+      .catch((e) => setMore((x) => (x.of === base ? { ...x, loading: false, error: errorMessage(e) } : x)));
+  };
   const terms = searchTerms(q);
-  useHighlight(list, terms, data);
+  useHighlight(list, terms, shown);
   return (
     <>
-      <div className="panel-filters">
+      <div className="panel-filters" ref={filters}>
         <SearchInput autoFocus value={text} onChange={setText} placeholder="Buscar mensagens" />
         {/* Os filtros mais usados, com o que fazem, atrás de um toque: a nuvem de operadores parecia sintaxe de
             programador. Escolher um filtro põe o operador na busca. */}
@@ -1010,7 +1089,7 @@ function ServerSearchPanel({ room }: Props) {
           <ul className="search-help" aria-label="Operadores de busca">
             {SEARCH_TIPS.map(([op, what]) => (
               <li key={op}>
-                <button type="button" className="search-tip" onClick={() => setText((t) => `${t.trim()} ${op}`.trim() + (op.endsWith(':') || op.endsWith('@') ? '' : ' '))}>
+                <button type="button" className="search-tip" onClick={() => addTip(op)}>
                   <kbd>{op}</kbd>
                   <span>{what}</span>
                 </button>
@@ -1024,18 +1103,28 @@ function ServerSearchPanel({ room }: Props) {
         <Empty icon="search" title="Buscar nesta sala">
           Digite acima para procurar nas mensagens desta sala.
         </Empty>
+      ) : pending ? (
+        <Empty icon="search" title="Complete o filtro">
+          {pending}
+        </Empty>
       ) : loading ? (
         <div role="status" aria-label="Buscando…">
           <SkeletonList n={5} delay={0} />
         </div>
       ) : (
         data &&
-        (data.messages.length ? (
+        (shown.length ? (
           <div className="results" ref={list}>
-            <p className="results-count">{plural(data.messages.length, 'resultado', 'resultados')}</p>
-            {data.messages.map((m: Message) => (
+            <p className="results-count">{plural(Math.max(data.total ?? 0, shown.length), 'resultado', 'resultados')}</p>
+            {shown.map((m: Message) => (
               <MessageResult key={m._id} m={m} />
             ))}
+            {extra.error && <div className="form-error">{extra.error}</div>}
+            {shown.length < (data.total ?? 0) && (
+              <button type="button" className="btn ghost results-more" disabled={extra.loading} onClick={loadMore}>
+                {extra.loading ? 'Carregando…' : 'Carregar mais resultados'}
+              </button>
+            )}
           </div>
         ) : (
           <Empty icon="search" title={`Nada encontrado para "${q}"`}>

@@ -11,6 +11,7 @@ import { useSetting, useStore } from '../lib/store';
 import { Icon, type IconName } from '../components/Icon';
 import { useForYou } from '../components/navState';
 import { ForYouCard } from '../components/Sidebar';
+import { JoinCodeDialog } from '../components/JoinCodeDialog';
 import { Empty, GroupAvatar, Pager, SearchInput, SkeletonTable, Tabs, UserAvatar, useAsync, ThLabel } from '../components/ui';
 
 const dayFmt = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -177,7 +178,9 @@ export function DirectoryPage() {
     const t = setTimeout(() => (setQ(text.trim()), setOffset(0)), 250);
     return () => clearTimeout(t);
   }, [text]);
-  const { data, loading, error, reload } = useAsync(() => api.get('directory', { type, text: q, offset, count: 25 }), [type, q, offset]);
+  const { data: got, loading, error, reload } = useAsync(() => api.get('directory', { type, text: q, offset, count: 25 }).then((r) => ({ ...r, type })), [type, q, offset]);
+  // Ao trocar de aba, a resposta da aba anterior não vale enquanto a nova carrega (canais apareciam como pessoas).
+  const data = got?.type === type ? got : null;
   const direct = useDirect();
 
   const openUser = async (username: string) => {
@@ -188,10 +191,13 @@ export function DirectoryPage() {
       useStore.getState().toast(errorMessage(e), 'error');
     }
   };
-  const join = async (rid: string) => {
+  // Canal com código: o código é pedido antes de chamar o servidor (antes, "Código de acesso inválido" sem pedir nada).
+  const [codeFor, setCodeFor] = useState<{ rid: string; name: string } | null>(null);
+  const join = async (r: { _id: string; name: string; fname?: string; joinCodeRequired?: boolean }) => {
+    if (r.joinCodeRequired) return setCodeFor({ rid: r._id, name: r.fname || r.name });
     try {
-      await api.post('channels.join', { roomId: rid });
-      navigate(roomPath({ _id: rid, t: 'c' }));
+      await api.post('channels.join', { roomId: r._id });
+      navigate(roomPath({ _id: r._id, t: 'c' }));
     } catch (e) {
       useStore.getState().toast(errorMessage(e), 'error');
     }
@@ -340,6 +346,8 @@ export function DirectoryPage() {
             const rid = team ? r.roomId : r._id;
             const path = roomPath(team ? { _id: r.roomId, t: r.type === 1 ? 'p' : 'c' } : r);
             const member = !!subs[rid];
+            // Canal arquivado: só dá para ler (Abrir mostra o histórico); entrar o servidor recusa.
+            const archived = !team && !!r.archived;
             return (
               <tr key={r._id} className="clickable" onClick={() => navigate(path)}>
                 <td>
@@ -352,6 +360,8 @@ export function DirectoryPage() {
                       <span className="cell-name">
                         <span className="dir-name">{team ? r.name : r.fname || r.name}</span>
                         {r.featured && <span className="pill accent">Destaque</span>}
+                        {archived && <span className="pill tag">Arquivado</span>}
+                        {!team && !member && !archived && r.joinCodeRequired && <Icon name="join-code" size={14} className="dir-code" label="Precisa de código de acesso" />}
                       </span>
                       {(r.topic || r.description) && <span className="cell-sub">{r.topic || r.description}</span>}
                     </div>
@@ -362,13 +372,13 @@ export function DirectoryPage() {
                 <td className="muted dir-meta dir-date">{formatDate(r.ts)}</td>
                 <td className="dir-action">
                   <div className="row-actions">
-                    {member || team ? (
+                    {member || team || archived ? (
                       <button type="button" className="btn small ghost" onClick={act(() => navigate(path))}>
                         <Icon name="nav-chats" />
                         Abrir
                       </button>
                     ) : (
-                      <button type="button" className="btn small ghost" onClick={act(() => void join(rid))}>
+                      <button type="button" className="btn small ghost" onClick={act(() => void join(r))}>
                         <Icon name="join-room" />
                         Entrar
                       </button>
@@ -405,6 +415,7 @@ export function DirectoryPage() {
         {content}
         {data && !error && <Pager offset={offset} count={25} total={data.total} onChange={setOffset} />}
       </div>
+      {codeFor && <JoinCodeDialog rid={codeFor.rid} name={codeFor.name} onClose={() => setCodeFor(null)} onJoined={() => navigate(roomPath({ _id: codeFor.rid, t: 'c' }))} />}
     </div>
   );
 }

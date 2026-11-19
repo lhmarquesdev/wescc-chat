@@ -3,7 +3,7 @@ import { useFilesTab } from '../lib/files';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { Subscription, UserStatus } from '@shared/index';
 import { parseSpotlightQuery } from '@shared/search';
-import { presenceLabel, shownCustomStatus, silencesNotifications, statusLine } from '@shared/status';
+import { presenceLabel, shownCustomStatus, silencesNotifications, statusLine, STATUS_TYPE_LABEL } from '@shared/status';
 import { api, errorMessage } from '../lib/api';
 import { badgeCount, MY_STATUS_LABEL, roomIconName, roomPath } from '../lib/format';
 import { matchesLocal, spotlightHint } from '../lib/spotlightRules';
@@ -260,7 +260,8 @@ export function useMyStatus() {
   const text = (live ? live.statusText : me.statusText) || '';
   // O personalizado de quem está invisível só a própria pessoa sabe (a presença chega sem ele): vem de me.
   const custom = !!shownCustomStatus({ status, statusCustom: me.statusCustom }, list);
-  const label = presenceLabel({ status, statusCustom: me.statusCustom }, list);
+  // Invisível escolhido: para a própria pessoa é "Invisível" (os outros veem Offline).
+  const label = !custom && status === 'offline' && me.statusDefault === 'offline' ? STATUS_TYPE_LABEL.offline : presenceLabel({ status, statusCustom: me.statusCustom }, list);
   const silenced = silencesNotifications(me.statusDefault);
   return { status, text, label, custom, silenced, line: statusLine(label, custom, text) };
 }
@@ -731,10 +732,11 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
     first.click();
     return true;
   };
-  // "Abrir diretório" leva o texto da busca (com @, na aba Pessoas) e termina a busca daqui.
-  const openDirectory = () => {
+  // "Abrir diretório" leva o texto da busca (com @, na aba Pessoas) e termina a busca daqui. "Ver mais" de um grupo
+  // cortado da busca escolhe a aba (users: Pessoas).
+  const openDirectory = (users = parseSpotlightQuery(filter).scope === 'users') => {
     const q = parseSpotlightQuery(filter);
-    navigate(`/directory${q.scope === 'users' ? '/users' : ''}${q.text ? `?q=${encodeURIComponent(q.text)}` : ''}`);
+    navigate(`/directory${users ? '/users' : ''}${q.text ? `?q=${encodeURIComponent(q.text)}` : ''}`);
     finishSearch();
     onNavigate?.();
   };
@@ -777,7 +779,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
             icon="search"
             title={`Nada encontrado para “${filter.trim()}”`}
             action={
-              <button type="button" className="btn small" onClick={openDirectory}>
+              <button type="button" className="btn small" onClick={() => openDirectory()}>
                 Abrir diretório
               </button>
             }
@@ -906,7 +908,14 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
           />
         ))}
         {searching && !onlyUnread && (
-          <SpotlightResults spot={spot} localCount={localCount} big={list} onDone={spotDone} hint={spotIdle ? spotlightHint(parseSpotlightQuery(filter)) : undefined} />
+          <SpotlightResults
+            spot={spot}
+            localCount={localCount}
+            big={list}
+            onDone={spotDone}
+            hint={spotIdle ? spotlightHint(parseSpotlightQuery(filter)) : undefined}
+            onMore={openDirectory}
+          />
         )}
         {empty}
       </nav>

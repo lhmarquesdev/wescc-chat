@@ -10,8 +10,12 @@ import type { Ctx } from './users';
 
 const LIMIT = 8;
 
+// Ordem natural ("Pessoa Teste 2" antes de "Pessoa Teste 10"): na comparação, os números do texto ganham zeros à esquerda.
+const natural = (col: string) =>
+  `(SELECT string_agg(CASE WHEN p[1] ~ '^[0-9]' THEN lpad(p[1], 20, '0') ELSE p[1] END, '' ORDER BY i) FROM regexp_matches(${col}, '[0-9]+|[^0-9]+', 'g') WITH ORDINALITY AS x(p, i))`;
+
 // Pessoas: sem quem pergunta, sem bots e sem contas desativadas. Ordem: usuário exato, começo do usuário ou do
-// nome, começo de uma palavra do nome, qualquer parte.
+// nome, começo de uma palavra do nome, qualquer parte. Vem um a mais que o limite só para saber se há mais.
 async function searchPeople(userId: string, like: string, text: string): Promise<SpotlightUser[]> {
   const rows = await many(
     `WITH q AS (SELECT wescc_fold($2) AS f)
@@ -24,8 +28,8 @@ async function searchPeople(userId: string, like: string, text: string): Promise
          WHEN wescc_fold(u.username) LIKE q.f || '%' OR wescc_fold(u.name) LIKE q.f || '%' THEN 1
          WHEN wescc_fold(u.name) LIKE '% ' || q.f || '%' THEN 2
          ELSE 3 END,
-       lower(coalesce(nullif(u.name, ''), u.username))
-     LIMIT ${LIMIT}`,
+       ${natural("lower(coalesce(nullif(u.name, ''), u.username))")}
+     LIMIT ${LIMIT + 1}`,
     [userId, like, text],
   );
   return rows.map((r) => ({
@@ -59,7 +63,7 @@ async function searchRooms(userId: string, like: string, text: string): Promise<
          WHEN wescc_fold(r.name) LIKE q.f || '%' OR wescc_fold(coalesce(r.fname, '')) LIKE q.f || '%' THEN 1
          ELSE 2 END,
        r.featured DESC, r.users_count DESC, r.name
-     LIMIT ${LIMIT}`,
+     LIMIT ${LIMIT + 1}`,
     [userId, like, text],
   );
   const anyCode = rows.some((r) => r.has_code);
@@ -79,7 +83,8 @@ async function searchRooms(userId: string, like: string, text: string): Promise<
   }));
 }
 
-export async function spotlight(ctx: Ctx, raw: string): Promise<{ users: SpotlightUser[]; rooms: SpotlightRoom[] }> {
+// moreUsers / moreRooms: havia mais que as 8 de cada grupo (a web oferece o diretório para ver todas).
+export async function spotlight(ctx: Ctx, raw: string): Promise<{ users: SpotlightUser[]; rooms: SpotlightRoom[]; moreUsers?: boolean; moreRooms?: boolean }> {
   const q = parseSpotlightQuery(raw);
   if (!spotlightReady(q)) return { users: [], rooms: [] };
   const like = escapeLike(q.text);
@@ -93,5 +98,5 @@ export async function spotlight(ctx: Ctx, raw: string): Promise<{ users: Spotlig
     people ? searchPeople(ctx.userId, like, q.text) : [],
     channels ? searchRooms(ctx.userId, like, q.text) : [],
   ]);
-  return { users, rooms };
+  return { users: users.slice(0, LIMIT), rooms: rooms.slice(0, LIMIT), moreUsers: users.length > LIMIT, moreRooms: rooms.length > LIMIT };
 }

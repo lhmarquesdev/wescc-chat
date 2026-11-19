@@ -9,6 +9,8 @@ import { createCustomStatus, deleteCustomStatus, getCustomStatus, listCustomStat
 import { getUserRoles, hasPermission, permissionsForRoles, roleInfos } from '../services/permissions';
 import { getSetting } from '../services/settings';
 import { userLock } from '@shared/rbac';
+import { escapeLike } from '@shared/search';
+import { clampStatusText } from '@shared/status';
 import { bus } from '../realtime/bus';
 import { assertCanManageUser, assertRoleChange, effectiveRoles, grantContext, writeUserRoles } from '../services/rbac';
 import { recordHistory } from '../services/rbacHistory';
@@ -201,7 +203,7 @@ export function usersRoutes(app: FastifyInstance) {
   route(app, 'POST', 'users.updateOwnBasicInfo', {}, async (req, _rep, ctx) => {
     const d = b(req).data ?? {};
     // Na troca de senha obrigatória só a senha pode ser alterada.
-    const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: d.statusText };
+    const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: d.statusText == null || d.statusText === '' ? (d.statusText ?? undefined) : clampStatusText(str(d.statusText, 'statusText')) };
     const row = await updateUser(
       ctx,
       ctx.userId,
@@ -224,7 +226,8 @@ export function usersRoutes(app: FastifyInstance) {
       if (!other) throw notFound('error-invalid-user', 'Usuário não encontrado.');
       await assertCanManageUser(ctx, target);
     }
-    const message = body.message === undefined || body.message === null ? undefined : String(body.message);
+    // Texto (vazio limpa a mensagem); outro tipo é recusado em vez de virar "[object Object]".
+    const message = body.message === undefined || body.message === null ? undefined : body.message === '' ? '' : str(body.message, 'message');
     // Status personalizado: vale o tipo dele e ganha de status. Sem statusId, um status de base limpa o personalizado.
     let status: string | undefined = body.status;
     let customId: string | null = null;
@@ -351,7 +354,15 @@ export function usersRoutes(app: FastifyInstance) {
     return { users: rows.map((r) => mapUser(r, { full: admin })), count: rows.length, offset, total: Number(rows[0]?.total ?? 0) };
   });
   route(app, 'GET', 'users.autocomplete', {}, async (req, _rep, ctx) => {
-    const term = String(q(req).selector ? JSON.parse(q(req).selector).term ?? '' : q(req).term ?? '');
+    // selector (como no Rocket.Chat): JSON com term; quebrado é recusado com aviso, não com erro interno.
+    let selector: any;
+    try {
+      selector = q(req).selector ? JSON.parse(String(q(req).selector)) : undefined;
+    } catch {
+      selector = null;
+    }
+    if (selector !== undefined && (selector === null || typeof selector !== 'object')) throw badRequest('error-invalid-params', 'Parâmetro selector inválido.');
+    const term = String(selector ? selector.term ?? '' : q(req).term ?? '');
     const exclude = strArray(q(req).exclude);
     // inRoom só para quem pode ver os membros da sala; sem acesso, ou com a lista de membros oculta, o rid é ignorado.
     let rid: string | undefined;
@@ -363,9 +374,9 @@ export function usersRoutes(app: FastifyInstance) {
     }
     const rows = await many(
       `SELECT id, username, name, status, avatar_etag, roles ${rid ? ', EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = $4 AND s.user_id = users.id) AS in_room' : ''}
-       FROM users WHERE active AND (username ILIKE $1 OR name ILIKE $1) AND NOT (username = ANY($2))
+       FROM users WHERE active AND (wescc_fold(username) LIKE wescc_fold($1) OR wescc_fold(name) LIKE wescc_fold($1)) AND NOT (username = ANY($2))
        ORDER BY ${rid ? 'in_room DESC, ' : ''}(lower(username) = lower($3)) DESC, username LIMIT 15`,
-      rid ? [`${term}%`, exclude, term, rid] : [`${term}%`, exclude, term],
+      rid ? [`${escapeLike(term)}%`, exclude, term, rid] : [`${escapeLike(term)}%`, exclude, term],
     );
     // roles (globais): a web decide antes do clique se dá para abrir uma conversa direta.
     return { items: rows.map((r) => ({ _id: r.id, username: r.username, name: r.name, status: r.status, avatarETag: r.avatar_etag, roles: r.roles, inRoom: r.in_room })) };

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
 import { plural, roomDisplayName } from '../lib/format';
@@ -48,6 +49,10 @@ export function ThreadPanel({
   const ephSlots = useMemo(() => placeEphemeral(ephemeral, replies ?? []), [ephemeral, replies]);
   // Respostas seguidas da mesma pessoa se agrupam como na conversa (continuesGroup, com o mesmo intervalo).
   const groupingPeriod = useSetting<number>('Message_GroupingPeriod') ?? 300;
+  // Resposta aberta por um resultado da busca: rola até ela e destaca, como o ?msg= na conversa.
+  const reply = (useLocation().state as { reply?: string } | null)?.reply;
+  const shown = useRef<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
 
   useEffect(() => {
     if (rootFromList) setRoot(rootFromList);
@@ -67,9 +72,19 @@ export function ThreadPanel({
   }, [tmid]);
 
   useLayoutEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+    const el = ref.current;
+    if (!el) return;
+    const target = reply && reply !== shown.current ? el.querySelector<HTMLElement>(`[id="msg-${reply}"]`) : null;
+    if (!target) {
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    shown.current = reply!;
+    target.scrollIntoView({ block: 'center' });
+    setFlash(reply!);
+    setTimeout(() => setFlash((f) => (f === reply ? null : f)), 2500);
     // Integrações (Jira): também quando chega uma resposta efêmera
-  }, [replies?.length, ephemeral.length]);
+  }, [replies?.length, ephemeral.length, reply]);
 
   const actions = { onEdit: setEditing, onQuote: setQuoting, onUserClick };
   const name = roomDisplayName(sub, room);
@@ -131,6 +146,7 @@ export function ThreadPanel({
               actions={actions}
               inThread
               canModerate={canModerate}
+              highlight={flash === m._id}
             />,
           ])
           .concat(ephSlots.end.map((e) => <EphemeralRow key={`eph-${e._id}`} m={e} />))}

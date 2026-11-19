@@ -127,6 +127,18 @@ describe('spotlight: pessoas', () => {
     const r = await search(u, `reuniao.${t}`);
     expect(r.users[0]).toMatchObject({ status: 'offline', statusCustom: null });
   });
+
+  it('mais de 8: moreUsers diz que há mais; ordem natural (2 antes de 10)', async () => {
+    const t = rand();
+    for (let i = 1; i <= 12; i++) await person(`lote${t}.${i}`, `Lote ${t} ${i}`);
+    const u = await newUser(A);
+    const r = await search(u, `lote ${t}`);
+    expect(r.users.map((x: any) => x.name)).toEqual([1, 2, 3, 4, 5, 6, 7, 8].map((i) => `Lote ${t} ${i}`));
+    expect(r.moreUsers).toBe(true);
+    const few = await search(u, `lote ${t} 1`);
+    expect(few.users.map((x: any) => x.name)).toEqual([1, 10, 11, 12].map((i) => `Lote ${t} ${i}`));
+    expect(few.moreUsers).toBe(false);
+  });
 });
 
 describe('spotlight: canais', () => {
@@ -194,5 +206,19 @@ describe('spotlight: canais', () => {
     // O administrador entra sem código: para ele o canal não pede (sem a inscrição, para a sala aparecer na busca).
     await pool.query('DELETE FROM subscriptions WHERE room_id = $1 AND user_id = $2', [rid, A.userId]);
     expect((await search(A, t)).rooms[0]).toMatchObject({ _id: rid, joinCodeRequired: false });
+  });
+});
+
+describe('spotlight: mais que o limite', () => {
+  it('mais de 8 canais: moreRooms; até 8: false', async () => {
+    const t = rand();
+    for (let i = 1; i <= 9; i++) await channel(`muitos-${t}-${i}`);
+    const u = await newUser(A);
+    const r = await search(u, `#muitos-${t}`);
+    expect(r.rooms).toHaveLength(8);
+    expect(r.moreRooms).toBe(true);
+    const one = await search(u, `#muitos-${t}-9`);
+    expect(roomNames(one)).toEqual([`muitos-${t}-9`]);
+    expect(one.moreRooms).toBe(false);
   });
 });

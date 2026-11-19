@@ -2,6 +2,7 @@ import type { RoomRetention, RoomType, Subscription, SubscriptionNotifyPrefs } f
 import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { LOCK_TEXT } from '@shared/rbac';
+import { escapeLike } from '@shared/search';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
@@ -399,7 +400,7 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
 export async function createDirect(ctx: Ctx, usernames: string[]) {
   if (!(await hasPermission(ctx.userId, 'create-d'))) throw forbidden();
   const names = [...new Set(usernames.map((u) => u.replace(/^@/, '').toLowerCase()))].filter((u) => u !== ctx.username.toLowerCase());
-  const others = names.length ? await many('SELECT id, username FROM users WHERE lower(username) = ANY($1)', [names]) : [];
+  const others = names.length ? await many('SELECT id, username, active FROM users WHERE lower(username) = ANY($1)', [names]) : [];
   if (others.length !== names.length) throw badRequest('error-invalid-user', 'Usuário não encontrado.');
   if (others.length > 8) throw badRequest('error-too-many-users', 'Máximo de 9 participantes em mensagem direta.');
   const all = [{ id: ctx.userId, username: ctx.username }, ...others];
@@ -417,6 +418,9 @@ export async function createDirect(ctx: Ctx, usernames: string[]) {
     return existing;
   }
   // Só uma conversa nova passa pela política; reabrir uma antiga mostra o histórico e o compositor explica o bloqueio.
+  // Com uma conta desativada não se começa conversa (ela não lê nem responde).
+  const gone = others.find((u) => !u.active);
+  if (gone) throw badRequest('error-user-deactivated', `A conta de @${gone.username} está desativada.`);
   await assertCanStartDirect(ctx, others.map((u) => u.id));
   const id = newId();
   const inserted = await one(
@@ -815,14 +819,17 @@ export async function updateSubscriptionFlags(ctx: Ctx, rid: string, data: { fav
 
 // ---------- Diretório ----------
 
+// Busca sem acento e sem maiúsculas, como a da barra lateral: $1 é o termo já com % e _ escapados (escapeLike).
+// Sem view-c-room, canais e times públicos não aparecem: só os em que a pessoa já está (a regra de canAccessRoom).
 export async function directory(ctx: Ctx, opts: { type: 'channels' | 'users' | 'teams'; text?: string; offset?: number; count?: number; sort?: string }) {
   const count = Math.min(opts.count ?? 25, 100);
   const offset = Number(opts.offset ?? 0);
-  const text = `%${opts.text ?? ''}%`;
+  const text = escapeLike(String(opts.text ?? ''));
+  const has = (col: string) => `wescc_fold(${col}) LIKE '%' || wescc_fold($1) || '%'`;
   if (opts.type === 'users') {
     const rows = await many(
       `SELECT id, username, name, status, status_text, status_custom, avatar_etag, bio, roles, created_at, count(*) OVER() AS total FROM users
-       WHERE active AND type = 'user' AND (username ILIKE $1 OR name ILIKE $1)
+       WHERE active AND type = 'user' AND (${has('username')} OR ${has('name')})
        ORDER BY username LIMIT ${count} OFFSET ${offset}`,
       [text],
     );
@@ -841,12 +848,13 @@ export async function directory(ctx: Ctx, opts: { type: 'channels' | 'users' | '
       })),
     };
   }
+  const seePublic = await hasPermission(ctx.userId, 'view-c-room');
   if (opts.type === 'teams') {
     const rows = await many(
       `SELECT t.*, r.description, r.topic, r.users_count, (SELECT count(*) FROM rooms x WHERE x.team_id = t.id AND NOT x.team_main)::int AS rooms_count,
          count(*) OVER() AS total
        FROM teams t JOIN rooms r ON r.id = t.room_id
-       WHERE t.name ILIKE $1 AND (t.type = 0 OR EXISTS (SELECT 1 FROM team_members m WHERE m.team_id = t.id AND m.user_id = $2))
+       WHERE ${has('t.name')} AND (${seePublic ? 't.type = 0 OR ' : ''}EXISTS (SELECT 1 FROM team_members m WHERE m.team_id = t.id AND m.user_id = $2))
        ORDER BY t.name LIMIT ${count} OFFSET ${offset}`,
       [text, ctx.userId],
     );
@@ -858,12 +866,15 @@ export async function directory(ctx: Ctx, opts: { type: 'channels' | 'users' | '
   const rows = await many(
     `SELECT r.*, u.username AS owner_username, t.name AS team_name, count(*) OVER() AS total FROM rooms r
      LEFT JOIN users u ON u.id = r.owner_id LEFT JOIN teams t ON t.id = r.team_id
-     WHERE r.t = 'c' AND r.prid IS NULL AND (r.name ILIKE $1 OR r.fname ILIKE $1 OR r.topic ILIKE $1)
+     WHERE r.t = 'c' AND r.prid IS NULL AND (${has('r.name')} OR ${has("coalesce(r.fname, '')")} OR ${has("coalesce(r.topic, '')")})
        AND (r.team_id IS NULL OR t.type = 0 OR EXISTS (SELECT 1 FROM team_members m WHERE m.team_id = r.team_id AND m.user_id = $2))
+       ${seePublic ? '' : 'AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = r.id AND s.user_id = $2)'}
      ORDER BY r.featured DESC, r.users_count DESC, r.name LIMIT ${count} OFFSET ${offset}`,
     [text, ctx.userId],
   );
-  return { total: Number(rows[0]?.total ?? 0), result: rows.map((r) => ({ ...mapRoom(r), teamName: r.team_name })) };
+  // Canal com código: a web pede o código antes de entrar (quem tem join-without-join-code entra sem ele).
+  const bypass = rows.some((r) => r.join_code) && (await hasPermission(ctx.userId, 'join-without-join-code'));
+  return { total: Number(rows[0]?.total ?? 0), result: rows.map((r) => ({ ...mapRoom(r), teamName: r.team_name, joinCodeRequired: !!r.join_code && !bypass })) };
 }
 
 export async function adminListRooms(opts: { filter?: string; types?: RoomType[]; offset?: number; count?: number }) {
