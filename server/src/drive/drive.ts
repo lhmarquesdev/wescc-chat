@@ -455,6 +455,9 @@ export async function setAcl(ctx: Ctx, folderId: unknown, input: { inherit?: unk
     }
   }
   const inherit = input.inherit === undefined ? f.inherit : input.inherit === true;
+  // Pasta principal ou restrita sem ninguém com "Gerencia": só um administrador conseguiria entrar de novo nela.
+  if (!acc.all && (!f.parent_id || !inherit) && ![...entries.values()].some((e) => e.level === 3))
+    throw badRequest('error-no-manager', 'Deixe pelo menos alguém com "Gerencia" nesta pasta (uma pessoa, um papel ou um canal).');
   await tx(async (c) => {
     await c.query('DELETE FROM drive_acl WHERE folder_id = $1', [f.id]);
     for (const e of entries.values())

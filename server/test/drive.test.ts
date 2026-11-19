@@ -105,6 +105,21 @@ describe('compartilhar', () => {
     expect((await share(root, [{ type: 'user', id: carla.userId, level: 9 }], ana)).status).toBe(400);
   });
 
+  it('pasta principal ou restrita não fica sem ninguém que gerencia', async () => {
+    const r = await share(root, [{ type: 'user', id: ana.userId, level: 2 }], ana);
+    expect(r.status).toBe(400);
+    expect(r.errorType).toBe('error-no-manager');
+    expect((await folder(root, ana)).folder.level).toBe(3);
+    // Subpasta que herda pode ficar sem lista própria; restrita, não.
+    const s = (await api('POST', 'files.folder.create', { name: 'Herdeira', parentId: root }, ana)).folder._id;
+    expect((await share(s, [], ana)).success).toBe(true);
+    expect((await share(s, [{ type: 'user', id: carla.userId, level: 1 }], ana, false)).errorType).toBe('error-no-manager');
+    // Quem gerencia todas as pastas pode deixar só para administradores.
+    expect((await share(s, [], A, false)).success).toBe(true);
+    await api('POST', 'files.trash', { folderIds: [s] }, A);
+    await api('POST', 'files.purge', { folderIds: [s] }, A);
+  });
+
   it('seletor do compartilhamento acha papéis, canais e pessoas', async () => {
     const r = await api('GET', 'files.subjects', { text: 'Carla' }, ana);
     expect(r.subjects.some((s: any) => s.type === 'user' && s.id === carla.userId)).toBe(true);
