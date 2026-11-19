@@ -610,6 +610,7 @@ export interface Call {
   answeredAt: string | null;
   endedAt: string | null;
   endedBy: string | null;
+  endedByUser?: UserRef | null; // quem encerrou (nome para o aviso "Encerrada por …")
   endedReason: CallEndReason | null;
   duration: number | null; // segundos: atendimento → fim (a dois) ou início → fim (grupo)
   listenOnly: boolean; // transmissão

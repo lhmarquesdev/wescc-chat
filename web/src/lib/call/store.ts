@@ -1282,6 +1282,8 @@ function onDirectCall(call: Call) {
 
 // Por que a chamada a dois terminou, do meu lado.
 function directEndedText(call: Call): string {
+  // Um administrador encerrou (Administração › Chamadas): o call.notice com o nome chega depois, quando a janela já fechou.
+  if (call.endedReason === 'moderator' && call.endedByUser) return `A chamada foi encerrada por ${callUserLabel(call.endedByUser)}.`;
   if (call.endedReason === 'dropped') {
     if (!call.endedBy) return 'A chamada caiu: a conexão entre vocês foi perdida.';
     if (call.endedBy === meRef()?._id) return LOST_LINK;

@@ -182,6 +182,22 @@ describe('chamadas em mensagens diretas', () => {
     for (const w of [wa, wu, wa2, wu3]) w.close();
   });
 
+  it('administrador encerra a chamada a dois: o evento já traz quem encerrou, para o aviso nos dois lados', async () => {
+    const u = await newUser(A);
+    const v = await newUser(A);
+    const [wu, wv] = await Promise.all([online(u), online(v)]);
+    const rid = await dmWith(u, v);
+    for (const answer of [true, false]) {
+      const c = (await api('POST', 'calls.start', { roomId: rid, kind: 'audio', connectionId: wu.connectionId }, u)).call;
+      if (answer) await api('POST', 'calls.accept', { callId: c._id, connectionId: wv.connectionId }, v);
+      const status = answer ? 'ended' : 'canceled';
+      const evs = [callEvent(wu, c._id, status), callEvent(wv, c._id, status)];
+      expect((await api('POST', 'calls.admin.end', { callId: c._id }, A)).call.status).toBe(status);
+      for (const e of await Promise.all(evs)) expect(e.call).toMatchObject({ endedReason: 'moderator', endedBy: A.userId, endedByUser: { _id: A.userId, username: 'admin' } });
+    }
+    for (const w of [wu, wv]) w.close();
+  });
+
   it('a conexão direta entre os navegadores caiu: calls.end com dropped encerra como queda, sem culpar ninguém', async () => {
     const u = await newUser(A);
     const [wa, wu] = await Promise.all([online(A), online(u)]);
