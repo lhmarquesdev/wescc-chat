@@ -49,7 +49,7 @@ export function AdminCalls() {
         <ServerCard data={status.data} loading={status.loading} error={status.error} onReload={status.reload} onTest={() => setTesting(true)} />
         {status.data ? <HttpsCard s={status.data} /> : status.loading && <HttpsSkeleton />}
         <ActiveCalls onEnded={status.reload} />
-        {testing && <SelfTest onClose={() => setTesting(false)} />}
+        {testing && <SelfTest admin onClose={() => setTesting(false)} />}
       </div>
     </>
   );
@@ -130,7 +130,8 @@ function ServerCard({
         </div>
       )}
       <div className="admin-calls-actions">
-        <button type="button" className="btn" onClick={onTest}>
+        {/* Sem servidor configurado não há o que testar: o aviso acima diz como instalar. */}
+        <button type="button" className="btn" onClick={onTest} disabled={!!data && !data.configured} title={data && !data.configured ? 'Configure o servidor de chamadas primeiro.' : undefined}>
           <Icon name="call-server" />
           Testar minha conexão
         </button>
