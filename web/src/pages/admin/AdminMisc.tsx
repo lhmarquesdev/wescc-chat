@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime, plural } from '../../lib/format';
 import { customEmojiUrl } from '../../lib/emoji';
+import { messageLink } from '../../lib/messageRules';
 import { useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, FileButton, Modal, Pager, SearchInput, SkeletonList, SkeletonTable, confirmDialog, useAsync, ThLabel } from '../../components/ui';
@@ -120,19 +122,32 @@ export function AdminModeration() {
                 <th>
                   <ThLabel>Última</ThLabel>
                 </th>
+                <th className="actions-col">
+                  <span className="visually-hidden">Ações</span>
+                </th>
               </tr>
             </thead>
             <tbody>
               {data.reports.map((r: any) => (
                 <tr key={r.userId} className="clickable" onClick={() => setUser(r)}>
                   <td>
-                    <UserCell username={r.username} name={r.name} />
+                    {/* Conta excluída depois da denúncia: sem nome de usuário (antes aparecia "@null"). */}
+                    {r.username ? <UserCell username={r.username} name={r.name} /> : <RoomCell icon={<Icon name="disabled-user" />} name="Usuário excluído" sub="A conta não existe mais" />}
                   </td>
                   <td className="num" data-label="Denúncias">
                     <span className="pill err">{r.count}</span>
                   </td>
                   <td className="nowrap" data-label="Última">
                     {lastSeen(r.ts)}
+                  </td>
+                  <td className="actions-col">
+                    {/* Botão de verdade: a linha abre pelo teclado (Tab + Enter) e pelo leitor de tela. */}
+                    <div className="row-actions">
+                      <button type="button" className="btn small ghost" onClick={(e) => (e.stopPropagation(), setUser(r))}>
+                        <Icon name="show" />
+                        Analisar
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -145,22 +160,63 @@ export function AdminModeration() {
   );
 }
 
+// Denúncias da mesma mensagem ficam juntas: as ações de cada item valem para a mensagem (ou para a denúncia da pessoa).
+function groupReports(reports: any[]) {
+  const groups: { key: string; first: any; reports: any[] }[] = [];
+  const byKey = new Map<string, (typeof groups)[number]>();
+  for (const r of reports) {
+    const key = r.messageId ? `m:${r.messageId}` : `r:${r._id}`;
+    const g = byKey.get(key);
+    if (g) g.reports.push(r);
+    else {
+      const ng = { key, first: r, reports: [r] };
+      byKey.set(key, ng);
+      groups.push(ng);
+    }
+  }
+  return groups;
+}
+
 function UserReports({ user, onClose }: { user: any; onClose: () => void }) {
   // Figurinhas: reload para atualizar a lista depois de remover uma figurinha de todas as conversas.
   const { data, loading, reload } = useAsync(() => api.get('moderation.userReports', { userId: user.userId }), [user.userId]);
-  // Figurinhas: remover de todas as conversas resolve as denúncias da mensagem; sem nenhuma pendente, o modal fecha.
-  const [removed, setRemoved] = useState(false);
+  // Depois de agir num item (descartar, apagar, remover a figurinha), sem nenhuma denúncia pendente o modal fecha.
+  const [acted, setActed] = useState(false);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (removed && !loading && data && !data.reports.length) onClose();
-  }, [removed, loading, data, onClose]);
+    if (acted && !loading && data && !data.reports.length) onClose();
+  }, [acted, loading, data, onClose]);
+  const who = user.username ? `@${user.username}` : 'usuário excluído';
+  const run = async (call: () => Promise<unknown>, done: string, closeAfter = false) => {
+    setBusy(true);
+    try {
+      await call();
+      ok(done);
+      if (closeAfter) return onClose();
+      setActed(true);
+      reload();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const dismissAll = async () => {
+    const yes = await confirmDialog({
+      title: `Descartar as denúncias contra ${who}?`,
+      body: 'As mensagens continuam nas conversas e as denúncias saem da lista. Não dá para desfazer.',
+      confirmLabel: 'Descartar denúncias',
+    });
+    if (yes) void run(() => api.post('moderation.dismissReports', { userId: user.userId }), 'Denúncias descartadas.', true);
+  };
   const deleteMessages = async () => {
     const yes = await confirmDialog({
       title: 'Apagar as mensagens denunciadas?',
-      body: `As mensagens de @${user.username} que foram denunciadas somem das conversas.`,
+      body: `As mensagens de ${who} que foram denunciadas somem das conversas.`,
       confirmLabel: 'Apagar mensagens',
       danger: true,
     });
-    if (yes) api.post('moderation.user.deleteReportedMessages', { userId: user.userId }).then(onClose).catch(fail);
+    if (yes) void run(() => api.post('moderation.user.deleteReportedMessages', { userId: user.userId }), 'Mensagens denunciadas apagadas.', true);
   };
   const deactivate = async () => {
     const yes = await confirmDialog({
@@ -169,59 +225,112 @@ function UserReports({ user, onClose }: { user: any; onClose: () => void }) {
       confirmLabel: 'Desativar',
       danger: true,
     });
-    if (yes) api.post('users.setActiveStatus', { userId: user.userId, activeStatus: false }).then(onClose).catch(fail);
+    if (yes) void run(() => api.post('users.setActiveStatus', { userId: user.userId, activeStatus: false }), `@${user.username} foi desativado.`, true);
   };
+  const dismissOne = (g: ReturnType<typeof groupReports>[number]) =>
+    run(
+      () => api.post('moderation.dismissReports', g.first.messageId ? { msgId: g.first.messageId } : { reportId: g.first._id }),
+      g.reports.length > 1 ? 'Denúncias descartadas.' : 'Denúncia descartada.',
+    );
+  const deleteOne = async (r: any) => {
+    const yes = await confirmDialog({
+      title: 'Apagar esta mensagem?',
+      body: 'A mensagem some da conversa para todos e as denúncias dela saem da lista.',
+      confirmLabel: 'Apagar mensagem',
+      danger: true,
+    });
+    if (yes) void run(() => api.post('moderation.user.deleteReportedMessages', { userId: user.userId, msgId: r.messageId }), 'Mensagem apagada.');
+  };
+  const groups = groupReports(data?.reports ?? []);
   return (
     <Modal
       wide
-      title={`Denúncias contra @${user.username}`}
+      className="report-modal"
+      title={`Denúncias contra ${who}`}
       onClose={onClose}
       footer={
         <>
-          <button className="btn left" onClick={() => api.post('moderation.dismissReports', { userId: user.userId }).then(onClose).catch(fail)}>
-            Descartar denúncias
+          <button className="btn left" disabled={busy} onClick={dismissAll}>
+            Descartar todas
           </button>
-          <button className="btn danger" onClick={deleteMessages}>
+          <button className="btn danger" disabled={busy} onClick={deleteMessages}>
             <Icon name="delete" />
             Apagar mensagens denunciadas
           </button>
-          <button className="btn danger" onClick={deactivate}>
-            <Icon name="disabled-user" />
-            Desativar usuário
-          </button>
+          {user.username && (
+            <button className="btn danger" disabled={busy} onClick={deactivate}>
+              <Icon name="disabled-user" />
+              Desativar usuário
+            </button>
+          )}
         </>
       }
     >
       {loading && !data ? (
         <SkeletonList n={3} />
-      ) : !data?.reports.length ? (
+      ) : !groups.length ? (
         <Empty icon="report" title="Nenhuma denúncia pendente" />
       ) : (
         <ul className="report-list">
-          {data?.reports.map((r: any) => (
-            <li key={r._id}>
-              <div className="report-meta">
-                <strong>{r.reporter}</strong> denunciou {lastSeen(r.ts).toLowerCase()}
-                {r.roomName && (
-                  <span className="muted">
-                    {' '}
-                    · <Icon name="room-channel" size={12} />
-                    {r.roomName}
-                  </span>
+          {groups.map((g) => {
+            const r = g.first;
+            const reporters = [...new Set(g.reports.map((x: any) => x.reporter ?? 'usuário excluído'))];
+            const canOpen = r.messageId && r.rid && r.roomType && !r.messageRemoved;
+            return (
+              <li key={g.key}>
+                <div className="report-meta">
+                  <strong>{reporters.join(', ')}</strong> {reporters.length > 1 ? 'denunciaram' : 'denunciou'} {lastSeen(r.ts).toLowerCase()}
+                  {r.roomName && (
+                    <span className="muted">
+                      {' '}
+                      · <Icon name="room-channel" size={12} />
+                      {r.roomName}
+                    </span>
+                  )}
+                </div>
+                {!r.messageId ? (
+                  <div className="muted small">Denúncia da pessoa (sem mensagem).</div>
+                ) : r.messageRemoved ? (
+                  <blockquote className="muted">
+                    <em>A mensagem já foi apagada</em>
+                  </blockquote>
+                ) : r.e2e ? (
+                  <blockquote className="muted">
+                    <em>Mensagem criptografada (a moderação não vê o conteúdo)</em>
+                  </blockquote>
+                ) : (
+                  r.msg && <blockquote>{r.msg}</blockquote>
                 )}
-              </div>
-              {r.e2e ? (
-                <blockquote className="muted">
-                  <em>Mensagem criptografada (a moderação não vê o conteúdo)</em>
-                </blockquote>
-              ) : (
-                r.msg && <blockquote>{r.msg}</blockquote>
-              )}
-              {/* Figurinhas */}
-              {r.sticker && <ReportSticker sticker={r.sticker} messageId={r.messageId} onDone={() => (setRemoved(true), reload())} />}
-              {r.description && <div className="muted small">Motivo: {r.description}</div>}
-            </li>
-          ))}
+                {/* Figurinhas */}
+                {r.sticker && <ReportSticker sticker={r.sticker} messageId={r.messageId} onDone={() => (setActed(true), reload())} />}
+                {g.reports
+                  .filter((x: any) => x.description)
+                  .map((x: any) => (
+                    <div key={x._id} className="muted small">
+                      Motivo{g.reports.length > 1 ? ` (${x.reporter ?? 'usuário excluído'})` : ''}: {x.description}
+                    </div>
+                  ))}
+                <div className="row-actions report-actions">
+                  {canOpen && (
+                    <Link className="btn small ghost" to={messageLink({ rid: r.rid, t: r.roomType, mid: r.messageId, tmid: r.tmid })}>
+                      <Icon name="open-external" />
+                      Abrir na conversa
+                    </Link>
+                  )}
+                  <button type="button" className="btn small ghost" disabled={busy} onClick={() => void dismissOne(g)}>
+                    <Icon name="check" />
+                    Descartar
+                  </button>
+                  {r.messageId && !r.messageRemoved && (
+                    <button type="button" className="btn small ghost danger" disabled={busy} onClick={() => void deleteOne(r)}>
+                      <Icon name="delete" />
+                      Apagar mensagem
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </Modal>

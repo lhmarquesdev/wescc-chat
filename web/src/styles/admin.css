@@ -1126,6 +1126,17 @@ h4 .head-count {
   vertical-align: -1px;
   margin-right: 2px;
 }
+/* Ações de cada denúncia (abrir, descartar, apagar): quebram de linha no celular. */
+.report-actions {
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+/* No celular, os três botões do rodapé da Moderação quebram de linha em vez de cortar o texto. */
+@media (pointer: coarse) {
+  .modal.report-modal .modal-foot > .btn {
+    flex: 1 1 auto;
+  }
+}
 .history-list > li {
   padding: var(--space-3) 0;
   border-bottom: 1px solid hsl(var(--line-1));

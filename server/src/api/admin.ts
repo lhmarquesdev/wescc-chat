@@ -306,31 +306,58 @@ export function adminRoutes(app: FastifyInstance) {
   });
   route(app, 'GET', 'moderation.userReports', { permissions: ['view-moderation-console'] }, async (req) => {
     const rows = await many(
-      `SELECT r.*, m.msg, m.e2e IS NOT NULL AS e2e, m.extra->'sticker' AS sticker, m.created_at AS msg_ts, rep.username AS reporter, ro.name AS room_name FROM moderation_reports r
+      `SELECT r.*, m.msg, m.e2e IS NOT NULL AS e2e, m.extra->'sticker' AS sticker, m.created_at AS msg_ts, m.tmid, (m.id IS NULL OR m.t = 'rm') AS msg_removed,
+         rep.username AS reporter, ro.name AS room_name, ro.t AS room_t FROM moderation_reports r
        LEFT JOIN messages m ON m.id = r.message_id LEFT JOIN users rep ON rep.id = r.reporter_id LEFT JOIN rooms ro ON ro.id = r.room_id
        WHERE r.reported_user_id = $1 AND NOT r.resolved ORDER BY r.created_at DESC`,
       [str(q(req).userId, 'userId')],
     );
     return {
       // e2e: mensagem cifrada (a moderação não vê o texto).
-      reports: rows.map((r) => ({ _id: r.id, messageId: r.message_id, msg: r.msg, e2e: !!r.e2e, sticker: r.sticker ?? null, roomName: r.room_name, reporter: r.reporter, description: r.description, ts: r.created_at })),
+      // rid, roomType e tmid: "Abrir na conversa"; messageRemoved: a mensagem já foi apagada.
+      reports: rows.map((r) => ({
+        _id: r.id,
+        messageId: r.message_id,
+        msg: r.msg,
+        e2e: !!r.e2e,
+        sticker: r.sticker ?? null,
+        roomName: r.room_name,
+        rid: r.room_id,
+        roomType: r.room_t,
+        tmid: r.tmid ?? null,
+        messageRemoved: !!r.message_id && !!r.msg_removed,
+        reporter: r.reporter,
+        description: r.description,
+        ts: r.created_at,
+      })),
     };
   });
   route(app, 'POST', 'moderation.dismissReports', { permissions: ['manage-moderation-actions'] }, async (req, _rep, ctx) => {
     const body = b(req);
-    if (body.userId) await query('UPDATE moderation_reports SET resolved = true WHERE reported_user_id = $1', [body.userId]);
-    if (body.msgId) await query('UPDATE moderation_reports SET resolved = true WHERE message_id = $1', [body.msgId]);
-    await audit(actorOf(ctx), 'moderation.dismissed', { userId: body.userId, msgId: body.msgId });
+    // userId: todas as denúncias contra a pessoa; msgId: as de uma mensagem; reportId: uma denúncia (a de usuário, sem mensagem).
+    if (!body.userId && !body.msgId && !body.reportId) throw badRequest('error-invalid-params', 'Informe a pessoa, a mensagem ou a denúncia.');
+    if (body.userId) await query('UPDATE moderation_reports SET resolved = true WHERE reported_user_id = $1', [String(body.userId)]);
+    if (body.msgId) await query('UPDATE moderation_reports SET resolved = true WHERE message_id = $1', [String(body.msgId)]);
+    if (body.reportId) await query('UPDATE moderation_reports SET resolved = true WHERE id = $1', [String(body.reportId)]);
+    await audit(actorOf(ctx), 'moderation.dismissed', { userId: body.userId, msgId: body.msgId, reportId: body.reportId });
     return {};
   });
   route(app, 'POST', 'moderation.user.deleteReportedMessages', { permissions: ['manage-moderation-actions'] }, async (req, _rep, ctx) => {
-    const userId = str(b(req).userId, 'userId');
-    const msgs = await many('SELECT m.* FROM messages m WHERE m.id IN (SELECT message_id FROM moderation_reports WHERE reported_user_id = $1 AND NOT resolved)', [userId]);
+    const body = b(req);
+    const userId = str(body.userId, 'userId');
+    // msgId: só aquela mensagem denunciada (a ação por linha da Moderação); sem ele, todas as denunciadas da pessoa.
+    const msgId = str(body.msgId, 'msgId', { optional: true }) ?? null;
+    const msgs = await many(
+      `SELECT m.* FROM messages m WHERE m.t IS DISTINCT FROM 'rm' AND m.id IN (
+         SELECT message_id FROM moderation_reports WHERE reported_user_id = $1 AND NOT resolved AND ($2::text IS NULL OR message_id = $2))`,
+      [userId, msgId],
+    );
     const { removeMessageRow } = await import('../services/messages');
     for (const m of msgs) await removeMessageRow(m);
-    await query('UPDATE moderation_reports SET resolved = true WHERE reported_user_id = $1', [userId]);
-    await audit(actorOf(ctx), 'moderation.messages.deleted', { userId }, { count: msgs.length });
-    return {};
+    if (msgId) await query('UPDATE moderation_reports SET resolved = true WHERE message_id = $1', [msgId]);
+    else await query('UPDATE moderation_reports SET resolved = true WHERE reported_user_id = $1', [userId]);
+    await audit(actorOf(ctx), 'moderation.messages.deleted', { userId, msgId: msgId ?? undefined }, { count: msgs.length });
+    return { count: msgs.length };
   });
 
   // ---------- Instâncias ----------

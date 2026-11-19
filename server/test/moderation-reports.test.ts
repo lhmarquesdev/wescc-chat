@@ -67,3 +67,38 @@ describe('denúncia de usuário', () => {
     expect(n.rows[0].n).toBe(0);
   });
 });
+
+describe('ações por denúncia na Moderação', () => {
+  it('descarta uma mensagem, uma denúncia de pessoa e apaga só a mensagem escolhida', async () => {
+    const keep = await send(ana, 'mensagem que fica');
+    const drop = await send(ana, 'mensagem que sai');
+    const reply = (await api('POST', 'chat.sendMessage', { message: { rid, msg: 'resposta denunciada', tmid: keep._id } }, ana)).message;
+    for (const m of [keep, drop, reply]) expect((await report(bia, m._id)).status).toBe(200);
+    expect((await report(A, keep._id)).status).toBe(200);
+
+    let rows = await openReports(ana.userId);
+    const row = rows.find((r) => r.messageId === reply._id);
+    // "Abrir na conversa": sala, tipo e tópico da mensagem.
+    expect(row).toMatchObject({ rid, roomType: 'c', tmid: keep._id, messageRemoved: false });
+
+    expect((await api('POST', 'moderation.dismissReports', {}, A)).status).toBe(400);
+    expect((await api('POST', 'moderation.dismissReports', { msgId: keep._id }, A)).status).toBe(200);
+    rows = await openReports(ana.userId);
+    expect(rows.some((r) => r.messageId === keep._id)).toBe(false);
+
+    const del = await api('POST', 'moderation.user.deleteReportedMessages', { userId: ana.userId, msgId: drop._id }, A);
+    expect([del.status, del.count]).toEqual([200, 1]);
+    expect((await api('GET', 'chat.getMessage', { msgId: drop._id }, A)).status).not.toBe(200);
+    expect((await api('GET', 'chat.getMessage', { msgId: keep._id }, A)).message.msg).toBe('mensagem que fica');
+    rows = await openReports(ana.userId);
+    expect(rows.map((r) => r.messageId)).toContain(reply._id);
+    expect(rows.some((r) => r.messageId === drop._id)).toBe(false);
+
+    const userReport = rows.find((r) => !r.messageId);
+    expect(userReport).toBeTruthy();
+    expect((await api('POST', 'moderation.dismissReports', { reportId: userReport._id }, A)).status).toBe(200);
+    rows = await openReports(ana.userId);
+    expect(rows.some((r) => !r.messageId)).toBe(false);
+    expect(rows.map((r) => r.messageId)).toContain(reply._id);
+  });
+});
