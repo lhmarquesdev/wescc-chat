@@ -628,7 +628,7 @@ async function needFile(acc: Access, fileId: unknown, min: 1 | 2 | 3, opts: { al
 // (planilha, Word, texto: vai como anexo). As prévias da própria tela (?preview) não contam.
 export async function fileForDownload(ctx: Ctx | null, fileId: string, opts: { download: boolean; preview?: boolean }) {
   if (!ctx) throw forbidden();
-  if (!(await hasAnyPermission(ctx.userId, ['view-files', 'manage-all-files']))) throw forbidden();
+  if (!(await hasAnyPermission(ctx.userId, ['view-files', 'manage-all-files']))) throw forbidden('Você não tem acesso à aba Arquivos.');
   assertDriveOn();
   const acc = await loadAccess(ctx);
   const r = await needFile(acc, fileId, 1);

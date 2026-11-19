@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { b, paging, q, route, str, strArray } from '../api/http';
+import { ApiError } from '../lib/errors';
 import { inlineMimeType, safeMimeType } from '../services/uploads';
 import {
   activity,
@@ -37,6 +38,29 @@ const on =
 const id = (v: unknown, name: string) => str(v, name, { max: 64 });
 const items = (body: Record<string, any>) => ({ fileIds: strArray(body.fileIds), folderIds: strArray(body.folderIds) });
 
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+// O link do arquivo aberto direto no navegador (aba nova, link colado no chat): sem acesso, uma página em português em
+// vez do JSON de erro. As prévias da tela (imagem, vídeo, texto, PDF) e o Baixar continuam com o erro de sempre.
+const opensAsPage = (req: any) => {
+  const dest = req.headers['sec-fetch-dest'];
+  return dest ? dest === 'document' : String(req.headers.accept ?? '').includes('text/html');
+};
+
+function fileErrorPage(e: ApiError, loggedIn: boolean) {
+  const text = !loggedIn
+    ? 'Este link é de um arquivo da aba Arquivos. Entre com a sua conta e abra o arquivo pela pasta dele.'
+    : e.statusCode === 404
+      ? 'O arquivo foi apagado, ou você não tem acesso à pasta dele. Peça a quem gerencia a pasta para compartilhá-la com você.'
+      : e.message;
+  const link = loggedIn ? '<a href="/files">Ir para Arquivos</a>' : '<a href="/login?next=%2Ffiles">Entrar</a>';
+  return (
+    `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>Arquivo indisponível</title>` +
+    `<body style="font-family:system-ui,sans-serif;max-width:520px;margin:60px auto;padding:0 16px;line-height:1.5"><h2>${loggedIn ? 'Não deu para abrir este arquivo' : 'Entre para abrir este arquivo'}</h2>` +
+    `<p>${esc(text)}</p><p>${link}</p></body></html>`
+  );
+}
+
 export function driveRoutes(app: FastifyInstance) {
   route(app, 'GET', 'files.home', P, on(async (_req, _r, ctx) => driveHome(ctx)));
   route(app, 'GET', 'files.folder', P, on(async (req, _r, ctx) => folderView(ctx, id(q(req).folderId, 'folderId'))));
@@ -60,7 +84,14 @@ export function driveRoutes(app: FastifyInstance) {
   // Download e pré-visualização (o cookie de sessão vale para GET). Mesmas proteções dos anexos do chat.
   app.get('/file-upload/drive/:id/*', async (req: any, reply) => {
     const download = q(req).download !== undefined;
-    const f = await fileForDownload(req.ctx, String(req.params.id), { download, preview: q(req).preview !== undefined });
+    let f: Awaited<ReturnType<typeof fileForDownload>>;
+    try {
+      f = await fileForDownload(req.ctx, String(req.params.id), { download, preview: q(req).preview !== undefined });
+    } catch (e) {
+      if (!(e instanceof ApiError) || !opensAsPage(req)) throw e;
+      reply.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'");
+      return reply.code(e.statusCode).type('text/html; charset=utf-8').header('cache-control', 'no-store').send(fileErrorPage(e, !!req.ctx));
+    }
     const type = safeMimeType(f.type);
     const inline = inlineMimeType(type);
     reply.header('Content-Type', type);

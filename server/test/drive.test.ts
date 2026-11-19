@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { many, one, query } from '../src/db/pool';
 import { purgeExpiredTrash } from '../src/drive/drive';
 import { storedPath } from '../src/services/uploads';
-import { admin, api, connectWs, newUser, raw, startServer, stopServer, type Auth } from './helpers';
+import { admin, api, connectWs, newUser, raw, startServer, stopServer, urlOf, type Auth } from './helpers';
 
 // Arquivos: pastas com permissão por pasta (papel, canal, pessoa), herança, envio, download, lixeira, cota e histórico.
 
@@ -524,5 +524,28 @@ describe('nomes, avisos e limites', () => {
     }
     expect((await api('GET', 'files.activity', { folderId: eq, offset: '1e309' }, carla)).events).toEqual([]);
     expect((await api('GET', 'files.activity', { folderId: eq, count: '1e309' }, carla)).events.length).toBeGreaterThan(0);
+  });
+
+  it('link do arquivo aberto no navegador sem acesso mostra uma página em português, não o JSON', async () => {
+    const f = (await up(hidden, 'avaliacao-fulano.txt', 'sigilo', carla)).file;
+    const open = (auth: Auth | null, headers: Record<string, string>) =>
+      fetch(urlOf(f.url), { headers: { ...headers, ...(auth ? { cookie: `rc_uid=${auth.userId}; rc_token=${auth.authToken}` } : {}) } });
+    const ok = await open(carla, { accept: 'text/html', 'sec-fetch-dest': 'document' });
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toBe('sigilo');
+    const page = await open(bruno, { accept: 'text/html,application/xhtml+xml', 'sec-fetch-dest': 'document' });
+    expect(page.status).toBe(404);
+    expect(page.headers.get('content-type')).toContain('text/html');
+    const html = await page.text();
+    expect(html).toContain('Não deu para abrir este arquivo');
+    expect(html).toContain('Peça a quem gerencia a pasta');
+    expect(html).not.toContain('errorType');
+    const anon = await open(null, { accept: 'text/html' });
+    expect(anon.status).toBe(403);
+    expect(await anon.text()).toContain('Entre para abrir este arquivo');
+    // Prévias da tela (imagem, fetch) e chamadas da API seguem com o JSON.
+    const img = await open(bruno, { accept: 'image/*', 'sec-fetch-dest': 'image' });
+    expect(img.status).toBe(404);
+    expect((await img.json()).errorType).toBe('error-file-not-found');
   });
 });
