@@ -352,7 +352,15 @@ export function usersRoutes(app: FastifyInstance) {
     return { users: rows.map((r) => mapUser(r, { full: admin })), count: rows.length, offset, total: Number(rows[0]?.total ?? 0) };
   });
   route(app, 'GET', 'users.autocomplete', {}, async (req, _rep, ctx) => {
-    const term = String(q(req).selector ? JSON.parse(q(req).selector).term ?? '' : q(req).term ?? '');
+    // selector (como no Rocket.Chat): JSON com term; quebrado é recusado com aviso, não com erro interno.
+    let selector: any;
+    try {
+      selector = q(req).selector ? JSON.parse(String(q(req).selector)) : undefined;
+    } catch {
+      selector = null;
+    }
+    if (selector !== undefined && (selector === null || typeof selector !== 'object')) throw badRequest('error-invalid-params', 'Parâmetro selector inválido.');
+    const term = String(selector ? selector.term ?? '' : q(req).term ?? '');
     const exclude = strArray(q(req).exclude);
     // inRoom só para quem pode ver os membros da sala; sem acesso, ou com a lista de membros oculta, o rid é ignorado.
     let rid: string | undefined;

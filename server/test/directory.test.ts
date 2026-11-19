@@ -61,6 +61,13 @@ describe('diretório: acentos e curingas', () => {
     const items = (await api('GET', 'users.autocomplete', { term: 'Ana Avila' }, u)).items.map((i: any) => i.username);
     expect(items).toContain(ana.username);
     expect((await api('GET', 'users.autocomplete', { term: '%' }, u)).items).toEqual([]);
+    // selector em JSON (Rocket.Chat): vale como term; quebrado ou que não é objeto → 400, não erro interno.
+    const sel = (await api('GET', 'users.autocomplete', { selector: JSON.stringify({ term: 'Ana Avila' }) }, u)).items.map((i: any) => i.username);
+    expect(sel).toContain(ana.username);
+    for (const selector of ['{bad', 'null', '"ana"', '5']) {
+      const r = await api('GET', 'users.autocomplete', { selector }, u);
+      expect([r.status, r.errorType, r.error], selector).toEqual([400, 'error-invalid-params', 'Parâmetro selector inválido.']);
+    }
   });
 });
 
