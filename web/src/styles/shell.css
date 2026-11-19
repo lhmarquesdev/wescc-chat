@@ -1065,6 +1065,19 @@ button.side-item {
   white-space: normal;
 }
 
+/* Estado vazio na lateral azul (nenhuma conversa, busca sem resultado, "Tudo lido"): texto claro sobre o azul. No
+   celular a lista usa o tema da página e fica com as cores comuns. */
+.sidebar:not([data-mode='list']) .empty,
+.sidebar:not([data-mode='list']) .empty-desc {
+  color: hsl(var(--sidebar-foreground) / 0.85);
+}
+.sidebar:not([data-mode='list']) .empty-title {
+  color: hsl(var(--sidebar-foreground));
+}
+.sidebar:not([data-mode='list']) .empty-icon {
+  color: hsl(var(--sidebar-foreground) / 0.6);
+}
+
 /* ---------- Lista de conversas como tela inicial (celular) ----------
    A lista usa o tema da página (não a ilha escura): só os valores das variáveis mudam. */
 .sidebar[data-mode='list'] {
