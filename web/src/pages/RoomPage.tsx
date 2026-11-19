@@ -498,6 +498,8 @@ export function RoomPage() {
       (!p.when || p.when(room)) &&
       (!p.perm || [p.perm].flat().some((x) => canWithRoles(x, roles))) &&
       !(p.id === 'members' && membersHidden) &&
+      // Link de convite: só quem participa da sala cria (o servidor exige), e não numa sala arquivada.
+      !(p.id === 'invite' && (!sub || room.archived)) &&
       !(p.id === 'scheduled' && !scheduledHere && panel !== 'scheduled') &&
       !(p.id === 'translate' && !translateOn),
   );

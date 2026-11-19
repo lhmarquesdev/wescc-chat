@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { OAuthProviderPublic, OAuthProviderType } from '@shared/index';
 import { api, ApiError, errorMessage, getCredentials } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
+import { roomPath } from '../lib/format';
 import { clearLogoutReason, LOGOUT_REASON_TEXT, peekLogoutReason } from '../lib/logoutReason';
 import { login, loginWithOAuth, loginWithSaml } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
@@ -429,39 +430,75 @@ export function RegisterPage() {
   );
 }
 
+// Motivo de um convite que não serve mais (validateInviteToken.reason); os outros casos caem no texto geral.
+const INVITE_REASON: Record<string, { title: string; text: string }> = {
+  expired: { title: 'Convite expirado', text: 'Este convite expirou. Peça um novo a quem convidou você.' },
+  'used-up': { title: 'Convite esgotado', text: 'Este convite já foi usado o número máximo de vezes. Peça um novo a quem convidou você.' },
+  archived: { title: 'Sala arquivada', text: 'A sala deste convite foi arquivada e não recebe mais pessoas.' },
+};
+const INVITE_INVALID = { title: 'Convite inválido', text: 'Este convite é inválido ou expirou. Peça um novo a quem convidou você.' };
+
 export function InvitePage({ loggedIn }: { loggedIn: boolean }) {
   const { token = '' } = useParams();
   const navigate = useNavigate();
   const [info, setInfo] = useState<any>(null);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     void api.post('validateInviteToken', { token }).then(setInfo).catch((e) => setError(errorMessage(e)));
   }, [token]);
   const accept = async () => {
+    setBusy(true);
     try {
       const r = await api.post('useInviteToken', { token });
-      navigate(r.room.t === 'p' ? `/group/${r.room.rid}` : `/channel/${r.room.rid}`);
+      navigate(roomPath(r.room));
     } catch (e) {
       setError(errorMessage(e));
+      setBusy(false);
     }
   };
+  const member = !!info?.alreadyMember;
+  const bad = info && !info.valid && !member ? (INVITE_REASON[info.reason] ?? INVITE_INVALID) : null;
+  const roomName = info?.room && (info.room.fname || info.room.name);
+  // Sem saída a pessoa ficaria presa na tela: volta para o chat (ou para o login).
+  const exit = (
+    <Link className="btn lg full" to={loggedIn ? '/home' : '/login'}>
+      <Icon name="back" />
+      {loggedIn ? 'Ir para o chat' : 'Voltar ao login'}
+    </Link>
+  );
   return (
-    <AuthShell title={info && !info.valid ? 'Convite inválido' : 'Convite'}>
+    <AuthShell title={bad ? bad.title : 'Convite'}>
       {error && <FormError>{error}</FormError>}
       {!info && !error && <div className="spinner" role="status" aria-label="Carregando" />}
-      {info && !info.valid && <p className="muted">Este convite é inválido ou expirou. Peça um novo a quem convidou você.</p>}
-      {info?.valid && (
+      {bad && <p className="muted">{bad.text}</p>}
+      {member && (
         <div className="form auth-form">
           <div className="auth-invite">
             <span className="auth-invite-icon">
               <Icon name={info.room.t === 'p' ? 'room-private' : 'room-channel'} size={20} />
             </span>
             <span>
-              Você foi convidado para <strong>{info.room.fname || info.room.name}</strong>.
+              Você já participa de <strong>{roomName}</strong>.
+            </span>
+          </div>
+          <Link className="btn primary lg full block" to={roomPath(info.room)}>
+            Abrir sala
+          </Link>
+        </div>
+      )}
+      {info?.valid && !member && (
+        <div className="form auth-form">
+          <div className="auth-invite">
+            <span className="auth-invite-icon">
+              <Icon name={info.room.t === 'p' ? 'room-private' : 'room-channel'} size={20} />
+            </span>
+            <span>
+              Você foi convidado para <strong>{roomName}</strong>.
             </span>
           </div>
           {loggedIn ? (
-            <button type="button" className="btn primary lg full block" onClick={accept}>
+            <button type="button" className="btn primary lg full block" onClick={accept} aria-busy={busy || undefined} disabled={busy}>
               Entrar na sala
             </button>
           ) : (
@@ -471,6 +508,7 @@ export function InvitePage({ loggedIn }: { loggedIn: boolean }) {
           )}
         </div>
       )}
+      {(bad || error) && exit}
     </AuthShell>
   );
 }
