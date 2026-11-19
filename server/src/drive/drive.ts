@@ -25,7 +25,7 @@ import { audit } from '../services/audit';
 import { hasAnyPermission, roleExists } from '../services/permissions';
 import { canAccessRoom, getRoom } from '../services/rooms';
 import { getSetting } from '../services/settings';
-import { deleteStored, newStoredRel, safeMimeType, storedPath, typeAllowed } from '../services/uploads';
+import { deleteStored, inlineMimeType, newStoredRel, safeMimeType, storedPath, typeAllowed } from '../services/uploads';
 import type { Ctx } from '../services/users';
 import { DRIVE_TEXT, loadAccess, needFolder, type Access, type FolderRow } from './access';
 
@@ -597,13 +597,15 @@ async function needFile(acc: Access, fileId: unknown, min: 1 | 2 | 3, opts: { al
   return r;
 }
 
-export async function fileForDownload(ctx: Ctx | null, fileId: string, logDownload: boolean) {
+// Entra no histórico o que sai como download: o botão Baixar (?download) e abrir um tipo que o navegador não mostra
+// (planilha, Word, texto: vai como anexo). As prévias da própria tela (?preview) não contam.
+export async function fileForDownload(ctx: Ctx | null, fileId: string, opts: { download: boolean; preview?: boolean }) {
   if (!ctx) throw forbidden();
   if (!(await hasAnyPermission(ctx.userId, ['view-files', 'manage-all-files']))) throw forbidden();
   assertDriveOn();
   const acc = await loadAccess(ctx);
   const r = await needFile(acc, fileId, 1);
-  if (logDownload) await logActivity(ctx, r.folder_id, r.id, 'file.download', { name: r.name });
+  if (opts.download || (!opts.preview && !inlineMimeType(safeMimeType(r.type)))) await logActivity(ctx, r.folder_id, r.id, 'file.download', { name: r.name });
   return { ...r, absPath: storedPath(r.storage_path) };
 }
 

@@ -301,6 +301,23 @@ describe('arquivos', () => {
     await query("DELETE FROM drive_folders WHERE id = 'bidiPASTAAAAAAAAA'");
   });
 
+  it('abrir um tipo que o navegador não mostra conta como download; prévia e PDF aberto, não', async () => {
+    const xlsx = (await up(root, 'planilha.xlsx', 'PK', bruno, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')).file;
+    const pdf = (await up(root, 'manual.pdf', '%PDF-1.4', bruno, 'application/pdf')).file;
+    const txt = (await up(root, 'notas.txt', 'notas', bruno)).file;
+    const downloads = async (fileId: string) =>
+      (await api('GET', 'files.activity', { folderId: root, count: 200 }, ana)).events.filter((e: any) => e.action === 'file.download' && e.fileId === fileId).length;
+    const open = await raw(xlsx.url, davi);
+    expect(open.headers.get('content-disposition')).toContain('attachment');
+    expect(await downloads(xlsx._id)).toBe(1);
+    expect((await raw(pdf.url, davi)).headers.get('content-disposition')).toContain('inline');
+    expect(await downloads(pdf._id)).toBe(0);
+    expect((await raw(`${txt.url}?preview`, davi)).status).toBe(200);
+    expect(await downloads(txt._id)).toBe(0);
+    await raw(`${pdf.url}?download`, davi);
+    expect(await downloads(pdf._id)).toBe(1);
+  });
+
   it('cota cheia recusa o envio com aviso claro', async () => {
     await api('POST', 'settings', { settings: { Drive_Quota_GB: 1 } }, A);
     await query("INSERT INTO drive_files (id, folder_id, name, type, size, storage_path) VALUES ('grandeAAAAAAAAAAA', $1, 'grande.bin', 'application/octet-stream', $2, '2026/01/grandeAAAAAAAAAAA')", [root, 1024 ** 3]);

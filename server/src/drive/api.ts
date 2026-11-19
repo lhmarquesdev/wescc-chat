@@ -60,7 +60,7 @@ export function driveRoutes(app: FastifyInstance) {
   // Download e pré-visualização (o cookie de sessão vale para GET). Mesmas proteções dos anexos do chat.
   app.get('/file-upload/drive/:id/*', async (req: any, reply) => {
     const download = q(req).download !== undefined;
-    const f = await fileForDownload(req.ctx, String(req.params.id), download);
+    const f = await fileForDownload(req.ctx, String(req.params.id), { download, preview: q(req).preview !== undefined });
     const type = safeMimeType(f.type);
     const inline = inlineMimeType(type);
     reply.header('Content-Type', type);

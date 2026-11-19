@@ -37,6 +37,10 @@ const toneOf = (f: { name: string; type: string }) => {
 };
 const isText = (f: DriveFile) => /^text\//.test(f.type) || /\.(txt|md|csv|log|json|xml|ya?ml|ini|sql)$/i.test(f.name);
 const canPreview = (f: DriveFile) => /^(image|video|audio)\//.test(f.type) || f.type === 'application/pdf' || isText(f);
+// O navegador mostra na própria aba (o mesmo que inlineMimeType no servidor); o resto vai como download.
+const opensInTab = (f: DriveFile) => /^(image\/(png|jpeg|gif|webp|bmp|avif)|(audio|video)\/[a-z0-9.+-]+|application\/pdf)$/.test(f.type);
+// Prévias desta tela: ?preview não entra no histórico como download.
+const previewUrl = (f: DriveFile) => `${f.url}?preview`;
 // As mesmas regras do servidor (drive.ts): renomear a pasta principal pede gerenciar; subpasta, editar a de cima. Mover e
 // mandar para a lixeira: gerenciar, ou editar uma subpasta que herda o acesso e a de cima.
 const canRenameFolder = (f: DriveFolder) => f.level >= 3 || (!!f.parentId && f.level >= 2 && (f.parentLevel ?? 0) >= 2);
@@ -501,7 +505,7 @@ function Thumb({ file }: { file: DriveFile }) {
   if (file.type.startsWith('image/') && !failed)
     return (
       <span className="fl-thumb">
-        <img src={file.url} alt="" loading="lazy" onError={() => setFailed(true)} />
+        <img src={previewUrl(file)} alt="" loading="lazy" onError={() => setFailed(true)} />
       </span>
     );
   return (
@@ -994,7 +998,7 @@ function FilePreview({ file }: { file: DriveFile }) {
     setText(null);
     if (!isText(file) || file.size > 512 * 1024) return;
     let alive = true;
-    fetch(file.url, { credentials: 'same-origin' })
+    fetch(previewUrl(file), { credentials: 'same-origin' })
       .then((r) => r.text())
       .then((t) => alive && setText(t))
       .catch(() => alive && setText(''));
@@ -1002,10 +1006,10 @@ function FilePreview({ file }: { file: DriveFile }) {
       alive = false;
     };
   }, [file]);
-  if (file.type.startsWith('image/')) return <img className="fl-preview-img" src={file.url} alt={file.name} />;
-  if (file.type.startsWith('video/')) return <video className="fl-preview-media" src={file.url} controls preload="metadata" />;
-  if (file.type.startsWith('audio/')) return <audio className="fl-preview-audio" src={file.url} controls preload="metadata" />;
-  if (file.type === 'application/pdf') return <iframe className="fl-preview-pdf" src={file.url} title={`Prévia de ${file.name}`} />;
+  if (file.type.startsWith('image/')) return <img className="fl-preview-img" src={previewUrl(file)} alt={file.name} />;
+  if (file.type.startsWith('video/')) return <video className="fl-preview-media" src={previewUrl(file)} controls preload="metadata" />;
+  if (file.type.startsWith('audio/')) return <audio className="fl-preview-audio" src={previewUrl(file)} controls preload="metadata" />;
+  if (file.type === 'application/pdf') return <iframe className="fl-preview-pdf" src={previewUrl(file)} title={`Prévia de ${file.name}`} />;
   if (isText(file) && file.size <= 512 * 1024) return text === null ? <Skeleton height={120} /> : <pre className="fl-preview-text">{text.slice(0, 20000)}</pre>;
   return (
     <div className="fl-preview-none">
@@ -1045,10 +1049,12 @@ function FileDetails({ file, level, actions, onClose }: { file: DriveFile; level
           <Icon name="download" />
           Baixar
         </button>
-        <a className="btn" href={file.url} target="_blank" rel="noreferrer">
-          <Icon name="open-external" />
-          Abrir
-        </a>
+        {opensInTab(file) && (
+          <a className="btn" href={file.url} target="_blank" rel="noreferrer">
+            <Icon name="open-external" />
+            Abrir
+          </a>
+        )}
         <Menu
           label="Mais ações do arquivo"
           trigger={
