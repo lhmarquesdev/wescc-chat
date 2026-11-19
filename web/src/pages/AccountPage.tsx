@@ -658,6 +658,14 @@ export function TwoFactorCard() {
   const touch = useMedia('(pointer: coarse)');
   const site = useSetting<string>('Site_Name') || 'Wescc Chat';
   const codesText = () => `Códigos de backup do ${site} (@${me.username}). Cada um funciona uma vez.\n\n${codes!.join('\n')}\n`;
+  // Sem HTTPS (fora de localhost) o navegador não libera a área de transferência: avisa em vez de parecer que copiou.
+  const copy = (text: string, done: string) =>
+    navigator.clipboard
+      ? navigator.clipboard
+          .writeText(text)
+          .then(() => ok(done))
+          .catch(fail)
+      : fail(new Error('Não foi possível copiar neste navegador. Selecione o texto e copie.'));
   const downloadCodes = () => {
     const url = URL.createObjectURL(new Blob([codesText()], { type: 'text/plain;charset=utf-8' }));
     const a = Object.assign(document.createElement('a'), { href: url, download: 'codigos-de-backup.txt' });
@@ -710,12 +718,7 @@ export function TwoFactorCard() {
             <button
               type="button"
               className="btn"
-              onClick={() =>
-                navigator.clipboard
-                  .writeText(codesText())
-                  .then(() => ok('Códigos copiados.'))
-                  .catch(fail)
-              }
+              onClick={() => void copy(codesText(), 'Códigos copiados.')}
             >
               <Icon name="copy" />
               Copiar códigos
@@ -780,12 +783,7 @@ export function TwoFactorCard() {
                 <button
                   type="button"
                   className="btn small"
-                  onClick={() =>
-                    navigator.clipboard
-                      .writeText(setup.secret)
-                      .then(() => ok('Chave copiada.'))
-                      .catch(fail)
-                  }
+                  onClick={() => void copy(setup.secret, 'Chave copiada.')}
                 >
                   <Icon name="copy" />
                   Copiar chave
