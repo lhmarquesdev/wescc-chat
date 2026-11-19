@@ -183,6 +183,8 @@ function UserReports({ user, onClose }: { user: any; onClose: () => void }) {
   // Depois de agir num item (descartar, apagar, remover a figurinha), sem nenhuma denúncia pendente o modal fecha.
   const [acted, setActed] = useState(false);
   const [busy, setBusy] = useState(false);
+  // "Abrir na conversa" só onde o moderador entra: numa DM ou grupo de outras pessoas o link dava em "Sala não encontrada".
+  const subs = useStore((s) => s.subscriptions);
   useEffect(() => {
     if (acted && !loading && data && !data.reports.length) onClose();
   }, [acted, loading, data, onClose]);
@@ -275,7 +277,7 @@ function UserReports({ user, onClose }: { user: any; onClose: () => void }) {
           {groups.map((g) => {
             const r = g.first;
             const reporters = [...new Set(g.reports.map((x: any) => x.reporter ?? 'usuário excluído'))];
-            const canOpen = r.messageId && r.rid && r.roomType && !r.messageRemoved;
+            const canOpen = r.messageId && r.rid && r.roomType && !r.messageRemoved && (r.roomType === 'c' || !!subs[r.rid]);
             return (
               <li key={g.key}>
                 <div className="report-meta">
