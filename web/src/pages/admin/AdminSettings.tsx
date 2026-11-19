@@ -2,12 +2,13 @@ import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } 
 import { Link } from 'react-router-dom';
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime, plural } from '../../lib/format';
-import { useStore } from '../../lib/store';
+import { usePermission, useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { RoomPicker } from '../../components/Pickers';
 import { Empty, Menu, SearchInput, Skeleton, Toggle, Tooltip, confirmDialog, useAsync } from '../../components/ui';
 import { useIsPhone } from '../../components/overlay';
 import { PageHead } from './parts';
+import { useLeaveGuard } from './rbac/leaveGuard';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -100,8 +101,9 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stri
 
 // E-mail: a última falha de envio desta instância (o envio é em segundo plano: senão ninguém fica sabendo) e o e-mail
 // de teste, que mostra o motivo. O teste usa o que está salvo.
-function EmailExtra({ unsaved }: { unsaved: boolean }) {
-  const { data, reload } = useAsync(() => api.get('email.status'), []);
+// savedVersion muda a cada gravação: o estado do SMTP é lido de novo (o botão destravava só recarregando a página).
+function EmailExtra({ unsaved, savedVersion, canEdit }: { unsaved: boolean; savedVersion: number; canEdit: boolean }) {
+  const { data, reload } = useAsync(() => api.get('email.status'), [savedVersion]);
   const [testing, setTesting] = useState(false);
   const st = data?.status as { configured: boolean; lastSuccessAt: string | null; lastFailure: { at: string; error: string; subject: string } | null } | undefined;
   const failedLast = !!st?.lastFailure && (!st.lastSuccessAt || st.lastFailure.at > st.lastSuccessAt);
@@ -116,7 +118,13 @@ function EmailExtra({ unsaved }: { unsaved: boolean }) {
         reload();
       });
   };
-  const hint = !st?.configured ? 'Preencha o servidor SMTP e salve para testar.' : unsaved ? 'Salve as alterações antes de testar.' : 'Vai para o e-mail da sua conta.';
+  const hint = !canEdit
+    ? 'Só quem pode alterar as configurações envia o e-mail de teste.'
+    : !st?.configured
+      ? 'Preencha o servidor SMTP e salve para testar.'
+      : unsaved
+        ? 'Salve as alterações antes de testar.'
+        : 'Vai para o e-mail da sua conta.';
   return (
     <>
       {st && failedLast && (
@@ -134,7 +142,7 @@ function EmailExtra({ unsaved }: { unsaved: boolean }) {
         </div>
       )}
       <div className="settings-extra row-actions wrap">
-        <button className="btn" onClick={test} disabled={testing || unsaved || !st?.configured} aria-busy={testing || undefined} aria-describedby="email-test-hint">
+        <button className="btn" onClick={test} disabled={!canEdit || testing || unsaved || !st?.configured} aria-busy={testing || undefined} aria-describedby="email-test-hint">
           <Icon name="email" />
           Enviar e-mail de teste
         </button>
@@ -155,7 +163,11 @@ export function AdminSettings() {
   const [filter, setFilter] = useState('');
   const [saving, setSaving] = useState(false);
   const [testingTranslate, setTestingTranslate] = useState(false);
+  const [savedVersion, setSavedVersion] = useState(0);
   const navRef = useRef<HTMLDivElement>(null);
+  // Só "Ver" (view-privileged-setting): campos travados, sem barra de salvar e sem as ações, como na página do LDAP.
+  const canEdit = usePermission('edit-privileged-setting');
+  const canRunRetention = usePermission('manage-retention-policy');
 
   // Integrações (Jira): sem os grupos que têm página própria (HIDDEN_GROUPS).
   const all: any[] = useMemo(() => (data?.settings ?? []).filter((s: any) => !HIDDEN_GROUPS.includes(s.group)), [data]);
@@ -176,6 +188,15 @@ export function AdminSettings() {
   const changedIn = (g: string) => changed.filter((id) => all.find((s: any) => s._id === id)?.group === g).length;
   // Número vazio ou com casas decimais: o campo fica em vermelho e o Salvar espera (o servidor também recusa).
   const invalid = useMemo(() => changed.filter((id) => all.find((s: any) => s._id === id)?.type === 'int' && !Number.isInteger(draft[id])), [changed, draft, all]);
+  // Sair pelo menu, por um link ou fechando a aba com alterações não salvas: pergunta antes (elas sumiam caladas).
+  useLeaveGuard(changed.length > 0, () =>
+    confirmDialog({
+      title: 'Descartar as alterações?',
+      body: `${plural(changed.length, 'alteração não salva', 'alterações não salvas')} nas configurações. Sair mesmo assim?`,
+      confirmLabel: 'Descartar e sair',
+      danger: true,
+    }),
+  );
 
   if (loading && !data)
     return (
@@ -214,6 +235,7 @@ export function AdminSettings() {
       await api.post('settings', { settings: Object.fromEntries(changed.map((id) => [id, draft[id]])) });
       setDraft({});
       reload();
+      setSavedVersion((v) => v + 1);
       ok('Configurações salvas.');
     } catch (e) {
       fail(e);
@@ -221,17 +243,41 @@ export function AdminSettings() {
       setSaving(false);
     }
   };
+  // A limpeza usa o que está salvo: com alterações na tela o botão espera, e a confirmação mostra os prazos salvos.
+  const saved = (id: string) => all.find((s: any) => s._id === id)?.value;
+  const retentionUnsaved = changedIn('RetentionPolicy') > 0;
   const runRetention = async () => {
+    const kinds = (
+      [
+        ['RetentionPolicy_AppliesToChannels', 'RetentionPolicy_TTL_Channels', 'Canais públicos'],
+        ['RetentionPolicy_AppliesToGroups', 'RetentionPolicy_TTL_Groups', 'Grupos privados'],
+        ['RetentionPolicy_AppliesToDMs', 'RetentionPolicy_TTL_DMs', 'Mensagens diretas'],
+      ] as const
+    ).filter(([on]) => saved(on));
+    const what = saved('RetentionPolicy_FilesOnly') ? 'Arquivos' : 'Mensagens e arquivos';
     const yes = await confirmDialog({
       title: 'Executar a limpeza agora?',
-      body: 'Mensagens e arquivos mais antigos que o prazo da política são apagados de vez.',
+      body: (
+        <>
+          <p>{what} mais antigos que o prazo salvo são apagados de vez:</p>
+          <ul>
+            {kinds.map(([, ttl, label]) => (
+              <li key={ttl}>
+                {label}: mais de {plural(Number(saved(ttl)), 'dia', 'dias')}
+              </li>
+            ))}
+            {!kinds.length && <li>Nenhum tipo de sala está marcado na política salva.</li>}
+          </ul>
+          <p className="muted small">Salas com política própria seguem o prazo delas.</p>
+        </>
+      ),
       confirmLabel: 'Executar limpeza',
       danger: true,
     });
     if (!yes) return;
     api
       .post('retention.run')
-      .then((r) => ok(`${r.removed} itens removidos em ${r.rooms} salas.`))
+      .then((r) => ok(`${plural(r.removed, 'item removido', 'itens removidos')} em ${plural(r.rooms, 'sala', 'salas')}.`))
       .catch(fail);
   };
   // Tradução: testa o rascunho da tela (endereço e chave ainda não salvos); a chave mascarada vale como a gravada.
@@ -330,6 +376,12 @@ export function AdminSettings() {
           {(!q || visible.length > 0) && (
             <h2 className={phone && !q ? 'settings-group-title visually-hidden' : 'settings-group-title'}>{q ? `Resultados para “${filter.trim()}”` : (GROUP_LABEL[group] ?? group)}</h2>
           )}
+          {!canEdit && (
+            <div className="callout info" role="status">
+              <Icon name="info" />
+              <span>Você só pode ver estas configurações.</span>
+            </div>
+          )}
           {/* Integrações (Jira) */}
           {group === 'Integrations' && !q && (
             <div className="callout info">
@@ -378,6 +430,7 @@ export function AdminSettings() {
                   value={value(s)}
                   modified={changed.includes(s._id)}
                   error={invalid.includes(s._id) ? 'Preencha com um número inteiro.' : undefined}
+                  disabled={!canEdit}
                   onChange={(v) => set(s, v)}
                   onRevert={() => revert(s)}
                 />
@@ -388,6 +441,7 @@ export function AdminSettings() {
             <div className="settings-extra row-actions wrap">
               <button
                 className="btn"
+                disabled={!canEdit}
                 onClick={() =>
                   api
                     .post('ldap.testConnection')
@@ -400,6 +454,7 @@ export function AdminSettings() {
               </button>
               <button
                 className="btn"
+                disabled={!canEdit}
                 onClick={() =>
                   api
                     .post('ldap.syncNow')
@@ -418,7 +473,7 @@ export function AdminSettings() {
               <button
                 className="btn"
                 onClick={testTranslate}
-                disabled={testingTranslate || !translateUrl}
+                disabled={!canEdit || testingTranslate || !translateUrl}
                 aria-busy={testingTranslate || undefined}
                 aria-describedby={!translateUrl ? 'translate-test-hint' : undefined}
               >
@@ -432,13 +487,23 @@ export function AdminSettings() {
               )}
             </div>
           )}
-          {group === 'Email' && !q && <EmailExtra unsaved={changedIn('Email') > 0} />}
+          {group === 'Email' && !q && <EmailExtra unsaved={changedIn('Email') > 0} savedVersion={savedVersion} canEdit={canEdit} />}
           {group === 'RetentionPolicy' && !q && (
-            <div className="settings-extra row-actions">
-              <button className="btn danger" onClick={runRetention}>
+            <div className="settings-extra row-actions wrap">
+              <button
+                className="btn danger"
+                onClick={runRetention}
+                disabled={retentionUnsaved || !canRunRetention}
+                aria-describedby={retentionUnsaved || !canRunRetention ? 'retention-run-hint' : undefined}
+              >
                 <Icon name="retention" />
                 Executar limpeza agora
               </button>
+              {(retentionUnsaved || !canRunRetention) && (
+                <span id="retention-run-hint" className="muted small">
+                  {!canRunRetention ? 'Só quem pode rodar a política de retenção executa a limpeza.' : 'Salve as alterações antes de executar.'}
+                </span>
+              )}
             </div>
           )}
           {group === 'SAML' && !q && (
@@ -451,7 +516,7 @@ export function AdminSettings() {
           )}
         </div>
       </div>
-      {changed.length > 0 && (
+      {canEdit && changed.length > 0 && (
         <div className="save-bar" role="region" aria-label="Alterações não salvas">
           <span className="save-bar-text">
             <span className="save-bar-dot" aria-hidden="true" />
@@ -503,7 +568,23 @@ function SettingKey({ id }: { id: string }) {
 }
 
 // Linha da página de configurações: rótulo e descrição à esquerda (280px), controle à direita.
-function SettingRow({ s, value, modified, error, onChange, onRevert }: { s: any; value: any; modified: boolean; error?: string; onChange: (v: unknown) => void; onRevert: () => void }) {
+function SettingRow({
+  s,
+  value,
+  modified,
+  error,
+  disabled,
+  onChange,
+  onRevert,
+}: {
+  s: any;
+  value: any;
+  modified: boolean;
+  error?: string;
+  disabled?: boolean;
+  onChange: (v: unknown) => void;
+  onRevert: () => void;
+}) {
   const id = useId();
   return (
     <div className={`setting-row${s.type === 'boolean' ? ' bool' : ''}${modified ? ' modified' : ''}`}>
@@ -524,7 +605,7 @@ function SettingRow({ s, value, modified, error, onChange, onRevert }: { s: any;
         {s.description && <span className="setting-desc">{s.description}</span>}
       </div>
       <div className="setting-control">
-        <SettingControl s={s} value={value} onChange={onChange} id={id} invalid={!!error} />
+        <SettingControl s={s} value={value} onChange={onChange} id={id} invalid={!!error} disabled={disabled} />
         {error && (
           <span className="field-error" id={`${id}-err`} role="alert">
             {error}
@@ -542,7 +623,7 @@ function SettingRow({ s, value, modified, error, onChange, onRevert }: { s: any;
 }
 
 // "Canais padrão": chips das salas e um seletor para acrescentar; o valor continua "geral,avisos".
-function ChannelList({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
+function ChannelList({ value, onChange, disabled }: { value: unknown; onChange: (v: unknown) => void; disabled?: boolean }) {
   const names = String(value ?? '')
     .split(',')
     .map((x) => x.trim())
@@ -555,22 +636,40 @@ function ChannelList({ value, onChange }: { value: unknown; onChange: (v: unknow
             <span key={n} className="chip">
               <Icon name="room-channel" size={14} />
               {n}
-              <button type="button" aria-label={`Remover ${n}`} onClick={() => onChange(names.filter((x) => x !== n).join(','))}>
-                <Icon name="close" size={14} />
-              </button>
+              {!disabled && (
+                <button type="button" aria-label={`Remover ${n}`} onClick={() => onChange(names.filter((x) => x !== n).join(','))}>
+                  <Icon name="close" size={14} />
+                </button>
+              )}
             </span>
           ))}
         </div>
       )}
-      <RoomPicker value={null} onChange={(r) => r && onChange([...new Set([...names, r.name])].join(','))} placeholder="Adicionar canal" />
+      {!disabled && <RoomPicker value={null} onChange={(r) => r && onChange([...new Set([...names, r.name])].join(','))} placeholder="Adicionar canal" />}
     </div>
   );
 }
 
-function SettingControl({ s, value, onChange, id, label, invalid }: { s: any; value: any; onChange: (v: unknown) => void; id?: string; label?: ReactNode; invalid?: boolean }) {
+function SettingControl({
+  s,
+  value,
+  onChange,
+  id,
+  label,
+  invalid,
+  disabled,
+}: {
+  s: any;
+  value: any;
+  onChange: (v: unknown) => void;
+  id?: string;
+  label?: ReactNode;
+  invalid?: boolean;
+  disabled?: boolean;
+}) {
   if (s._id === 'Language')
     return (
-      <select id={id} value={value ?? 'pt-BR'} onChange={(e) => onChange(e.target.value)}>
+      <select id={id} value={value ?? 'pt-BR'} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
         {LANGUAGES.some((l) => l.key === value) || !value ? null : <option value={value}>{value}</option>}
         {LANGUAGES.map((l) => (
           <option key={l.key} value={l.key}>
@@ -579,10 +678,10 @@ function SettingControl({ s, value, onChange, id, label, invalid }: { s: any; va
         ))}
       </select>
     );
-  if (s._id === 'Default_Channels') return <ChannelList value={value} onChange={onChange} />;
+  if (s._id === 'Default_Channels') return <ChannelList value={value} onChange={onChange} disabled={disabled} />;
   switch (s.type) {
     case 'boolean':
-      return <Toggle checked={!!value} onChange={onChange} label={label ?? <span className="visually-hidden">{labelOf(s)}</span>} />;
+      return <Toggle checked={!!value} onChange={onChange} disabled={disabled} label={label ?? <span className="visually-hidden">{labelOf(s)}</span>} />;
     case 'int':
       // Vazio continua vazio (Number('') virava 0 e travava limites como o de requisições por minuto).
       return (
@@ -592,6 +691,7 @@ function SettingControl({ s, value, onChange, id, label, invalid }: { s: any; va
           inputMode="numeric"
           step={1}
           value={value ?? ''}
+          disabled={disabled}
           aria-invalid={invalid || undefined}
           aria-describedby={invalid && id ? `${id}-err` : undefined}
           onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
@@ -599,7 +699,7 @@ function SettingControl({ s, value, onChange, id, label, invalid }: { s: any; va
       );
     case 'select':
       return (
-        <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+        <select id={id} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
           {s.values.map((v: any) => (
             <option key={v.key} value={v.key}>
               {v.label}
@@ -609,11 +709,11 @@ function SettingControl({ s, value, onChange, id, label, invalid }: { s: any; va
       );
     case 'code':
     case 'multiline':
-      return <textarea id={id} className={s.type === 'code' ? 'mono' : ''} rows={s.type === 'code' ? 6 : 4} value={value ?? ''} onChange={(e) => onChange(e.target.value)} />;
+      return <textarea id={id} className={s.type === 'code' ? 'mono' : ''} rows={s.type === 'code' ? 6 : 4} value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
     case 'password':
-      return <input id={id} type="password" value={value ?? ''} onChange={(e) => onChange(e.target.value)} autoComplete="new-password" />;
+      return <input id={id} type="password" value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value)} autoComplete="new-password" />;
     default:
-      return <input id={id} value={value ?? ''} onChange={(e) => onChange(e.target.value)} />;
+      return <input id={id} value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
   }
 }
 
