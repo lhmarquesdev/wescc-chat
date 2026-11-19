@@ -706,6 +706,9 @@ export const LOCK_TEXT: Record<Exclude<LockReason, null> | 'self', string> = {
   self: 'Você não pode alterar os próprios papéis.',
 };
 
+// 2FA obrigatório e "Restrito em conversas diretas" de um papel que também é de alguém acima de quem edita.
+export const HOLDERS_LOCK_TEXT = 'Este papel também é de pessoas com papéis acima dos seus (como administradores): só um administrador muda o 2FA obrigatório e a restrição em conversas diretas dele.';
+
 // ---------- Acesso efetivo ----------
 
 export interface EffectiveArea {

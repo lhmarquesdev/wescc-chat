@@ -135,3 +135,33 @@ describe('desativar', () => {
     expect((await api('POST', 'users.setActiveStatus', { userId: other.userId, activeStatus: true }, A)).success).toBe(true);
   });
 });
+
+describe('papéis: travas de segurança com pessoas acima de quem edita', () => {
+  it('gestor não liga 2FA obrigatório nem Restrito num papel que administradores também têm', async () => {
+    const keys = ['view-user-administration', 'edit-other-user-info', 'assign-roles', 'view-permissions', 'manage-roles'];
+    expect((await api('POST', 'rbac.roles.create', { name: 'gestor-pessoas', description: 'Gestor de pessoas', scope: 'Users', permissions: keys }, A)).success).toBe(true);
+    const gestor = await newUser(A, { roles: ['user', 'gestor-pessoas'] });
+    expect((await api('POST', 'rbac.roles.create', { name: 'equipe-noite', description: 'Equipe da noite', scope: 'Users' }, A)).success).toBe(true);
+    await newUser(A, { roles: ['user', 'equipe-noite'] });
+
+    const g = await api('GET', 'rbac.grantContext', undefined, gestor);
+    expect(g.holderLocks.user).toBe('root-only');
+    expect(g.holderLocks['equipe-noite']).toBeUndefined();
+
+    for (const body of [{ roleId: 'user', mandatory2fa: true }, { roleId: 'user', restrictDirect: true }]) {
+      const r = await api('POST', 'rbac.roles.update', body, gestor);
+      expect(r.status).toBe(403);
+      expect(r.errorType).toBe('RBAC_HOLDER_SUPERIOR');
+      expect(r.error).toMatch(/só um administrador muda o 2FA obrigatório/);
+    }
+    expect((await api('POST', 'roles.update', { roleId: 'user', mandatory2fa: true }, gestor)).errorType).toBe('RBAC_HOLDER_SUPERIOR');
+    const row = (await pool.query(`SELECT mandatory_2fa, restrict_direct FROM roles WHERE id = 'user'`)).rows[0];
+    expect(row).toEqual({ mandatory_2fa: false, restrict_direct: false });
+    // O resto do papel continua editável, e num papel só de quem o gestor gerencia as travas também.
+    expect((await api('POST', 'rbac.roles.update', { roleId: 'user', purpose: 'Todos da empresa' }, gestor)).success).toBe(true);
+    expect((await api('POST', 'rbac.roles.update', { roleId: 'equipe-noite', mandatory2fa: true }, gestor)).success).toBe(true);
+    // O administrador continua mudando.
+    expect((await api('POST', 'rbac.roles.update', { roleId: 'user', restrictDirect: false, mandatory2fa: false }, A)).success).toBe(true);
+    expect((await api('GET', 'rbac.grantContext', undefined, A)).holderLocks).toEqual({});
+  });
+});

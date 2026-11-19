@@ -4,7 +4,7 @@
 // em outras permissões continua.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { areaLevel, isSensitive, KEY_AREA, levelText, RBAC_GROUPS, rbacLabel, ROLE_PURPOSE, roleNameProblem, VISIBLE_KEYS } from '@shared/rbac';
+import { areaLevel, HOLDERS_LOCK_TEXT, isSensitive, KEY_AREA, levelText, RBAC_GROUPS, rbacLabel, ROLE_PURPOSE, roleNameProblem, VISIBLE_KEYS } from '@shared/rbac';
 import { roleDisplayName } from '@shared/messageText';
 import { api } from '../../../lib/api';
 import { plural, ROLE_LABEL, roleLabel } from '../../../lib/format';
@@ -134,6 +134,8 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
   const canEditPerms = grant.canEditPermissions && !lock;
   const canEditRole = grant.canEditRoles && !lock;
   const canWrite = canEditPerms || canEditRole;
+  // 2FA obrigatório e Restrito valem para quem tem o papel: com alguém acima de você entre essas pessoas, ficam travados.
+  const securityLocked = !!grant.holderLocks?.[role._id];
 
   const askLeave = async () => !dirty || confirmDialog({ title: 'Descartar as alterações?', body: 'O que você mudou neste papel ainda não foi salvo.', confirmLabel: 'Descartar', danger: true });
   const compare = async (other: string) => {
@@ -340,7 +342,7 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
                   <div className="toggle-list">
                     <Toggle
                       checked={draft.mandatory2fa}
-                      disabled={!canEditRole}
+                      disabled={!canEditRole || securityLocked}
                       onChange={(v) => setDraft({ ...draft, mandatory2fa: v })}
                       label="Exigir 2FA"
                       description="Quem tem o papel configura a autenticação em dois fatores antes de usar o chat."
@@ -348,13 +350,14 @@ export function RoleEditor({ roleId, roles, grant, onSaved, onDeleted }: { roleI
                     {draft.scope === 'Users' && (
                       <Toggle
                         checked={draft.restrictDirect}
-                        disabled={!canEditRole}
+                        disabled={!canEditRole || securityLocked}
                         onChange={(v) => setDraft({ ...draft, restrictDirect: v })}
                         label="Restrito em conversas diretas"
                         description="Não abre conversas diretas nem chamadas com outras pessoas restritas (como a Operação)."
                       />
                     )}
                   </div>
+                  {canEditRole && securityLocked && <Notice kind="lock">{HOLDERS_LOCK_TEXT}</Notice>}
                 </div>
               </Section>
               <Section icon="info" title="Sobre este papel">
