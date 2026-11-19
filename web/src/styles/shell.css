@@ -353,6 +353,29 @@
   flex-direction: column;
   position: relative;
 }
+/* "Pular para o conteúdo": fora da tela até receber o foco pelo teclado. */
+.skip-link {
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: var(--z-modal);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-full);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+  text-decoration: none;
+  box-shadow: var(--shadow-2);
+  transform: translateY(calc(-100% - var(--space-4)));
+}
+.skip-link:focus {
+  transform: none;
+}
+/* A área principal só recebe o foco pelo "Pular para o conteúdo": sem o anel em volta da tela toda. */
+.main:focus-visible {
+  box-shadow: none;
+}
 .main > :where(:not(.topbar, .offline-bar, .mobile-nav-btn)) {
   flex: 1 1 0;
   min-height: 0;

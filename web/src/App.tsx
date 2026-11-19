@@ -259,13 +259,17 @@ function Protected() {
 
   return (
     <div className={`layout ${navOpen ? 'nav-open' : ''}`} data-view={view} data-side={sideIcon && !phone ? 'icon' : 'full'}>
+      {/* Primeira parada do Tab (só aparece com o foco): pula o menu e a lista de conversas. */}
+      <a className="skip-link" href="#conteudo" onClick={skipToContent}>
+        Pular para o conteúdo
+      </a>
       {/* Celular fora da lista: a gaveta fica fora da tela e fora do Tab e do leitor de tela. */}
       <aside className="sidebar-wrap" inert={phone && !asList && !navOpen}>
         {asList && !connected && <OfflineBar />}
         <Sidebar onNavigate={() => setNavOpen(false)} mode={asList ? 'list' : 'side'} />
       </aside>
       <div className="sidebar-backdrop" onClick={() => setNavOpen(false)} />
-      <main className="main">
+      <main className="main" id="conteudo" tabIndex={-1}>
         {/* Gaveta antiga: fica como reserva, escondida (a barra de abas e o voltar das salas substituem). */}
         <button className="mobile-nav-btn" aria-label="Abrir menu" onClick={() => setNavOpen(true)}>
           <Icon name="nav-menu" />
@@ -284,6 +288,13 @@ function Protected() {
       <MessageNotices />
     </div>
   );
+}
+
+// Na conversa, o "Pular para o conteúdo" vai direto para o campo de mensagem; nas outras telas, para a área principal.
+function skipToContent(e: React.MouseEvent<HTMLAnchorElement>) {
+  e.preventDefault();
+  const target = document.querySelector<HTMLElement>('.room-main .composer textarea:not(:disabled)') ?? document.getElementById('conteudo');
+  target?.focus({ preventScroll: true });
 }
 
 function OfflineBar() {

@@ -192,6 +192,11 @@ function ComposerView({
   useEffect(() => {
     if (quoting) ta.current?.focus();
   }, [quoting]);
+  // Sala aberta no computador: o cursor já vai para o campo de mensagem (pelo teclado, sem atravessar a lista toda).
+  useEffect(() => {
+    if (!tmid && !coarse) ta.current?.focus({ preventScroll: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rid]);
 
   useEffect(() => {
     if (box.current) anch.setReference(box.current);
