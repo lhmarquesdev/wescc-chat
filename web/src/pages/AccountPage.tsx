@@ -355,27 +355,41 @@ function DeleteAccount({ onClose }: { onClose: () => void }) {
   );
 }
 
+const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
 function Preferences() {
-  const me = useStore((s) => s.me)!;
+  // Lidas da store, não copiadas: o botão de tema do topo e as mudanças feitas em outro aparelho (evento "user")
+  // aparecem aqui na hora.
+  const prefs = useStore((s) => s.me?.preferences);
   const coarse = useMedia('(pointer: coarse)');
-  const [p, setP] = useState<Record<string, any>>({
+  const p: Record<string, any> = {
     theme: 'auto',
     desktopNotifications: 'mentions',
     emailNotificationMode: 'mentions',
     notificationSound: true,
     sendOnEnter: true,
-    ...me.preferences,
-  });
+    ...prefs,
+  };
+  // Otimista: a store muda na hora; se o servidor recusar, só as chaves deste pedido voltam ao que eram.
   const save = async (patch: Record<string, unknown>) => {
-    const next = { ...p, ...patch };
-    setP(next);
+    const st = useStore.getState();
+    if (!st.me) return;
+    const before: Record<string, unknown> = { ...st.me.preferences };
+    st.setMe({ ...st.me, preferences: { ...st.me.preferences, ...patch } });
+    if (patch.theme) applyTheme(String(patch.theme));
     try {
       await api.post('users.setPreferences', { data: patch });
-      // Junta com o que está na store agora (as palavras destacadas mudam por fora deste formulário).
-      const cur = useStore.getState().me ?? me;
-      useStore.getState().setMe({ ...cur, preferences: { ...cur.preferences, ...patch } });
-      if (patch.theme) applyTheme(String(patch.theme));
     } catch (e) {
+      const now = useStore.getState().me;
+      if (now) {
+        const back: Record<string, unknown> = { ...now.preferences };
+        for (const k of Object.keys(patch)) {
+          if (k in before) back[k] = before[k];
+          else delete back[k];
+        }
+        useStore.getState().setMe({ ...now, preferences: back as Me['preferences'] });
+      }
+      if (patch.theme) applyTheme(String(before.theme ?? 'auto'));
       fail(e);
     }
   };
@@ -435,15 +449,7 @@ function Preferences() {
               <Toggle checked={p.notificationSound !== false} onChange={(v) => save({ notificationSound: v })} label="Som de notificação" />
               <PushToggle />
             </div>
-            {'Notification' in window && Notification.permission !== 'granted' && (
-              <div className="callout info">
-                <Icon name="notify-prompt" />
-                <span>O navegador ainda não deixou este site mostrar notificações.</span>
-                <button className="btn small callout-action" onClick={() => Notification.requestPermission().then((r) => r === 'granted' && syncPushSubscription())}>
-                  Permitir notificações do navegador
-                </button>
-              </div>
-            )}
+            <BrowserNotificationsCallout />
           </div>
         </div>
         {/* Também no celular: fora do bloco do teclado físico. */}
@@ -455,7 +461,12 @@ function Preferences() {
               <h2>Mensagens</h2>
             </div>
             <div className="toggle-list">
-              <Toggle checked={p.sendOnEnter !== false} onChange={(v) => save({ sendOnEnter: v })} label="Enter envia" description="Shift+Enter quebra a linha." />
+              <Toggle
+                checked={p.sendOnEnter !== false}
+                onChange={(v) => save({ sendOnEnter: v })}
+                label="Enter envia"
+                description={p.sendOnEnter !== false ? 'Shift+Enter quebra a linha.' : `Enter quebra a linha; ${MAC ? '⌘+Enter' : 'Ctrl+Enter'} envia.`}
+              />
             </div>
           </div>
         )}
@@ -633,6 +644,55 @@ function HighlightsCard() {
   );
 }
 const EMPTY_WORDS: string[] = [];
+
+// Permissão de notificações do navegador, lida de novo quando muda (cadeado da barra de endereço, outra aba) e depois do
+// pedido. Bloqueada, o botão não adiantaria (o navegador não pergunta de novo): a tela explica como liberar.
+function BrowserNotificationsCallout() {
+  const [perm, setPerm] = useState<NotificationPermission>(() => ('Notification' in window ? Notification.permission : 'granted'));
+  useEffect(() => {
+    if (!('Notification' in window)) return;
+    const sync = () => setPerm(Notification.permission);
+    let status: PermissionStatus | undefined;
+    let gone = false;
+    navigator.permissions
+      ?.query({ name: 'notifications' })
+      .then((s) => {
+        if (gone) return;
+        status = s;
+        s.addEventListener('change', sync);
+      })
+      .catch(() => {});
+    window.addEventListener('focus', sync);
+    return () => {
+      gone = true;
+      status?.removeEventListener('change', sync);
+      window.removeEventListener('focus', sync);
+    };
+  }, []);
+  // Liberada agora (pelo botão ou pelo cadeado): a inscrição de push deste aparelho é feita na hora.
+  const was = useRef(perm);
+  useEffect(() => {
+    if (perm === 'granted' && was.current !== 'granted') void syncPushSubscription();
+    was.current = perm;
+  }, [perm]);
+  if (perm === 'granted') return null;
+  if (perm === 'denied')
+    return (
+      <div className="callout warn">
+        <Icon name="notify-silenced" />
+        <span>O navegador bloqueou as notificações deste site. Para liberar, clique no ícone ao lado do endereço (cadeado ou ajustes), abra Notificações e escolha Permitir.</span>
+      </div>
+    );
+  return (
+    <div className="callout info">
+      <Icon name="notify-prompt" />
+      <span>O navegador ainda não deixou este site mostrar notificações.</span>
+      <button type="button" className="btn small callout-action" onClick={() => void Notification.requestPermission().then(setPerm)}>
+        Permitir notificações do navegador
+      </button>
+    </div>
+  );
+}
 
 // Push neste navegador: chega mesmo com o chat fechado (no celular, com o app instalado na tela inicial).
 function PushToggle() {
