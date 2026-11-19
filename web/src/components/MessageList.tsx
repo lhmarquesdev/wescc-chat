@@ -113,6 +113,9 @@ export function MessageList({
   const jumpTo = params.get('msg');
   const jumpRef = useRef(jumpTo);
   jumpRef.current = jumpTo;
+  // Indo até a mensagem do ?msg= e a rolagem até ela ainda não aconteceu: as rolagens do navegador nesse meio-tempo
+  // (o painel da busca que fecha, a lista trocada que encolhe) não contam como "chegou ao fim, volta ao recente".
+  const jumping = useRef(!!jumpTo);
   const groupingPeriod = useSetting<number>('Message_GroupingPeriod') ?? 300;
   // Avisos antigos podem pedir "Ciente" mesmo depois que a opção foi desligada no canal.
   const hasAck = list.some((m) => m.ackRequired);
@@ -142,18 +145,27 @@ export function MessageList({
 
   useEffect(() => {
     atBottom.current = !jumpTo;
+    jumping.current = !!jumpTo;
     if (jumpTo) {
-      void api.get('chat.getMessagesAround', { msgId: jumpTo, count: 30 }).then((r) => {
-        const msgs: Message[] = r.messages.slice().reverse();
-        seen.current = null;
-        useStore.getState().setMessages(rid, msgs, true);
-        requestAnimationFrame(() => {
-          document.getElementById(`msg-${jumpTo}`)?.scrollIntoView({ block: 'center' });
-          atBottom.current = false;
-          setFlash(jumpTo);
-          setTimeout(() => setFlash((f) => (f === jumpTo ? null : f)), 2500);
-        });
-      });
+      const done = () => {
+        if (jumpRef.current === jumpTo) jumping.current = false;
+      };
+      void api
+        .get('chat.getMessagesAround', { msgId: jumpTo, count: 30 })
+        .then((r) => {
+          const msgs: Message[] = r.messages.slice().reverse();
+          seen.current = null;
+          useStore.getState().setMessages(rid, msgs, true);
+          requestAnimationFrame(() => {
+            document.getElementById(`msg-${jumpTo}`)?.scrollIntoView({ block: 'center' });
+            atBottom.current = false;
+            setFlash(jumpTo);
+            setTimeout(() => setFlash((f) => (f === jumpTo ? null : f)), 2500);
+            // O evento da rolagem até a mensagem chega no quadro seguinte, antes deste requestAnimationFrame.
+            requestAnimationFrame(done);
+          });
+        })
+        .catch(done);
     } else if (!data?.loaded) {
       void load();
     }
@@ -294,7 +306,7 @@ export function MessageList({
   const onScroll = () => {
     const el = scroller.current!;
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-    atBottom.current = dist < 80;
+    atBottom.current = dist < 80 && !jumping.current;
     setFar(dist > 400);
     const user = autoTop.current === null || Math.abs(el.scrollTop - autoTop.current) > 1;
     autoTop.current = null;
