@@ -15,7 +15,8 @@ export interface ToastItem {
 
 // e2eKeys: impressão da chave pública da criptografia de ponta a ponta (null sem chaves). e2eResetByAdmin: um
 // administrador redefiniu a criptografia e a pessoa ainda não criou a senha nova.
-export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean; e2eKeys?: string | null; e2eResetByAdmin?: boolean };
+// hasPassword: a conta tem senha do chat (contas só de SAML/OAuth não têm).
+export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean; e2eKeys?: string | null; e2eResetByAdmin?: boolean; hasPassword?: boolean };
 
 interface RoomMessages {
   list: Message[];
@@ -45,6 +46,10 @@ interface State {
   reminders: MessageReminder[];
   scheduled: ScheduledMessage[];
   pollVotes: Record<string, string[]>;
+  // Foto e nome que mudaram desde que a tela carregou (eventos "user"): os avatares e as listas já carregadas usam o
+  // novo sem recarregar. avatarEtags: @usuário -> versão da foto; userNames: id -> nome e @usuário atuais.
+  avatarEtags: Record<string, string>;
+  userNames: Record<string, { name: string; username: string }>;
 
   setMe(me: Me | null): void;
   setSettings(s: Record<string, any>): void;
@@ -115,6 +120,8 @@ const initial = {
   reminders: [],
   scheduled: [],
   pollVotes: {},
+  avatarEtags: {},
+  userNames: {},
 };
 
 export const useStore = create<State>((set, get) => ({
@@ -299,7 +306,12 @@ export function applyEvent(ev: ServerEvent) {
       // Só o evento da própria escolha muda o status personalizado (o do perfil chega como os outros o veem).
       if (st.me && ev.user._id === st.me._id) st.setMe({ ...st.me, ...selfUserPatch(ev.user) } as Me);
       if (ev.user.roles) useStore.setState({ userRoles: { ...st.userRoles, [ev.user._id]: ev.user.roles } });
-      if (ev.user.avatarETag !== undefined && ev.user.username) avatarBust[ev.user.username] = String(ev.user.avatarETag ?? Date.now());
+      if (ev.user.avatarETag !== undefined && ev.user.username) {
+        // Sem foto (removida): um endereço fixo para as iniciais, diferente do da foto que estava no cache.
+        const v = ev.user.avatarETag ?? 'none';
+        if (st.avatarEtags[ev.user.username] !== v) useStore.setState({ avatarEtags: { ...useStore.getState().avatarEtags, [ev.user.username]: v } });
+      }
+      if (ev.user.name !== undefined && ev.user.username) renameUser(ev.user._id, ev.user.name, ev.user.username);
       break;
     case 'poll.myVotes':
       st.setPollVotes({ [ev.messageId]: ev.optionIds });
@@ -324,7 +336,27 @@ export function applyEvent(ev: ServerEvent) {
   }
 }
 
-export const avatarBust: Record<string, string> = {};
+// Nome ou @usuário novo de outra pessoa: as mensagens já carregadas (salas e tópicos) e as listas que leem userNames
+// passam a mostrar o novo. As conversas diretas chegam atualizadas pelo servidor (evento da inscrição).
+function renameUser(id: string, name: string, username: string) {
+  const st = useStore.getState();
+  const known = st.userNames[id];
+  if (known && known.name === name && known.username === username) return;
+  let changed = false;
+  const fix = (list: Message[]) => {
+    if (!list.some((m) => m.u?._id === id && (m.u.name !== name || m.u.username !== username))) return list;
+    changed = true;
+    return list.map((m) => (m.u?._id === id ? { ...m, u: { ...m.u, name, username } } : m));
+  };
+  const messages: State['messages'] = {};
+  for (const [rid, cur] of Object.entries(st.messages)) {
+    const list = fix(cur.list);
+    messages[rid] = list === cur.list ? cur : { ...cur, list };
+  }
+  const threads: State['threads'] = {};
+  for (const [tmid, list] of Object.entries(st.threads)) threads[tmid] = fix(list);
+  useStore.setState({ ...(changed ? { messages, threads } : {}), userNames: { ...st.userNames, [id]: { name, username } } });
+}
 
 // Chave do aviso "Sua mensagem agendada … não foi enviada" (um por agendada).
 export const scheduledFailKey = (id: string) => `scheduled-failed-${id}`;

@@ -788,14 +788,17 @@ function TeamPanel({ room, roles }: Props) {
 // Dono primeiro; o resto na ordem do servidor.
 const ROLE_ORDER = ['owner', 'moderator', 'leader', 'publisher'];
 
-function MemberRow({ m, muted, onClick }: { m: any; muted: boolean; onClick: () => void }) {
+function MemberRow({ m: listed, muted, onClick }: { m: any; muted: boolean; onClick: (username: string) => void }) {
+  // Nome ou @usuário trocado depois que a lista carregou: vale o novo (evento "user"), também no clique.
+  const renamed = useStore((s) => s.userNames[listed._id]);
+  const m = renamed ? { ...listed, ...renamed } : listed;
   const roles = [...(m.roles as string[])].sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b));
   // A presença ao vivo vale por cima da lista; o rótulo diz o status personalizado ("Em reunião").
   const pres = useUserPresence(m.username, { status: m.status, statusCustom: m.statusCustom });
   // Com mensagem, o status personalizado continua à vista ("Em atendimento · até as 15h"), como no cartão e na DM.
   const statusText = m.statusText ? statusLine(pres.label, pres.custom, m.statusText) : pres.status !== 'offline' ? pres.label : '';
   return (
-    <button type="button" className="member" onClick={onClick}>
+    <button type="button" className="member" onClick={() => onClick(m.username)}>
       <UserAvatar username={m.username} size={32} status={pres.status} statusCustom={pres.statusCustom} />
       <span className="member-who">
         <span className="member-name">
@@ -861,7 +864,7 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
           {title} · {list.length.toLocaleString('pt-BR')}
         </h4>
         {list.map((m) => (
-          <MemberRow key={m._id} m={m} muted={!!room.muted?.includes(m.username)} onClick={() => onUserClick(m.username)} />
+          <MemberRow key={m._id} m={m} muted={!!room.muted?.includes(m.username)} onClick={onUserClick} />
         ))}
       </div>
     );

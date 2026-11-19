@@ -29,6 +29,7 @@ import {
   login,
   logout,
   needs2faSetup,
+  normalizeName,
   registerUser,
   removePersonalToken,
   requestPasswordReset,
@@ -57,6 +58,8 @@ async function meResponse(userId: string) {
     // Criptografia de ponta a ponta: a impressão da chave pública (null sem chaves) e se um administrador redefiniu.
     e2eKeys: await fingerprintOf(userId),
     e2eResetByAdmin: !!u.e2e_reset_at || undefined,
+    // Se a conta tem senha do chat (contas só de SAML/OAuth não têm): a tela pede a senha ou o nome de usuário.
+    hasPassword: !!u.password_hash,
   };
 }
 
@@ -117,7 +120,7 @@ export function usersRoutes(app: FastifyInstance) {
   route(app, 'POST', 'users.register', { auth: false }, async (req) => {
     const body = b(req);
     const row = await registerUser(
-      { username: str(body.username, 'username'), name: str(body.name, 'name'), email: str(body.email, 'email'), pass: str(body.pass, 'pass'), secretURL: body.secretURL },
+      { username: str(body.username, 'username'), name: normalizeName(body.name), email: str(body.email, 'email'), pass: str(body.pass, 'pass'), secretURL: body.secretURL },
       req.ip,
     );
     return { user: mapUser(row) };
@@ -202,6 +205,9 @@ export function usersRoutes(app: FastifyInstance) {
   // ---------- Perfil próprio ----------
   route(app, 'POST', 'users.updateOwnBasicInfo', {}, async (req, _rep, ctx) => {
     const d = b(req).data ?? {};
+    // "Encerrar as outras sessões" junto com a senha nova (quem troca porque a senha vazou): as outras saem na hora.
+    const logoutOthers = !!d.newPassword && bool(d.logoutOthers) === true;
+    if (logoutOthers && !getSetting('Device_Management_Allow_Logout_All')) throw forbidden('Encerrar todas as outras sessões está desativado.');
     // Na troca de senha obrigatória só a senha pode ser alterada.
     const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: d.statusText == null || d.statusText === '' ? (d.statusText ?? undefined) : clampStatusText(str(d.statusText, 'statusText')) };
     const row = await updateUser(
@@ -210,6 +216,7 @@ export function usersRoutes(app: FastifyInstance) {
       fields,
       { asAdmin: false, currentPassword: d.currentPassword },
     );
+    if (logoutOthers) return { user: mapUser(row, { full: true }), sessionsEnded: await revokeAllSessions(ctx.userId, ctx.sessionId) };
     return { user: mapUser(row, { full: true }) };
   });
   route(app, 'POST', 'users.setPreferences', {}, async (req, _rep, ctx) => {
@@ -278,7 +285,12 @@ export function usersRoutes(app: FastifyInstance) {
     if (!getSetting('Accounts_AllowDeleteOwnAccount')) throw forbidden('Excluir a própria conta está desativado.');
     const u = await getUserById(ctx.userId);
     const { verifyPassword } = await import('../lib/password');
-    if (u.password_hash && !(await verifyPassword(str(b(req).password, 'password'), u.password_hash))) throw badRequest('error-invalid-password', 'Senha incorreta.');
+    if (u.password_hash) {
+      if (!(await verifyPassword(str(b(req).password, 'password'), u.password_hash))) throw badRequest('error-invalid-password', 'Senha incorreta.');
+    } else if (String(b(req).username ?? '').trim().replace(/^@/, '').toLowerCase() !== u.username.toLowerCase()) {
+      // Conta sem senha do chat (só SAML/OAuth): a pessoa confirma digitando o próprio nome de usuário.
+      throw badRequest('error-invalid-confirmation', 'Digite seu nome de usuário para confirmar.');
+    }
     await deleteUser(ctx, ctx.userId);
     return {};
   });
@@ -298,16 +310,22 @@ export function usersRoutes(app: FastifyInstance) {
     let target = ctx.userId;
     let data: Buffer | null = null;
     let type = '';
+    const allowed = async () => {
+      if (target !== ctx.userId && !(await hasPermission(ctx.userId, 'edit-other-user-avatar'))) throw forbidden();
+      if (target !== ctx.userId) await assertCanManageUser(ctx, target);
+      if (target === ctx.userId && !getSetting('Accounts_AllowUserAvatarChange')) throw forbidden('Alteração de avatar desativada.');
+    };
     if (req.isMultipart()) {
-      const parts = req.parts();
-      for await (const part of parts) {
-        if (part.type === 'file') {
-          data = await part.toBuffer();
-          type = part.mimetype;
-        } else if (part.fieldname === 'userId' && part.value) {
-          target = String(part.value);
-        }
-      }
+      // A permissão é conferida antes de ler o arquivo (com o userId que veio antes dele) e de novo depois. Sem userId
+      // antes do arquivo ele ainda pode vir depois (curl -F image=@... -F userId=...): aí vale só a conferência de baixo.
+      const r = await readAvatarUpload(req, async (fields) => {
+        if (!fields.userId) return;
+        target = fields.userId;
+        await allowed();
+      });
+      if (r.fields.userId) target = r.fields.userId;
+      data = r.data;
+      type = r.type;
     } else {
       const body = b(req);
       if (body.userId) target = body.userId;
@@ -316,9 +334,7 @@ export function usersRoutes(app: FastifyInstance) {
       type = m[1];
       data = Buffer.from(m[2], 'base64');
     }
-    if (target !== ctx.userId && !(await hasPermission(ctx.userId, 'edit-other-user-avatar'))) throw forbidden();
-    if (target !== ctx.userId) await assertCanManageUser(ctx, target);
-    if (target === ctx.userId && !getSetting('Accounts_AllowUserAvatarChange')) throw forbidden('Alteração de avatar desativada.');
+    await allowed();
     if (!data) throw badRequest('error-invalid-image', 'Imagem ausente.');
     await setAvatar(target, type, data);
     return {};
@@ -403,7 +419,7 @@ export function usersRoutes(app: FastifyInstance) {
     const row = await createUser(
       {
         username: str(body.username, 'username'),
-        name: str(body.name, 'name'),
+        name: normalizeName(body.name),
         email: body.email,
         password: str(body.password, 'password'),
         roles,
@@ -539,6 +555,8 @@ export function usersRoutes(app: FastifyInstance) {
     if (name.startsWith('room/')) return reply.callNotFound();
     const visible = !!req.ctx || avatarsPublic();
     reply.header('Cache-Control', visible && !req.ctx ? 'public, max-age=300' : 'private, max-age=300');
+    // O navegador segue o tipo gravado (sempre o detectado no conteúdo), sem adivinhar outro.
+    reply.header('X-Content-Type-Options', 'nosniff');
     if (!visible) return reply.type('image/svg+xml').send(initialsSvg(name));
     const u = await one('SELECT u.id, u.username, u.name, a.content_type, a.data, a.updated_at FROM users u LEFT JOIN avatars a ON a.user_id = u.id WHERE lower(u.username) = lower($1)', [name]);
     if (u?.data) return reply.type(u.content_type).send(u.data);
@@ -548,6 +566,7 @@ export function usersRoutes(app: FastifyInstance) {
   app.get('/avatar/uid/:id', async (req: any, reply) => {
     const visible = !!req.ctx || avatarsPublic();
     reply.header('Cache-Control', visible && !req.ctx ? 'public, max-age=300' : 'private, max-age=300');
+    reply.header('X-Content-Type-Options', 'nosniff');
     if (!visible) return reply.type('image/svg+xml').send(initialsSvg('?'));
     const u = await one('SELECT u.id, u.username, u.name, a.content_type, a.data FROM users u LEFT JOIN avatars a ON a.user_id = u.id WHERE u.id = $1', [String(req.params.id)]);
     if (u?.data) return reply.type(u.content_type).send(u.data);
@@ -556,6 +575,7 @@ export function usersRoutes(app: FastifyInstance) {
   app.get('/avatar/room/:rid', async (req: any, reply) => {
     const r = await one('SELECT r.*, a.content_type, a.data FROM rooms r LEFT JOIN room_avatars a ON a.room_id = r.id WHERE r.id = $1', [req.params.rid]);
     reply.header('Cache-Control', 'private, max-age=300');
+    reply.header('X-Content-Type-Options', 'nosniff');
     // Sala privada, DM ou atendimento: só para quem tem acesso. Canal público: segue a configuração de avatares.
     const { canAccessRoom } = await import('../services/rooms');
     const visible = !!r && (r.t === 'c' && avatarsPublic() ? true : !!req.ctx && (await canAccessRoom(req.ctx.userId, r)));
@@ -563,6 +583,39 @@ export function usersRoutes(app: FastifyInstance) {
     if (r.data) return reply.type(r.content_type).send(r.data);
     return reply.type('image/svg+xml').send(initialsSvg(r.fname || r.name || '#'));
   });
+}
+
+const AVATAR_MAX = 5 * 1024 * 1024;
+
+// Foto de usuário ou de sala por multipart: o limite de 5 MB vale no próprio leitor (o geral é de 1 GB), então um
+// arquivo maior é descartado enquanto chega, sem ir inteiro para a memória. beforeFile roda antes de o arquivo ser
+// lido, com os campos que vieram antes dele (a permissão).
+export async function readAvatarUpload(req: any, beforeFile?: (fields: Record<string, string>) => Promise<void>) {
+  const fields: Record<string, string> = {};
+  let data: Buffer | null = null;
+  let type = '';
+  try {
+    for await (const part of req.parts({ limits: { fileSize: AVATAR_MAX, files: 1, fields: 5, parts: 6, fieldSize: 1024 } })) {
+      if (part.type !== 'file') {
+        if (part.value) fields[part.fieldname] = String(part.value);
+        continue;
+      }
+      try {
+        await beforeFile?.(fields);
+      } catch (e) {
+        part.file.resume();
+        throw e;
+      }
+      data = await part.toBuffer();
+      type = part.mimetype;
+    }
+  } catch (e) {
+    const code = (e as any)?.code;
+    if (code === 'FST_REQ_FILE_TOO_LARGE') throw badRequest('error-file-too-large', 'Imagem muito grande (máx. 5 MB).');
+    if (code === 'FST_FILES_LIMIT' || code === 'FST_FIELDS_LIMIT' || code === 'FST_PARTS_LIMIT') throw badRequest('error-invalid-params', 'Envie só uma imagem por vez.');
+    throw e;
+  }
+  return { data, type, fields };
 }
 
 const BULK_MAX = 500;

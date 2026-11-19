@@ -60,7 +60,7 @@ import {
 import { spotlight } from '../services/spotlight';
 import { actorOf } from '../services/users';
 import { b, bool, paging, q, route, str, strArray } from './http';
-import { resolveUserParam } from './users';
+import { readAvatarUpload, resolveUserParam } from './users';
 
 const PREFIX_TYPE: Record<string, 'c' | 'p'> = { channels: 'c', groups: 'p' };
 
@@ -187,15 +187,11 @@ export function roomsRoutes(app: FastifyInstance) {
     return {};
   });
   route(app, 'POST', 'rooms.setAvatar', {}, async (req, _rep, ctx) => {
-    let rid = '';
-    let data: Buffer | null = null;
-    let type = '';
-    for await (const part of req.parts()) {
-      if (part.type === 'file') {
-        data = await part.toBuffer();
-        type = part.mimetype;
-      } else if (part.fieldname === 'roomId') rid = String(part.value);
-    }
+    // Até 5 MB, e a permissão conferida antes de ler o arquivo quando o roomId vem antes dele (como na web).
+    const { data, type, fields } = await readAvatarUpload(req, async (f) => {
+      if (f.roomId && !(await hasPermission(ctx.userId, 'edit-room-avatar', f.roomId))) throw forbidden();
+    });
+    const rid = fields.roomId ?? '';
     if (!rid || !data) throw badRequest('error-invalid-params', 'roomId e imagem são obrigatórios.');
     if (!(await hasPermission(ctx.userId, 'edit-room-avatar', rid))) throw forbidden();
     if (!/^image\/(png|jpeg|gif|webp)$/.test(type)) throw badRequest('error-invalid-image', 'Formato não suportado.');

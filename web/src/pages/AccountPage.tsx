@@ -6,7 +6,7 @@ import { foldText } from '@shared/search';
 import { formatDateTime } from '../lib/format';
 import { disablePushHere, enablePushHere, pushEnabledHere, pushSupported, syncPushSubscription } from '../lib/push';
 import { endSession, startSession } from '../lib/session';
-import { useSetting, useStore } from '../lib/store';
+import { useSetting, useStore, type Me } from '../lib/store';
 import { useLanguages, useTranslateAllowed } from '../lib/translate';
 import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
 import { normalizeLang } from '@shared/translate';
@@ -16,6 +16,7 @@ import { Icon } from '../components/Icon';
 import { SideBrand, TakeoverBack, TakeoverHead } from '../components/Sidebar';
 import { QrCode } from '../components/QrCode';
 import { DeviceCell, NewDevicePill, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
+import { useLeaveGuard } from './admin/rbac/leaveGuard';
 // Figurinhas: o item some com a função desligada.
 import { useStickerCaps } from '../lib/stickers';
 
@@ -115,34 +116,99 @@ export function AccountPage() {
   );
 }
 
+// Limites do servidor (services/users.ts).
+const NAME_MAX = 100;
+const BIO_MAX = 500;
+const AVATAR_MAX = 5 * 1024 * 1024;
+const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const profileForm = (me: Me) => ({ name: me.name, username: me.username, email: me.email ?? '', bio: me.bio ?? '', statusText: me.statusText ?? '' });
+type ProfileForm = ReturnType<typeof profileForm>;
+
 function Profile() {
   const me = useStore((s) => s.me)!;
+  // Com "Permitir alterar perfil" desligado o formulário fica travado (o servidor recusaria ao salvar).
+  const allowProfile = useSetting<boolean>('Accounts_AllowUserProfileChange') !== false;
   const allowUsername = useSetting<boolean>('Accounts_AllowUsernameChange');
   const allowEmail = useSetting<boolean>('Accounts_AllowEmailChange');
   const allowAvatar = useSetting<boolean>('Accounts_AllowUserAvatarChange');
   const allowDelete = useSetting<boolean>('Accounts_AllowDeleteOwnAccount');
-  const [f, setF] = useState({ name: me.name, username: me.username, email: me.email ?? '', bio: me.bio ?? '', statusText: me.statusText ?? '' });
+  // base: o que o formulário mostrou ao abrir (ou depois de salvar). Só vai para o servidor o que a pessoa mudou: um
+  // campo vazio ou travado que ela nem tocou (o e-mail de quem não tem e-mail, por exemplo) não impede salvar o resto.
+  const [base, setBase] = useState(() => profileForm(me));
+  const [f, setF] = useState(base);
+  const [currentPassword, setCurrentPassword] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const file = useRef<HTMLInputElement>(null);
-  const dirty = f.name !== me.name || f.username !== me.username || f.email !== (me.email ?? '') || f.bio !== (me.bio ?? '') || f.statusText !== (me.statusText ?? '');
+  // O que mudou por fora com a tela aberta (a mensagem de status pelo menu da foto, outro aparelho) entra nos campos
+  // que a pessoa não mexeu; o que ela está editando fica como está.
+  const fresh = JSON.stringify(profileForm(me));
+  useEffect(() => {
+    if (fresh === JSON.stringify(base)) return;
+    const next: ProfileForm = JSON.parse(fresh);
+    setF((cur) => Object.fromEntries((Object.keys(cur) as (keyof ProfileForm)[]).map((k) => [k, cur[k] === base[k] ? next[k] : cur[k]])) as ProfileForm);
+    setBase(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fresh]);
+  const changed = (Object.keys(f) as (keyof typeof f)[]).filter((k) => f[k] !== base[k]);
+  const dirty = changed.length > 0;
+  // O e-mail recebe o link de "Esqueci minha senha": trocá-lo pede a senha atual.
+  const emailChanged = f.email.trim() !== base.email.trim();
+  const nameMissing = changed.includes('name') && !/[\p{L}\p{N}]/u.test(f.name);
+  const canSave = allowProfile && dirty && !nameMissing && !(emailChanged && !currentPassword) && !saving;
+  // Trocar de seção, "Voltar às conversas" ou fechar a aba com alterações não salvas pergunta antes.
+  useLeaveGuard(dirty, () => confirmDialog({ title: 'Descartar as alterações?', body: 'O que você mudou no perfil ainda não foi salvo.', confirmLabel: 'Descartar', danger: true }));
   const save = async () => {
+    if (!canSave) return;
+    setSaving(true);
     try {
-      const r = await api.post('users.updateOwnBasicInfo', { data: f });
-      useStore.getState().setMe({ ...me, ...r.user });
+      const data: Record<string, string> = Object.fromEntries(changed.map((k) => [k, f[k]]));
+      if (emailChanged) data.currentPassword = currentPassword;
+      const r = await api.post('users.updateOwnBasicInfo', { data });
+      // Campo esvaziado (Sobre, mensagem de status) não vem na resposta: fica vazio, não com o valor antigo.
+      const cur = useStore.getState().me ?? me;
+      const next: Me = { ...cur, ...r.user, bio: r.user.bio, statusText: r.user.statusText };
+      useStore.getState().setMe(next);
+      setBase(profileForm(next));
+      setF(profileForm(next));
+      setCurrentPassword('');
       ok('Perfil atualizado.');
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+  // Tipo e tamanho conferidos antes de enviar (o servidor confere de novo, pelo conteúdo do arquivo).
+  const upload = async (picked: File) => {
+    if (!AVATAR_TYPES.includes(picked.type)) return fail(new Error('Escolha uma imagem PNG, JPEG, GIF ou WebP.'));
+    if (picked.size > AVATAR_MAX) return fail(new Error('A foto pode ter até 5 MB (PNG, JPEG, GIF ou WebP).'));
+    const fd = new FormData();
+    fd.append('image', picked);
+    setUploading(true);
+    try {
+      await api.post('users.setAvatar', fd);
+      ok('Foto atualizada.');
+    } catch (e) {
+      fail(e);
+    } finally {
+      setUploading(false);
+    }
+  };
+  const removeAvatar = async () => {
+    const yes = await confirmDialog({ title: 'Remover a foto?', body: 'No lugar dela aparecem as suas iniciais.', confirmLabel: 'Remover', danger: true });
+    if (!yes) return;
+    try {
+      await api.post('users.resetAvatar');
+      ok('Foto removida.');
     } catch (e) {
       fail(e);
     }
   };
-  const upload = async (picked: File) => {
-    const fd = new FormData();
-    fd.append('image', picked);
-    await api
-      .post('users.setAvatar', fd)
-      .then(() => ok('Foto atualizada.'))
-      .catch(fail);
-  };
   const ldap = me.authSource === 'ldap';
+  // Conta sem senha do chat (só SAML/OAuth): o e-mail vem do provedor.
+  const sso = !ldap && me.hasPassword === false;
   return (
     <>
       <PageHead title="Perfil" />
@@ -156,13 +222,13 @@ function Profile() {
               {allowAvatar && (
                 <div className="row-actions">
                   <input ref={file} type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={(e) => (e.target.files?.[0] && upload(e.target.files[0]), (e.target.value = ''))} />
-                  <button type="button" className="btn small" onClick={() => file.current?.click()}>
-                    <Icon name="image-change" />
-                    Trocar foto
+                  <button type="button" className="btn small" disabled={uploading} aria-busy={uploading || undefined} onClick={() => file.current?.click()}>
+                    {uploading ? <span className="spinner" aria-hidden="true" /> : <Icon name="image-change" />}
+                    {uploading ? 'Enviando…' : 'Trocar foto'}
                   </button>
                   {/* Só há o que remover quando a pessoa enviou uma foto (as iniciais são o padrão). */}
-                  {me.avatarETag && (
-                    <button type="button" className="btn small ghost" onClick={() => api.post('users.resetAvatar').catch(fail)}>
+                  {me.avatarETag && !uploading && (
+                    <button type="button" className="btn small ghost" onClick={() => void removeAvatar()}>
                       <Icon name="image-remove" />
                       Remover
                     </button>
@@ -178,31 +244,49 @@ function Profile() {
             <span>Sua conta é sincronizada com o diretório da empresa (LDAP); alguns campos são mantidos por lá.</span>
           </div>
         )}
+        {sso && (
+          <div className="callout info">
+            <Icon name="security" />
+            <span>Você entra pelo login da empresa; o e-mail e a senha são mantidos por lá.</span>
+          </div>
+        )}
+        {!allowProfile && (
+          <div className="callout info">
+            <Icon name="rbac-lock" />
+            <span>O administrador não permite alterar o perfil. Para mudar seus dados, fale com ele.</span>
+          </div>
+        )}
         <div className="card">
-          <div className="form">
+          {/* Formulário de verdade: o Enter num campo salva. */}
+          <form className="form" onSubmit={(e) => (e.preventDefault(), void save())}>
             <div className="two-col">
-              <Field label="Nome">
-                <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} disabled={ldap} />
+              <Field label="Nome" required error={nameMissing ? 'Informe seu nome.' : undefined}>
+                <input value={f.name} maxLength={NAME_MAX} required onChange={(e) => setF({ ...f, name: e.target.value })} disabled={ldap || !allowProfile} />
               </Field>
-              <Field label="Nome de usuário">
-                <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} disabled={!allowUsername || ldap} />
+              <Field label="Nome de usuário" hint={allowProfile && !ldap && !allowUsername ? 'O administrador não permite trocar o nome de usuário.' : undefined}>
+                <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} disabled={!allowProfile || !allowUsername || ldap} />
               </Field>
             </div>
-            <Field label="E-mail">
-              <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} disabled={!allowEmail || ldap} />
+            <Field label="E-mail" hint={allowProfile && !ldap && !sso && !allowEmail ? 'O administrador não permite trocar o e-mail.' : undefined}>
+              <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} disabled={!allowProfile || !allowEmail || ldap || sso} />
             </Field>
+            {emailChanged && (
+              <Field label="Senha atual" hint="Para trocar o e-mail, confirme com a sua senha. O endereço antigo recebe um aviso.">
+                <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" />
+              </Field>
+            )}
             <Field label="Mensagem de status" hint="Aparece ao lado do seu nome, até 120 caracteres.">
-              <input value={f.statusText} maxLength={120} onChange={(e) => setF({ ...f, statusText: e.target.value })} />
+              <input value={f.statusText} maxLength={120} onChange={(e) => setF({ ...f, statusText: e.target.value })} disabled={!allowProfile} />
             </Field>
-            <Field label="Sobre">
-              <textarea rows={3} value={f.bio} onChange={(e) => setF({ ...f, bio: e.target.value })} />
+            <Field label="Sobre" hint={`${f.bio.length}/${BIO_MAX}`}>
+              <textarea rows={3} value={f.bio} maxLength={BIO_MAX} onChange={(e) => setF({ ...f, bio: e.target.value })} disabled={!allowProfile} />
             </Field>
             <div className="form-actions">
-              <button className="btn primary" onClick={save} disabled={!dirty}>
+              <button type="submit" className="btn primary" disabled={!canSave}>
                 Salvar
               </button>
             </div>
-          </div>
+          </form>
         </div>
         {allowDelete && (
           <div className="danger-zone">
@@ -222,14 +306,16 @@ function Profile() {
   );
 }
 
-// No lugar do prompt(): a senha confirma a exclusão.
+// No lugar do prompt(): a senha confirma a exclusão. Conta sem senha do chat (só SAML/OAuth): o nome de usuário.
 function DeleteAccount({ onClose }: { onClose: () => void }) {
+  const me = useStore((s) => s.me)!;
+  const byUsername = me.hasPassword === false;
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const go = async () => {
     setBusy(true);
     try {
-      await api.post('users.deleteOwnAccount', { password });
+      await api.post('users.deleteOwnAccount', byUsername ? { username: password } : { password });
       await endSession();
       location.href = '/login';
     } catch (e) {
@@ -241,7 +327,7 @@ function DeleteAccount({ onClose }: { onClose: () => void }) {
     <Modal
       size="sm"
       title="Excluir sua conta?"
-      description="Não dá para desfazer. Digite sua senha para confirmar."
+      description={byUsername ? `Não dá para desfazer. Digite seu nome de usuário (${me.username}) para confirmar.` : 'Não dá para desfazer. Digite sua senha para confirmar.'}
       onClose={onClose}
       footer={
         <>
@@ -254,34 +340,57 @@ function DeleteAccount({ onClose }: { onClose: () => void }) {
         </>
       }
     >
-      <Field label="Senha">
-        <input type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" onKeyDown={(e) => e.key === 'Enter' && password && go()} />
+      <Field label={byUsername ? 'Nome de usuário' : 'Senha'}>
+        <input
+          type={byUsername ? 'text' : 'password'}
+          autoFocus
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete={byUsername ? 'off' : 'current-password'}
+          autoCapitalize="off"
+          spellCheck={false}
+          onKeyDown={(e) => e.key === 'Enter' && password && go()}
+        />
       </Field>
     </Modal>
   );
 }
 
+const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
 function Preferences() {
-  const me = useStore((s) => s.me)!;
+  // Lidas da store, não copiadas: o botão de tema do topo e as mudanças feitas em outro aparelho (evento "user")
+  // aparecem aqui na hora.
+  const prefs = useStore((s) => s.me?.preferences);
   const coarse = useMedia('(pointer: coarse)');
-  const [p, setP] = useState<Record<string, any>>({
+  const p: Record<string, any> = {
     theme: 'auto',
     desktopNotifications: 'mentions',
     emailNotificationMode: 'mentions',
     notificationSound: true,
     sendOnEnter: true,
-    ...me.preferences,
-  });
+    ...prefs,
+  };
+  // Otimista: a store muda na hora; se o servidor recusar, só as chaves deste pedido voltam ao que eram.
   const save = async (patch: Record<string, unknown>) => {
-    const next = { ...p, ...patch };
-    setP(next);
+    const st = useStore.getState();
+    if (!st.me) return;
+    const before: Record<string, unknown> = { ...st.me.preferences };
+    st.setMe({ ...st.me, preferences: { ...st.me.preferences, ...patch } });
+    if (patch.theme) applyTheme(String(patch.theme));
     try {
       await api.post('users.setPreferences', { data: patch });
-      // Junta com o que está na store agora (as palavras destacadas mudam por fora deste formulário).
-      const cur = useStore.getState().me ?? me;
-      useStore.getState().setMe({ ...cur, preferences: { ...cur.preferences, ...patch } });
-      if (patch.theme) applyTheme(String(patch.theme));
     } catch (e) {
+      const now = useStore.getState().me;
+      if (now) {
+        const back: Record<string, unknown> = { ...now.preferences };
+        for (const k of Object.keys(patch)) {
+          if (k in before) back[k] = before[k];
+          else delete back[k];
+        }
+        useStore.getState().setMe({ ...now, preferences: back as Me['preferences'] });
+      }
+      if (patch.theme) applyTheme(String(before.theme ?? 'auto'));
       fail(e);
     }
   };
@@ -341,15 +450,7 @@ function Preferences() {
               <Toggle checked={p.notificationSound !== false} onChange={(v) => save({ notificationSound: v })} label="Som de notificação" />
               <PushToggle />
             </div>
-            {'Notification' in window && Notification.permission !== 'granted' && (
-              <div className="callout info">
-                <Icon name="notify-prompt" />
-                <span>O navegador ainda não deixou este site mostrar notificações.</span>
-                <button className="btn small callout-action" onClick={() => Notification.requestPermission().then((r) => r === 'granted' && syncPushSubscription())}>
-                  Permitir notificações do navegador
-                </button>
-              </div>
-            )}
+            <BrowserNotificationsCallout />
           </div>
         </div>
         {/* Também no celular: fora do bloco do teclado físico. */}
@@ -361,7 +462,12 @@ function Preferences() {
               <h2>Mensagens</h2>
             </div>
             <div className="toggle-list">
-              <Toggle checked={p.sendOnEnter !== false} onChange={(v) => save({ sendOnEnter: v })} label="Enter envia" description="Shift+Enter quebra a linha." />
+              <Toggle
+                checked={p.sendOnEnter !== false}
+                onChange={(v) => save({ sendOnEnter: v })}
+                label="Enter envia"
+                description={p.sendOnEnter !== false ? 'Shift+Enter quebra a linha.' : `Enter quebra a linha; ${MAC ? '⌘+Enter' : 'Ctrl+Enter'} envia.`}
+              />
             </div>
           </div>
         )}
@@ -557,6 +663,55 @@ function HighlightsCard() {
 }
 const EMPTY_WORDS: string[] = [];
 
+// Permissão de notificações do navegador, lida de novo quando muda (cadeado da barra de endereço, outra aba) e depois do
+// pedido. Bloqueada, o botão não adiantaria (o navegador não pergunta de novo): a tela explica como liberar.
+function BrowserNotificationsCallout() {
+  const [perm, setPerm] = useState<NotificationPermission>(() => ('Notification' in window ? Notification.permission : 'granted'));
+  useEffect(() => {
+    if (!('Notification' in window)) return;
+    const sync = () => setPerm(Notification.permission);
+    let status: PermissionStatus | undefined;
+    let gone = false;
+    navigator.permissions
+      ?.query({ name: 'notifications' })
+      .then((s) => {
+        if (gone) return;
+        status = s;
+        s.addEventListener('change', sync);
+      })
+      .catch(() => {});
+    window.addEventListener('focus', sync);
+    return () => {
+      gone = true;
+      status?.removeEventListener('change', sync);
+      window.removeEventListener('focus', sync);
+    };
+  }, []);
+  // Liberada agora (pelo botão ou pelo cadeado): a inscrição de push deste aparelho é feita na hora.
+  const was = useRef(perm);
+  useEffect(() => {
+    if (perm === 'granted' && was.current !== 'granted') void syncPushSubscription();
+    was.current = perm;
+  }, [perm]);
+  if (perm === 'granted') return null;
+  if (perm === 'denied')
+    return (
+      <div className="callout warn">
+        <Icon name="notify-silenced" />
+        <span>O navegador bloqueou as notificações deste site. Para liberar, clique no ícone ao lado do endereço (cadeado ou ajustes), abra Notificações e escolha Permitir.</span>
+      </div>
+    );
+  return (
+    <div className="callout info">
+      <Icon name="notify-prompt" />
+      <span>O navegador ainda não deixou este site mostrar notificações.</span>
+      <button type="button" className="btn small callout-action" onClick={() => void Notification.requestPermission().then(setPerm)}>
+        Permitir notificações do navegador
+      </button>
+    </div>
+  );
+}
+
 // Push neste navegador: chega mesmo com o chat fechado (no celular, com o app instalado na tela inicial).
 function PushToggle() {
   const enabled = useSetting<boolean>('Push_enable');
@@ -599,56 +754,97 @@ export function applyTheme(theme: string) {
   paintTheme();
 }
 
+// As regras da senha (configurações públicas), para a pessoa ver antes de errar.
+function usePasswordRules() {
+  const min = Number(useSetting<number>('Accounts_Password_Policy_MinLength')) || 0;
+  const upper = useSetting<boolean>('Accounts_Password_Policy_AtLeastOneUppercase');
+  const digit = useSetting<boolean>('Accounts_Password_Policy_AtLeastOneNumber');
+  const special = useSetting<boolean>('Accounts_Password_Policy_AtLeastOneSpecialCharacter');
+  const parts = [upper && 'uma letra maiúscula', digit && 'um número', special && 'um caractere especial'].filter(Boolean) as string[];
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} e ${parts[parts.length - 1]}` : parts[0];
+  const size = min > 1 ? `Pelo menos ${min} caracteres` : min === 1 ? 'Pelo menos 1 caractere' : '';
+  if (!size) return list ? `Com ${list}.` : undefined;
+  return `${size}${list ? `, com ${list}` : ''}.`;
+}
+
 function Security() {
   const me = useStore((s) => s.me)!;
   const twoFA = useSetting<boolean>('Accounts_TwoFactorAuthentication_Enabled');
   const allowPassword = useSetting<boolean>('Accounts_AllowPasswordChange');
+  const allowLogoutAll = useSetting<boolean>('Device_Management_Allow_Logout_All') !== false;
+  const rules = usePasswordRules();
   const [cur, setCur] = useState('');
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
+  // Marcado: quem troca a senha porque ela vazou tira os outros aparelhos da conta junto.
+  const [logoutOthers, setLogoutOthers] = useState(true);
+  const [busy, setBusy] = useState(false);
   const mismatch = !!p2 && p1 !== p2;
+  const blank = !!p1 && !p1.trim();
+  // LDAP e contas só de SAML/OAuth entram pelo provedor: a senha não é do chat.
+  const external = me.authSource === 'ldap' || (me.authSource !== 'local' && me.hasPassword === false);
+  useLeaveGuard(!!(p1 || p2), () => confirmDialog({ title: 'Descartar a senha nova?', body: 'A senha ainda não foi trocada.', confirmLabel: 'Descartar', danger: true }));
   const changePw = async () => {
+    if (!p1 || blank || busy) return;
     if (p1 !== p2) return fail(new Error('As senhas não conferem.'));
+    setBusy(true);
     try {
-      await api.post('users.updateOwnBasicInfo', { data: { currentPassword: cur, newPassword: p1 } });
+      const r = await api.post('users.updateOwnBasicInfo', { data: { currentPassword: cur, newPassword: p1, ...(allowLogoutAll && logoutOthers ? { logoutOthers: true } : {}) } });
       setCur('');
       setP1('');
       setP2('');
-      ok('Senha alterada.');
+      const n = Number(r.sessionsEnded ?? 0);
+      ok(n ? `Senha alterada. ${n === 1 ? '1 outra sessão foi encerrada' : `${n} outras sessões foram encerradas`}.` : 'Senha alterada.');
     } catch (e) {
       fail(e);
+    } finally {
+      setBusy(false);
     }
   };
   return (
     <>
       <PageHead title="Segurança" />
       <div className="account-col">
-        {allowPassword && me.authSource !== 'ldap' && (
+        {allowPassword && external && (
+          <div className="callout info">
+            <Icon name="security" />
+            <span>Você entra pelo login da empresa ({me.authSource === 'ldap' ? 'Active Directory' : 'SSO'}); a senha é trocada por lá.</span>
+          </div>
+        )}
+        {allowPassword && !external && (
           <div className="card">
             <div className="card-head">
               <div>
                 <h2>Senha</h2>
-                <p className="card-desc">Depois de trocar, as outras sessões continuam abertas; encerre-as em Dispositivos se precisar.</p>
+                <p className="card-desc">
+                  {allowLogoutAll ? 'Troque a senha sempre que achar que outra pessoa pode saber dela.' : 'Depois de trocar, as outras sessões continuam abertas; encerre-as em Dispositivos se precisar.'}
+                </p>
               </div>
             </div>
-            <div className="form">
+            {/* Formulário de verdade: o Enter num campo troca a senha. */}
+            <form className="form" onSubmit={(e) => (e.preventDefault(), void changePw())}>
+              {/* Para o gerenciador de senhas saber de qual conta é a senha nova. */}
+              <input type="text" name="username" autoComplete="username" value={me.username} readOnly hidden />
               <Field label="Senha atual">
                 <input type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" />
               </Field>
               <div className="two-col">
-                <Field label="Nova senha">
+                <Field label="Nova senha" hint={rules} error={blank ? 'A senha não pode ser só espaços.' : undefined}>
                   <input type="password" value={p1} onChange={(e) => setP1(e.target.value)} autoComplete="new-password" />
                 </Field>
                 <Field label="Confirmar nova senha" error={mismatch ? 'As senhas não conferem.' : undefined}>
                   <input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" />
                 </Field>
               </div>
+              {allowLogoutAll && (
+                <Toggle checked={logoutOthers} onChange={setLogoutOthers} label="Encerrar as outras sessões" description="Os outros aparelhos saem da conta e entram de novo com a senha nova." />
+              )}
               <div className="form-actions">
-                <button className="btn primary" onClick={changePw} disabled={!p1 || mismatch}>
+                <button type="submit" className="btn primary" disabled={!p1 || mismatch || blank || busy}>
                   Alterar senha
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         )}
         {twoFA && <TwoFactorCard />}
@@ -939,14 +1135,14 @@ function Tokens() {
         <div className="card token-form">
           <div className="form">
             <Field label="Nome do token" hint="Para reconhecer onde ele é usado, como “Relatório diário”.">
-              <input ref={input} placeholder="Nome do token" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && name && generate()} />
+              <input ref={input} placeholder="Nome do token" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && name.trim() && generate()} />
             </Field>
             <Toggle checked={bypass} onChange={setBypass} label="Ignorar 2FA" description="O token funciona sem pedir o código do autenticador." />
             <div className="form-actions">
               <button className="btn" onClick={() => (setCreating(false), setName(''))}>
                 Cancelar
               </button>
-              <button className="btn primary" disabled={!name} onClick={generate}>
+              <button className="btn primary" disabled={!name.trim()} onClick={generate}>
                 Gerar
               </button>
             </div>

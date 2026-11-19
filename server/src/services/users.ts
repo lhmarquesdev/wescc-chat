@@ -27,9 +27,42 @@ export const actorOf = (c: Ctx): Actor => ({ id: c.userId, username: c.username,
 
 const USERNAME_RE = /^[0-9a-zA-Z._-]{2,40}$/;
 export const EMAIL_RE = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)*$/;
+// As menções de grupo (@all, @here): nenhuma conta usa esses nomes, em maiúsculas ou minúsculas (a importação também).
+export const RESERVED_USERNAMES = new Set(['all', 'here']);
 
 export function validateUsername(username: string) {
   if (!USERNAME_RE.test(username)) throw badRequest('error-invalid-username', 'Nome de usuário inválido (2-40 caracteres: letras, números, ponto, hífen, sublinhado).');
+  if (RESERVED_USERNAMES.has(username.toLowerCase())) throw badRequest('error-invalid-username', 'Esse nome de usuário é reservado.');
+}
+
+// Nome de exibição: espaços juntados, sem caracteres invisíveis (espaço de largura zero, controles de direção do
+// texto, caracteres de controle, o "preenchimento" coreano que conta como letra) e com alguma letra ou número; senão a
+// pessoa aparece sem nome nas listas e nas mensagens.
+export const NAME_MAX = 100;
+export const BIO_MAX = 500;
+const INVISIBLE_RE = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u115F\u1160\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u3164\uFEFF\uFFA0]/g;
+
+export function normalizeName(v: unknown) {
+  if (v !== undefined && v !== null && typeof v !== 'string') throw badRequest('error-invalid-name', 'O nome deve ser um texto.');
+  const name = String(v ?? '').normalize('NFC').replace(INVISIBLE_RE, '').replace(/\s+/g, ' ').trim();
+  if (!/[\p{L}\p{N}]/u.test(name)) throw badRequest('error-invalid-name', 'Informe um nome com letras ou números.');
+  if (name.length > NAME_MAX) throw badRequest('error-invalid-name', `O nome pode ter no máximo ${NAME_MAX} caracteres.`);
+  return name;
+}
+
+function normalizeBio(v: string) {
+  const bio = v.normalize('NFC').replace(INVISIBLE_RE, '').trim();
+  if (bio.length > BIO_MAX) throw badRequest('error-invalid-bio', `O campo Sobre pode ter no máximo ${BIO_MAX} caracteres.`);
+  return bio;
+}
+
+// Domínios de e-mail permitidos (Accounts_AllowedDomainsList): no cadastro e quando a pessoa troca o próprio e-mail.
+function assertAllowedDomain(email: string) {
+  const domains = String(getSetting('Accounts_AllowedDomainsList') ?? '')
+    .split(',')
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean);
+  if (domains.length && !domains.includes(email.split('@')[1]?.toLowerCase())) throw badRequest('error-invalid-domain', 'Domínio de e-mail não permitido.');
 }
 
 export function validatePassword(password: string) {
@@ -112,12 +145,7 @@ export async function registerUser(input: { username: string; name: string; emai
   if (mode === 'Disabled') throw forbidden('O cadastro está desativado.');
   if (mode === 'Secret' && (!input.secretURL || input.secretURL !== getSetting('Accounts_RegistrationForm_SecretURL')))
     throw forbidden('Cadastro permitido somente pelo link secreto.');
-  const domains = String(getSetting('Accounts_AllowedDomainsList') ?? '')
-    .split(',')
-    .map((d) => d.trim().toLowerCase())
-    .filter(Boolean);
-  if (domains.length && !domains.includes(input.email.split('@')[1]?.toLowerCase()))
-    throw badRequest('error-invalid-domain', 'Domínio de e-mail não permitido.');
+  assertAllowedDomain(input.email);
   const manual = getSetting<boolean>('Accounts_ManuallyApproveNewUsers');
   const row = await createUser({ username: input.username, name: input.name, email: input.email, password: input.pass, active: !manual });
   await audit({ id: row.id, username: row.username, ip }, 'user.registered', { userId: row.id });
@@ -472,6 +500,9 @@ export async function disableTotp(ctx: Ctx, code: string) {
 
 // ---------- Perfil ----------
 
+// Campos de texto do perfil: número ou objeto é recusado (null vale como "não mudar"; no e-mail, como "sem e-mail").
+const PROFILE_TEXT_FIELDS = { username: 'Nome de usuário', name: 'Nome', email: 'E-mail', password: 'Senha', bio: 'Sobre', statusText: 'Mensagem de status' };
+
 export async function updateUser(
   actor: Ctx,
   userId: string,
@@ -483,31 +514,71 @@ export async function updateUser(
   const sets: string[] = [];
   const params: unknown[] = [userId];
   const self = actor.userId === userId;
-  if (!opts.asAdmin && !getSetting('Accounts_AllowUserProfileChange')) throw forbidden('Alteração de perfil desativada.');
-
-  if (data.username !== undefined && data.username !== u.username) {
-    if (!opts.asAdmin && !getSetting('Accounts_AllowUsernameChange')) throw forbidden('Alteração de nome de usuário desativada.');
-    validateUsername(data.username);
-    const other = await getUserByUsername(data.username);
-    if (other && other.id !== userId) throw badRequest('error-field-unavailable', 'Nome de usuário em uso.');
-    sets.push(`username = $${params.push(data.username)}`);
+  for (const [k, label] of Object.entries(PROFILE_TEXT_FIELDS)) {
+    const v = (data as Record<string, unknown>)[k];
+    if (v !== undefined && v !== null && typeof v !== 'string') throw badRequest('error-invalid-params', `O campo ${label} deve ser um texto.`);
   }
-  if (data.name !== undefined) sets.push(`name = $${params.push(data.name)}`);
-  if (data.bio !== undefined) sets.push(`bio = $${params.push(data.bio)}`);
-  if (data.statusText !== undefined) sets.push(`status_text = $${params.push(data.statusText.slice(0, 120))}`);
-  if (data.email !== undefined && data.email !== u.email) {
-    if (!opts.asAdmin && !getSetting('Accounts_AllowEmailChange')) throw forbidden('Alteração de e-mail desativada.');
-    if (!EMAIL_RE.test(data.email)) throw badRequest('error-invalid-email', 'E-mail inválido.');
-    const other = await one('SELECT id FROM users WHERE lower(email) = lower($1)', [data.email]);
+  // Só conta o que muda de fato: a tela pode mandar os campos como estavam (e uma conta antiga pode ter um valor fora
+  // das regras de hoje). As travas do perfil, do LDAP e da senha atual valem para essas mudanças.
+  // Nome de usuário vazio também é mudança: cai na validação, em vez de ser ignorado com "Perfil atualizado".
+  const username = data.username != null && data.username !== u.username ? data.username : undefined;
+  let name = data.name != null && data.name !== u.name ? normalizeName(data.name) : undefined;
+  if (name === u.name) name = undefined;
+  let bio = data.bio != null && data.bio !== (u.bio ?? '') ? normalizeBio(data.bio) : undefined;
+  if (bio === (u.bio ?? '')) bio = undefined;
+  const statusText = data.statusText != null ? data.statusText.slice(0, 120) : undefined;
+  const statusChanged = statusText !== undefined && statusText !== (u.status_text ?? '');
+  // E-mail vazio é "sem e-mail" (NULL): quem não tem e-mail salva o resto do perfil.
+  const email = data.email === undefined ? undefined : (data.email ?? '').trim() || null;
+  const emailChanged = email !== undefined && email !== (u.email || null);
+  if (!opts.asAdmin) {
+    // "Permitir alterar perfil" vale para os dados do perfil; a senha segue só "Permitir alterar senha".
+    if ((username !== undefined || name !== undefined || bio !== undefined || statusChanged || emailChanged) && !getSetting('Accounts_AllowUserProfileChange'))
+      throw forbidden('Alteração de perfil desativada.');
+    // Conta do LDAP: nome, nome de usuário e e-mail vêm do diretório (a sincronização grava por cima).
+    if (u.auth_source === 'ldap' && (username !== undefined || name !== undefined || emailChanged))
+      throw forbidden('Nome, nome de usuário e e-mail da sua conta vêm do diretório da empresa (LDAP) e são atualizados por lá.');
+  }
+
+  if (username !== undefined) {
+    if (!opts.asAdmin && !getSetting('Accounts_AllowUsernameChange')) throw forbidden('Alteração de nome de usuário desativada.');
+    validateUsername(username);
+    const other = await getUserByUsername(username);
+    if (other && other.id !== userId) throw badRequest('error-field-unavailable', 'Nome de usuário em uso.');
+    sets.push(`username = $${params.push(username)}`);
+  }
+  if (name !== undefined) sets.push(`name = $${params.push(name)}`);
+  if (bio !== undefined) sets.push(`bio = $${params.push(bio)}`);
+  if (statusChanged) sets.push(`status_text = $${params.push(statusText)}`);
+  if (emailChanged) {
+    if (!opts.asAdmin) {
+      if (!getSetting('Accounts_AllowEmailChange')) throw forbidden('Alteração de e-mail desativada.');
+      // Sem senha do chat (conta só de SAML/OAuth) não há como confirmar quem pede; o provedor atualiza o e-mail.
+      if (!u.password_hash) throw forbidden('Sua conta entra pelo provedor da empresa; o e-mail é atualizado por lá.');
+      if (!email) throw badRequest('error-invalid-email', 'Informe o e-mail.');
+    }
+    if (email && !EMAIL_RE.test(email)) throw badRequest('error-invalid-email', 'E-mail inválido.');
+    if (!opts.asAdmin) {
+      assertAllowedDomain(email!);
+      // O e-mail recebe o link de "Esqueci minha senha": com a sessão aberta e sem a senha, ninguém o troca.
+      if (!opts.currentPassword) throw badRequest('error-password-required', 'Digite sua senha atual para trocar o e-mail.');
+      if (!(await verifyPassword(opts.currentPassword, u.password_hash))) throw badRequest('error-invalid-password', 'Senha atual incorreta.');
+    }
+    const other = email && (await one('SELECT id FROM users WHERE lower(email) = lower($1)', [email]));
     if (other && other.id !== userId) throw badRequest('error-field-unavailable', 'E-mail em uso.');
-    sets.push(`email = $${params.push(data.email)}`, `email_verified = ${opts.asAdmin && data.verified ? 'true' : 'false'}`);
+    sets.push(`email = $${params.push(email)}`, `email_verified = ${opts.asAdmin && data.verified && email ? 'true' : 'false'}`);
   }
   if (data.password) {
     // Na troca obrigatória (logo após entrar com a senha provisória) a senha atual não é pedida de novo.
     if (!opts.asAdmin && !(self && u.require_password_change)) {
       if (!getSetting('Accounts_AllowPasswordChange')) throw forbidden('Alteração de senha desativada.');
+      // LDAP e contas só de SAML/OAuth entram pelo provedor: uma senha do chat criada aqui continuaria valendo depois
+      // que a TI desligasse a pessoa lá (vinculadas que mantêm a senha local continuam trocando com a senha atual).
+      if (u.auth_source === 'ldap' || (u.auth_source !== 'local' && !u.password_hash)) throw forbidden('Sua conta entra pelo provedor da empresa; a senha é trocada lá.');
       if (u.password_hash && !(await verifyPassword(opts.currentPassword ?? '', u.password_hash))) throw badRequest('error-invalid-password', 'Senha atual incorreta.');
     }
+    // Só espaços passava pelo tamanho mínimo.
+    if (!data.password.trim()) throw badRequest('error-password-policy-not-met', 'A senha não pode ser só espaços.');
     validatePassword(data.password);
     sets.push(`password_hash = $${params.push(await hashPassword(data.password))}`, 'require_password_change = false');
   }
@@ -524,7 +595,7 @@ export async function updateUser(
   sets.push('updated_at = now()');
   const row = await one(`UPDATE users SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, params);
   if (data.username && data.username !== u.username) await propagateUsername(userId, u.username, data.username);
-  if (data.name !== undefined && data.name !== u.name) await query('UPDATE messages SET user_name = $2 WHERE user_id = $1', [userId, data.name]);
+  if (name !== undefined) await query('UPDATE messages SET user_name = $2 WHERE user_id = $1', [userId, name]);
   if (data.active === false) {
     await revokeAllSessions(userId);
   }
@@ -533,7 +604,31 @@ export async function updateUser(
     await audit(actorOf(actor), 'user.updated', { userId, username: row.username }, { fields: Object.keys(data).filter((k) => k !== 'password'), passwordChanged: !!data.password });
   }
   bus.publish({ all: true }, { type: 'user', action: 'updated', user: mapUser(row) });
+  // A mensagem de status (e o @usuário novo) chegam aos outros pela presença, como na troca pelo menu da foto.
+  if (statusChanged || username) bus.publish({ all: true }, presenceEvent(row));
+  // Conversas diretas: o nome na barra lateral e no topo da conversa de quem fala com a pessoa.
+  if (username || name !== undefined) void republishDirect(userId, !!username).catch(() => {});
+  if (emailChanged && !opts.asAdmin && u.email) void notifyEmailChanged(u, email!).catch(() => {});
   return row;
+}
+
+async function republishDirect(userId: string, usernameChanged: boolean) {
+  const { notifyRoomUpdated, republishSubscriptions } = await import('./rooms');
+  for (const r of await many(`SELECT id FROM rooms WHERE t = 'd' AND $1 = ANY(uids)`, [userId])) {
+    await republishSubscriptions(r.id);
+    if (usernameChanged) await notifyRoomUpdated(r.id);
+  }
+}
+
+// O endereço antigo fica sabendo da troca: se não foi a pessoa, ela avisa antes de alguém usar "Esqueci minha senha".
+async function notifyEmailChanged(u: any, email: string) {
+  const { sendMail } = await import('./mailer');
+  const site = getSetting<string>('Site_Name');
+  await sendMail({
+    to: u.email,
+    subject: `[${site}] O e-mail da sua conta foi alterado`,
+    text: `Olá, ${u.name || u.username}.\n\nO e-mail da sua conta no ${site} foi trocado para ${email}. A partir de agora os avisos e o link de "Esqueci minha senha" vão para esse endereço.\n\nSe não foi você, fale com o administrador do chat imediatamente.`,
+  });
 }
 
 async function propagateUsername(userId: string, oldU: string, newU: string) {
@@ -567,18 +662,48 @@ async function renameInReactions(oldU: string, newU: string | null, db?: Queryab
   );
 }
 
+// As preferências que users.setPreferences aceita e os valores de cada uma (highlights e language têm validação
+// própria, abaixo). Preferência nova: acrescente aqui, senão o servidor a recusa.
+const PREFERENCE_VALUES: Record<string, readonly string[] | 'boolean'> = {
+  theme: ['auto', 'light', 'dark'],
+  desktopNotifications: ['all', 'mentions', 'nothing'],
+  emailNotificationMode: ['mentions', 'nothing'],
+  stickerAnimation: ['system', 'auto', 'hover', 'never'],
+  notificationSound: 'boolean',
+  sendOnEnter: 'boolean',
+  showThreadsInMainChannel: 'boolean',
+  sidebarGroupByType: 'boolean',
+  sidebarShowUnread: 'boolean',
+  hideReadReceipts: 'boolean',
+  stickerSuggestions: 'boolean',
+  stickerTabSeen: 'boolean',
+  stickerHintSeen: 'boolean',
+};
+
 // Preferências da pessoa (merge no jsonb). As palavras destacadas são validadas e normalizadas aqui. Qualquer mudança
 // vai para as outras abas da pessoa pelo evento "user" (só para ela: os outros nunca veem preferences).
 export async function setPreferences(ctx: Ctx, prefs: UserPreferences) {
   if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) throw badRequest('error-invalid-params', 'Preferências inválidas.');
   const data: Record<string, unknown> = { ...prefs };
+  // Só as preferências conhecidas, com valores válidos (um valor qualquer desligava as notificações sem aviso, e
+  // chaves inventadas iam no /me de cada abertura). null tira a chave: a preferência volta ao padrão.
+  const remove: string[] = [];
+  for (const [k, v] of Object.entries(data)) {
+    if (k === 'highlights' || k === 'language') continue;
+    const allowed = Object.hasOwn(PREFERENCE_VALUES, k) ? PREFERENCE_VALUES[k] : undefined;
+    if (v === null) {
+      delete data[k];
+      remove.push(k);
+    } else if (!allowed) throw badRequest('error-invalid-params', `Preferência desconhecida: ${k.slice(0, 60)}.`);
+    else if (allowed === 'boolean' ? typeof v !== 'boolean' : !allowed.includes(v as string)) throw badRequest('error-invalid-params', `Valor inválido para a preferência ${k}.`);
+  }
   if ('highlights' in data) {
     const r = normalizeHighlights(data.highlights);
     if (!r.ok) throw badRequest('error-invalid-highlights', r.error);
     data.highlights = r.words;
   }
   // Idioma da pessoa (destino das traduções de mensagens). Vazio volta ao padrão da empresa: a chave sai.
-  const drop: string[] = [];
+  const drop: string[] = remove;
   if ('language' in data) {
     const v = data.language;
     if (v === '' || v === null || v === undefined) {
@@ -656,8 +781,12 @@ export async function deleteUser(actor: Ctx, userId: string, opts: { confirmReli
 
 // ---------- Avatar ----------
 
-export async function setAvatar(userId: string, contentType: string, data: Buffer) {
-  if (!/^image\/(png|jpeg|gif|webp)$/.test(contentType)) throw badRequest('error-invalid-image', 'Formato de imagem não suportado.');
+export async function setAvatar(userId: string, _declaredType: string, data: Buffer) {
+  // O tipo vem do conteúdo, não do que o navegador (ou o provedor) declarou: um PDF renomeado para .png virava uma foto
+  // quebrada para todo mundo.
+  const { imageType } = await import('../importer/pending');
+  const contentType = imageType(data);
+  if (!contentType) throw badRequest('error-invalid-image', 'O arquivo não é uma imagem PNG, JPEG, GIF ou WebP.');
   if (data.length > 5 * 1024 * 1024) throw badRequest('error-file-too-large', 'Imagem muito grande (máx. 5 MB).');
   const etag = newId(8);
   await query(
@@ -680,7 +809,11 @@ export async function resetAvatar(userId: string) {
 
 export async function createPersonalToken(ctx: Ctx, name: string, bypass2fa: boolean) {
   const token = randomToken();
-  if (await one('SELECT 1 FROM personal_access_tokens WHERE user_id = $1 AND name = $2', [ctx.userId, name]))
+  // Espaços sobrando não contam, e o nome não se repete mudando só maiúsculas ou espaços: na lista ficariam iguais.
+  name = name.replace(/\s+/g, ' ').trim();
+  if (!name) throw badRequest('error-invalid-params', 'Informe o nome do token.');
+  const same = (other: string) => other.replace(/\s+/g, ' ').trim().toLowerCase() === name.toLowerCase();
+  if ((await many<{ name: string }>('SELECT name FROM personal_access_tokens WHERE user_id = $1', [ctx.userId])).some((t) => same(t.name)))
     throw badRequest('error-token-already-exists', 'Já existe um token com esse nome.');
   await query('INSERT INTO personal_access_tokens (id, user_id, name, token_hash, bypass_2fa) VALUES ($1,$2,$3,$4,$5)', [
     newId(),
