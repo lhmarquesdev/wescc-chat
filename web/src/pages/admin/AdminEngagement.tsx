@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../lib/api';
 import { useStore } from '../../lib/store';
+import { addDays, dateInput } from '../../lib/calendar';
 import { roomIconName } from '../../lib/format';
 import { Icon } from '../../components/Icon';
 import { Empty, Kpi, SkeletonStats, SkeletonTable, Tabs, useAsync, ThLabel } from '../../components/ui';
@@ -26,8 +27,9 @@ function useRoomIcon() {
 export function AdminEngagement() {
   const [tab, setTab] = useState<'users' | 'messages' | 'channels'>('users');
   const [days, setDays] = useState(30);
-  const end = new Date().toISOString().slice(0, 10);
-  const start = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
+  // Datas locais: toISOString é UTC e, depois das 21h em Brasília, "hoje" já era amanhã.
+  const end = dateInput(new Date());
+  const start = dateInput(addDays(new Date(), -(days - 1)));
   return (
     <>
       <PageHead title="Engajamento">
