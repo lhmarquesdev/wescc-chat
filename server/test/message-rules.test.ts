@@ -153,3 +153,27 @@ describe('envio repetido', () => {
     expect(other.message.msg).toBe('minha');
   });
 });
+
+describe('menção a quem não está na sala', () => {
+  it('a resposta do envio diz quem foi mencionado sem estar na sala', async () => {
+    const [alice, bruno, carla] = [await newUser(A), await newUser(A), await newUser(A)];
+    const g = (await api('POST', 'groups.create', { name: `mencao-${uniq()}`, members: [alice.username, bruno.username] }, alice)).group;
+    const r = await send(alice, g._id, `@${carla.username} e @${bruno.username}, podem ver isso?`);
+    expect(r.mentionsNotInRoom).toEqual([{ _id: carla.userId, username: carla.username, name: expect.any(String) }]);
+    expect((await api('GET', 'subscriptions.getOne', { roomId: g._id }, carla)).subscription).toBeNull();
+    const ok = await send(alice, g._id, `@${bruno.username} só você`);
+    expect(ok.mentionsNotInRoom).toBeUndefined();
+    const all = await send(alice, g._id, '@all reunião');
+    expect(all.mentionsNotInRoom).toBeUndefined();
+  });
+
+  it('num canal de avisos, só quem vê a lista de membros fica sabendo', async () => {
+    const [dono, pub, carla] = [await newUser(A), await newUser(A), await newUser(A)];
+    const ch = (await api('POST', 'channels.create', { name: `avisos-${uniq()}`, members: [pub.username], extraData: { broadcast: true } }, dono)).channel;
+    await api('POST', 'channels.addPublisher', { roomId: ch._id, userId: pub.userId }, dono);
+    expect((await send(dono, ch._id, `@${carla.username} veja`)).mentionsNotInRoom).toHaveLength(1);
+    const r = await send(pub, ch._id, `@${carla.username} veja`);
+    expect(r.message.msg).toBe(`@${carla.username} veja`);
+    expect(r.mentionsNotInRoom).toBeUndefined();
+  });
+});

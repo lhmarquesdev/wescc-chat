@@ -11,6 +11,7 @@ import {
   getMessageRow,
   history,
   listByFlag,
+  mentionedNotInRoom,
   messageHistory,
   messagesAround,
   react,
@@ -48,7 +49,10 @@ export function chatRoutes(app: FastifyInstance) {
       e2e: m.e2e,
       e2eMentions: Array.isArray(m.e2eMentions) ? m.e2eMentions.map(String) : undefined,
     });
-    return { message: out };
+    // Quem foi mencionado sem estar na sala não fica sabendo: a web avisa quem escreveu.
+    const sent = out as any;
+    const notInRoom = sent?.rid && Array.isArray(sent.mentions) ? await mentionedNotInRoom(ctx, sent.rid, sent.mentions) : [];
+    return { message: out, ...(notInRoom.length ? { mentionsNotInRoom: notInRoom } : {}) };
   });
   // Compatível com chat.postMessage do Rocket.Chat (integrações e bots).
   route(app, 'POST', 'chat.postMessage', {}, async (req, _rep, ctx) => {

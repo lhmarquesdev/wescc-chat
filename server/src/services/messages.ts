@@ -472,6 +472,22 @@ export async function sendMessage(
   return message;
 }
 
+// Mencionados que não estão na sala: eles não recebem nada (notificação e não lidas são só de quem participa). A web
+// avisa quem escreveu e oferece adicionar. Com a lista de membros oculta (canal de avisos), só para quem pode vê-la.
+export async function mentionedNotInRoom(ctx: Ctx, rid: string, mentions: UserRef[] | undefined) {
+  const ids = (mentions ?? []).filter((m) => m._id !== 'all' && m._id !== 'here' && (m as any).type !== 'team').map((m) => m._id);
+  if (!ids.length) return [];
+  const room = await getRoom(rid);
+  if (!room || (room.broadcast && !(await hasPermission(ctx.userId, 'view-broadcast-member-list', rid)))) return [];
+  const rows = await many(
+    `SELECT u.id, u.username, u.name FROM users u
+      WHERE u.id = ANY($1) AND u.active AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = $2 AND s.user_id = u.id)
+      ORDER BY u.username`,
+    [ids, rid],
+  );
+  return rows.map((u) => ({ _id: u.id, username: u.username, name: u.name }));
+}
+
 // Menções de uma mensagem cifrada: os @usuário que a web leu no texto (no máximo 50), pelas mesmas regras do texto.
 function e2eMentionText(list: unknown) {
   return cleanMentionNames(list)

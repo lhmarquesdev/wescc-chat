@@ -8,7 +8,7 @@ import { editEncrypted, quoteOf, sendEncrypted, sendEncryptedFile, type E2eFileM
 import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
 import { slashCommands } from '../lib/commands';
 import { EMOJI, searchEmoji } from '../lib/emoji';
-import { formatBytes, roomPath } from '../lib/format';
+import { formatBytes, nameList, roomPath } from '../lib/format';
 import { mentionGroups, mentionSuggestions } from '../lib/messageRules';
 import { whenText } from '../lib/messageTimes';
 import { realtime } from '../lib/realtime';
@@ -300,11 +300,13 @@ function ComposerView({
       const [, trig, term] = m;
       if (trig === '@') {
         const r = await api.get('users.autocomplete', { term, rid }).catch(() => ({ items: [] }));
+        // Quem não está na sala vem depois dos membros e não recebe o aviso da menção.
+        const outside = useStore.getState().rooms[rid]?.t === 'd' ? 'não está na conversa' : 'não está na sala';
         const person = (u: any): Suggestion => ({
           key: u._id,
           lead: <Avatar username={u.username} size={24} />,
           title: u.name || u.username,
-          sub: `@${u.username}`,
+          sub: u.inRoom === false ? `@${u.username} · ${outside}` : `@${u.username}`,
           insert: `@${u.username} `,
         });
         const people: Suggestion[] = r.items.filter((u: any) => u.username !== me.username).map(person);
@@ -377,6 +379,26 @@ function ComposerView({
   const over = text.length > maxSize;
   textNow.current = text;
 
+  // Mencionou quem não está na sala: essa pessoa não recebe aviso nenhum. Quem pode adicionar pessoas adiciona dali.
+  const warnNotInRoom = (list?: { _id: string; username: string; name?: string }[]) => {
+    if (!list?.length || !room) return;
+    const st = useStore.getState();
+    const names = nameList(list.map((u) => u.name || u.username));
+    const where = room.t === 'd' ? 'nesta conversa' : 'nesta sala';
+    const text = list.length === 1 ? `${names} não está ${where} e não recebeu o aviso da menção.` : `${names} não estão ${where} e não receberam o aviso da menção.`;
+    const roles = [...me.roles, ...(sub?.roles ?? [])];
+    const canAdd = room.t !== 'd' && (canWithRoles('add-user-to-joined-room', roles) || canWithRoles(room.t === 'p' ? 'add-user-to-any-p-room' : 'add-user-to-any-c-room', roles));
+    const add = () =>
+      api
+        .post(
+          room.teamMain ? 'teams.addMembers' : room.t === 'p' ? 'groups.invite' : 'channels.invite',
+          room.teamMain ? { teamId: room.teamId, members: list.map((u) => ({ userId: u._id })) } : { roomId: rid, userIds: list.map((u) => u._id) },
+        )
+        .then(() => st.toast(list.length === 1 ? `${names} agora está na sala.` : `${names} agora estão na sala.`, 'success'))
+        .catch((e) => st.toast(errorMessage(e), 'error'));
+    st.toast(text, 'warning', { duration: 10000, action: canAdd ? { label: 'Adicionar à sala', onClick: () => void add() } : undefined });
+  };
+
   const send = async () => {
     if (sendingRef.current) return;
     let msg = text.trim();
@@ -397,9 +419,10 @@ function ComposerView({
         const key = JSON.stringify([rid, tmid ?? '', msg, quoting?._id ?? '', !!alsoChannel, !!ackRequired]);
         const _id = sendKey.current?.key === key ? sendKey.current.id : clientMessageId();
         sendKey.current = { key, id: _id };
-        await api.post('chat.sendMessage', { message: { _id, rid, msg, tmid, tshow: tmid ? alsoChannel || undefined : undefined, attachments, ackRequired } });
+        const r = await api.post('chat.sendMessage', { message: { _id, rid, msg, tmid, tshow: tmid ? alsoChannel || undefined : undefined, attachments, ackRequired } });
         sendKey.current = null;
         if (quoting) setQuoting(null);
+        warnNotInRoom(r.mentionsNotInRoom);
       }
       // O que a pessoa começou a escrever enquanto a mensagem saía fica no compositor.
       if (textNow.current.trim() === msg) {
