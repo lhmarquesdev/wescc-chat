@@ -192,6 +192,44 @@ describe('abrir uma mensagem antiga (?msg=)', () => {
   });
 });
 
+describe('páginas da sala com mensagens na mesma hora', () => {
+  it('rolar para cima e para baixo (latestId/oldestId) traz todas, mesmo as gravadas no mesmo instante', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `mesma-hora-${uniq()}` }, A)).channel;
+    const ids: string[] = [];
+    for (let i = 1; i <= 60; i++) ids.push((await send(A, ch._id, `m${i}`)).message._id);
+    // m1..m20 no mesmo instante (importação, robô); as outras depois, uma por segundo.
+    await pool.query(
+      `UPDATE messages SET created_at = CASE WHEN substring(msg from 2)::int <= 20 THEN timestamptz '2026-11-19 10:00:00.123+00'
+         ELSE timestamptz '2026-11-19 10:05:00+00' + substring(msg from 2)::int * interval '1 second' END
+       WHERE room_id = $1 AND msg ~ '^m[0-9]+$'`,
+      [ch._id],
+    );
+    const page = async (q: Record<string, string | number>) => (await api('GET', 'channels.history', { roomId: ch._id, count: 15, ...q }, A)).messages.filter((x: any) => !x.t);
+    // Para cima, como a web: a mais antiga carregada é o limite.
+    const up: any[] = await page({});
+    for (let more = await page({ latest: up[up.length - 1].ts, latestId: up[up.length - 1]._id }); more.length; ) {
+      up.push(...more);
+      more = await page({ latest: up[up.length - 1].ts, latestId: up[up.length - 1]._id });
+    }
+    expect(new Set(up.map((x) => x.msg)).size).toBe(60);
+    expect(up).toHaveLength(60);
+    // Para baixo, a partir de uma do meio do bloco (link para mensagem antiga).
+    const around = (await api('GET', 'chat.getMessagesAround', { msgId: ids[4], count: 5 }, A)).messages.filter((x: any) => !x.t);
+    const down: any[] = around.slice().reverse();
+    for (;;) {
+      const last = down[down.length - 1];
+      const more = (await api('GET', 'channels.history', { roomId: ch._id, count: 15, oldest: last.ts, oldestId: last._id }, A)).messages.filter((x: any) => !x.t).reverse();
+      if (!more.length) break;
+      down.push(...more);
+    }
+    expect(new Set(down.map((x) => x.msg)).size).toBe(down.length);
+    expect(down.map((x) => x.msg)).toEqual(expect.arrayContaining(ids.slice(20).map((_, i) => `m${i + 21}`)));
+    // As mesmas, na ordem: a lista para baixo é a lista para cima ao contrário, a partir da mensagem aberta.
+    const order = up.map((x) => x._id).reverse();
+    expect(down.map((x) => x._id)).toEqual(order.slice(order.indexOf(down[0]._id)));
+  });
+});
+
 async function withSettings(values: Record<string, unknown>, fn: () => Promise<void>) {
   const before = Object.fromEntries(Object.keys(values).map((k) => [k, getSetting(k)]));
   const r = await api('POST', 'settings', { settings: values }, A);

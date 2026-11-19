@@ -830,17 +830,31 @@ export async function getMessage(ctx: Ctx, msgId: string) {
   return withExtra(m);
 }
 
-export async function history(ctx: Ctx, rid: string, opts: { latest?: string; oldest?: string; count?: number; inclusive?: boolean; showThreadMessages?: boolean }) {
+export async function history(
+  ctx: Ctx,
+  rid: string,
+  opts: { latest?: string; latestId?: string; oldest?: string; oldestId?: string; count?: number; inclusive?: boolean; showThreadMessages?: boolean },
+) {
   await loadRoomForUser(ctx, rid);
   const params: unknown[] = [rid];
   const w: string[] = ['room_id = $1'];
   if (!opts.showThreadMessages) w.push(`(tmid IS NULL OR extra->>'tshow' = 'true')`);
   const op = opts.inclusive ? '=' : '';
-  if (opts.latest) w.push(`created_at <${op} $${params.push(opts.latest)}`);
-  if (opts.oldest) w.push(`created_at >${op} $${params.push(opts.oldest)}`);
+  // Página a partir de uma mensagem já carregada (latestId/oldestId, que a web manda): o limite é a hora gravada dela
+  // (microssegundos) e, na mesma hora, o id. Só com o ts (milissegundos), as mensagens da mesma hora no limite da página
+  // (importação, robô, mensagens de sistema em lote) nunca carregavam. A primeira condição deixa o índice da sala valer.
+  const edge = async (cmp: '<' | '>', ts?: string, id?: string) => {
+    const at = id ? (await one<{ at: string }>('SELECT created_at::text AS at FROM messages WHERE id = $1 AND room_id = $2', [id, rid]))?.at : undefined;
+    if (at) {
+      const a = params.push(at);
+      w.push(`created_at ${cmp}= $${a}`, `(created_at, id) ${cmp}${op} ($${a}::timestamptz, $${params.push(id)})`);
+    } else if (ts) w.push(`created_at ${cmp}${op} $${params.push(ts)}`);
+  };
+  await edge('<', opts.latest, opts.latestId);
+  await edge('>', opts.oldest, opts.oldestId);
   const count = Math.min(opts.count ?? 50, 200);
-  const order = opts.oldest && !opts.latest ? 'ASC' : 'DESC';
-  const rows = await many(`SELECT * FROM messages WHERE ${w.join(' AND ')} ORDER BY created_at ${order} LIMIT ${count}`, params);
+  const order = (opts.oldest || opts.oldestId) && !(opts.latest || opts.latestId) ? 'ASC' : 'DESC';
+  const rows = await many(`SELECT * FROM messages WHERE ${w.join(' AND ')} ORDER BY created_at ${order}, id ${order} LIMIT ${count}`, params);
   if (order === 'ASC') rows.reverse();
   return rows.map(withExtra);
 }
@@ -851,12 +865,13 @@ export async function messagesAround(ctx: Ctx, msgId: string, count = 30) {
   await loadRoomForUser(ctx, m.room_id);
   // A hora da própria linha (microssegundos), não a do Date do JavaScript (milissegundos): senão o destino caía entre as
   // de depois, e a lista tinha uma a menos do que o pedido.
+  // Na mesma hora, o id desempata (a mesma ordem do history, que carrega as de antes e as de depois a partir daqui).
   const before = await many(
-    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at <= (SELECT created_at FROM messages WHERE id = $2) ORDER BY created_at DESC LIMIT $3`,
+    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at <= (SELECT created_at FROM messages WHERE id = $2) AND (created_at, id) <= (SELECT created_at, id FROM messages WHERE id = $2) ORDER BY created_at DESC, id DESC LIMIT $3`,
     [m.room_id, m.id, count],
   );
   const after = await many(
-    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at > (SELECT created_at FROM messages WHERE id = $2) ORDER BY created_at ASC LIMIT $3`,
+    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at >= (SELECT created_at FROM messages WHERE id = $2) AND (created_at, id) > (SELECT created_at, id FROM messages WHERE id = $2) ORDER BY created_at ASC, id ASC LIMIT $3`,
     [m.room_id, m.id, count],
   );
   return [...after.reverse(), ...before].map(withExtra);

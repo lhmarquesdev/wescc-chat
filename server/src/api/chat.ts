@@ -122,7 +122,9 @@ export function chatRoutes(app: FastifyInstance) {
       const room = await resolveRoom(query);
       const messages = await history(ctx, room.id, {
         latest: dateParam(query.latest, 'latest', { optional: true }),
+        latestId: str(query.latestId, 'latestId', { optional: true }),
         oldest: dateParam(query.oldest, 'oldest', { optional: true }),
+        oldestId: str(query.oldestId, 'oldestId', { optional: true }),
         count: intParam(query.count, 'count', 50, 1, 200),
         inclusive: query.inclusive === 'true',
         showThreadMessages: query.showThreadMessages === 'true',

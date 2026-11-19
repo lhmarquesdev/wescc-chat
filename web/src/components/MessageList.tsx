@@ -275,7 +275,7 @@ export function MessageList({
     loadingRef.current = true;
     setLoadingOlder(true);
     try {
-      const r = await api.get('rooms.history', { roomId: rid, latest: list[0].ts, count: 50 });
+      const r = await api.get('rooms.history', { roomId: rid, latest: list[0].ts, latestId: list[0]._id, count: 50 });
       const el = scroller.current;
       if (el) prepend.current = el.scrollHeight - el.scrollTop;
       useStore.getState().prependMessages(rid, r.messages.slice().reverse(), r.messages.length === 50);
@@ -292,7 +292,7 @@ export function MessageList({
     if (loadingNewer.current || !cur?.hasNewer || !last) return;
     loadingNewer.current = true;
     try {
-      const r = await api.get('rooms.history', { roomId: rid, oldest: last.ts, count: 50 });
+      const r = await api.get('rooms.history', { roomId: rid, oldest: last.ts, oldestId: last._id, count: 50 });
       const page: Message[] = r.messages.slice().reverse();
       for (const x of page) seen.current?.add(x._id);
       paging.current = true;
