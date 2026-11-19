@@ -223,6 +223,10 @@ function DirectWindow({ call, me }: { call: Call; me: UserRef }) {
   const muted = !local.mic;
   const cameraOff = !local.camera;
   const status = ringing ? 'Chamando…' : phase === 'reconnecting' ? 'Reconectando…' : !connected ? 'Conectando…' : elapsed;
+  // O outro lado desligou o microfone ou a câmera (ele avisa pela sinalização): marca, como nos quadros em grupo.
+  const remoteMuted = connected && !!remote && !remote.mic;
+  const mutedMark = remoteMuted ? <Icon name="mic-off" size={14} label="Microfone desligado" className="call-muted" /> : null;
+  const camOffNote = connected && call.kind === 'video' && !hasRemoteVideo ? 'Câmera desligada' : null;
   const canShare = connected && canShareScreen();
   const idle = useIdle(ref, big && connected && (hasRemoteVideo || hasLocalVideo));
 
@@ -254,8 +258,12 @@ function DirectWindow({ call, me }: { call: Call; me: UserRef }) {
       </span>
       {big && (
         <>
-          <strong className="call-name">{name}</strong>
+          <strong className="call-name">
+            {mutedMark}
+            {name}
+          </strong>
           <span className="call-status">{status}</span>
+          {camOffNote && <span className="call-status">{camOffNote}</span>}
         </>
       )}
     </div>
@@ -280,7 +288,10 @@ function DirectWindow({ call, me }: { call: Call; me: UserRef }) {
       <div className="call-bar">
         <div className="call-bar-head">
           <div className={big ? (hasRemoteVideo ? 'call-who call-chip' : 'call-who visually-hidden') : 'call-who'}>
-            <strong>{name}</strong>
+            <strong>
+              {mutedMark}
+              {name}
+            </strong>
             <span className="call-status">{status}</span>
           </div>
           <div className="call-tools">

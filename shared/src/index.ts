@@ -697,7 +697,13 @@ export interface RoomCallState {
   serverTime: string;
 }
 
-export type CallSignal = { sdp: { type: 'offer' | 'answer'; sdp: string } } | { candidate: Record<string, unknown> | null };
+// state: microfone, câmera e tela de quem manda (a dois): desligar só apaga a faixa, e o outro lado não teria como saber.
+export type CallSignal = { sdp: { type: 'offer' | 'answer'; sdp: string } } | { candidate: Record<string, unknown> | null } | { state: CallMediaState };
+export interface CallMediaState {
+  mic: boolean;
+  camera: boolean;
+  screen: boolean;
+}
 
 export type ClientEvent =
   | { type: 'auth'; token: string }

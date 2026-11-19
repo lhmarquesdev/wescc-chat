@@ -922,6 +922,11 @@
 .call-muted {
   color: hsl(var(--st-red));
 }
+/* Microfone desligado do outro lado, antes do nome (chamada a dois). */
+:where(.call-who, .call-placeholder) .call-muted {
+  margin-right: var(--space-1);
+  vertical-align: -2px;
+}
 .call-hand-up {
   color: hsl(var(--st-amber));
 }

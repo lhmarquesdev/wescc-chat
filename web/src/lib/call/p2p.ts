@@ -1,6 +1,6 @@
 // Motor P2P da chamada a dois: a mesma conexão de sempre (sinalização pelo WebSocket, candidatos guardados até a
 // descrição remota, tela no lugar da câmera com replaceTrack e renegociação), agora atrás do contrato CallEngine.
-import type { Call, CallsConfig, CallSignal, ServerEvent, UserRef } from '@shared/index';
+import type { Call, CallMediaState, CallsConfig, CallSignal, ServerEvent, UserRef } from '@shared/index';
 import { api } from '../api';
 import { realtime } from '../realtime';
 import { createMeter, openTrack, SPEECH_LEVEL, type Meter } from './devices';
@@ -25,6 +25,8 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
   let micOn = false;
   let cameraOn = false;
   let remote: MediaStream | null = null;
+  // Microfone, câmera e tela do outro lado, como ele mandou (null: versão antiga, que não manda).
+  let remoteState: CallMediaState | null = null;
   let connected = false;
   let lost = false; // a conexão direta oscilou ('disconnected'): reconectando
   let lostTimer = 0;
@@ -65,9 +67,10 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
         id: o._id,
         user: o,
         isMe: false,
-        mic: true,
-        camera: !!remoteVideo(),
-        screen: false,
+        mic: remoteState?.mic ?? true,
+        // Câmera desligada manda quadros pretos (a faixa continua viva): vale o que o outro lado disse.
+        camera: !!remoteVideo() && (!remoteState || remoteState.camera || remoteState.screen),
+        screen: remoteState?.screen ?? false,
         speaking: speaking.includes(o._id),
         lastSpokeAt: null,
         handAt: null,
@@ -91,6 +94,11 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
 
   function signal(data: CallSignal) {
     if (call) realtime.send({ type: 'call.signal', callId: call._id, data });
+  }
+
+  // Conta ao outro lado como estão meu microfone, minha câmera e minha tela.
+  function sendState() {
+    if (connected) signal({ state: { mic: micOn && !!mic, camera: cameraOn && !!camera && !screen, screen: !!screen } });
   }
 
   function localTracks() {
@@ -129,6 +137,7 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
         clearTimeout(lostTimer);
         ev.emit({ type: 'state', state: 'connected' });
         batch.schedule();
+        sendState();
       }
       // Oscilou: a janela mostra "Reconectando…". Sem voltar em 10 s, o áudio já não passa: conta como queda.
       if (state === 'disconnected' && connected && !lost) {
@@ -171,6 +180,13 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
   }
 
   async function onSignal(data: CallSignal) {
+    if ('state' in data) {
+      const s = data.state;
+      if (!s || typeof s !== 'object') return;
+      remoteState = { mic: !!s.mic, camera: !!s.camera, screen: !!s.screen };
+      batch.schedule();
+      return;
+    }
     if (!pc) return;
     if ('sdp' in data) {
       await pc.setRemoteDescription(data.sdp);
@@ -180,7 +196,7 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
         signal({ sdp: { type: 'answer', sdp: answer.sdp ?? '' } });
       }
       await flushCandidates();
-    } else if (data.candidate) {
+    } else if ('candidate' in data && data.candidate) {
       if (pc.remoteDescription) await pc.addIceCandidate(data.candidate as RTCIceCandidateInit).catch(() => {});
       else pending.push(data.candidate as RTCIceCandidateInit);
     }
@@ -204,8 +220,11 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
     if (!call) return;
     if (e.type === 'call.signal' && e.callId === call._id) void onSignal(e.data).catch(() => {});
     if (e.type === 'call' && e.call._id === call._id) {
+      // Um dos lados voltou com outra conexão (queda curta): o que mandei enquanto isso pode ter se perdido.
+      const moved = e.call.callerConnectionId !== call.callerConnectionId || e.call.calleeConnectionId !== call.calleeConnectionId;
       call = e.call;
       void maybeOffer(e.call);
+      if (moved) sendState();
     }
   });
 
@@ -261,6 +280,7 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
       micOn = on && !!mic;
       if (mic) mic.enabled = micOn;
       batch.schedule();
+      sendState();
     },
     async setCamera(on) {
       if (screen) return;
@@ -279,6 +299,7 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
       cameraOn = on && !!camera;
       if (camera) camera.enabled = cameraOn;
       refresh();
+      sendState();
     },
     // Compartilha a tela no lugar da câmera (ou acrescenta vídeo numa chamada de voz).
     async setScreen(on) {
@@ -291,6 +312,7 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
         await sender?.replaceTrack(camera).catch(() => {});
         s.stop();
         refresh();
+        sendState();
         return;
       }
       if (screen) return;
@@ -313,6 +335,7 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
       }
       s.onended = () => void (screen === s && engine.setScreen(false));
       refresh();
+      sendState();
     },
     setReceiveVideo() {
       // Na chamada a dois o vídeo é sempre recebido.

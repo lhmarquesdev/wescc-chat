@@ -71,6 +71,9 @@ describe('chamadas em mensagens diretas', () => {
     expect(got).toEqual({ type: 'call.signal', callId: id, data: { sdp: { type: 'offer', sdp: 'v=0 oferta' } } });
     wu.send({ type: 'call.signal', callId: id, data: { candidate: { candidate: 'c1' } } });
     await wa.waitFor((e) => e.type === 'call.signal' && e.data.candidate?.candidate === 'c1');
+    // Microfone e câmera desligados chegam ao outro lado (desligar só apaga a faixa, que continua viva).
+    wa.send({ type: 'call.signal', callId: id, data: { state: { mic: false, camera: false, screen: false } } });
+    expect((await wu.waitFor((e) => e.type === 'call.signal' && 'state' in e.data)).data).toEqual({ state: { mic: false, camera: false, screen: false } });
     // Terceiro não injeta sinalização.
     wi.send({ type: 'call.signal', callId: id, data: { sdp: { type: 'answer', sdp: 'falsa' } } });
     await sleep(300);
