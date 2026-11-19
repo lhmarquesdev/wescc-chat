@@ -358,7 +358,7 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
 export async function createDirect(ctx: Ctx, usernames: string[]) {
   if (!(await hasPermission(ctx.userId, 'create-d'))) throw forbidden();
   const names = [...new Set(usernames.map((u) => u.replace(/^@/, '').toLowerCase()))].filter((u) => u !== ctx.username.toLowerCase());
-  const others = names.length ? await many('SELECT id, username FROM users WHERE lower(username) = ANY($1)', [names]) : [];
+  const others = names.length ? await many('SELECT id, username, active FROM users WHERE lower(username) = ANY($1)', [names]) : [];
   if (others.length !== names.length) throw badRequest('error-invalid-user', 'Usuário não encontrado.');
   if (others.length > 8) throw badRequest('error-too-many-users', 'Máximo de 9 participantes em mensagem direta.');
   const all = [{ id: ctx.userId, username: ctx.username }, ...others];
@@ -376,6 +376,9 @@ export async function createDirect(ctx: Ctx, usernames: string[]) {
     return existing;
   }
   // Só uma conversa nova passa pela política; reabrir uma antiga mostra o histórico e o compositor explica o bloqueio.
+  // Com uma conta desativada não se começa conversa (ela não lê nem responde).
+  const gone = others.find((u) => !u.active);
+  if (gone) throw badRequest('error-user-deactivated', `A conta de @${gone.username} está desativada.`);
   await assertCanStartDirect(ctx, others.map((u) => u.id));
   const id = newId();
   const inserted = await one(

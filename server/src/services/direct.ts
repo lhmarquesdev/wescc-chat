@@ -147,7 +147,16 @@ export async function assertCanBringIn(
   }
 }
 
-export async function directPolicyFor(ctx: Ctx, room: any): Promise<RoomDirectPolicy> {
+// O mesmo texto da recusa do envio (messages.ts).
+const DEACTIVATED = 'Este usuário está desativado.';
+
+// own: a pergunta é sobre a própria DM (não sobre uma discussão criada nela). Na DM a dois com uma conta desativada não
+// dá para escrever nem ligar, como no envio e no início da chamada; a discussão segue aceitando mensagens.
+export async function directPolicyFor(ctx: Ctx, room: any, own = true): Promise<RoomDirectPolicy> {
+  if (own && room?.t === 'd' && room.uids?.length === 2) {
+    const other = await one('SELECT active FROM users WHERE id = $1', [room.uids.find((u: string) => u !== ctx.userId) ?? '']);
+    if (other && !other.active) return { canSend: false, canCall: false, sendBlockedReason: DEACTIVATED, callBlockedReason: DEACTIVATED };
+  }
   if (room?.t !== 'd' || !restrictedRoleIds().length) return { canSend: true, canCall: true };
   const parties = await loadParties([ctx.userId, ...room.uids]);
   const rules = currentDirectRules();
