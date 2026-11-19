@@ -6,6 +6,7 @@ import { plural, roomDisplayName } from '../lib/format';
 import { continuesGroup, lastOwnEditable } from '../lib/messageRules';
 import { contentOf } from '../lib/e2e/client';
 import { useSetting, useStore } from '../lib/store';
+import { onReconnectWhileShown } from '../lib/catchup';
 import { Composer } from './Composer';
 import { Icon } from './Icon';
 import { MessageGateContext, MessageItem } from './MessageItem';
@@ -73,6 +74,26 @@ export function ThreadPanel({
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tmid]);
+
+  // Reconexão: as respostas (e a contagem do tópico) de enquanto a conexão estava fora.
+  useEffect(
+    () =>
+      onReconnectWhileShown('thread', tmid, () => {
+        void Promise.all([api.get('chat.getMessage', { msgId: tmid }), api.get('chat.getThreadMessages', { tmid, count: 500 })])
+          .then(([m, r]) => {
+            setRoot(m.message);
+            // Respostas que o tempo real trouxe enquanto a busca estava no ar continuam no fim.
+            const got: Message[] = r.messages;
+            const last = got[got.length - 1]?.ts ?? '';
+            const ids = new Set(got.map((x) => x._id));
+            const live = (useStore.getState().threads[tmid] ?? []).filter((x) => x.ts > last && !ids.has(x._id));
+            useStore.getState().setThread(tmid, [...got, ...live]);
+            setError('');
+          })
+          .catch(() => {});
+      }),
+    [tmid],
+  );
 
   useLayoutEffect(() => {
     const el = ref.current;

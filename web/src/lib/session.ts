@@ -13,6 +13,7 @@ import { loadIntegrationsMe, resetIntegrations } from './integrations';
 import { invalidateSlashCommands } from './commands';
 import { checkBuild } from './call/build';
 import { leaveDirectCallOnLogout } from './call/store';
+import { catchUpAfterReconnect } from './catchup';
 import { decryptNotification, forgetE2eRoom, handleE2eEvent, initE2e, resetE2e } from './e2e/client';
 
 export async function loadPublicSettings() {
@@ -94,6 +95,8 @@ export async function startSession() {
       // Ao reconectar, recarrega o que pode ter mudado. Eventos "user" podem ter se perdido: os papéis anunciados
       // deixam de valer por cima do que as telas buscam.
       useStore.setState({ userRoles: {} });
+      // Mensagens que chegaram durante a queda: as salas e tópicos na tela buscam de novo; o resto sai do cache.
+      catchUpAfterReconnect();
       void loadSubscriptions();
       void loadPresence();
       void loadUserStatuses();

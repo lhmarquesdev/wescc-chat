@@ -45,7 +45,8 @@ export const useIsPhone = () => useMedia(PHONE_QUERY);
 
 // ---------- Esc: só a camada de cima fecha ----------
 
-const layers: { escape: () => void }[] = [];
+// entry: a entrada desta camada no histórico (Voltar do celular), 0 sem entrada.
+const layers: { escape: () => void; entry: number }[] = [];
 
 function onEscapeKey(e: KeyboardEvent) {
   // Quem tratou o Esc antes (a lista de um campo dentro do modal) chama preventDefault ou para a propagação.
@@ -54,21 +55,87 @@ function onEscapeKey(e: KeyboardEvent) {
   layers[layers.length - 1].escape();
 }
 
-export function useEscape(active: boolean, onEscape: () => void) {
+// ---------- Voltar do celular: fecha a camada de cima ----------
+// No celular, o Voltar do Android (ou o gesto de voltar) fecha a folha, o diálogo ou a foto aberta, como já fecha os
+// painéis, em vez de sair da conversa. Cada camada dessas ganha uma entrada no histórico com o mesmo endereço; fechada
+// pela própria tela, a entrada sai (ou fica para a camada que abre logo em seguida, como um menu que abre um diálogo).
+let ignorePops = 0;
+let orphan = 0; // entrada de uma camada que fechou pela tela, à espera de sair do histórico
+let historyReady = false;
+const entryNow = () => Number(history.state?.wesccLayer) || 0;
+
+function onPopState() {
+  if (ignorePops > 0) {
+    ignorePops--;
+    return;
+  }
+  orphan = 0;
+  const now = entryNow();
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const l = layers[i];
+    if (l.entry > now) {
+      l.entry = 0;
+      l.escape();
+    }
+  }
+}
+
+function setupHistory() {
+  if (historyReady) return;
+  historyReady = true;
+  window.addEventListener('popstate', onPopState);
+  // Navegar a partir de uma camada (um item da folha que abre outra tela) troca a entrada da camada em vez de empilhar:
+  // o Voltar depois volta direto para onde a pessoa estava, sem uma parada a mais na mesma conversa.
+  const push = history.pushState.bind(history);
+  history.pushState = (data: any, unused: string, url?: string | URL | null) => {
+    if (entryNow() && !data?.wesccLayer) history.replaceState(data, unused, url);
+    else push(data, unused, url);
+  };
+}
+
+function pushEntry() {
+  setupHistory();
+  // A camada que fechou agora há pouco deixou a entrada dela: a nova fica com ela.
+  if (orphan && entryNow() === orphan) {
+    const e = orphan;
+    orphan = 0;
+    return e;
+  }
+  const e = Math.max(Date.now(), entryNow() + 1);
+  history.pushState({ ...history.state, wesccLayer: e }, '');
+  return e;
+}
+
+function dropEntry(entry: number) {
+  if (!entry || entryNow() !== entry) return;
+  orphan = entry;
+  setTimeout(() => {
+    if (orphan !== entry) return;
+    orphan = 0;
+    if (entryNow() !== entry) return;
+    ignorePops++;
+    history.back();
+  }, 0);
+}
+
+// back: no celular, o Voltar também fecha esta camada (folhas, diálogos, visualizador de imagem).
+export function useEscape(active: boolean, onEscape: () => void, back = false) {
   const cb = useRef(onEscape);
   useLayoutEffect(() => {
     cb.current = onEscape;
   });
   useEffect(() => {
     if (!active) return;
-    const layer = { escape: () => cb.current() };
+    const layer = { escape: () => cb.current(), entry: back && matchMedia(PHONE_QUERY).matches ? pushEntry() : 0 };
     layers.push(layer);
     if (layers.length === 1) document.addEventListener('keydown', onEscapeKey);
     return () => {
       const i = layers.indexOf(layer);
       if (i >= 0) layers.splice(i, 1);
       if (!layers.length) document.removeEventListener('keydown', onEscapeKey);
+      dropEntry(layer.entry);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 }
 
@@ -337,7 +404,7 @@ export function Sheet({
   onKeyDown?: (e: ReactKeyboardEvent<HTMLDivElement>) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEscape(true, onClose);
+  useEscape(true, onClose, true);
   useFocusTrap(ref, true, initialFocus);
   useScrollLock(true);
   useSheetDrag(ref, onClose);

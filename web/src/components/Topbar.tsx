@@ -30,16 +30,20 @@ const ACCOUNT: Record<string, string> = {
   connected: 'Contas conectadas',
 };
 
-function useTrail(): { label: string; to?: string }[] {
+// Também dá o nome da tela para o título da aba (App.tsx): o último item é a tela atual.
+export function useTrail(): { label: string; to?: string }[] {
   const { pathname } = useLocation();
-  const subs = useStore((s) => s.subscriptions);
-  const rooms = useStore((s) => s.rooms);
   const room = /^\/(channel|group|direct)\/([^/]+)/.exec(pathname);
-  if (room) {
-    const sub = subs[room[2]] ?? Object.values(subs).find((s) => s.name === room[2]);
+  // Só o nome da sala: as outras mudanças nas inscrições (não lidas, última mensagem) não redesenham quem usa a trilha.
+  const roomName = useStore((s) => {
+    if (!room) return undefined;
+    const sub = s.subscriptions[room[2]] ?? Object.values(s.subscriptions).find((x) => x.name === room[2]);
     // Sem inscrição (prévia de um canal, sala excluída com a conversa aberta): o nome que se conhece da sala.
-    const known = room[1] !== 'direct' ? rooms[room[2]] : undefined;
-    return [{ label: 'Conversas', to: '/home' }, { label: sub?.fname || sub?.name || known?.fname || known?.name || 'Conversa' }];
+    const known = room[1] !== 'direct' ? s.rooms[room[2]] : undefined;
+    return sub?.fname || sub?.name || known?.fname || known?.name;
+  });
+  if (room) {
+    return [{ label: 'Conversas', to: '/home' }, { label: roomName || 'Conversa' }];
   }
   const area = AREAS.find(([re]) => re.test(pathname));
   if (!area) return [{ label: 'Início' }];

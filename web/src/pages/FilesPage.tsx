@@ -328,7 +328,7 @@ export function FilesPage() {
       <div className={!usable ? 'fl-layout no-nav' : details && !phone ? 'fl-layout with-details' : 'fl-layout'}>
         {!phone && usable && <FilesNav home={home} error={homeError} currentId={folderId ?? null} path={data?.path ?? []} trash={trash} tick={tick} open={navOpen} onClose={() => setNavOpen(false)} />}
         {!phone && navOpen && <div className="fl-nav-backdrop" onClick={() => setNavOpen(false)} />}
-        <main className="fl-main" aria-label={title}>
+        <section className="fl-main" aria-label={title}>
           {!trash && !search && folderId && usable && !error && <Breadcrumb data={data} />}
           {!trash && !(search.trim().length >= 2) && (folderId ? data : home) && (
             <div className="fl-toolbar">
@@ -391,7 +391,7 @@ export function FilesPage() {
             </div>
           )}
           {body}
-        </main>
+        </section>
         {details && !phone && <aside className="fl-details">{details}</aside>}
       </div>
       {details && phone && (

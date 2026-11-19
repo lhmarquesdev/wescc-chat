@@ -103,6 +103,9 @@ if (creds) setCredentials(creds);
 
 type Params = Record<string, unknown> | undefined;
 
+export const NETWORK_TEXT = 'Sem conexão com o servidor. Confira a sua rede e tente de novo.';
+export const noConnection = (e: unknown) => e instanceof ApiError && e.status === 0 && e.errorType === 'network';
+
 async function request<T = any>(method: string, path: string, data?: Params | FormData): Promise<T> {
   const headers: Record<string, string> = {};
   if (creds) {
@@ -125,7 +128,13 @@ async function request<T = any>(method: string, path: string, data?: Params | Fo
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify(data);
   }
-  const res = await fetch(url, { method, headers, body });
+  let res: Response;
+  try {
+    res = await fetch(url, { method, headers, body });
+  } catch {
+    // Sem rede ou servidor fora do ar: o navegador só diz "Failed to fetch".
+    throw new ApiError(0, 'network', NETWORK_TEXT);
+  }
   let json: any = {};
   try {
     json = await res.json();
@@ -202,6 +211,8 @@ export function uploadFile(rid: string, file: File, fields: Record<string, strin
 
 export function errorMessage(e: unknown) {
   if (e instanceof ApiError) return e.message;
+  // fetch direto (fora do request) que não chegou ao servidor
+  if (e instanceof TypeError && /failed to fetch|networkerror|load failed|network request failed/i.test(e.message)) return NETWORK_TEXT;
   if (e instanceof Error) return e.message;
   return String(e);
 }

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { NavLink, useParams } from 'react-router-dom';
+import { Navigate, NavLink, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
 import { normalizeHighlights } from '@shared/highlights';
 import { foldText } from '@shared/search';
@@ -33,6 +33,8 @@ import { E2eCard } from '../components/e2e/E2eCard';
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
 
+const ACCOUNT_SECTIONS = ['profile', 'preferences', 'stickers', 'security', 'devices', 'data', 'tokens', 'connected'];
+
 export function AccountPage() {
   const { section = 'profile' } = useParams();
   const navRef = useActiveNavInView(section);
@@ -44,6 +46,11 @@ export function AccountPage() {
   const canConnected = !!integrations && integrations.jira.enabled && integrations.jira.userAuth !== 'off';
   // Meus dados: configuração pública, então o item some na hora quando o administrador desliga.
   const userDataOn = useSetting<boolean>('UserData_EnableDownload');
+  // Endereço velho ou digitado errado, ou seção que a pessoa não tem: vai para o Perfil em vez de uma área vazia
+  // (Contas conectadas espera a consulta das integrações antes de decidir).
+  const hidden =
+    (section === 'stickers' && !stickerCaps.on && !stickerCaps.canManage) || (section === 'tokens' && !canTokens) || (section === 'connected' && !!integrations && !canConnected);
+  if (!ACCOUNT_SECTIONS.includes(section) || hidden) return <Navigate to="/account/profile" replace />;
   return (
     <div className="page with-nav takeover account-page">
       <TakeoverHead title="Minha conta" />

@@ -5,7 +5,7 @@ import { encryptedContent } from '@shared/messages';
 import { mediaTypeAllowed, stickerPreviewText } from '@shared/stickers';
 import { localCommandText } from '@shared/e2e';
 import { editEncrypted, quoteOf, sendEncrypted, sendEncryptedFile, type E2eFileMeta } from '../lib/e2e/client';
-import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
+import { api, ApiError, errorMessage, noConnection, uploadTo } from '../lib/api';
 import { slashCommands, type SlashCommand } from '../lib/commands';
 import { EMOJI, resolveEmoji, searchEmoji } from '../lib/emoji';
 import { formatBytes, nameList, roomPath } from '../lib/format';
@@ -209,6 +209,11 @@ function ComposerView({
   useEffect(() => {
     if (quoting) ta.current?.focus();
   }, [quoting]);
+  // Sala aberta no computador: o cursor já vai para o campo de mensagem (pelo teclado, sem atravessar a lista toda).
+  useEffect(() => {
+    if (!tmid && !coarse) ta.current?.focus({ preventScroll: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rid]);
 
   useEffect(() => {
     if (box.current) anch.setReference(box.current);
@@ -480,7 +485,9 @@ function ComposerView({
       if (!isEdit && tmid) setAlsoChannel(false);
       clearSent(msg);
     } catch (e) {
-      useStore.getState().toast(errorMessage(e), 'error');
+      // Sem conexão: o texto continua no campo para enviar de novo.
+      const why = noConnection(e) ? `Sem conexão com o servidor: ${editing ? 'a edição não foi salva' : 'a mensagem não foi enviada'}. Confira a sua rede e tente de novo.` : errorMessage(e);
+      useStore.getState().toast(why, 'error');
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -1134,7 +1141,7 @@ function ComposerView({
             aria-invalid={descOver || undefined}
             value={fileDesc}
             onChange={(e) => setFileDesc(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && confirmPending()}
+            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), confirmPending())}
           />
           {descOver && <p className="upload-problem">{`A descrição excede ${maxSize} caracteres (${fileDesc.trim().length}).`}</p>}
         </Modal>

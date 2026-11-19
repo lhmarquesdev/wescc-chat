@@ -107,6 +107,13 @@ export function PanelHead({ title, sub, actions, onClose }: { title: string; sub
     refocusRoom();
     onClose();
   };
+  // Painel aberto: o foco entra nele pelo título (o leitor de tela anuncia, o próximo Tab já está no painel e o Esc
+  // fecha). Um campo do painel que já pegou o foco fica com ele.
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    const h = titleRef.current;
+    if (h && !h.closest('.panel')?.contains(document.activeElement)) h.focus({ preventScroll: true });
+  }, []);
   return (
     <div className="panel-head">
       {phone && (
@@ -114,7 +121,7 @@ export function PanelHead({ title, sub, actions, onClose }: { title: string; sub
           <Icon name="back" size={20} />
         </button>
       )}
-      <h2 className="panel-title">
+      <h2 className="panel-title" ref={titleRef} tabIndex={-1}>
         <span className="panel-title-text">{title}</span>
         {sub && <span className="sub">{sub}</span>}
       </h2>

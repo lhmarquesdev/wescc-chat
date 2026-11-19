@@ -1,5 +1,5 @@
 import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { OAuthProviderPublic, OAuthProviderType } from '@shared/index';
 import { api, ApiError, errorMessage, getCredentials } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
@@ -118,11 +118,19 @@ export function LoginPage() {
   const passwordReset = useSetting<boolean>('Accounts_PasswordReset');
   const [providers, setProviders] = useState<OAuthProviderPublic[]>([]);
   const next = safeNext(params.get('next'));
+  // Sessão já aberta neste navegador (favorito do /login, Voltar depois de entrar): vai direto para o chat. Uma sessão
+  // que o servidor encerrou volta para cá pelo próprio chat (o 401 limpa a credencial). O retorno do SSO segue abaixo.
+  // Decidido ao abrir: um SSO que falha com outra sessão guardada volta para cá e mostra o erro.
+  const [signedIn] = useState(() => !!getCredentials() && !params.get('saml') && !params.get('oauth'));
   // Saída forçada com motivo (um administrador redefiniu a criptografia): o aviso fica até a pessoa entrar.
   const [reason] = useState(peekLogoutReason);
-  useEffect(() => clearLogoutReason(), []);
+  useEffect(() => {
+    if (!signedIn) clearLogoutReason();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
+    if (signedIn) return;
     void api
       .get('oauth-providers.public')
       .then((r) => setProviders(r.providers))
@@ -145,6 +153,8 @@ export function LoginPage() {
       .catch((err) => (setError(errorMessage(err)), setBusy(false), navigate('/login', { replace: true })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (signedIn) return <Navigate to={next} replace />;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -380,6 +390,8 @@ export function RegisterPage() {
     }
   };
 
+  // Já entrou neste navegador: o cadastro não tem o que fazer aqui.
+  if (getCredentials() && !done) return <Navigate to="/home" replace />;
   if (registration === 'Disabled')
     return (
       <AuthShell title="Cadastro desativado" subtitle="Peça um convite ao administrador.">
@@ -407,13 +419,13 @@ export function RegisterPage() {
       <form onSubmit={submit} className="form auth-form">
         {error && <FormError>{error}</FormError>}
         <Field label="Nome">
-          <input autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+          <input autoFocus autoComplete="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         </Field>
         <Field label="Nome de usuário">
-          <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.replace(/\s/g, '.') })} />
+          <input autoComplete="username" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.replace(/\s/g, '.') })} />
         </Field>
         <Field label="E-mail">
-          <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+          <input type="email" autoComplete="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
         </Field>
         <Field label="Senha" hint={`Mínimo de ${minLen} caracteres.`}>
           <PasswordInput autoComplete="new-password" value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />

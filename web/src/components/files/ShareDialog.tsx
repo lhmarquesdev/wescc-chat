@@ -142,9 +142,10 @@ export function ShareDialog({ folder, acl, onClose, onSaved }: { folder: DriveFo
               e.stopPropagation();
               setListOpen(false);
             }
-            if (e.key === 'Enter' && suggestions[0]) {
+            // Com texto na busca, o Enter escolhe a sugestão e nunca salva (o Enter do diálogo aciona o Salvar).
+            if (e.key === 'Enter' && (suggestions[0] || text.trim())) {
               e.preventDefault();
-              add(suggestions[0]);
+              if (suggestions[0]) add(suggestions[0]);
             }
           }}
           placeholder="Adicionar papel, canal, grupo ou pessoa"

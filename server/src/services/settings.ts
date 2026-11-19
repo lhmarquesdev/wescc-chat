@@ -95,7 +95,7 @@ async function validateDefaultChannels(v: unknown): Promise<string | null> {
 }
 
 // ---------- Geral ----------
-add('General', 'Workspace', 'Site_Name', 'string', 'Wescc Chat', { public: true, label: 'Nome do workspace', validate: validateSiteName });
+add('General', 'Workspace', 'Site_Name', 'string', 'Wescc Chat', { public: true, label: 'Nome do chat (na tela de entrar e na aba do navegador)', validate: validateSiteName });
 add('General', 'Workspace', 'Site_Url', 'string', process.env.SITE_URL ?? 'http://localhost:3000', { public: true, label: 'URL do site', validate: validateHttpUrl });
 add('General', 'Workspace', 'Language', 'string', 'pt-BR', { public: true, label: 'Idioma padrão (destino das traduções de mensagens)' });
 add('General', 'Workspace', 'Default_Channels', 'string', 'geral', { label: 'Canais padrão (separados por vírgula)', validate: validateDefaultChannels });

@@ -67,6 +67,7 @@ interface State {
   prependMessages(rid: string, list: Message[], hasMore: boolean): void;
   appendMessages(rid: string, list: Message[], hasNewer: boolean): void;
   sentFromRoom(rid: string): void;
+  mergeLatest(rid: string, latest: Message[], hasMore: boolean): void;
   upsertMessage(m: Message): void;
   removeMessage(rid: string, id: string, tmid?: string | null): void;
   setThread(tmid: string, list: Message[]): void;
@@ -162,6 +163,20 @@ export const useStore = create<State>((set, get) => ({
   sentFromRoom: (rid) => {
     const cur = get().messages[rid];
     if (cur?.hasNewer) set({ messages: { ...get().messages, [rid]: { ...cur, toLatest: Date.now() } } });
+  },
+  // As últimas mensagens da sala, buscadas de novo (reconexão): da primeira delas em diante vale o servidor (novas,
+  // editadas e apagadas); as mais antigas que já estavam carregadas ficam, e as que o tempo real trouxe durante a
+  // busca continuam no fim. Sem ponto em comum (chegou mais de uma página), a lista recomeça do que veio.
+  mergeLatest: (rid, latest, hasMore) => {
+    const cur = get().messages[rid];
+    if (!cur) return;
+    const from = latest[0]?.ts ?? '';
+    const to = latest[latest.length - 1]?.ts ?? '';
+    const ids = new Set(latest.map((m) => m._id));
+    const newer = to ? cur.list.filter((m) => m.ts > to && !ids.has(m._id)) : [];
+    const joins = hasMore && !!from && cur.list.some((m) => m.ts >= from);
+    const older = joins ? cur.list.filter((m) => m.ts < from) : [];
+    set({ messages: { ...get().messages, [rid]: { ...cur, list: [...older, ...latest, ...newer], hasMore: joins ? cur.hasMore : hasMore, loaded: true } } });
   },
   upsertMessage: (m) => {
     const st = get();

@@ -132,6 +132,8 @@
   min-width: 3ch;
   overflow: hidden;
   text-overflow: ellipsis;
+  font: inherit;
+  letter-spacing: inherit;
 }
 .room-name .pill {
   flex-shrink: 0;

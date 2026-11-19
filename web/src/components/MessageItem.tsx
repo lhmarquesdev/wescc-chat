@@ -206,7 +206,7 @@ function attachmentColor(c?: string) {
 // blobName: imagem decifrada no navegador (blob:): baixa com o nome real e não abre em nova aba.
 function Lightbox({ src, title, download, m, blobName, onClose }: { src: string; title?: string; download?: string; m?: Message; blobName?: string; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEscape(true, onClose);
+  useEscape(true, onClose, true);
   useScrollLock(true);
   useFocusTrap(ref, true);
   const name = m ? authorName(m) : '';

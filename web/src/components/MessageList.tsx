@@ -2,7 +2,8 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { Message, Subscription } from '@shared/index';
 import { watchAcks } from '../lib/acks';
-import { api, errorMessage } from '../lib/api';
+import { api, errorMessage, noConnection } from '../lib/api';
+import { onReconnectWhileShown } from '../lib/catchup';
 import { readHeld, releaseRead } from '../lib/markUnread';
 import { formatDateTime, formatDay, formatTime, nameList, plural, roomDisplayName, roomIconName } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
@@ -213,6 +214,34 @@ export function MessageList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rid, jumpTo]);
 
+  // Reconexão: o que chegou (ou mudou) enquanto a conexão estava fora. Até a busca terminar, a sala não é marcada
+  // como lida, para o contador não sumir com mensagens que a pessoa nem viu. Num link para uma mensagem (?msg=) ou numa
+  // lista que não chega à última, a volta para o fim (ou a página seguinte) já busca do servidor.
+  const catchingUp = useRef(false);
+  useEffect(
+    () =>
+      onReconnectWhileShown('room', rid, () => {
+        const cur = useStore.getState().messages[rid];
+        if (jumpRef.current || cur?.hasNewer) return;
+        if (!cur?.loaded) return void load();
+        catchingUp.current = true;
+        api
+          .get('rooms.history', { roomId: rid, count: 50 })
+          .then((r) => {
+            catchingUp.current = false;
+            useStore.getState().mergeLatest(rid, r.messages.slice().reverse(), r.messages.length === 50);
+          })
+          .catch((e) => {
+            // Caiu de novo: a próxima reconexão tenta outra vez (e até lá não marca como lida). Outro erro (o servidor
+            // recusou): carrega a sala de novo, sem deixar a leitura presa até a próxima queda.
+            if (noConnection(e)) return;
+            catchingUp.current = false;
+            void load();
+          });
+      }),
+    [rid, load],
+  );
+
   // As mensagens desta sala saíram da memória com a conversa aberta (a pessoa saiu e voltou): carrega de novo.
   const hadData = useRef<string | null>(data ? rid : null);
   useEffect(() => {
@@ -331,7 +360,7 @@ export function MessageList({
       const s = useStore.getState().subscriptions[rid];
       const cur = useStore.getState().messages[rid];
       // Antes de a lista carregar não há o que estar à vista (abrir com 120 não lidas marcava todas na hora).
-      if (!s || !cur?.loaded || cur.hasNewer || !document.hasFocus() || !atBottom.current || readHeld(rid)) return;
+      if (!s || !cur?.loaded || cur.hasNewer || !document.hasFocus() || !atBottom.current || readHeld(rid) || catchingUp.current) return;
       if (s.unread > 0 || s.alert || s.userMentions > 0) void api.post('subscriptions.read', { rid }).catch(() => {});
     };
     mark();
