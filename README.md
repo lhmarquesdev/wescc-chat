@@ -50,7 +50,7 @@ Para desenvolver o front com recarga automática, rode `npm run dev -w web` em o
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` / `TLS_CA_FILE` | — | HTTPS próprio com certificado e chave em PEM (com os dois, vale o PFX) |
 | `HTTP_REDIRECT_PORT` | — | Portas HTTP que redirecionam para o `SITE_URL`, separadas por vírgula (ex.: `80,3000`) |
 | `INTERNAL_PORT` | `3080` | Só com HTTPS próprio: porta em `127.0.0.1` para os webhooks do servidor de chamadas |
-| `TRUST_PROXY` | `false` com HTTPS próprio, `true` sem | Proxies cujo `X-Forwarded-For` vale: `true`, `false` ou endereços e faixas separados por vírgula |
+| `TRUST_PROXY` | `false` com HTTPS próprio; sem ele, só proxy na mesma máquina (ou na rede do container) | Proxies cujo `X-Forwarded-For` vale: `true`, `false` ou endereços e faixas separados por vírgula |
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET_FILE` | — | Servidor de chamadas em grupo (o instalador do LiveKit grava os valores) |
 | `SECRETS_KEY_FILE` / `SECRETS_KEY` | — | Chave de segredos das integrações (Jira): caminho completo de um arquivo com 32 bytes aleatórios em base64 (ou o valor) |
 | `SECRETS_KEY_PREVIOUS_FILE` / `SECRETS_KEY_PREVIOUS` | — | Chave anterior, só durante a troca da chave de segredos |
@@ -126,9 +126,13 @@ Sem nenhuma variável `TLS_*`, tudo fica como antes: HTTP na porta `PORT`.
   porta nunca é liberada no firewall e não pode ser a mesma de `PORT` nem de `HTTP_REDIRECT_PORT` (o chat não sobe).
   `PORT` ou `INTERNAL_PORT` vazios valem o padrão; um valor que não é porta (1 a 65535) impede o chat de subir.
 - **IP de quem acessa**: com HTTPS próprio, o `X-Forwarded-For` é ignorado (`TRUST_PROXY=false`) e vale o IP da
-  conexão (bloqueio de login, limites de requisições e auditoria). Atrás de um proxy reverso (sem `TLS_*`), o padrão
-  continua `true`; para aceitar só os seus proxies, liste-os: `TRUST_PROXY=127.0.0.1,10.0.0.0/8` (máscara em
-  pontos também vale, desde que contínua: `10.0.0.0/255.0.0.0`).
+  conexão (bloqueio de login, limites de requisições e auditoria). Sem `TLS_*`, o padrão aceita o `X-Forwarded-For`
+  só de um proxy reverso na mesma máquina (`127.0.0.1`/`::1`) e, com o chat num container (Docker, Podman), também da
+  rede do container (o proxy no host ou em outro container); de qualquer outro endereço vale o IP da conexão, para
+  ninguém escolher o próprio IP e escapar do bloqueio por IP. Proxy em outra máquina: liste-o,
+  `TRUST_PROXY=10.0.0.5` ou `TRUST_PROXY=127.0.0.1,10.0.0.0/8` (máscara em pontos também vale, desde que contínua:
+  `10.0.0.0/255.0.0.0`); sem isso, o log avisa uma vez "X-Forwarded-For de … ignorado" com o valor a definir.
+  `TRUST_PROXY=true` volta a aceitar o `X-Forwarded-For` de qualquer um.
 - Um erro de configuração ao subir (`TRUST_PROXY`, arquivo `*_FILE` que não existe ou sem permissão de leitura,
   porta inválida) sai só com a mensagem, em uma linha no `wescc-chat.err.log`.
 - Os logs de requisição escondem os parâmetros `access_token` e `join_request` (`***`).
@@ -248,13 +252,17 @@ vira um botão na tela de login.
 ## Esqueci minha senha
 
 A tela de login tem o link "Esqueci minha senha" (`Accounts_PasswordReset`). O chat envia por e-mail um link válido por
-1 hora, que só funciona uma vez; ao redefinir, todas as sessões da conta são encerradas e o 2FA continua sendo pedido.
-Para funcionar:
+1 hora, que só funciona uma vez; ao redefinir, todas as sessões da conta são encerradas, os tokens de acesso pessoal
+são revogados e o 2FA continua sendo pedido. Para funcionar:
 
-- configure o SMTP em Administração › Configurações › Email;
+- configure o SMTP em Administração › Configurações › Email (sem ele, a tela de login mostra "Esqueceu a senha? Fale
+  com o administrador." no lugar do link);
 - confira a URL do site em Configurações › Geral (ou a variável `SITE_URL`), que é usada no link.
 
-Contas LDAP e contas que só entram por SAML/OAuth seguem o provedor e não recebem o link.
+Contas LDAP e contas que só entram por SAML/OAuth seguem o provedor e não recebem o link (com o LDAP ligado, a tela
+"Esqueci minha senha" lembra que a senha de rede se troca pelo procedimento da TI). A tela de nova senha confere o
+link ao abrir (usado, vencido ou trocado por um mais novo: avisa antes de pedir a senha) e continua aberta se a página
+for recarregada.
 
 ## App instalável e notificações push
 
@@ -1169,15 +1177,30 @@ como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os teste
   resolvida, a API só aceita as rotas para resolvê-la e o WebSocket fecha com o código 4005. Quem liga o 2FA
   obrigatório também precisa configurar o próprio 2FA.
 - Tentativas de login falhas (inclusive código 2FA errado) bloqueiam a conta e o IP por alguns minutos, em todas as
-  instâncias: Configurações › Contas › Sessão.
+  instâncias: Configurações › Contas › Sessão. O navegador em que a pessoa já entrou na conta (cookie `wescc_device`)
+  conta as próprias falhas e não é barrado pelo bloqueio da conta nem do IP: quem erra a senha de um colega de outra
+  máquina não o tira do chat (os aparelhos em que a conta nunca entrou ficam bloqueados e a tela diz para entrar por
+  um conhecido). Com o AD fora do ar e sem senha local para conferir (`LDAP_Login_Fallback` desligado, ou conta do AD
+  sem senha no chat), o login responde "O servidor de rede (AD) não respondeu" e não conta tentativa.
 - Trocar o próprio e-mail em Minha conta pede a senha atual, respeita os domínios permitidos e manda um aviso para o
   endereço antigo. Contas LDAP e contas que só entram por SAML/OAuth não trocam a senha nem o e-mail por ali (nas LDAP,
   nome e nome de usuário também vêm do diretório); para excluir a própria conta sem senha, a pessoa digita o nome de
-  usuário. `all` e `here` são nomes de usuário reservados.
+  usuário. `all`, `here` e `system` são nomes de usuário reservados.
 - Na troca de senha em Minha conta › Segurança, as regras aparecem embaixo de "Nova senha", senha só de espaços é
   recusada e "Encerrar as outras sessões" (marcado por padrão; some com `Device_Management_Allow_Logout_All`
   desligado) tira os outros aparelhos da conta na hora. A foto de perfil é conferida pelo conteúdo (PNG, JPEG, GIF ou
   WebP, até 5 MB): outro arquivo com nome de imagem é recusado.
+- Cada código do aplicativo autenticador vale uma vez só. Os códigos de backup têm 10 letras e números sem os que se
+  confundem (`XXXXX-XXXXX`), sem diferença de maiúsculas, espaços ou hífen. Desativar o 2FA pede a senha (contas com
+  senha do chat) e um código; senha ou código errados contam para um bloqueio de alguns minutos, como no login.
+- Tokens de acesso pessoal: criar um pede a senha (contas com senha do chat) e o código do 2FA, quando ligado.
+  Redefinir a senha, a troca de senha pelo administrador e o "Encerrar sessões" do administrador revogam os tokens da
+  pessoa; desativar a conta fecha as conexões abertas com eles.
+- Saída forçada (conta desativada, sessões encerradas pelo administrador ou em outro dispositivo, senha redefinida ou
+  trocada pelo administrador, sessão vencida): o token sai do navegador, a tela de entrar diz o motivo e, ao entrar de
+  novo, a pessoa volta para a tela em que estava.
+- Cadastro (`Accounts_RegistrationForm`): instalações novas começam com o cadastro desativado; as que já existiam
+  mantêm a opção de antes (migração 046). Com o cadastro público e sem aprovação manual, Configurações › Contas avisa.
 - A API só aceita chamadas de outros sites com CORS ligado (Configurações › Segurança › CORS). O cookie de sessão vale
   apenas para leituras (imagens e downloads) e para o WebSocket da própria página.
 - Avatares exigem login por padrão (`Accounts_AvatarBlockUnauthenticatedAccess`); avatares de salas privadas só para

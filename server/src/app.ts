@@ -97,6 +97,16 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
     if (!reply.hasHeader('x-frame-options')) reply.header('X-Frame-Options', 'SAMEORIGIN');
     return payload;
   });
+  // Sem TRUST_PROXY, o X-Forwarded-For de um proxy em outra máquina é ignorado (vale o IP da conexão): avisa uma vez,
+  // com o que definir, para quem está atrás de um proxy não ficar com o IP dele em todo login e na auditoria.
+  if (config.trustProxyDefault && config.trustProxy !== false) {
+    let warned = false;
+    app.addHook('onRequest', async (req) => {
+      if (warned || !req.headers['x-forwarded-for'] || req.ip !== req.socket.remoteAddress) return;
+      warned = true;
+      app.log.warn(`X-Forwarded-For de ${req.ip} ignorado. Se o chat está atrás de um proxy reverso nesse endereço, defina TRUST_PROXY=${req.ip.replace(/^::ffff:/, '')}.`);
+    });
+  }
 
   usersRoutes(app);
   roomsRoutes(app);

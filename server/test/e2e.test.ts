@@ -1351,7 +1351,8 @@ describe('criptografia: redefinir e excluir', () => {
     try {
       const reset = next(ws, (e) => e.type === 'e2e.keys' && e.action === 'reset');
       const rotate = next(wsAna, (e) => e.type === 'e2e.rotate' && e.rid === room.rid);
-      expect((await api('POST', 'e2e.resetOwnE2EKey', { password: 'senha-forte-1', code: totpCode(secret) }, bruno)).success).toBe(true);
+      // O código da ativação do 2FA já foi usado: vale o próximo.
+      expect((await api('POST', 'e2e.resetOwnE2EKey', { password: 'senha-forte-1', code: totpCode(secret, Date.now() + 30_000) }, bruno)).success).toBe(true);
       await reset();
       await rotate();
       expect(await api('GET', 'e2e.fetchMyKeys', {}, bruno)).toMatchObject({ publicKey: null, privateKey: null });

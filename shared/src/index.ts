@@ -50,8 +50,12 @@ export interface User {
   pendingApproval?: boolean; // dados completos: cadastro pela tela de entrar aguardando a aprovação de um administrador
 }
 
-// Motivo de uma saída forçada que a tela de entrar explica (e2e-reset: um administrador redefiniu a criptografia).
-export type LogoutReason = 'e2e-reset';
+// Motivo de uma saída forçada que a tela de entrar explica. e2e-reset: um administrador redefiniu a criptografia;
+// deactivated: conta desativada (administrador, AD ou importação); admin-logout: um administrador encerrou as sessões;
+// password-changed: senha redefinida pelo link ou trocada pelo administrador; session-revoked: a própria pessoa
+// encerrou esta sessão em outro dispositivo; ended: só no navegador, a sessão deixou de valer (venceu ou foi encerrada
+// com o aparelho desligado).
+export type LogoutReason = 'e2e-reset' | 'deactivated' | 'admin-logout' | 'password-changed' | 'session-revoked' | 'ended';
 
 export interface UserPreferences {
   language?: string; // idioma da pessoa: destino das traduções de mensagens (ausente = padrão da empresa)

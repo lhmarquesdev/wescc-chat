@@ -3,8 +3,9 @@ import { Navigate, NavLink, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
 import { normalizeHighlights } from '@shared/highlights';
 import { foldText } from '@shared/search';
-import { formatDateTime } from '../lib/format';
+import { formatDateTime, plural } from '../lib/format';
 import { disablePushHere, enablePushHere, pushEnabledHere, pushSupported, syncPushSubscription } from '../lib/push';
+import { usePasswordHint } from '../lib/passwordPolicy';
 import { endSession, startSession } from '../lib/session';
 import { useSetting, useStore, type Me } from '../lib/store';
 import { useLanguages, useTranslateAllowed } from '../lib/translate';
@@ -15,7 +16,7 @@ import { useMedia } from '../components/overlay';
 import { Icon } from '../components/Icon';
 import { SideBrand, TakeoverBack, TakeoverHead } from '../components/Sidebar';
 import { QrCode } from '../components/QrCode';
-import { DeviceCell, NewDevicePill, PageHead, TableWrap, lastSeen, useActiveNavInView } from './admin/parts';
+import { DeviceCell, NewDevicePill, PageHead, TableWrap, deviceLabel, lastSeen, useActiveNavInView } from './admin/parts';
 import { useLeaveGuard } from './admin/rbac/leaveGuard';
 // Figurinhas: o item some com a função desligada.
 import { useStickerCaps } from '../lib/stickers';
@@ -761,25 +762,11 @@ export function applyTheme(theme: string) {
   paintTheme();
 }
 
-// As regras da senha (configurações públicas), para a pessoa ver antes de errar.
-function usePasswordRules() {
-  const min = Number(useSetting<number>('Accounts_Password_Policy_MinLength')) || 0;
-  const upper = useSetting<boolean>('Accounts_Password_Policy_AtLeastOneUppercase');
-  const digit = useSetting<boolean>('Accounts_Password_Policy_AtLeastOneNumber');
-  const special = useSetting<boolean>('Accounts_Password_Policy_AtLeastOneSpecialCharacter');
-  const parts = [upper && 'uma letra maiúscula', digit && 'um número', special && 'um caractere especial'].filter(Boolean) as string[];
-  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} e ${parts[parts.length - 1]}` : parts[0];
-  const size = min > 1 ? `Pelo menos ${min} caracteres` : min === 1 ? 'Pelo menos 1 caractere' : '';
-  if (!size) return list ? `Com ${list}.` : undefined;
-  return `${size}${list ? `, com ${list}` : ''}.`;
-}
-
 function Security() {
   const me = useStore((s) => s.me)!;
   const twoFA = useSetting<boolean>('Accounts_TwoFactorAuthentication_Enabled');
   const allowPassword = useSetting<boolean>('Accounts_AllowPasswordChange');
   const allowLogoutAll = useSetting<boolean>('Device_Management_Allow_Logout_All') !== false;
-  const rules = usePasswordRules();
   const [cur, setCur] = useState('');
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
@@ -791,6 +778,7 @@ function Security() {
   // LDAP e contas só de SAML/OAuth entram pelo provedor: a senha não é do chat.
   const external = me.authSource === 'ldap' || (me.authSource !== 'local' && me.hasPassword === false);
   useLeaveGuard(!!(p1 || p2), () => confirmDialog({ title: 'Descartar a senha nova?', body: 'A senha ainda não foi trocada.', confirmLabel: 'Descartar', danger: true }));
+  const passwordHint = usePasswordHint();
   const changePw = async () => {
     if (!p1 || blank || busy) return;
     if (p1 !== p2) return fail(new Error('As senhas não conferem.'));
@@ -836,7 +824,7 @@ function Security() {
                 <input type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" />
               </Field>
               <div className="two-col">
-                <Field label="Nova senha" hint={rules} error={blank ? 'A senha não pode ser só espaços.' : undefined}>
+                <Field label="Nova senha" hint={passwordHint} error={blank ? 'A senha não pode ser só espaços.' : undefined}>
                   <input type="password" value={p1} onChange={(e) => setP1(e.target.value)} autoComplete="new-password" />
                 </Field>
                 <Field label="Confirmar nova senha" error={mismatch ? 'As senhas não conferem.' : undefined}>
@@ -867,6 +855,48 @@ export function TwoFactorCard() {
   const [setup, setSetup] = useState<{ secret: string; url: string } | null>(null);
   const [code, setCode] = useState('');
   const [codes, setCodes] = useState<string[] | null>(null);
+  // Desativar pede também a senha (contas com senha do chat), como gerar um token.
+  const needsPassword = !me.authSource || me.authSource === 'local';
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  // Celular e tablet: o QR code está na própria tela e não dá para escaneá-lo; o link abre o aplicativo autenticador.
+  const touch = useMedia('(pointer: coarse)');
+  const site = useSetting<string>('Site_Name') || 'Wescc Chat';
+  const codesText = () => `Códigos de backup do ${site} (@${me.username}). Cada um funciona uma vez.\n\n${codes!.join('\n')}\n`;
+  // Sem HTTPS (fora de localhost) o navegador não libera a área de transferência: avisa em vez de parecer que copiou.
+  const copy = (text: string, done: string) =>
+    navigator.clipboard
+      ? navigator.clipboard
+          .writeText(text)
+          .then(() => ok(done))
+          .catch(fail)
+      : fail(new Error('Não foi possível copiar neste navegador. Selecione o texto e copie.'));
+  const downloadCodes = () => {
+    const url = URL.createObjectURL(new Blob([codesText()], { type: 'text/plain;charset=utf-8' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: 'codigos-de-backup.txt' });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const verify = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (code.length !== 6 || busy) return;
+    setBusy(true);
+    api
+      .post('users.2fa.verifyTotp', { code })
+      .then((r) => (setCodes(r.codes), setSetup(null), setCode(''), useStore.getState().setMe({ ...me, twoFactorEnabled: true })))
+      .catch(fail)
+      .finally(() => setBusy(false));
+  };
+  const disable = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!code || (needsPassword && !password) || busy) return;
+    setBusy(true);
+    api
+      .post('users.2fa.disableTotp', { code, password: needsPassword ? password : undefined })
+      .then(() => (useStore.getState().setMe({ ...me, twoFactorEnabled: false }), setCode(''), setPassword(''), ok('2FA desativado.')))
+      .catch(fail)
+      .finally(() => setBusy(false));
+  };
   // Com o 2FA obrigatório pendente, o resto do chat só carrega depois que os códigos de backup forem vistos.
   const done = () => {
     setCodes(null);
@@ -888,57 +918,89 @@ export function TwoFactorCard() {
             <span>2FA ativado. Guarde estes códigos de backup em local seguro; cada um funciona uma vez:</span>
           </div>
           <pre className="codes">{codes.join('\n')}</pre>
+          {/* Os códigos aparecem uma vez só: copiar ou baixar antes de sair da tela. */}
           <div className="form-actions">
-            <button className="btn primary" onClick={done}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void copy(codesText(), 'Códigos copiados.')}
+            >
+              <Icon name="copy" />
+              Copiar códigos
+            </button>
+            <button type="button" className="btn" onClick={downloadCodes}>
+              <Icon name="download" />
+              Baixar .txt
+            </button>
+            <button type="button" className="btn primary" onClick={done}>
               Pronto
             </button>
           </div>
         </>
       ) : me.twoFactorEnabled ? (
-        <>
+        <form className="form" onSubmit={disable}>
           <div className="callout ok">
             <Icon name="success" />
             <span>Ativado com aplicativo autenticador.</span>
           </div>
-          {/* Aceita também um código de backup (8 letras e números): sem o teclado só numérico. */}
+          {needsPassword && (
+            <Field label="Sua senha" hint="Para confirmar que é você.">
+              <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            </Field>
+          )}
+          {/* Aceita também um código de backup (XXXXX-XXXXX, letras e números): sem o teclado só numérico. */}
           <Field label="Código atual para desativar" hint="O código do aplicativo ou um dos códigos de backup.">
             <input
               className="otp-input"
               autoComplete="one-time-code"
               autoCapitalize="off"
               spellCheck={false}
-              maxLength={8}
+              maxLength={11}
               placeholder="000000"
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\s/g, ''))}
             />
           </Field>
           <div className="form-actions">
-            <button
-              className="btn danger"
-              disabled={!code}
-              onClick={() =>
-                api
-                  .post('users.2fa.disableTotp', { code })
-                  .then(() => (useStore.getState().setMe({ ...me, twoFactorEnabled: false }), setCode(''), ok('2FA desativado.')))
-                  .catch(fail)
-              }
-            >
+            <button type="submit" className="btn danger" aria-busy={busy || undefined} disabled={!code || (needsPassword && !password) || busy}>
               Desativar 2FA
             </button>
           </div>
-        </>
+        </form>
       ) : setup ? (
-        <>
+        <form className="form" onSubmit={verify}>
           <ol className="steps">
-            <li>Escaneie o QR code no seu aplicativo autenticador (Google Authenticator, Microsoft Authenticator, 1Password…).</li>
+            <li>
+              {touch
+                ? 'Toque em “Abrir no aplicativo autenticador” ou copie a chave e cole no aplicativo (Google Authenticator, Microsoft Authenticator, 1Password…). Em outro aparelho, escaneie o QR code.'
+                : 'Escaneie o QR code no seu aplicativo autenticador (Google Authenticator, Microsoft Authenticator, 1Password…).'}
+            </li>
             <li>Digite o código de 6 dígitos que ele mostrar.</li>
           </ol>
           <div className="qr-box">
             <QrCode text={setup.url} size={200} />
-            <p className="muted small">
-              Ou digite a chave manualmente: <code>{setup.secret}</code>
-            </p>
+            <div className="qr-key">
+              {/* Em grupos de 4 para ler e digitar (os aplicativos ignoram os espaços); "Copiar" leva a chave sem eles. */}
+              <p className="muted small">
+                Ou digite a chave manualmente: <code>{setup.secret.replace(/(.{4})(?=.)/g, '$1 ')}</code>
+              </p>
+              <div className="row-actions wrap">
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => void copy(setup.secret, 'Chave copiada.')}
+                >
+                  <Icon name="copy" />
+                  Copiar chave
+                </button>
+                {touch && (
+                  <a className="btn small" href={setup.url}>
+                    <Icon name="open-external" />
+                    Abrir no aplicativo autenticador
+                  </a>
+                )}
+              </div>
+            </div>
           </div>
           <Field label="Código gerado pelo aplicativo">
             <input
@@ -953,19 +1015,15 @@ export function TwoFactorCard() {
             />
           </Field>
           <div className="form-actions">
-            <button
-              className="btn primary"
-              onClick={() =>
-                api
-                  .post('users.2fa.verifyTotp', { code })
-                  .then((r) => (setCodes(r.codes), setSetup(null), setCode(''), useStore.getState().setMe({ ...me, twoFactorEnabled: true })))
-                  .catch(fail)
-              }
-            >
+            {/* Desistir no meio: o 2FA continua desligado e "Ativar 2FA" gera uma chave nova. */}
+            <button type="button" className="btn" onClick={() => (setSetup(null), setCode(''))}>
+              Cancelar
+            </button>
+            <button type="submit" className="btn primary" aria-busy={busy || undefined} disabled={code.length !== 6 || busy}>
               Verificar e ativar
             </button>
           </div>
-        </>
+        </form>
       ) : (
         <div className="form-actions">
           <button className="btn primary" onClick={() => api.post('users.2fa.enableTotp').then(setSetup).catch(fail)}>
@@ -980,6 +1038,7 @@ export function TwoFactorCard() {
 
 function Devices() {
   const { data, loading, reload } = useAsync(() => api.get('sessions.list', { count: 100 }), []);
+  const canTokens = useStore((s) => s.me?.permissions.includes('create-personal-access-tokens'));
   const allowAll = useSetting<boolean>('Device_Management_Allow_Logout_All');
   const others = (data?.sessions ?? []).filter((s: any) => !s.current).length;
   const logoutOthers = async () => {
@@ -987,7 +1046,15 @@ function Devices() {
     if (!yes) return;
     api
       .post('sessions.logout.others')
-      .then((r) => (ok(`${r.removed} sessões encerradas.`), reload()))
+      .then((r) => (ok(`${plural(r.removed, 'sessão encerrada', 'sessões encerradas')}.`), reload()))
+      .catch(fail);
+  };
+  const logoutOne = async (s: any) => {
+    const yes = await confirmDialog({ title: 'Encerrar a sessão?', body: `${deviceLabel(s.device)} sai da conta e precisa entrar de novo.`, confirmLabel: 'Encerrar sessão', danger: true });
+    if (!yes) return;
+    api
+      .post('sessions.logout.me', { sessionId: s._id })
+      .then(() => (ok('Sessão encerrada.'), reload()))
       .catch(fail);
   };
   return (
@@ -995,6 +1062,12 @@ function Devices() {
       <PageHead title="Dispositivos" />
       <p className="page-lead">
         Cada login cria uma sessão. Encerre as que você não reconhece. “Dispositivo novo” marca o primeiro acesso da conta por um navegador ou programa.
+        {canTokens && (
+          <>
+            {' '}
+            Tokens de acesso (scripts e integrações) não aparecem aqui e continuam valendo: revogue-os em <NavLink to="/account/tokens">Tokens de acesso</NavLink>.
+          </>
+        )}
       </p>
       {/* Abaixo do texto, não no cabeçalho: a barra de 56px fica igual à das outras páginas da conta. */}
       {allowAll && others > 0 && (
@@ -1049,7 +1122,7 @@ function Devices() {
                   <td className="actions-col">
                     {!s.current && (
                       <div className="row-actions">
-                        <button className="btn small ghost danger" onClick={() => api.post('sessions.logout.me', { sessionId: s._id }).then(reload).catch(fail)}>
+                        <button className="btn small ghost danger" onClick={() => void logoutOne(s)}>
                           <Icon name="logout" />
                           Encerrar
                         </button>
@@ -1070,16 +1143,24 @@ function Tokens() {
   const { data, loading, reload } = useAsync(() => api.get('users.getPersonalAccessTokens'), []);
   const me = useStore((s) => s.me)!;
   const [name, setName] = useState('');
-  const [bypass, setBypass] = useState(false);
   const [token, setToken] = useState('');
   const [creating, setCreating] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const tokens: any[] = data?.tokens ?? [];
+  // Criar pede a senha (e o código do 2FA): uma sessão esquecida aberta não vira acesso permanente à API.
+  const twoFAOn = useSetting<boolean>('Accounts_TwoFactorAuthentication_Enabled') !== false;
+  const needsPassword = !me.authSource || me.authSource === 'local';
+  const needsCode = !!me.twoFactorEnabled && twoFAOn;
+  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const ready = !!name.trim() && (!needsPassword || !!password) && (!needsCode || !!code);
+  const close = () => (setCreating(false), setName(''), setPassword(''), setCode(''));
   const generate = () =>
     api
-      .post('users.generatePersonalAccessToken', { tokenName: name, bypassTwoFactor: bypass })
-      .then((r) => (setToken(r.token), setName(''), setCreating(false), reload()))
+      .post('users.generatePersonalAccessToken', { tokenName: name, password: needsPassword ? password : undefined, code: needsCode ? code : undefined })
+      .then((r) => (setToken(r.token), close(), reload()))
       .catch(fail);
+  const onEnter = (e: React.KeyboardEvent) => e.key === 'Enter' && ready && generate();
   const revoke = async (t: any) => {
     const yes = await confirmDialog({ title: `Revogar o token "${t.name}"?`, body: 'Scripts e integrações que usam este token param de funcionar.', confirmLabel: 'Revogar', danger: true });
     if (!yes) return;
@@ -1142,14 +1223,35 @@ function Tokens() {
         <div className="card token-form">
           <div className="form">
             <Field label="Nome do token" hint="Para reconhecer onde ele é usado, como “Relatório diário”.">
-              <input ref={input} placeholder="Nome do token" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && name.trim() && generate()} />
+              <input ref={input} placeholder="Nome do token" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} onKeyDown={onEnter} />
             </Field>
-            <Toggle checked={bypass} onChange={setBypass} label="Ignorar 2FA" description="O token funciona sem pedir o código do autenticador." />
+            {needsPassword && (
+              <Field label="Sua senha" hint="Para confirmar que é você.">
+                <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={onEnter} />
+              </Field>
+            )}
+            {needsCode && (
+              <Field label="Código do 2FA" hint="O código do aplicativo autenticador ou um código de backup.">
+                <input
+                  className="otp-input"
+                  autoComplete="one-time-code"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  maxLength={11}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\s/g, ''))}
+                  onKeyDown={onEnter}
+                />
+              </Field>
+            )}
+            <p className="muted small">
+              O token usa a API com as suas permissões, sem pedir o código do 2FA. Ele é revogado se a sua senha for redefinida ou se um administrador encerrar as suas sessões.
+            </p>
             <div className="form-actions">
-              <button className="btn" onClick={() => (setCreating(false), setName(''))}>
+              <button className="btn" onClick={close}>
                 Cancelar
               </button>
-              <button className="btn primary" disabled={!name.trim()} onClick={generate}>
+              <button className="btn primary" disabled={!ready} onClick={generate}>
                 Gerar
               </button>
             </div>
@@ -1201,7 +1303,6 @@ function Tokens() {
                       </span>
                       <div>
                         <span className="cell-name">{t.name}</span>
-                        {t.bypassTwoFactor && <span className="cell-sub">Ignora 2FA</span>}
                       </div>
                     </div>
                   </td>

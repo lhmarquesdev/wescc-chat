@@ -72,7 +72,7 @@ describe('validação das configurações', () => {
       ['Site_Url', 'site sem http', /^URL do site: /],
       ['From_Email', 'nao-e-email', /^Remetente: /],
       ['From_Email', '', /^Remetente: /],
-      ['Site_Name', '   ', /^Nome do workspace: Informe o nome\.$/],
+      ['Site_Name', '   ', /^Nome do chat: Informe o nome\.$/],
       ['LDAP_Url', 'http://x', /^URL do servidor \(ldap:\/\/ ou ldaps:\/\/\): /],
       ['API_CORS_Origin', 'abc', /Origem inválida: abc/],
       ['API_CORS_Origin', 'https://intranet.empresa.com.br/caminho', /Origem inválida/],

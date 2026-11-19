@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { normalizeHighlights } from '@shared/highlights';
 import type { LogoutReason, UserPreferences, UserStatus } from '@shared/index';
 import { LANG_RE, normalizeLang } from '@shared/translate';
@@ -6,10 +7,10 @@ import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound, unauthorized } from '../lib/errors';
 import { newId, randomToken, sha256 } from '../lib/ids';
 import { hashPassword, verifyPassword } from '../lib/password';
-import { generateSecret, otpauthUrl, verifyTotp } from '../lib/totp';
+import { generateSecret, otpauthUrl, totpStep } from '../lib/totp';
 import { bus } from '../realtime/bus';
 import { audit, type Actor } from './audit';
-import { announceNewDevice, deviceCookieHeader, rememberLoginDevice } from './loginDevices';
+import { announceNewDevice, deviceCookieHeader, isKnownDevice, rememberLoginDevice } from './loginDevices';
 import { mapUser, presenceEvent } from './mappers';
 import { getSetting } from './settings';
 import { recordActivity } from './stats';
@@ -68,6 +69,7 @@ function assertAllowedDomain(email: string) {
 }
 
 export function validatePassword(password: string) {
+  if (password && !password.trim()) throw badRequest('error-password-policy-not-met', 'A senha não pode ter só espaços.');
   const min = getSetting<number>('Accounts_Password_Policy_MinLength');
   const errs: string[] = [];
   if (password.length < min) errs.push(`mínimo de ${min} caracteres`);
@@ -76,6 +78,10 @@ export function validatePassword(password: string) {
   if (getSetting('Accounts_Password_Policy_AtLeastOneSpecialCharacter') && !/[^A-Za-z0-9]/.test(password)) errs.push('um caractere especial');
   if (errs.length) throw badRequest('error-password-policy-not-met', `A senha precisa de: ${errs.join(', ')}.`);
 }
+
+// Confirmações (gerar token, desligar o 2FA) pedem a senha só de quem entra com a senha do chat, como a tela mostra:
+// a conta local vinculada depois ao AD ou ao SAML guarda a senha antiga, que a pessoa já não usa.
+const asksPassword = (u: any) => !!u.password_hash && (u.auth_source ?? 'local') === 'local';
 
 export async function getUserById(id: string) {
   return one('SELECT * FROM users WHERE id = $1', [id]);
@@ -157,9 +163,16 @@ export async function registerUser(input: { username: string; name: string; emai
   if (mode === 'Disabled') throw forbidden('O cadastro está desativado.');
   if (mode === 'Secret' && (!input.secretURL || input.secretURL !== getSetting('Accounts_RegistrationForm_SecretURL')))
     throw forbidden('Cadastro permitido somente pelo link secreto.');
-  assertAllowedDomain(input.email);
+  // Mensagens para quem preenche a tela de cadastro (não o nome do parâmetro da API).
+  const username = input.username.trim();
+  const email = input.email.trim();
+  if (!username) throw badRequest('error-invalid-params', 'Informe o nome de usuário.');
+  const name = normalizeName(input.name);
+  if (!email) throw badRequest('error-invalid-params', 'Informe o e-mail.');
+  if (!input.pass) throw badRequest('error-invalid-params', 'Informe a senha.');
+  assertAllowedDomain(email);
   const manual = getSetting<boolean>('Accounts_ManuallyApproveNewUsers');
-  const row = await createUser({ username: input.username, name: normalizeName(input.name), email: input.email, password: input.pass, active: !manual });
+  const row = await createUser({ username, name, email, password: input.pass, active: !manual });
   // Aprovação manual: a administração vê a conta como "Aguardando aprovação" (não como uma conta desativada).
   if (manual) await query('UPDATE users SET pending_approval = true WHERE id = $1', [row.id]);
   await audit({ id: row.id, username: row.username, ip }, 'user.registered', { userId: row.id });
@@ -200,10 +213,17 @@ async function notifyPendingApproval(u: { id: string; username: string; name: st
 // O contador do login usa o id da conta quando ela existe (usuário e e-mail contam juntos).
 const loginKey = (login: string) => `user:${login.trim().toLowerCase()}`;
 
-function attemptKeys(login: string, ip?: string) {
+// knownDevice: o navegador já entrou nesta conta (cookie wescc_device; vem de isKnownDevice). Ele conta as próprias falhas
+// à parte e não é barrado pelos contadores da conta e do IP: senão qualquer um tiraria um colega do chat errando a senha
+// dele de outra máquina (ou da mesma rede), a cada fim de bloqueio. Os outros aparelhos seguem o bloqueio da conta.
+function attemptKeys(login: string, ip?: string, knownDevice?: string | null) {
   const keys: { key: string; max: number }[] = [];
   const byUser = getSetting<number>('Accounts_Block_Failed_Login_Attempts');
   const byIp = getSetting<number>('Accounts_Block_Failed_Login_Attempts_By_Ip');
+  if (knownDevice) {
+    if (byUser > 0) keys.push({ key: `${loginKey(login)}|dev:${knownDevice}`, max: byUser });
+    return keys;
+  }
   if (byUser > 0) keys.push({ key: loginKey(login), max: byUser });
   if (byIp > 0 && ip) keys.push({ key: `ip:${ip}`, max: byIp });
   return keys;
@@ -211,31 +231,38 @@ function attemptKeys(login: string, ip?: string) {
 
 const blockMinutes = () => Math.max(1, getSetting<number>('Accounts_Block_Failed_Login_Minutes') || 5);
 
-async function assertNotBlocked(login: string, ip?: string) {
-  const keys = attemptKeys(login, ip).map((k) => k.key);
+async function assertNotBlocked(login: string, ip?: string, knownDevice?: string | null) {
+  const keys = attemptKeys(login, ip, knownDevice).map((k) => k.key);
   if (!keys.length) return;
-  const r = await one('SELECT max(blocked_until) AS until FROM login_attempts WHERE key = ANY($1) AND blocked_until > now()', [keys]);
-  if (r?.until) throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas falhas. Tente novamente em alguns minutos.');
+  const rows = await many('SELECT key FROM login_attempts WHERE key = ANY($1) AND blocked_until > now()', [keys]);
+  if (!rows.length) return;
+  // A conta bloqueada (e não o IP) num aparelho em que ela nunca entrou: quem é dono dela entra por outro.
+  if (!knownDevice && rows.every((r) => r.key === loginKey(login)))
+    throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas falhas nesta conta. Entre por um computador ou celular em que você já entrou antes, ou tente novamente em alguns minutos.');
+  throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas falhas. Tente novamente em alguns minutos.');
 }
 
-async function recordFailedAttempt(login: string, ip?: string) {
+async function countFailure(key: string, max: number) {
   const minutes = blockMinutes();
-  for (const { key, max } of attemptKeys(login, ip)) {
-    // A contagem recomeça depois de um período sem falhas.
-    await query(
-      `INSERT INTO login_attempts (key, count, updated_at) VALUES ($1, 1, now())
-       ON CONFLICT (key) DO UPDATE SET
-         count = CASE WHEN login_attempts.updated_at < now() - make_interval(mins => $2) THEN 1 ELSE login_attempts.count + 1 END,
-         updated_at = now()`,
-      [key, minutes],
-    );
-    await query(`UPDATE login_attempts SET blocked_until = now() + make_interval(mins => $3), count = 0 WHERE key = $1 AND count >= $2`, [key, max, minutes]);
-  }
+  // A contagem recomeça depois de um período sem falhas.
+  await query(
+    `INSERT INTO login_attempts (key, count, updated_at) VALUES ($1, 1, now())
+     ON CONFLICT (key) DO UPDATE SET
+       count = CASE WHEN login_attempts.updated_at < now() - make_interval(mins => $2) THEN 1 ELSE login_attempts.count + 1 END,
+       updated_at = now()`,
+    [key, minutes],
+  );
+  await query(`UPDATE login_attempts SET blocked_until = now() + make_interval(mins => $3), count = 0 WHERE key = $1 AND count >= $2`, [key, max, minutes]);
 }
 
-async function clearFailedAttempts(login: string) {
-  // Só zera o contador do login: o do IP continua (senão bastaria entrar numa conta própria entre as tentativas).
-  await query('DELETE FROM login_attempts WHERE key = $1', [loginKey(login)]);
+async function recordFailedAttempt(login: string, ip?: string, knownDevice?: string | null) {
+  for (const { key, max } of attemptKeys(login, ip, knownDevice)) await countFailure(key, max);
+}
+
+async function clearFailedAttempts(login: string, knownDevice?: string | null) {
+  // Só zera o contador deste login (o do aparelho conhecido, que não desfaz um bloqueio da conta em andamento para os
+  // outros): o do IP continua (senão bastaria entrar numa conta própria entre as tentativas).
+  await query('DELETE FROM login_attempts WHERE key = $1', [knownDevice ? `${loginKey(login)}|dev:${knownDevice}` : loginKey(login)]);
 }
 
 export interface DeviceInfo {
@@ -247,8 +274,10 @@ export interface DeviceInfo {
 
 function parseDevice(d: DeviceInfo) {
   const ua = d.userAgent ?? '';
-  const os = /Windows/i.test(ua) ? 'Windows' : /Mac OS X/i.test(ua) ? 'macOS' : /Android/i.test(ua) ? 'Android' : /iPhone|iPad/i.test(ua) ? 'iOS' : /Linux/i.test(ua) ? 'Linux' : 'Desconhecido';
-  const browser = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : ua ? 'Outro' : 'API';
+  // iPhone e iPad dizem "like Mac OS X", e o Android diz "Linux": os celulares vêm antes. No iPhone, Chrome, Firefox e
+  // Edge se chamam CriOS, FxiOS e EdgiOS (e o Edge do Android, EdgA).
+  const os = /Windows/i.test(ua) ? 'Windows' : /iPhone|iPad|iPod/i.test(ua) ? 'iOS' : /Android/i.test(ua) ? 'Android' : /Mac OS X/i.test(ua) ? 'macOS' : /Linux/i.test(ua) ? 'Linux' : 'Desconhecido';
+  const browser = /Edg(e|A|iOS)?\//.test(ua) ? 'Edge' : /Chrome\/|CriOS\//.test(ua) ? 'Chrome' : /Firefox\/|FxiOS\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : ua ? 'Outro' : 'API';
   return { userAgent: ua, ip: d.ip, os, browser, name: d.name ?? `${browser} em ${os}` };
 }
 
@@ -276,10 +305,16 @@ export class TwoFactorRequired extends Error {
   }
 }
 
+// Conta que não existe (ou sem senha local) também calcula um scrypt, com este hash de mentira: senão o tempo de
+// resposta diria quem tem cadastro.
+let dummyHash: Promise<string> | null = null;
+
 export async function login(params: { user: string; password: string; code?: string; device: DeviceInfo }) {
+  const dummy = (dummyHash ??= hashPassword(randomToken()));
   let user = await findUserForLogin(params.user);
   const attemptLogin = user ? `id:${user.id}` : params.user;
-  await assertNotBlocked(attemptLogin, params.device.ip);
+  const known = await isKnownDevice(user?.id, params.device.deviceId);
+  await assertNotBlocked(attemptLogin, params.device.ip, known);
   let ok = false;
   if (getSetting('LDAP_Enable') && (!user || user.auth_source === 'ldap')) {
     const { ldapLogin } = await import('../ldap/ldap');
@@ -287,17 +322,21 @@ export async function login(params: { user: string; password: string; code?: str
     if (r.status === 'ok') {
       user = r.user;
       ok = true;
-    } else if (r.status === 'unavailable' && user && getSetting('LDAP_Login_Fallback')) {
+    } else if (r.status === 'unavailable' && user?.password_hash && getSetting('LDAP_Login_Fallback')) {
       // Servidor fora do ar: vale a senha local. Recusa do diretório (senha errada, conta desativada) não cai aqui.
       ok = await verifyPassword(params.password, user.password_hash);
+    } else if (r.status === 'unavailable') {
+      // Sem a senha local para conferir (opção desligada, ou conta do AD sem senha no chat, o caso comum): a senha pode
+      // estar certa, então não conta como tentativa falha.
+      throw new ApiError(503, 'error-ldap-unavailable', 'O servidor de rede (AD) não respondeu. Tente de novo em alguns minutos.');
     }
-  } else if (user) {
-    ok = await verifyPassword(params.password, user.password_hash);
+  } else {
+    ok = (await verifyPassword(params.password, user?.password_hash || (await dummy))) && !!user?.password_hash;
   }
   if (!ok) user = null;
 
   if (!user) {
-    await recordFailedAttempt(attemptLogin, params.device.ip);
+    await recordFailedAttempt(attemptLogin, params.device.ip, known);
     await audit({ ip: params.device.ip, username: params.user }, 'auth.login.failed', { login: params.user });
     throw unauthorized('Usuário ou senha incorretos.');
   }
@@ -306,23 +345,40 @@ export async function login(params: { user: string; password: string; code?: str
     if (!params.code) throw new TwoFactorRequired('totp');
     if (!(await check2fa(user, params.code))) {
       // Código errado conta como tentativa falha (senão o código de 6 dígitos poderia ser adivinhado).
-      await recordFailedAttempt(attemptLogin, params.device.ip);
+      await recordFailedAttempt(attemptLogin, params.device.ip, known);
       await audit({ id: user.id, username: user.username, ip: params.device.ip }, 'auth.login.failed', { login: params.user, reason: 'totp' });
-      throw unauthorized('Código de verificação inválido.');
+      throw unauthorized('Código de verificação inválido ou já usado.');
     }
   }
-  await clearFailedAttempts(attemptLogin);
+  await clearFailedAttempts(attemptLogin, known);
   const s = await createSession(user.id, params.device);
   await audit({ id: user.id, username: user.username, ip: params.device.ip }, 'auth.login', { sessionId: s.sessionId });
   return { user, ...s };
 }
 
+// Código de backup como a pessoa digita: sem diferença de maiúsculas, espaços ou hífen.
+const normalizeBackupCode = (code: string) => code.toUpperCase().replace(/[\s-]/g, '');
+
+// 10 caracteres sem os que se confundem (0/O, 1/I/L), mostrados como XXXXX-XXXXX.
+const BACKUP_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+function newBackupCode() {
+  let s = '';
+  for (let i = 0; i < 10; i++) s += BACKUP_ALPHABET[randomInt(BACKUP_ALPHABET.length)];
+  return `${s.slice(0, 5)}-${s.slice(5)}`;
+}
+
 export async function check2fa(user: any, code: string) {
-  if (user.totp_secret && verifyTotp(user.totp_secret, code)) return true;
-  const hashed = sha256(code.trim());
-  if (user.backup_codes.includes(hashed)) {
-    await query('UPDATE users SET backup_codes = array_remove(backup_codes, $2) WHERE id = $1', [user.id, hashed]);
-    return true;
+  // Cada código do aplicativo vale uma vez (o mesmo código visto ou capturado não abre outro login): o UPDATE só passa
+  // com um passo depois do último aceito, também quando dois pedidos chegam juntos.
+  const step = user.totp_secret ? totpStep(user.totp_secret, code) : null;
+  if (step !== null) {
+    return !!(await one('UPDATE users SET totp_last_step = $2 WHERE id = $1 AND (totp_last_step IS NULL OR totp_last_step < $2) RETURNING id', [user.id, step]));
+  }
+  // Códigos de backup de antes da 046 (base64, com maiúsculas e minúsculas) valem como foram mostrados.
+  for (const hashed of [sha256(normalizeBackupCode(code)), sha256(code.trim())]) {
+    if (user.backup_codes.includes(hashed)) {
+      return !!(await one('UPDATE users SET backup_codes = array_remove(backup_codes, $2) WHERE id = $1 AND $2 = ANY(backup_codes) RETURNING id', [user.id, hashed]));
+    }
   }
   return false;
 }
@@ -356,9 +412,9 @@ export async function resolveToken(userId: string | undefined, token: string) {
   return null;
 }
 
-export async function logout(sessionId: string) {
+export async function logout(sessionId: string, reason?: LogoutReason) {
   await query('DELETE FROM sessions WHERE id = $1', [sessionId]);
-  bus.forceLogout({ sessionIds: [sessionId] });
+  bus.forceLogout({ sessionIds: [sessionId], reason });
 }
 
 export async function listSessions(opts: { userId?: string; offset?: number; count?: number; search?: string }) {
@@ -390,7 +446,8 @@ export async function revokeSession(ctx: Ctx, sessionId: string, asAdmin: boolea
   const s = await one('SELECT * FROM sessions WHERE id = $1', [sessionId]);
   if (!s) throw notFound('error-session-not-found', 'Sessão não encontrada.');
   if (s.user_id !== ctx.userId && !asAdmin) throw forbidden();
-  await logout(sessionId);
+  // A tela de entrar do aparelho que saiu explica quem encerrou (a própria sessão atual sai sem aviso, como no Sair).
+  await logout(sessionId, s.user_id !== ctx.userId ? 'admin-logout' : sessionId !== ctx.sessionId ? 'session-revoked' : undefined);
   await audit(actorOf(ctx), 'session.revoked', { sessionId, userId: s.user_id });
 }
 
@@ -398,6 +455,14 @@ export async function revokeSession(ctx: Ctx, sessionId: string, asAdmin: boolea
 export async function revokeAllSessions(userId: string, exceptSessionId?: string, reason?: LogoutReason) {
   const rows = await many('DELETE FROM sessions WHERE user_id = $1 AND id <> $2 RETURNING id', [userId, exceptSessionId ?? '']);
   if (rows.length) bus.forceLogout({ sessionIds: rows.map((r) => r.id), reason });
+  return rows.length;
+}
+
+// Tokens de acesso pessoal saem junto quando a conta é retomada (senha redefinida, senha trocada ou sessões
+// encerradas pelo administrador): senão quem invadiu continuaria na API. Os sockets abertos com eles fecham.
+export async function revokePersonalTokens(userId: string) {
+  const rows = await many('DELETE FROM personal_access_tokens WHERE user_id = $1 RETURNING id', [userId]);
+  if (rows.length) bus.forceLogout({ sessionIds: rows.map((r) => `pat:${r.id}`) });
   return rows.length;
 }
 
@@ -413,6 +478,8 @@ const canResetPassword = (u: any) => u.active && u.type !== 'bot' && (u.auth_sou
 // Sempre responde do mesmo jeito, exista ou não a conta, para não revelar quem tem cadastro.
 export async function requestPasswordReset(email: string, ip?: string) {
   if (!getSetting('Accounts_PasswordReset')) throw forbidden('A redefinição de senha está desativada.');
+  // Sem SMTP o link nunca chegaria (o envio devolve false em silêncio): a pessoa fica sabendo na hora.
+  if (!getSetting('SMTP_Host')) throw new ApiError(503, 'error-email-not-configured', 'O envio de e-mails não está configurado neste chat. Peça ao administrador para redefinir a sua senha.');
   const u = await one('SELECT * FROM users WHERE lower(email) = lower($1)', [email.trim()]);
   if (!u || !canResetPassword(u)) return;
   // Um pedido a cada 2 minutos por conta; só o link mais recente vale.
@@ -457,6 +524,14 @@ export async function sendPasswordSetupEmail(userId: string, reason: 'created' |
   return sendMail({ to: u.email, subject: `Defina sua senha no ${site}`, text, html });
 }
 
+// A tela de nova senha confere o link ao abrir: usado, vencido ou trocado por um mais novo, ela avisa antes de a pessoa
+// digitar a senha. O token tem 32 bytes aleatórios: a resposta não ajuda a adivinhar nenhum.
+export async function checkResetToken(token: string) {
+  if (!getSetting('Accounts_PasswordReset')) return false;
+  const u = await one('SELECT u.* FROM password_resets p JOIN users u ON u.id = p.user_id WHERE p.token_hash = $1 AND p.expires_at > now()', [sha256(token)]);
+  return !!u && canResetPassword(u);
+}
+
 export async function resetPasswordWithToken(token: string, password: string, ip?: string) {
   if (!getSetting('Accounts_PasswordReset')) throw forbidden('A redefinição de senha está desativada.');
   const invalid = () => badRequest('error-invalid-token', 'Link inválido ou expirado. Peça um novo em "Esqueci minha senha".');
@@ -470,17 +545,19 @@ export async function resetPasswordWithToken(token: string, password: string, ip
   if (!u || !canResetPassword(u)) throw invalid();
   await query('UPDATE users SET password_hash = $2, require_password_change = false, updated_at = now() WHERE id = $1', [u.id, await hashPassword(password)]);
   await query('DELETE FROM password_resets WHERE user_id = $1', [u.id]);
-  await query('DELETE FROM login_attempts WHERE key = $1', [loginKey(`id:${u.id}`)]);
-  // Quem estava com a senha antiga (inclusive um invasor) sai de todos os dispositivos.
-  await revokeAllSessions(u.id);
-  await audit({ id: u.id, username: u.username, ip }, 'user.password.reset', { userId: u.id });
+  // A pessoa provou ser dona do e-mail: os bloqueios da conta (também os de cada aparelho) saem.
+  await query(`DELETE FROM login_attempts WHERE key = $1 OR starts_with(key, $1 || '|dev:')`, [loginKey(`id:${u.id}`)]);
+  // Quem estava com a senha antiga (inclusive um invasor) sai de todos os dispositivos e perde os tokens de acesso.
+  await revokeAllSessions(u.id, undefined, 'password-changed');
+  const tokens = await revokePersonalTokens(u.id);
+  await audit({ id: u.id, username: u.username, ip }, 'user.password.reset', { userId: u.id }, { tokensRevoked: tokens });
   if (u.email) {
     const { sendMail } = await import('./mailer');
     const site = getSetting<string>('Site_Name');
     void sendMail({
       to: u.email,
       subject: `[${site}] Sua senha foi alterada`,
-      text: `Olá, ${u.name || u.username}.\n\nA senha da sua conta no ${site} acabou de ser redefinida e todas as sessões foram encerradas. Se não foi você, fale com o administrador imediatamente.`,
+      text: `Olá, ${u.name || u.username}.\n\nA senha da sua conta no ${site} acabou de ser redefinida: todas as sessões foram encerradas e os tokens de acesso foram revogados. Se não foi você, fale com o administrador imediatamente.`,
     });
   }
 }
@@ -523,24 +600,35 @@ export async function enableTotp(ctx: Ctx) {
   // Gerar uma chave nova desligaria o 2FA atual sem pedir código: é preciso desativar antes (com código).
   if (u?.totp_enabled) throw badRequest('totp-already-enabled', 'O 2FA já está ativo. Desative-o com um código antes de configurar outro aplicativo.');
   const secret = generateSecret();
-  await query('UPDATE users SET totp_secret = $2, totp_enabled = false WHERE id = $1', [ctx.userId, secret]);
+  await query('UPDATE users SET totp_secret = $2, totp_enabled = false, totp_last_step = NULL WHERE id = $1', [ctx.userId, secret]);
   return { secret, url: otpauthUrl(secret, ctx.username, getSetting<string>('Site_Name')) };
 }
 
 export async function verifyAndEnableTotp(ctx: Ctx, code: string) {
   const u = await getUserById(ctx.userId);
-  if (!u?.totp_secret || !verifyTotp(u.totp_secret, code)) throw badRequest('invalid-totp', 'Código inválido.');
-  const codes = Array.from({ length: 12 }, () => randomToken(6).slice(0, 8));
-  await query('UPDATE users SET totp_enabled = true, backup_codes = $2 WHERE id = $1', [ctx.userId, codes.map(sha256)]);
+  const step = u?.totp_secret ? totpStep(u.totp_secret, code) : null;
+  if (step === null) throw badRequest('invalid-totp', 'Código inválido.');
+  const codes = Array.from({ length: 12 }, newBackupCode);
+  // O código da ativação também já foi usado: não serve para entrar logo em seguida.
+  await query('UPDATE users SET totp_enabled = true, backup_codes = $2, totp_last_step = $3 WHERE id = $1', [ctx.userId, codes.map((c) => sha256(normalizeBackupCode(c))), step]);
   await audit(actorOf(ctx), 'user.2fa.enabled', { userId: ctx.userId });
   return { codes };
 }
 
-export async function disableTotp(ctx: Ctx, code: string) {
+export async function disableTotp(ctx: Ctx, code: string, password?: string) {
   const u = await getUserById(ctx.userId);
   if (!u?.totp_enabled) return;
-  if (!(await check2fa(u, code))) throw badRequest('invalid-totp', 'Código inválido.');
-  await query("UPDATE users SET totp_enabled = false, totp_secret = NULL, backup_codes = '{}' WHERE id = $1", [ctx.userId]);
+  // Quem pegou uma sessão aberta não desliga o 2FA no chute: pede a senha (contas com senha do chat) e cada erro, de
+  // senha ou de código, conta para um bloqueio de alguns minutos, como no login (com o bloqueio do login desligado,
+  // 10 tentativas).
+  const key = `2fa-disable:${u.id}`;
+  const fail = async (e: ApiError) => (await countFailure(key, getSetting<number>('Accounts_Block_Failed_Login_Attempts') || 10), e);
+  if (await one('SELECT 1 FROM login_attempts WHERE key = $1 AND blocked_until > now()', [key]))
+    throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas erradas. Tente novamente em alguns minutos.');
+  if (asksPassword(u) && !(await verifyPassword(password ?? '', u.password_hash))) throw await fail(badRequest('error-invalid-password', 'Senha atual incorreta.'));
+  if (!(await check2fa(u, code))) throw await fail(badRequest('invalid-totp', 'Código inválido ou já usado.'));
+  await query('DELETE FROM login_attempts WHERE key = $1', [key]);
+  await query("UPDATE users SET totp_enabled = false, totp_secret = NULL, backup_codes = '{}', totp_last_step = NULL WHERE id = $1", [ctx.userId]);
   await audit(actorOf(ctx), 'user.2fa.disabled', { userId: ctx.userId });
 }
 
@@ -626,6 +714,9 @@ export async function updateUser(
     // Só espaços passava pelo tamanho mínimo.
     if (!data.password.trim()) throw badRequest('error-password-policy-not-met', 'A senha não pode ser só espaços.');
     validatePassword(data.password);
+    // Na troca obrigatória, ficar com a senha provisória (que o administrador conhece) anularia a exigência.
+    if (!opts.asAdmin && u.password_hash && (await verifyPassword(data.password, u.password_hash)))
+      throw badRequest('error-password-same', 'A senha nova precisa ser diferente da atual.');
     sets.push(`password_hash = $${params.push(await hashPassword(data.password))}`);
     // Senha provisória com "Exigir troca de senha" na mesma gravação: vale o que a administração pediu.
     if (!(opts.asAdmin && data.requirePasswordChange !== undefined)) sets.push('require_password_change = false');
@@ -659,7 +750,23 @@ export async function updateUser(
   if (data.username && data.username !== u.username) await propagateUsername(userId, u.username, data.username);
   if (name !== undefined) await query('UPDATE messages SET user_name = $2 WHERE user_id = $1', [userId, name]);
   if (data.active === false) {
-    await revokeAllSessions(userId);
+    await revokeAllSessions(userId, undefined, 'deactivated');
+    // Também os sockets abertos com token de acesso pessoal (a API já recusa a conta desativada).
+    bus.forceLogout({ userId, reason: 'deactivated' });
+  }
+  if (data.password && !self) {
+    await revokeAllSessions(userId, undefined, 'password-changed');
+    await revokePersonalTokens(userId);
+    // A pessoa fica sabendo que a senha mudou (e por quem), como na redefinição por e-mail.
+    if (row.email) {
+      const { sendMail } = await import('./mailer');
+      const site = getSetting<string>('Site_Name');
+      void sendMail({
+        to: row.email,
+        subject: `[${site}] Sua senha foi alterada`,
+        text: `Olá, ${row.name || row.username}.\n\nUm administrador trocou a senha da sua conta no ${site} e as sessões abertas foram encerradas. Peça a senha nova a quem administra o chat. Se você não esperava por isso, avise o administrador.`,
+      });
+    }
   }
   if (data.active && u.pending_approval && !u.active && row.email) {
     // Cadastro aprovado: a pessoa que se cadastrou fica sabendo que já pode entrar.
@@ -671,19 +778,6 @@ export async function updateUser(
       subject: `[${site}] Cadastro aprovado`,
       text: `Olá, ${row.name || row.username}.\n\nSeu cadastro no ${site} foi aprovado. Você já pode entrar com o nome de usuário "${row.username}" e a senha que escolheu:\n\n${siteUrl()}/login`,
     });
-  }
-  if (data.password && !self) {
-    await revokeAllSessions(userId);
-    // A pessoa fica sabendo que a senha mudou (e por quem), como na redefinição por e-mail.
-    if (row.email) {
-      const { sendMail } = await import('./mailer');
-      const site = getSetting<string>('Site_Name');
-      void sendMail({
-        to: row.email,
-        subject: `[${site}] Sua senha foi alterada`,
-        text: `Olá, ${row.name || row.username}.\n\nUm administrador trocou a senha da sua conta no ${site} e as sessões abertas foram encerradas. Peça a senha nova a quem administra o chat. Se você não esperava por isso, avise o administrador.`,
-      });
-    }
   }
   if (!self || data.active !== undefined) {
     await audit(actorOf(actor), 'user.updated', { userId, username: row.username }, { fields: Object.keys(data).filter((k) => k !== 'password'), passwordChanged: !!data.password });
@@ -939,7 +1033,9 @@ export async function resetAvatar(userId: string) {
 
 // ---------- Tokens pessoais ----------
 
-export async function createPersonalToken(ctx: Ctx, name: string, bypass2fa: boolean) {
+// Pede a senha (contas com senha local) e o código do 2FA (quando ligado), como redefinir a criptografia: uma sessão
+// roubada não vira um acesso à API que fica depois de a pessoa recuperar a conta.
+export async function createPersonalToken(ctx: Ctx, name: string, bypass2fa: boolean, confirm: { password?: string; code?: string } = {}) {
   const token = randomToken();
   // Espaços sobrando não contam, e o nome não se repete mudando só maiúsculas ou espaços: na lista ficariam iguais.
   name = name.replace(/\s+/g, ' ').trim();
@@ -947,6 +1043,10 @@ export async function createPersonalToken(ctx: Ctx, name: string, bypass2fa: boo
   const same = (other: string) => other.replace(/\s+/g, ' ').trim().toLowerCase() === name.toLowerCase();
   if ((await many<{ name: string }>('SELECT name FROM personal_access_tokens WHERE user_id = $1', [ctx.userId])).some((t) => same(t.name)))
     throw badRequest('error-token-already-exists', 'Já existe um token com esse nome.');
+  const u = await getUserById(ctx.userId);
+  if (asksPassword(u) && !(await verifyPassword(confirm.password ?? '', u.password_hash))) throw badRequest('error-invalid-password', 'Senha atual incorreta.');
+  if (u.totp_enabled && getSetting('Accounts_TwoFactorAuthentication_Enabled') && !(await check2fa(u, confirm.code ?? '')))
+    throw badRequest('invalid-totp', 'Código de verificação inválido ou já usado.');
   await query('INSERT INTO personal_access_tokens (id, user_id, name, token_hash, bypass_2fa) VALUES ($1,$2,$3,$4,$5)', [
     newId(),
     ctx.userId,
@@ -964,7 +1064,8 @@ export async function listPersonalTokens(userId: string) {
 }
 
 export async function removePersonalToken(userId: string, name: string) {
-  await query('DELETE FROM personal_access_tokens WHERE user_id = $1 AND name = $2', [userId, name]);
+  const rows = await many('DELETE FROM personal_access_tokens WHERE user_id = $1 AND name = $2 RETURNING id', [userId, name]);
+  if (rows.length) bus.forceLogout({ sessionIds: rows.map((r) => `pat:${r.id}`) });
 }
 
 // ---------- Primeira execução ----------

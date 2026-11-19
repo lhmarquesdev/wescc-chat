@@ -145,6 +145,12 @@
 .auth-main .icon-btn {
   color: hsl(0 0% 100% / 0.8);
 }
+/* Foco pelo teclado sobre o painel azul: contorno branco (o anel da marca a 30% some no azul, e o botão Entrar troca
+   a sombra do anel pela dele). */
+.auth-main :is(a, button, input[type='checkbox']):focus-visible {
+  outline: 2px solid hsl(var(--on-color));
+  outline-offset: 2px;
+}
 .auth-main .icon-btn:hover {
   background: hsl(0 0% 100% / 0.16);
   color: hsl(var(--on-color));
@@ -180,9 +186,11 @@
   color: hsl(var(--on-color));
   box-shadow: none;
 }
-/* Erro e avisos: cartão sólido, como os avisos do Atendeti (o branco translúcido sobre o azul ficava em 2,6:1). */
+/* Erro e avisos: cartão sólido, como os avisos do Atendeti (o branco translúcido sobre o azul ficava em 2,6:1). Vale
+   também para .callout.ok, .info…, cuja regra vem depois e deixava o aviso translúcido sobre o azul. */
 .auth-main .form-error,
-.auth-main .callout {
+.auth-main .callout,
+.auth-main .callout:is(.info, .ok, .warn, .err) {
   border-color: transparent;
   background: hsl(var(--card));
   color: hsl(var(--foreground));

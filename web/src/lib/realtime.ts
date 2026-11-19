@@ -1,7 +1,6 @@
-import type { ClientEvent, ServerEvent } from '@shared/index';
-import { getCredentials } from './api';
+import type { ClientEvent, LogoutReason, ServerEvent } from '@shared/index';
+import { api, getCredentials } from './api';
 import { applyEvent, useStore } from './store';
-import { rememberLogoutReason } from './logoutReason';
 
 type Listener = (ev: ServerEvent) => void;
 
@@ -16,6 +15,7 @@ class Realtime {
   // Sem interação há N minutos (ausência automática). Vai ao servidor a cada conexão: ele decide pelo conjunto das abas.
   private idle = false;
   private timer: number | null = null;
+  private onEnded: ((reason?: LogoutReason) => void) | null = null;
   // Id desta conexão no servidor (as chamadas usam para a sinalização).
   connectionId: string | null = null;
 
@@ -25,6 +25,12 @@ class Realtime {
     this.connect();
     this.setupIdle();
     this.setupWake();
+  }
+
+  // Sessão encerrada de fora (conta desativada, administrador, outro dispositivo): session.ts limpa o navegador e abre
+  // a tela de entrar com o motivo.
+  setSessionEndedHandler(fn: (reason?: LogoutReason) => void) {
+    this.onEnded = fn;
   }
 
   stop() {
@@ -59,8 +65,9 @@ class Realtime {
         first = false;
       }
       if (ev.type === 'force_logout') {
-        rememberLogoutReason(ev.reason);
-        location.href = '/login';
+        // O servidor fecha o socket logo depois (4003): sem reconectar nem ir duas vezes para a tela de entrar.
+        this.stopped = true;
+        this.onEnded?.(ev.reason);
         return;
       }
       applyEvent(ev);
@@ -71,8 +78,14 @@ class Realtime {
       useStore.getState().setConnected(false);
       if (this.stopped) return;
       if (e.code === 4001 || e.code === 4003) {
-        // Sessão inválida.
-        location.href = '/login';
+        // Token recusado (ou nenhum "auth" em 10 s, numa rede lenta): a API confirma. Sessão que não vale mais cai no
+        // tratamento do 401 (limpa o navegador e abre a tela de entrar com o aviso); valendo, tenta de novo.
+        void api
+          .get('me')
+          .catch(() => null)
+          .then(() => {
+            if (!this.stopped && getCredentials()) this.timer = window.setTimeout(() => this.connect(), Math.min(30_000, 1000 * 2 ** this.retry++));
+          });
         return;
       }
       if (e.code === 4005) {

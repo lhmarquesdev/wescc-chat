@@ -12,7 +12,7 @@ let A: Auth;
 beforeAll(async () => {
   await startServer();
   A = await admin();
-  await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: false, Site_Url: 'https://chat.empresa.com.br' } }, A);
+  await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: false, Site_Url: 'https://chat.empresa.com.br', SMTP_Host: 'smtp.empresa.test' } }, A);
 });
 afterAll(() => stopServer());
 beforeEach(() => {
@@ -77,6 +77,35 @@ describe('esqueci minha senha', () => {
     await api('POST', 'settings', { settings: { Accounts_PasswordReset: false } }, A);
     expect((await forgot(email)).status).toBe(403);
     await api('POST', 'settings', { settings: { Accounts_PasswordReset: true } }, A);
+  });
+
+  it('a tela confere o link ao abrir: vale até ser usado, vencer ou ser trocado por um mais novo', async () => {
+    const check = async (token: string) => (await api('POST', 'users.checkResetToken', { token })).valid;
+    const u = await newUser(A);
+    const email = `${u.username}@test.local`;
+    await forgot(email);
+    await sleep(50);
+    const first = tokenOf(outbox[0].text);
+    expect(await check(first)).toBe(true);
+    expect(await check('nao-existe')).toBe(false);
+    // Um pedido mais novo invalida o anterior.
+    await pool.query(`UPDATE password_resets SET created_at = now() - interval '3 minutes' WHERE user_id = $1`, [u.userId]);
+    await forgot(email);
+    await sleep(50);
+    const second = tokenOf(outbox[1].text);
+    expect(await check(first)).toBe(false);
+    expect(await check(second)).toBe(true);
+    // Conferir não gasta o link.
+    expect((await reset(second, 'senha-redefinida-4')).success).toBe(true);
+    expect(await check(second)).toBe(false);
+    // Vencido.
+    await pool.query(`UPDATE password_resets SET created_at = now() - interval '3 minutes' WHERE user_id = $1`, [u.userId]);
+    await forgot(email);
+    await sleep(50);
+    const third = tokenOf(outbox.filter((m) => m.subject.includes('Redefinição de senha')).at(-1)!.text);
+    await pool.query(`UPDATE password_resets SET expires_at = now() - interval '1 second' WHERE user_id = $1`, [u.userId]);
+    expect(await check(third)).toBe(false);
+    expect((await api('POST', 'users.checkResetToken', {})).status).toBe(400);
   });
 
   it('o 2FA continua sendo pedido depois de redefinir a senha', async () => {

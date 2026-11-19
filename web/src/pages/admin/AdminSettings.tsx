@@ -244,6 +244,12 @@ export function AdminSettings() {
     );
 
   const value = (s: any) => (s._id in draft ? draft[s._id] : s.value);
+  // Cadastro público sem aprovação manual: qualquer pessoa que abrir o endereço do chat entra (vale o que está na tela).
+  const valueOf = (id: string) => {
+    const s = all.find((x: any) => x._id === id);
+    return s ? value(s) : undefined;
+  };
+  const openRegistration = valueOf('Accounts_RegistrationForm') === 'Public' && !valueOf('Accounts_ManuallyApproveNewUsers');
   const set = (s: any, v: unknown) => setDraft((d) => ({ ...d, [s._id]: v }));
   const revert = (s: any) =>
     setDraft((d) => {
@@ -424,6 +430,15 @@ export function AdminSettings() {
               <Link className="btn small" to="/admin/integrations">
                 Abrir Integrações
               </Link>
+            </div>
+          )}
+          {group === 'Accounts' && !q && openRegistration && (
+            <div className="callout warn" role="status">
+              <Icon name="warning" />
+              <span>
+                Cadastro público ligado: qualquer pessoa que abrir o endereço do chat cria uma conta e já lê os canais públicos e a lista de pessoas. Para um chat interno, use “Somente com link
+                secreto” ou ligue “Aprovar novos usuários manualmente”.
+              </span>
             </div>
           )}
           {group === 'LDAP' && !q && (

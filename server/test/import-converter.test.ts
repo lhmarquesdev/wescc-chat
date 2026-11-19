@@ -19,7 +19,7 @@ let A: Auth;
 beforeAll(async () => {
   await startServer();
   A = await admin();
-  await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: false } }, A);
+  await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: false, Accounts_RegistrationForm: 'Public' } }, A);
 });
 afterAll(() => stopServer());
 

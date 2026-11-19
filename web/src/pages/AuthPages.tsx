@@ -4,8 +4,9 @@ import type { OAuthProviderPublic, OAuthProviderType } from '@shared/index';
 import { api, ApiError, errorMessage, getCredentials } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
 import { roomPath } from '../lib/format';
-import { clearLogoutReason, LOGOUT_REASON_TEXT, peekLogoutReason } from '../lib/logoutReason';
-import { login, loginWithOAuth, loginWithSaml } from '../lib/session';
+import { usePasswordHint } from '../lib/passwordPolicy';
+import { clearLogoutReason, LOGOUT_REASON_ICON, LOGOUT_REASON_TEXT, peekLogoutReason } from '../lib/logoutReason';
+import { login, loginWithOAuth, loginWithSaml, logout } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
 import { BrandMark, ProviderIcon } from '../components/BrandIcons';
 import { Icon } from '../components/Icon';
@@ -77,13 +78,14 @@ function FormError({ children }: { children: ReactNode }) {
   );
 }
 
-// Senha com o botão de mostrar/ocultar dentro do campo.
+// Senha com o botão de mostrar/ocultar dentro do campo. Mostrada, ela vira campo de texto: sem maiúscula automática,
+// corretor nem verificação ortográfica, que mudariam a senha ou a mandariam para o serviço de ortografia.
 function PasswordInput(props: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
   const [show, setShow] = useState(false);
   const label = show ? 'Ocultar senha' : 'Mostrar senha';
   return (
     <span className="password-field">
-      <input {...props} type={show ? 'text' : 'password'} />
+      <input {...props} type={show ? 'text' : 'password'} autoCapitalize="none" autoCorrect="off" spellCheck={false} />
       <button type="button" className="icon-btn" title={label} aria-label={label} aria-pressed={show} onClick={() => setShow(!show)}>
         <Icon name={show ? 'hide' : 'show'} />
       </button>
@@ -109,6 +111,8 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [needCode, setNeedCode] = useState(false);
+  // Código de backup tem letras: o campo troca o teclado numérico do celular pelo de texto.
+  const [backupCode, setBackupCode] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const registration = useSetting<string>('Accounts_RegistrationForm');
@@ -116,18 +120,17 @@ export function LoginPage() {
   const samlLabel = useSetting<string>('SAML_Button_Label');
   const ldap = useSetting<boolean>('LDAP_Enable');
   const passwordReset = useSetting<boolean>('Accounts_PasswordReset');
+  // Sem o envio de e-mails configurado o link nunca chegaria (valor calculado pelo servidor).
+  const resetAvailable = useSetting<boolean>('Accounts_PasswordReset_Available') !== false;
   const [providers, setProviders] = useState<OAuthProviderPublic[]>([]);
   const next = safeNext(params.get('next'));
-  // Sessão já aberta neste navegador (favorito do /login, Voltar depois de entrar): vai direto para o chat. Uma sessão
-  // que o servidor encerrou volta para cá pelo próprio chat (o 401 limpa a credencial). O retorno do SSO segue abaixo.
-  // Decidido ao abrir: um SSO que falha com outra sessão guardada volta para cá e mostra o erro.
-  const [signedIn] = useState(() => !!getCredentials() && !params.get('saml') && !params.get('oauth'));
-  // Saída forçada com motivo (um administrador redefiniu a criptografia): o aviso fica até a pessoa entrar.
+  // Saída forçada com motivo (conta desativada, sessão encerrada, criptografia redefinida): o aviso fica até a pessoa
+  // entrar ou ir para outra tela. Apagar ao abrir perderia o aviso no recarregamento que vem logo depois da saída.
   const [reason] = useState(peekLogoutReason);
-  useEffect(() => {
-    if (!signedIn) clearLogoutReason();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => clearLogoutReason, []);
+  // Já conectado (/login nos favoritos): vai direto para o chat em vez de mostrar o formulário e abrir mais uma sessão.
+  // Se a sessão guardada não vale mais, a API recusa, a credencial sai e a pessoa volta para cá com o aviso.
+  const [signedIn] = useState(() => !!getCredentials() && !params.get('saml') && !params.get('oauth'));
 
   useEffect(() => {
     if (signedIn) return;
@@ -162,7 +165,7 @@ export function LoginPage() {
     setError('');
     const before = getCredentials();
     try {
-      await login(user, password, needCode ? code : undefined);
+      await login(user.trim(), password, needCode ? code : undefined);
       navigate(next, { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.errorType === 'totp-required') setNeedCode(true);
@@ -178,15 +181,16 @@ export function LoginPage() {
     }
   };
 
+  if (signedIn) return <Navigate to={next} replace />;
   return (
     <AuthShell
       title={needCode ? 'Verificação em duas etapas' : 'Bem-vindo de volta'}
-      subtitle={needCode ? 'Digite o código do seu aplicativo autenticador.' : ldap ? 'Use seu usuário de rede ou e-mail corporativo.' : 'Use seu usuário ou e-mail corporativo.'}
+      subtitle={needCode ? (backupCode ? 'Digite um dos códigos de backup que você guardou.' : 'Digite o código do seu aplicativo autenticador.') : ldap ? 'Use seu usuário de rede ou e-mail corporativo.' : 'Use seu usuário ou e-mail corporativo.'}
     >
       <form onSubmit={submit} className="form auth-form">
         {reason && !error && (
           <div className="callout info" role="status">
-            <Icon name="e2e-key" />
+            <Icon name={LOGOUT_REASON_ICON[reason]} />
             <span>{LOGOUT_REASON_TEXT[reason]}</span>
           </div>
         )}
@@ -200,22 +204,40 @@ export function LoginPage() {
               <PasswordInput autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </Field>
             {passwordReset && (
-              <div className="auth-row">
-                <Link to="/forgot-password">Esqueci minha senha</Link>
-              </div>
+              <div className="auth-row">{resetAvailable ? <Link to="/forgot-password">Esqueci minha senha</Link> : <span>Esqueceu a senha? Fale com o administrador.</span>}</div>
             )}
           </>
         ) : (
-          <Field label="Código de verificação" hint="O código de 6 dígitos do aplicativo autenticador ou um código de backup.">
-            <input autoFocus inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
-          </Field>
+          <>
+            <Field
+              label={backupCode ? 'Código de backup' : 'Código de verificação'}
+              hint={backupCode ? 'Cada código vale uma vez. Maiúsculas, espaços e hífen não importam.' : 'O código de 6 dígitos do aplicativo autenticador.'}
+            >
+              <input
+                key={backupCode ? 'backup' : 'app'}
+                autoFocus
+                inputMode={backupCode ? 'text' : 'numeric'}
+                autoComplete="one-time-code"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              />
+            </Field>
+            <div className="auth-row">
+              <button type="button" className="link" onClick={() => (setBackupCode(!backupCode), setCode(''))}>
+                {backupCode ? 'Usar o código do aplicativo' : 'Usar um código de backup'}
+              </button>
+            </div>
+          </>
         )}
-        <button type="submit" className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !user || !password}>
+        <button type="submit" className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !user || !password || (needCode && !code.trim())}>
           {busy && <span className="spinner sm" aria-hidden="true" />}
           {needCode ? 'Verificar' : 'Entrar'}
         </button>
         {needCode && (
-          <button type="button" className="btn ghost full" onClick={() => (setNeedCode(false), setCode(''), setError(''))}>
+          <button type="button" className="btn ghost full" onClick={() => (setNeedCode(false), setCode(''), setBackupCode(false), setError(''))}>
             <Icon name="back" />
             Voltar
           </button>
@@ -254,11 +276,26 @@ export function LoginPage() {
   );
 }
 
+// Com o AD ligado, o link vale só para contas com senha do chat (as de rede trocam a senha pelo procedimento da TI).
+// Não diz se o e-mail digitado é de uma conta de rede.
+function LdapResetNote() {
+  return (
+    <div className="callout info">
+      <Icon name="info" />
+      <span>Se você entra com o usuário de rede (AD), troque a senha pelo procedimento da TI: a redefinição por aqui vale só para contas do chat.</span>
+    </div>
+  );
+}
+
 export function ForgotPasswordPage() {
+  const ldap = useSetting<boolean>('LDAP_Enable');
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const available = useSetting<boolean>('Accounts_PasswordReset_Available') !== false;
+  // Indisponível porque o administrador desligou a redefinição (e não por falta de e-mail): o motivo é outro.
+  const resetOff = useSetting<boolean>('Accounts_PasswordReset') === false;
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -279,6 +316,20 @@ export function ForgotPasswordPage() {
           <Icon name="success" />
           <span>Se houver uma conta com o e-mail {email.trim()}, você vai receber em instantes um link para criar uma senha nova. O link vale por 1 hora.</span>
         </div>
+        {ldap && <LdapResetNote />}
+        <Link className="btn lg full" to="/login">
+          <Icon name="back" />
+          Voltar ao login
+        </Link>
+      </AuthShell>
+    );
+  if (!available)
+    return (
+      <AuthShell
+        title="Esqueci minha senha"
+        subtitle={`${resetOff ? 'A redefinição de senha por e-mail está desligada neste chat.' : 'Este chat não envia e-mails.'} Peça ao administrador para redefinir a sua senha.`}
+      >
+        {ldap && <LdapResetNote />}
         <Link className="btn lg full" to="/login">
           <Icon name="back" />
           Voltar ao login
@@ -295,6 +346,7 @@ export function ForgotPasswordPage() {
         <button className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !email.trim()}>
           Enviar link
         </button>
+        {ldap && <LdapResetNote />}
         <div className="auth-alt">
           <Link to="/login">Voltar ao login</Link>
         </div>
@@ -303,35 +355,78 @@ export function ForgotPasswordPage() {
   );
 }
 
+// O token do link fica guardado nesta aba: recarregar a página (ou o celular descartar a aba enquanto a pessoa busca a
+// senha no gerenciador) não perde o link. Sai ao concluir ou quando o link não vale mais.
+const RESET_KEY = 'wescc.resetToken';
+function readResetToken() {
+  const fromLink = new URLSearchParams(location.hash.slice(1)).get('token');
+  try {
+    if (fromLink) sessionStorage.setItem(RESET_KEY, fromLink);
+    return fromLink ?? sessionStorage.getItem(RESET_KEY) ?? '';
+  } catch {
+    return fromLink ?? '';
+  }
+}
+function forgetResetToken() {
+  try {
+    sessionStorage.removeItem(RESET_KEY);
+  } catch {
+    // armazenamento indisponível
+  }
+}
+
 // Aberta pelo link do e-mail: /reset-password#token=...
 export function ResetPasswordPage() {
-  const [token] = useState(() => new URLSearchParams(location.hash.slice(1)).get('token') ?? '');
+  const [token] = useState(readResetToken);
+  // O link é conferido ao abrir: usado ou vencido, a tela avisa antes de a pessoa digitar a senha duas vezes.
+  const [valid, setValid] = useState<boolean | null>(token ? null : false);
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-  const minLen = useSetting<number>('Accounts_Password_Policy_MinLength');
+  const passwordHint = usePasswordHint();
   // Tira o token da barra de endereço (histórico e capturas de tela).
   useEffect(() => {
     if (location.hash) history.replaceState(null, '', location.pathname);
   }, []);
+  useEffect(() => {
+    if (!token) return;
+    api
+      .post('users.checkResetToken', { token })
+      .then((r: { valid: boolean }) => setValid(r.valid))
+      // Sem resposta (rede): mostra o formulário; o servidor confere de novo ao salvar.
+      .catch(() => setValid(true));
+  }, [token]);
+  useEffect(() => {
+    if (valid === false || done) forgetResetToken();
+  }, [valid, done]);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (p1 !== p2) return setError('As senhas não conferem.');
+    setBusy(true);
     try {
       await api.post('users.resetPassword', { token, password: p1 });
       setDone(true);
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      setBusy(false);
     }
   };
-  if (!token)
+  if (valid === false)
     return (
-      <AuthShell title="Link inválido" subtitle="Peça um novo link em “Esqueci minha senha”.">
+      <AuthShell title="Link inválido ou expirado" subtitle="O link já foi usado, venceu (vale por 1 hora) ou foi trocado por um mais novo. Peça outro em “Esqueci minha senha”.">
         <Link className="btn primary lg full" to="/forgot-password">
           Esqueci minha senha
         </Link>
+      </AuthShell>
+    );
+  if (valid === null)
+    return (
+      <AuthShell title="Nova senha">
+        <div className="spinner" role="status" aria-label="Conferindo o link" />
       </AuthShell>
     );
   if (done)
@@ -339,7 +434,7 @@ export function ResetPasswordPage() {
       <AuthShell title="Senha redefinida">
         <div className="callout ok">
           <Icon name="success" />
-          <span>Por segurança, todas as sessões abertas foram encerradas.</span>
+          <span>Por segurança, todas as sessões abertas foram encerradas e os tokens de acesso foram revogados.</span>
         </div>
         <Link className="btn primary lg full block" to="/login">
           Entrar
@@ -350,13 +445,14 @@ export function ResetPasswordPage() {
     <AuthShell title="Nova senha" subtitle="Crie uma senha nova para a sua conta.">
       <form onSubmit={submit} className="form auth-form">
         {error && <FormError>{error}</FormError>}
-        <Field label="Nova senha" hint={`Mínimo de ${minLen} caracteres.`}>
+        <Field label="Nova senha" hint={passwordHint}>
           <PasswordInput autoFocus autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} />
         </Field>
         <Field label="Confirmar nova senha">
           <PasswordInput autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} />
         </Field>
-        <button className="btn primary lg full block" disabled={!p1}>
+        <button className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !p1}>
+          {busy && <span className="spinner sm" aria-hidden="true" />}
           Salvar senha
         </button>
       </form>
@@ -364,21 +460,52 @@ export function ResetPasswordPage() {
   );
 }
 
+// Nome de usuário aceito pelo servidor (validateUsername).
+const USERNAME_RE = /^[0-9a-zA-Z._-]{2,40}$/;
+type RegisterForm = { name: string; username: string; email: string; pass: string; confirm: string };
+
+// Conferência antes de enviar, campo a campo, com o texto que a pessoa entende (o servidor confere de novo).
+function registerErrors(f: RegisterForm): Partial<Record<keyof RegisterForm, string>> {
+  const e: Partial<Record<keyof RegisterForm, string>> = {};
+  if (!f.name.trim()) e.name = 'Preencha o seu nome.';
+  else if (f.name.trim().length > 100) e.name = 'O nome pode ter no máximo 100 caracteres.';
+  if (!f.username) e.username = 'Preencha o nome de usuário.';
+  else if (!USERNAME_RE.test(f.username)) e.username = 'Use de 2 a 40 letras sem acento, números, ponto, hífen ou sublinhado.';
+  if (!f.email.trim()) e.email = 'Preencha o e-mail.';
+  // A mesma regra do servidor (EMAIL_RE).
+  else if (!/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)*$/.test(f.email.trim())) e.email = 'Digite um e-mail válido, como nome@empresa.com.br.';
+  if (!f.pass) e.pass = 'Crie uma senha.';
+  else if (!f.pass.trim()) e.pass = 'A senha não pode ter só espaços.';
+  if (f.pass && f.confirm !== f.pass) e.confirm = 'As senhas não conferem.';
+  return e;
+}
+
 export function RegisterPage() {
   const navigate = useNavigate();
   const { secret } = useParams();
-  const [f, setF] = useState({ name: '', username: '', email: '', pass: '', confirm: '' });
+  const [f, setF] = useState<RegisterForm>({ name: '', username: '', email: '', pass: '', confirm: '' });
   const [error, setError] = useState('');
+  // Erros por campo: aparecem depois da primeira tentativa de enviar e somem conforme a pessoa corrige.
+  const [tried, setTried] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-  const minLen = useSetting<number>('Accounts_Password_Policy_MinLength');
+  const passwordHint = usePasswordHint();
   const registration = useSetting<string>('Accounts_RegistrationForm');
+  const errs = tried ? registerErrors(f) : {};
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (f.pass !== f.confirm) return setError('As senhas não conferem.');
+    setTried(true);
+    const found = registerErrors(f);
+    const first = (['name', 'username', 'email', 'pass', 'confirm'] as const).find((k) => found[k]);
+    if (first) {
+      document.querySelector<HTMLInputElement>(`.auth-form [name="${first}"]`)?.focus();
+      return;
+    }
+    setBusy(true);
     try {
-      await api.post('users.register', { name: f.name, username: f.username, email: f.email, pass: f.pass, secretURL: secret });
+      await api.post('users.register', { name: f.name.trim(), username: f.username, email: f.email.trim(), pass: f.pass, secretURL: secret });
       try {
         await login(f.username, f.pass);
         navigate('/home');
@@ -387,6 +514,8 @@ export function RegisterPage() {
       }
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -395,6 +524,16 @@ export function RegisterPage() {
   if (registration === 'Disabled')
     return (
       <AuthShell title="Cadastro desativado" subtitle="Peça um convite ao administrador.">
+        <Link className="btn lg full" to="/login">
+          <Icon name="back" />
+          Voltar ao login
+        </Link>
+      </AuthShell>
+    );
+  // Só pelo link secreto e o endereço veio sem ele: avisa antes de a pessoa preencher tudo.
+  if (registration === 'Secret' && !secret)
+    return (
+      <AuthShell title="Cadastro só pelo link" subtitle="O cadastro é feito só pelo link enviado pela empresa. Peça o link ao administrador.">
         <Link className="btn lg full" to="/login">
           <Icon name="back" />
           Voltar ao login
@@ -416,24 +555,35 @@ export function RegisterPage() {
     );
   return (
     <AuthShell title="Criar conta" subtitle="Preencha seus dados para entrar no chat da sua equipe.">
-      <form onSubmit={submit} className="form auth-form">
+      <form onSubmit={submit} className="form auth-form" noValidate>
         {error && <FormError>{error}</FormError>}
-        <Field label="Nome">
-          <input autoFocus autoComplete="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        <Field label="Nome" error={errs.name}>
+          <input autoFocus name="name" required autoComplete="name" maxLength={100} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         </Field>
-        <Field label="Nome de usuário">
-          <input autoComplete="username" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.replace(/\s/g, '.') })} />
+        <Field label="Nome de usuário" hint={errs.username ? undefined : 'Letras sem acento, números, ponto, hífen e sublinhado (2 a 40).'} error={errs.username}>
+          <input
+            name="username"
+            required
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            value={f.username}
+            onChange={(e) => setF({ ...f, username: e.target.value.replace(/\s/g, '.') })}
+          />
         </Field>
-        <Field label="E-mail">
-          <input type="email" autoComplete="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+        <Field label="E-mail" error={errs.email}>
+          <input name="email" type="email" required autoComplete="email" autoCapitalize="none" spellCheck={false} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
         </Field>
-        <Field label="Senha" hint={`Mínimo de ${minLen} caracteres.`}>
-          <PasswordInput autoComplete="new-password" value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />
+        <Field label="Senha" hint={errs.pass ? undefined : passwordHint} error={errs.pass}>
+          <PasswordInput name="pass" required autoComplete="new-password" value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />
         </Field>
-        <Field label="Confirmar senha">
-          <PasswordInput autoComplete="new-password" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} />
+        <Field label="Confirmar senha" error={errs.confirm}>
+          <PasswordInput name="confirm" required autoComplete="new-password" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} />
         </Field>
-        <button className="btn primary lg full block">Criar conta</button>
+        <button className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy}>
+          {busy && <span className="spinner sm" aria-hidden="true" />}
+          Criar conta
+        </button>
         <div className="auth-alt">
           Já tem conta? <Link to="/login">Entrar</Link>
         </div>
@@ -526,30 +676,46 @@ export function InvitePage({ loggedIn }: { loggedIn: boolean }) {
 }
 
 export function ChangePasswordPage({ onDone }: { onDone: () => void }) {
+  const navigate = useNavigate();
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const passwordHint = usePasswordHint();
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!p1) return setError('Digite a nova senha.');
     if (p1 !== p2) return setError('As senhas não conferem.');
+    setBusy(true);
+    setError('');
     try {
       await api.post('users.updateOwnBasicInfo', { data: { newPassword: p1, currentPassword: '' } });
       onDone();
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      setBusy(false);
     }
   };
   return (
     <AuthShell title="Defina uma nova senha" subtitle="O administrador pediu que você troque a sua senha antes de continuar.">
       <form className="form auth-form" onSubmit={submit}>
         {error && <FormError>{error}</FormError>}
-        <Field label="Nova senha">
+        <Field label="Nova senha" hint={passwordHint}>
           <PasswordInput autoFocus autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} />
         </Field>
-        <Field label="Confirmar">
+        <Field label="Confirmar nova senha">
           <PasswordInput autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} />
         </Field>
-        <button className="btn primary lg full block">Salvar</button>
+        <button className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !p1}>
+          {busy && <span className="spinner sm" aria-hidden="true" />}
+          Salvar
+        </button>
+        {/* Conta errada ou computador compartilhado: sair sem trocar a senha, como na tela do 2FA obrigatório. */}
+        <button type="button" className="btn ghost full" onClick={() => void logout().then(() => navigate('/login'))}>
+          <Icon name="logout" />
+          Sair
+        </button>
       </form>
     </AuthShell>
   );

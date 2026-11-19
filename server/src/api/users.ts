@@ -16,6 +16,7 @@ import { assertCanManageUser, assertRoleChange, effectiveRoles, grantContext, wr
 import { recordHistory } from '../services/rbacHistory';
 import {
   actorOf,
+  checkResetToken,
   type Ctx,
   createPersonalToken,
   createUser,
@@ -37,6 +38,7 @@ import {
   resetPasswordWithToken,
   resetAvatar,
   revokeAllSessions,
+  revokePersonalTokens,
   revokeSession,
   sendPasswordSetupEmail,
   setAvatar,
@@ -128,10 +130,11 @@ export function usersRoutes(app: FastifyInstance) {
       await audit({ id: u.id, username: u.username, ip: req.ip }, 'auth.login', { sessionId: s.sessionId, method });
       return { status: 'success', data: { userId: u.id, authToken: s.authToken, me: await meResponse(u.id) } };
     }
-    const user = str(body.user ?? body.username ?? body.email, 'user');
+    // Espaço antes ou depois do usuário (sugestão do teclado do celular, copiar e colar) não faz o login falhar.
+    const user = str(body.user ?? body.username ?? body.email, 'user').trim();
     const password = str(body.password, 'password');
     try {
-      const r = await login({ user, password, code: body.code, device: { userAgent: req.headers['user-agent'], ip: req.ip, deviceId: readDeviceId(req.headers.cookie) } });
+      const r = await login({ user, password, code: body.code == null ? undefined : String(body.code), device: { userAgent: req.headers['user-agent'], ip: req.ip, deviceId: readDeviceId(req.headers.cookie) } });
       reply.header('set-cookie', r.deviceCookie);
       return { status: 'success', data: { userId: r.user.id, authToken: r.authToken, me: await meResponse(r.user.id) } };
     } catch (e) {
@@ -151,8 +154,10 @@ export function usersRoutes(app: FastifyInstance) {
 
   route(app, 'POST', 'users.register', { auth: false }, async (req) => {
     const body = b(req);
+    // Campo vazio ou inválido: registerUser responde com a mensagem do campo, depois de conferir se o cadastro está aberto.
+    const text = (v: unknown) => (typeof v === 'string' ? v : '');
     const row = await registerUser(
-      { username: str(body.username, 'username'), name: normalizeName(body.name), email: str(body.email, 'email'), pass: str(body.pass, 'pass'), secretURL: body.secretURL },
+      { username: text(body.username), name: text(body.name), email: text(body.email), pass: text(body.pass), secretURL: body.secretURL },
       req.ip,
     );
     return { user: mapUser(row) };
@@ -163,6 +168,7 @@ export function usersRoutes(app: FastifyInstance) {
     await requestPasswordReset(str(b(req).email, 'email', { max: 320 }), req.ip);
     return {};
   });
+  route(app, 'POST', 'users.checkResetToken', { auth: false }, async (req) => ({ valid: await checkResetToken(str(b(req).token, 'token', { max: 200 })) }));
   route(app, 'POST', 'users.resetPassword', { auth: false }, async (req) => {
     const body = b(req);
     await resetPasswordWithToken(str(body.token, 'token', { max: 200 }), str(body.password, 'password', { max: 1000 }), req.ip);
@@ -176,7 +182,8 @@ export function usersRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'users.2fa.verifyTotp', {}, async (req, _rep, ctx) => verifyAndEnableTotp(ctx, str(b(req).code, 'code')));
   route(app, 'POST', 'users.2fa.disableTotp', {}, async (req, _rep, ctx) => {
-    await disableTotp(ctx, str(b(req).code, 'code'));
+    const body = b(req);
+    await disableTotp(ctx, str(body.code, 'code'), typeof body.password === 'string' ? body.password : undefined);
     return {};
   });
 
@@ -207,7 +214,7 @@ export function usersRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'sessions.logout.others', {}, async (_req, _rep, ctx) => {
     if (!getSetting('Device_Management_Allow_Logout_All')) throw forbidden();
-    return { removed: await revokeAllSessions(ctx.userId, ctx.sessionId) };
+    return { removed: await revokeAllSessions(ctx.userId, ctx.sessionId, 'session-revoked') };
   });
   route(app, 'GET', 'sessions.list.all', { permissions: ['view-device-management'] }, async (req, _rep, ctx) => {
     const query = q(req);
@@ -228,9 +235,11 @@ export function usersRoutes(app: FastifyInstance) {
   route(app, 'GET', 'users.getPersonalAccessTokens', { permissions: ['create-personal-access-tokens'] }, async (_req, _rep, ctx) => ({
     tokens: await listPersonalTokens(ctx.userId),
   }));
-  route(app, 'POST', 'users.generatePersonalAccessToken', { permissions: ['create-personal-access-tokens'] }, async (req, _rep, ctx) => ({
-    token: await createPersonalToken(ctx, str(b(req).tokenName, 'tokenName', { max: 100 }), !!bool(b(req).bypassTwoFactor)),
-  }));
+  route(app, 'POST', 'users.generatePersonalAccessToken', { permissions: ['create-personal-access-tokens'] }, async (req, _rep, ctx) => {
+    const body = b(req);
+    const confirm = { password: typeof body.password === 'string' ? body.password : undefined, code: typeof body.code === 'string' ? body.code : undefined };
+    return { token: await createPersonalToken(ctx, str(body.tokenName, 'tokenName', { max: 100 }), !!bool(body.bypassTwoFactor), confirm) };
+  });
   route(app, 'POST', 'users.removePersonalAccessToken', {}, async (req, _rep, ctx) => {
     await removePersonalToken(ctx.userId, str(b(req).tokenName, 'tokenName'));
     return {};
@@ -242,7 +251,8 @@ export function usersRoutes(app: FastifyInstance) {
     // "Encerrar as outras sessões" junto com a senha nova (quem troca porque a senha vazou): as outras saem na hora.
     const logoutOthers = !!d.newPassword && bool(d.logoutOthers) === true;
     if (logoutOthers && !getSetting('Device_Management_Allow_Logout_All')) throw forbidden('Encerrar todas as outras sessões está desativado.');
-    // Na troca de senha obrigatória só a senha pode ser alterada.
+    // Na troca de senha obrigatória só a senha pode ser alterada (e vazia não é resposta: antes saía 200 sem mudar nada).
+    if (ctx.setup === 'password' && (typeof d.newPassword !== 'string' || !d.newPassword)) throw badRequest('error-invalid-params', 'Digite a nova senha.');
     const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: typeof d.statusText === 'string' && d.statusText !== '' ? clampStatusText(d.statusText) : (d.statusText ?? undefined) };
     const row = await updateUser(
       ctx,
@@ -568,9 +578,11 @@ export function usersRoutes(app: FastifyInstance) {
     const userId = b(req).userId ?? ctx.userId;
     if (userId !== ctx.userId && !(await hasPermission(ctx.userId, 'logout-other-user'))) throw forbidden();
     if (userId !== ctx.userId) await assertCanManageUser(ctx, userId);
-    const n = await revokeAllSessions(userId);
-    await audit(actorOf(ctx), 'user.logout.all', { userId }, { sessions: n });
-    return { message: `Sessões encerradas: ${n}` };
+    const n = await revokeAllSessions(userId, undefined, userId !== ctx.userId ? 'admin-logout' : undefined);
+    // Encerrar as sessões de outra pessoa (conta invadida, desligamento) também revoga os tokens de acesso dela.
+    const tokens = userId !== ctx.userId ? await revokePersonalTokens(userId) : 0;
+    await audit(actorOf(ctx), 'user.logout.all', { userId }, { sessions: n, tokens });
+    return { message: `Sessões encerradas: ${n}${tokens ? `. Tokens de acesso revogados: ${tokens}` : ''}` };
   });
   // Ativar, desativar e encerrar sessões em lote (a tela seleciona até 500 pessoas): uma chamada só, sem esbarrar no
   // limite de chamadas por minuto. Ficam de fora quem tem cadeado (papéis acima dos seus) e a própria conta.
@@ -600,12 +612,15 @@ export function usersRoutes(app: FastifyInstance) {
   route(app, 'POST', 'users.bulkLogout', { permissions: ['logout-other-user'] }, async (req, _rep, ctx) => {
     const { targets, skipped } = await bulkAccountTargets(ctx, b(req).userIds);
     let sessions = 0;
+    let tokens = 0;
     for (const t of targets) {
-      const n = await revokeAllSessions(t.id);
-      await audit(actorOf(ctx), 'user.logout.all', { userId: t.id }, { sessions: n, bulk: true });
+      const n = await revokeAllSessions(t.id, undefined, 'admin-logout');
+      const k = await revokePersonalTokens(t.id);
+      await audit(actorOf(ctx), 'user.logout.all', { userId: t.id }, { sessions: n, tokens: k, bulk: true });
       sessions += n;
+      tokens += k;
     }
-    return { users: targets.length, sessions, skipped };
+    return { users: targets.length, sessions, tokens, skipped };
   });
   route(app, 'POST', 'users.resetTOTP', { permissions: ['edit-other-user-totp'] }, async (req, _rep, ctx) => {
     const userId = str(b(req).userId, 'userId');
