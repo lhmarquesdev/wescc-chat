@@ -27,6 +27,7 @@ import {
   login,
   logout,
   needs2faSetup,
+  normalizeName,
   registerUser,
   removePersonalToken,
   requestPasswordReset,
@@ -55,6 +56,8 @@ async function meResponse(userId: string) {
     // Criptografia de ponta a ponta: a impressão da chave pública (null sem chaves) e se um administrador redefiniu.
     e2eKeys: await fingerprintOf(userId),
     e2eResetByAdmin: !!u.e2e_reset_at || undefined,
+    // Se a conta tem senha do chat (contas só de SAML/OAuth não têm): a tela pede a senha ou o nome de usuário.
+    hasPassword: !!u.password_hash,
   };
 }
 
@@ -115,7 +118,7 @@ export function usersRoutes(app: FastifyInstance) {
   route(app, 'POST', 'users.register', { auth: false }, async (req) => {
     const body = b(req);
     const row = await registerUser(
-      { username: str(body.username, 'username'), name: str(body.name, 'name'), email: str(body.email, 'email'), pass: str(body.pass, 'pass'), secretURL: body.secretURL },
+      { username: str(body.username, 'username'), name: normalizeName(body.name), email: str(body.email, 'email'), pass: str(body.pass, 'pass'), secretURL: body.secretURL },
       req.ip,
     );
     return { user: mapUser(row) };
@@ -275,7 +278,12 @@ export function usersRoutes(app: FastifyInstance) {
     if (!getSetting('Accounts_AllowDeleteOwnAccount')) throw forbidden('Excluir a própria conta está desativado.');
     const u = await getUserById(ctx.userId);
     const { verifyPassword } = await import('../lib/password');
-    if (u.password_hash && !(await verifyPassword(str(b(req).password, 'password'), u.password_hash))) throw badRequest('error-invalid-password', 'Senha incorreta.');
+    if (u.password_hash) {
+      if (!(await verifyPassword(str(b(req).password, 'password'), u.password_hash))) throw badRequest('error-invalid-password', 'Senha incorreta.');
+    } else if (String(b(req).username ?? '').trim().replace(/^@/, '').toLowerCase() !== u.username.toLowerCase()) {
+      // Conta sem senha do chat (só SAML/OAuth): a pessoa confirma digitando o próprio nome de usuário.
+      throw badRequest('error-invalid-confirmation', 'Digite seu nome de usuário para confirmar.');
+    }
     await deleteUser(ctx, ctx.userId);
     return {};
   });
@@ -394,7 +402,7 @@ export function usersRoutes(app: FastifyInstance) {
     const row = await createUser(
       {
         username: str(body.username, 'username'),
-        name: str(body.name, 'name'),
+        name: normalizeName(body.name),
         email: body.email,
         password: str(body.password, 'password'),
         roles,

@@ -9,7 +9,7 @@ import { mapRoom } from '../services/mappers';
 import { CHANNEL_RE, MENTION_RE, safeUrl } from '../services/messages';
 import { hasPermission } from '../services/permissions';
 import { buildSubscription, getRoom, notifyRoomUpdated, notifySubscription } from '../services/rooms';
-import { revokeAllSessions, sendPasswordSetupEmail } from '../services/users';
+import { RESERVED_USERNAMES, revokeAllSessions, sendPasswordSetupEmail } from '../services/users';
 import { channelImportId } from './importers/csv';
 import { MAX_EMAIL, isEmail } from './importers/csv-util';
 import { iterateStaged, markRecordError, markRecordsSkipped } from './staging';
@@ -42,7 +42,6 @@ const TOKEN_RE = /\u0001([@#])([^|\u0001\u0002]*)(?:\|([^\u0001\u0002]*))?\u0002
 // No CSV o id de um canal é o próprio nome: dois arquivos sem relação nenhuma dão o mesmo id a grupos de mesmo nome.
 const CSV_ROOM_ID = channelImportId('');
 const nameOnlyId = (id: string) => id.startsWith(CSV_ROOM_ID);
-const RESERVED_USERNAMES = new Set(['all', 'here']);
 // Importadores cujos ids não são da origem (e-mail ou nome): só desativam as contas que uma importação deles criou.
 const CREATED_ONLY = new Set(['csv', 'slack-users']);
 // "-", "n/a", vazio ou espaços no lugar do e-mail valem como sem e-mail, e um texto de mais de 254 caracteres também.

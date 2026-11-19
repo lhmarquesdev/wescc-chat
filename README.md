@@ -1087,6 +1087,10 @@ como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os teste
   obrigatório também precisa configurar o próprio 2FA.
 - Tentativas de login falhas (inclusive código 2FA errado) bloqueiam a conta e o IP por alguns minutos, em todas as
   instâncias: Configurações › Contas › Sessão.
+- Trocar o próprio e-mail em Minha conta pede a senha atual, respeita os domínios permitidos e manda um aviso para o
+  endereço antigo. Contas LDAP e contas que só entram por SAML/OAuth não trocam a senha nem o e-mail por ali (nas LDAP,
+  nome e nome de usuário também vêm do diretório); para excluir a própria conta sem senha, a pessoa digita o nome de
+  usuário. `all` e `here` são nomes de usuário reservados.
 - A API só aceita chamadas de outros sites com CORS ligado (Configurações › Segurança › CORS). O cookie de sessão vale
   apenas para leituras (imagens e downloads) e para o WebSocket da própria página.
 - Avatares exigem login por padrão (`Accounts_AvatarBlockUnauthenticatedAccess`); avatares de salas privadas só para
