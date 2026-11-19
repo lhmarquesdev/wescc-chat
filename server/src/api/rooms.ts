@@ -121,7 +121,7 @@ export function roomsRoutes(app: FastifyInstance) {
       const p = await getRoom(room.prid);
       if (p) out.parent = { _id: p.id, t: p.t, name: p.name, fname: p.fname };
     }
-    out.joinCodeRequired = !!room.join_code;
+    out.joinCodeRequired = !!room.join_code && !(await hasPermission(ctx.userId, 'join-without-join-code'));
     // Calculado para quem pergunta: a web desativa o compositor e as chamadas antes do clique.
     // A discussão criada numa DM segue a política da DM para quem participa dela.
     const direct = room.t === 'd' ? room : await directParentFor(ctx, room);

@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { admin, api, login, newUser, startServer, stopServer, type Auth } from './helpers';
 
-// Diretório (GET directory): busca sem acento, % e _ como letras e canais só com view-c-room. users.autocomplete
-// também ignora acentos.
+// Diretório (GET directory): busca sem acento, % e _ como letras, canais só com view-c-room, código de acesso e
+// canais arquivados marcados. users.autocomplete também ignora acentos.
 let A: Auth;
 beforeAll(async () => {
   await startServer();
@@ -64,7 +64,7 @@ describe('diretório: acentos e curingas', () => {
   });
 });
 
-describe('diretório: permissão', () => {
+describe('diretório: permissão e entrada', () => {
   it('sem view-c-room não lista canais nem times públicos (só os em que a pessoa está)', async () => {
     const t = rand();
     const pub = await channel(`${t}-publico`);
@@ -81,5 +81,24 @@ describe('diretório: permissão', () => {
     expect(names(await dir(u, 'channels', t)).sort()).toEqual([`${t}-meu`, `${t}-publico`, `${t}-time`]);
     expect(names(await dir(u, 'teams', t))).toEqual([`${t}-time`]);
     expect(pub).toBeTruthy();
+  });
+
+  it('canal com código vem com joinCodeRequired (não para quem entra sem código) e o arquivado com archived', async () => {
+    const t = rand();
+    const coded = await channel(`${t}-codigo`);
+    expect((await api('POST', 'rooms.saveRoomSettings', { rid: coded, joinCode: 'abc123' }, A)).success).toBe(true);
+    const arch = await channel(`${t}-arquivado`);
+    expect((await api('POST', 'channels.archive', { roomId: arch }, A)).success).toBe(true);
+    const u = await newUser(A);
+    const rows = (await dir(u, 'channels', t)).result;
+    expect(rows.find((r: any) => r._id === coded)).toMatchObject({ joinCodeRequired: true, archived: false });
+    expect(rows.find((r: any) => r._id === arch)).toMatchObject({ joinCodeRequired: false, archived: true });
+    expect((await api('GET', 'rooms.info', { roomId: coded }, u)).room.joinCodeRequired).toBe(true);
+    // O administrador (join-without-join-code) entra sem código.
+    expect((await dir(A, 'channels', t)).result.find((r: any) => r._id === coded).joinCodeRequired).toBe(false);
+    expect((await api('GET', 'rooms.info', { roomId: coded }, A)).room.joinCodeRequired).toBe(false);
+    // Entrar sem código continua recusado; com o código, entra.
+    expect((await api('POST', 'channels.join', { roomId: coded }, u)).errorType).toBe('error-code-invalid');
+    expect((await api('POST', 'channels.join', { roomId: coded, joinCode: 'abc123' }, u)).success).toBe(true);
   });
 });

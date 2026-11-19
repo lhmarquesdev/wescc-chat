@@ -816,7 +816,9 @@ export async function directory(ctx: Ctx, opts: { type: 'channels' | 'users' | '
      ORDER BY r.featured DESC, r.users_count DESC, r.name LIMIT ${count} OFFSET ${offset}`,
     [text, ctx.userId],
   );
-  return { total: Number(rows[0]?.total ?? 0), result: rows.map((r) => ({ ...mapRoom(r), teamName: r.team_name })) };
+  // Canal com código: a web pede o código antes de entrar (quem tem join-without-join-code entra sem ele).
+  const bypass = rows.some((r) => r.join_code) && (await hasPermission(ctx.userId, 'join-without-join-code'));
+  return { total: Number(rows[0]?.total ?? 0), result: rows.map((r) => ({ ...mapRoom(r), teamName: r.team_name, joinCodeRequired: !!r.join_code && !bypass })) };
 }
 
 export async function adminListRooms(opts: { filter?: string; types?: RoomType[]; offset?: number; count?: number }) {

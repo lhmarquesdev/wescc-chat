@@ -1744,6 +1744,12 @@ button.side-item {
 .dir-name + .pill {
   flex-shrink: 0;
 }
+/* Canal que pede código de acesso: a chave ao lado do nome. */
+.dir-code {
+  flex-shrink: 0;
+  margin-left: var(--space-1-5);
+  color: hsl(var(--muted-foreground));
+}
 .dir-team {
   display: block;
   max-width: 160px;
