@@ -267,3 +267,40 @@ describe('status personalizados: editar e excluir', () => {
     expect(mine.find((e: any) => e.action === 'user-status.deleted').data).toEqual({ statusType: 'busy', users: 0 });
   });
 });
+
+describe('status: nome invisível e mensagem', () => {
+  it('nome só com caractere invisível é recusado; invisível no meio sai (e não burla o repetido)', async () => {
+    const err = async (p: Promise<any>) => {
+      const r = await p;
+      return [r.status, r.errorType, r.error];
+    };
+    const letters = [400, 'error-invalid-name', 'Use letras ou números no nome.'];
+    for (const name of ['​', '​‍⁠', '﻿​', '...', '🍔']) expect(await err(create(A, name, 'busy')), JSON.stringify(name)).toEqual(letters);
+    expect(await err(create(A, 'Em​ pausa', 'away'))).toEqual([400, 'error-status-name-exists', 'Já existe um status com esse nome.']);
+    const ok = await create(A, 'Plan​tão⁠ noturno', 'busy');
+    try {
+      expect(ok.customUserStatus.name).toBe('Plantão noturno');
+    } finally {
+      await remove(A, ok.customUserStatus._id);
+    }
+  });
+
+  it('mensagem cortada em 120 sem partir emoji; o que não é texto é recusado', async () => {
+    const u = await newUser(A);
+    const text = async () => (await pool.query('SELECT status_text FROM users WHERE id = $1', [u.userId])).rows[0].status_text as string;
+    expect((await pick(u, { message: `${'a'.repeat(119)}😀` })).success).toBe(true);
+    expect(await text()).toBe('a'.repeat(119));
+    expect((await pick(u, { message: `${'a'.repeat(118)}😀b` })).success).toBe(true);
+    expect(await text()).toBe(`${'a'.repeat(118)}😀`);
+    for (const message of [{ a: 1 }, ['x'], 42, true]) {
+      const r = await pick(u, { message });
+      expect([r.status, r.error], JSON.stringify(message)).toEqual([400, 'O parâmetro "message" deve ser texto.']);
+    }
+    expect(await text()).toBe(`${'a'.repeat(118)}😀`);
+    // Vazio limpa; o perfil (updateOwnBasicInfo) corta do mesmo jeito.
+    expect((await pick(u, { message: '' })).success).toBe(true);
+    expect(await text()).toBe('');
+    expect((await api('POST', 'users.updateOwnBasicInfo', { data: { statusText: `${'b'.repeat(119)}😀` } }, u)).success).toBe(true);
+    expect(await text()).toBe('b'.repeat(119));
+  });
+});

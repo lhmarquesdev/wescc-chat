@@ -10,6 +10,7 @@ import { getUserRoles, hasPermission, permissionsForRoles, roleInfos } from '../
 import { getSetting } from '../services/settings';
 import { userLock } from '@shared/rbac';
 import { escapeLike } from '@shared/search';
+import { clampStatusText } from '@shared/status';
 import { bus } from '../realtime/bus';
 import { assertCanManageUser, assertRoleChange, effectiveRoles, grantContext, writeUserRoles } from '../services/rbac';
 import { recordHistory } from '../services/rbacHistory';
@@ -202,7 +203,7 @@ export function usersRoutes(app: FastifyInstance) {
   route(app, 'POST', 'users.updateOwnBasicInfo', {}, async (req, _rep, ctx) => {
     const d = b(req).data ?? {};
     // Na troca de senha obrigatória só a senha pode ser alterada.
-    const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: d.statusText };
+    const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: typeof d.statusText === 'string' ? clampStatusText(d.statusText) : d.statusText };
     const row = await updateUser(
       ctx,
       ctx.userId,
@@ -225,7 +226,8 @@ export function usersRoutes(app: FastifyInstance) {
       if (!other) throw notFound('error-invalid-user', 'Usuário não encontrado.');
       await assertCanManageUser(ctx, target);
     }
-    const message = body.message === undefined || body.message === null ? undefined : String(body.message);
+    // Texto (vazio limpa a mensagem); outro tipo é recusado em vez de virar "[object Object]".
+    const message = body.message === undefined || body.message === null ? undefined : body.message === '' ? '' : str(body.message, 'message');
     // Status personalizado: vale o tipo dele e ganha de status. Sem statusId, um status de base limpa o personalizado.
     let status: string | undefined = body.status;
     let customId: string | null = null;

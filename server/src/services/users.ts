@@ -1,6 +1,7 @@
 import { normalizeHighlights } from '@shared/highlights';
 import type { LogoutReason, UserPreferences, UserStatus } from '@shared/index';
 import { LANG_RE, normalizeLang } from '@shared/translate';
+import { clampStatusText } from '@shared/status';
 import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound, unauthorized } from '../lib/errors';
 import { newId, randomToken, sha256 } from '../lib/ids';
@@ -610,7 +611,7 @@ export async function setStatus(userId: string, status: UserStatus | undefined, 
     sets.push(`status = CASE WHEN EXISTS (SELECT 1 FROM presence_connections WHERE user_id = $1) THEN $${params.length} ELSE 'offline' END`);
     sets.push(`status_custom = $${params.push(customId)}`);
   }
-  if (statusText !== undefined) sets.push(`status_text = $${params.push(statusText.slice(0, 120))}`);
+  if (statusText !== undefined) sets.push(`status_text = $${params.push(clampStatusText(statusText))}`);
   if (!sets.length) return;
   const row = await one(`UPDATE users SET ${sets.join(', ')} WHERE id = $1 RETURNING id, username, status, status_text, status_default, status_custom`, params);
   if (!row) return;
