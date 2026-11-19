@@ -155,7 +155,7 @@ export function Modal({
     if (phone && !variant) setHasForm(!!ref.current?.querySelector(`.modal-body ${TEXT_FIELD}`));
   }, [phone, variant]);
   const kind: ModalVariant = phone ? (variant && variant !== 'dialog' ? variant : wide || hasForm ? 'fullscreen' : 'sheet') : 'dialog';
-  useEscape(true, onClose);
+  useEscape(true, onClose, true);
   useFocusTrap(ref, true, FIRST_FIELD);
   useScrollLock(true);
   useSheetDrag(ref, onClose, kind === 'sheet');
