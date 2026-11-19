@@ -15,7 +15,8 @@ export interface ToastItem {
 
 // e2eKeys: impressão da chave pública da criptografia de ponta a ponta (null sem chaves). e2eResetByAdmin: um
 // administrador redefiniu a criptografia e a pessoa ainda não criou a senha nova.
-export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean; e2eKeys?: string | null; e2eResetByAdmin?: boolean };
+// hasPassword: a conta tem senha do chat (contas só de SAML/OAuth não têm).
+export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean; e2eKeys?: string | null; e2eResetByAdmin?: boolean; hasPassword?: boolean };
 
 interface RoomMessages {
   list: Message[];

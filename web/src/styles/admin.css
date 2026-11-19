@@ -424,6 +424,7 @@ h4 .head-count {
   font-size: var(--fs-16);
   line-height: var(--lh-16);
   font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
 }
 .profile-who .row-actions {
   margin-top: var(--space-2);

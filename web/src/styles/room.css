@@ -59,10 +59,12 @@
   margin-bottom: 10px;
 }
 .room-start-title {
+  max-width: 100%;
   font-size: var(--fs-16);
   line-height: var(--lh-16);
   font-weight: var(--fw-semibold);
   color: hsl(var(--foreground));
+  overflow-wrap: anywhere;
 }
 .room-start-topic {
   max-width: 640px;

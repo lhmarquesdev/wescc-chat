@@ -5,7 +5,7 @@ import { normalizeHighlights } from '@shared/highlights';
 import { formatDateTime } from '../lib/format';
 import { disablePushHere, enablePushHere, pushEnabledHere, pushSupported, syncPushSubscription } from '../lib/push';
 import { endSession, startSession } from '../lib/session';
-import { useSetting, useStore } from '../lib/store';
+import { useSetting, useStore, type Me } from '../lib/store';
 import { useLanguages, useTranslateAllowed } from '../lib/translate';
 import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
 import { normalizeLang } from '@shared/translate';
@@ -114,26 +114,49 @@ export function AccountPage() {
   );
 }
 
+// Limites do servidor (services/users.ts).
+const NAME_MAX = 100;
+const BIO_MAX = 500;
+const AVATAR_MAX = 5 * 1024 * 1024;
+const profileForm = (me: Me) => ({ name: me.name, username: me.username, email: me.email ?? '', bio: me.bio ?? '', statusText: me.statusText ?? '' });
+
 function Profile() {
   const me = useStore((s) => s.me)!;
   const allowUsername = useSetting<boolean>('Accounts_AllowUsernameChange');
   const allowEmail = useSetting<boolean>('Accounts_AllowEmailChange');
   const allowAvatar = useSetting<boolean>('Accounts_AllowUserAvatarChange');
   const allowDelete = useSetting<boolean>('Accounts_AllowDeleteOwnAccount');
-  const [f, setF] = useState({ name: me.name, username: me.username, email: me.email ?? '', bio: me.bio ?? '', statusText: me.statusText ?? '' });
+  // base: o que o formulário mostrou ao abrir (ou depois de salvar). Só vai para o servidor o que a pessoa mudou: um
+  // campo vazio ou travado que ela nem tocou (o e-mail de quem não tem e-mail, por exemplo) não impede salvar o resto.
+  const [base, setBase] = useState(() => profileForm(me));
+  const [f, setF] = useState(base);
+  const [currentPassword, setCurrentPassword] = useState('');
   const [deleting, setDeleting] = useState(false);
   const file = useRef<HTMLInputElement>(null);
-  const dirty = f.name !== me.name || f.username !== me.username || f.email !== (me.email ?? '') || f.bio !== (me.bio ?? '') || f.statusText !== (me.statusText ?? '');
+  const changed = (Object.keys(f) as (keyof typeof f)[]).filter((k) => f[k] !== base[k]);
+  const dirty = changed.length > 0;
+  // O e-mail recebe o link de "Esqueci minha senha": trocá-lo pede a senha atual.
+  const emailChanged = f.email.trim() !== base.email.trim();
+  const nameMissing = changed.includes('name') && !/[\p{L}\p{N}]/u.test(f.name);
   const save = async () => {
     try {
-      const r = await api.post('users.updateOwnBasicInfo', { data: f });
-      useStore.getState().setMe({ ...me, ...r.user });
+      const data: Record<string, string> = Object.fromEntries(changed.map((k) => [k, f[k]]));
+      if (emailChanged) data.currentPassword = currentPassword;
+      const r = await api.post('users.updateOwnBasicInfo', { data });
+      // Campo esvaziado (Sobre, mensagem de status) não vem na resposta: fica vazio, não com o valor antigo.
+      const cur = useStore.getState().me ?? me;
+      const next: Me = { ...cur, ...r.user, bio: r.user.bio, statusText: r.user.statusText };
+      useStore.getState().setMe(next);
+      setBase(profileForm(next));
+      setF(profileForm(next));
+      setCurrentPassword('');
       ok('Perfil atualizado.');
     } catch (e) {
       fail(e);
     }
   };
   const upload = async (picked: File) => {
+    if (picked.size > AVATAR_MAX) return fail(new Error('A foto pode ter até 5 MB (PNG, JPEG, GIF ou WebP).'));
     const fd = new FormData();
     fd.append('image', picked);
     await api
@@ -142,6 +165,8 @@ function Profile() {
       .catch(fail);
   };
   const ldap = me.authSource === 'ldap';
+  // Conta sem senha do chat (só SAML/OAuth): o e-mail vem do provedor.
+  const sso = !ldap && me.hasPassword === false;
   return (
     <>
       <PageHead title="Perfil" />
@@ -177,27 +202,38 @@ function Profile() {
             <span>Sua conta é sincronizada com o diretório da empresa (LDAP); alguns campos são mantidos por lá.</span>
           </div>
         )}
+        {sso && (
+          <div className="callout info">
+            <Icon name="security" />
+            <span>Você entra pelo login da empresa; o e-mail e a senha são mantidos por lá.</span>
+          </div>
+        )}
         <div className="card">
           <div className="form">
             <div className="two-col">
-              <Field label="Nome">
-                <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} disabled={ldap} />
+              <Field label="Nome" required error={nameMissing ? 'Informe seu nome.' : undefined}>
+                <input value={f.name} maxLength={NAME_MAX} required onChange={(e) => setF({ ...f, name: e.target.value })} disabled={ldap} />
               </Field>
               <Field label="Nome de usuário">
                 <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} disabled={!allowUsername || ldap} />
               </Field>
             </div>
             <Field label="E-mail">
-              <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} disabled={!allowEmail || ldap} />
+              <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} disabled={!allowEmail || ldap || sso} />
             </Field>
+            {emailChanged && (
+              <Field label="Senha atual" hint="Para trocar o e-mail, confirme com a sua senha. O endereço antigo recebe um aviso.">
+                <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" />
+              </Field>
+            )}
             <Field label="Mensagem de status" hint="Aparece ao lado do seu nome, até 120 caracteres.">
               <input value={f.statusText} maxLength={120} onChange={(e) => setF({ ...f, statusText: e.target.value })} />
             </Field>
-            <Field label="Sobre">
-              <textarea rows={3} value={f.bio} onChange={(e) => setF({ ...f, bio: e.target.value })} />
+            <Field label="Sobre" hint={`${f.bio.length}/${BIO_MAX}`}>
+              <textarea rows={3} value={f.bio} maxLength={BIO_MAX} onChange={(e) => setF({ ...f, bio: e.target.value })} />
             </Field>
             <div className="form-actions">
-              <button className="btn primary" onClick={save} disabled={!dirty}>
+              <button className="btn primary" onClick={save} disabled={!dirty || nameMissing || (emailChanged && !currentPassword)}>
                 Salvar
               </button>
             </div>
@@ -221,14 +257,16 @@ function Profile() {
   );
 }
 
-// No lugar do prompt(): a senha confirma a exclusão.
+// No lugar do prompt(): a senha confirma a exclusão. Conta sem senha do chat (só SAML/OAuth): o nome de usuário.
 function DeleteAccount({ onClose }: { onClose: () => void }) {
+  const me = useStore((s) => s.me)!;
+  const byUsername = me.hasPassword === false;
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const go = async () => {
     setBusy(true);
     try {
-      await api.post('users.deleteOwnAccount', { password });
+      await api.post('users.deleteOwnAccount', byUsername ? { username: password } : { password });
       await endSession();
       location.href = '/login';
     } catch (e) {
@@ -240,7 +278,7 @@ function DeleteAccount({ onClose }: { onClose: () => void }) {
     <Modal
       size="sm"
       title="Excluir sua conta?"
-      description="Não dá para desfazer. Digite sua senha para confirmar."
+      description={byUsername ? `Não dá para desfazer. Digite seu nome de usuário (${me.username}) para confirmar.` : 'Não dá para desfazer. Digite sua senha para confirmar.'}
       onClose={onClose}
       footer={
         <>
@@ -253,8 +291,17 @@ function DeleteAccount({ onClose }: { onClose: () => void }) {
         </>
       }
     >
-      <Field label="Senha">
-        <input type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" onKeyDown={(e) => e.key === 'Enter' && password && go()} />
+      <Field label={byUsername ? 'Nome de usuário' : 'Senha'}>
+        <input
+          type={byUsername ? 'text' : 'password'}
+          autoFocus
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete={byUsername ? 'off' : 'current-password'}
+          autoCapitalize="off"
+          spellCheck={false}
+          onKeyDown={(e) => e.key === 'Enter' && password && go()}
+        />
       </Field>
     </Modal>
   );
@@ -589,6 +636,8 @@ function Security() {
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
   const mismatch = !!p2 && p1 !== p2;
+  // LDAP e contas só de SAML/OAuth entram pelo provedor: a senha não é do chat.
+  const external = me.authSource === 'ldap' || (me.authSource !== 'local' && me.hasPassword === false);
   const changePw = async () => {
     if (p1 !== p2) return fail(new Error('As senhas não conferem.'));
     try {
@@ -605,7 +654,13 @@ function Security() {
     <>
       <PageHead title="Segurança" />
       <div className="account-col">
-        {allowPassword && me.authSource !== 'ldap' && (
+        {allowPassword && external && (
+          <div className="callout info">
+            <Icon name="security" />
+            <span>Você entra pelo login da empresa ({me.authSource === 'ldap' ? 'Active Directory' : 'SSO'}); a senha é trocada por lá.</span>
+          </div>
+        )}
+        {allowPassword && !external && (
           <div className="card">
             <div className="card-head">
               <div>
