@@ -84,6 +84,9 @@ export function FilesPage() {
   const allowed = usePermission(['view-files', 'manage-all-files']);
   const usable = enabled && allowed;
   const trash = location.pathname === '/files/trash';
+  // Link de um arquivo (Copiar link do arquivo): /files/f/<pasta>?file=<arquivo> abre a pasta com ele selecionado.
+  const [params, setParams] = useSearchParams();
+  const fileParam = params.get('file');
   const [view, setViewState] = useState<ViewMode>(readView);
   const [search, setSearch] = useState('');
   const [home, setHome] = useState<Awaited<ReturnType<typeof filesApi.home>> | null>(null);
@@ -140,6 +143,20 @@ export function FilesPage() {
       alive = false;
     };
   }, [folderId, tick, usable]);
+
+  useEffect(() => {
+    if (!fileParam || !data || data.folder._id !== folderId) return;
+    const hit = data.files.find((f) => f._id === fileParam);
+    if (hit) setSelected({ kind: 'file', file: hit });
+    else toast('Esse arquivo não está mais nesta pasta: ele pode ter sido movido, renomeado ou mandado para a lixeira.', 'warning');
+    setParams(
+      (p) => {
+        p.delete('file');
+        return p;
+      },
+      { replace: true },
+    );
+  }, [fileParam, data, folderId, setParams, toast]);
 
   useEffect(() => setSelected(null), [folderId, trash]);
   useEffect(() => setNavOpen(false), [location.pathname]);
@@ -1401,10 +1418,20 @@ function useItemActions(opts: {
             type="button"
             onClick={() => {
               close();
-              void navigator.clipboard?.writeText(`${location.origin}/files/f/${f.folderId}`).then(() => toast('Link da pasta copiado.', 'success'));
+              void navigator.clipboard?.writeText(`${location.origin}/files/f/${f.folderId}?file=${f._id}`).then(() => toast('Link do arquivo copiado. Quem tem acesso à pasta abre direto nele.', 'success'));
             }}
           >
             <Icon name="copy-link" />
+            Copiar link do arquivo
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              void navigator.clipboard?.writeText(`${location.origin}/files/f/${f.folderId}`).then(() => toast('Link da pasta copiado.', 'success'));
+            }}
+          >
+            <Icon name="files-folder" />
             Copiar link da pasta
           </button>
           {level >= 2 && setDialog && (
