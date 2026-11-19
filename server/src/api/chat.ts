@@ -156,7 +156,7 @@ export function chatRoutes(app: FastifyInstance) {
   }
   route(app, 'GET', 'chat.search', {}, async (req, _rep, ctx) => {
     const p = paging(q(req));
-    const r = await searchMessages(ctx, { rid: q(req).roomId || undefined, searchText: str(q(req).searchText, 'searchText'), ...p });
+    const r = await searchMessages(ctx, { rid: q(req).roomId || undefined, searchText: str(q(req).searchText, 'searchText'), tz: q(req).tz || undefined, ...p });
     return { ...r, count: r.messages.length, offset: p.offset };
   });
   route(app, 'GET', 'chat.getMessageReadReceipts', {}, async (req, _rep, ctx) => {

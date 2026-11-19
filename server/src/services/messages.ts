@@ -18,6 +18,7 @@ import { getUserRoles, hasPermission, restrictedRoleIds, rolesHavePermission } f
 import { canAccessRoom, getRoom, getSubscriptionRow, loadRoomForUser, notifyRoomUpdated } from './rooms';
 import { getSetting } from './settings';
 import { checkE2eInput, cleanMentionNames, E2E_ERR, e2eOn } from './e2e';
+import { EXPORT_TZ } from './exportRender';
 import { recordActivity } from './stats';
 import { actorOf, type Ctx } from './users';
 import { emit } from './hooks';
@@ -817,22 +818,72 @@ export async function listByFlag(ctx: Ctx, rid: string, flag: 'pinned' | 'starre
   return { total: Number(rows[0]?.total ?? 0), messages: rows.map(withExtra) };
 }
 
-// Busca com operadores: from:@user, has:file|link|star|pin, is:pinned|starred|thread, before:AAAA-MM-DD, after:AAAA-MM-DD, in:#canal
-export async function searchMessages(ctx: Ctx, opts: { rid?: string; searchText: string; offset?: number; count?: number }) {
+// Fuso dos filtros de data: o do navegador de quem busca (o mesmo das horas que a pessoa vê); sem ele ou inválido, o
+// do servidor (o das exportações).
+function searchZone(tz?: string) {
+  for (const z of [tz, EXPORT_TZ]) {
+    if (!z) continue;
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: z });
+      return z;
+    } catch {
+      // fuso desconhecido: tenta o próximo
+    }
+  }
+  return 'UTC';
+}
+
+// Dia de um filtro em AAAA-MM-DD ou DD/MM/AAAA; null se o dia não existe (30 de fevereiro, mês 13).
+export function parseSearchDay(v: string): [number, number, number] | null {
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v);
+  let y: number, mo: number, d: number;
+  if (m) [y, mo, d] = [+m[1], +m[2], +m[3]];
+  else if ((m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v))) [d, mo, y] = [+m[1], +m[2], +m[3]];
+  else return null;
+  const t = new Date(Date.UTC(y, mo - 1, d));
+  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) return null;
+  return [y, mo, d];
+}
+
+// Instante em que o dia começa no fuso (meia-noite local). O dia seguinte é d + 1 (Date.UTC vira o mês sozinho).
+export function dayStartIn(tz: string, y: number, mo: number, d: number): Date {
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+  const offset = (t: number) => {
+    const p = Object.fromEntries(fmt.formatToParts(t).map((x) => [x.type, Number(x.value)]));
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - t;
+  };
+  const wall = Date.UTC(y, mo - 1, d);
+  // Duas voltas: o deslocamento na meia-noite pode ser outro que o da primeira estimativa (horário de verão).
+  return new Date(wall - offset(wall - offset(wall)));
+}
+
+// Busca com operadores: from:@user, has:file|link|star|pin, is:pinned|starred|thread, before:/after:/on: com
+// AAAA-MM-DD ou DD/MM/AAAA (no fuso tz), in:#canal. O texto acha também sem acento e no nome e na legenda dos arquivos.
+export async function searchMessages(ctx: Ctx, opts: { rid?: string; searchText: string; offset?: number; count?: number; tz?: string }) {
   let text = opts.searchText.trim();
   const params: unknown[] = [];
   const w: string[] = ['m.t IS NULL'];
-  const take = (re: RegExp, fn: (v: string) => void) => {
-    text = text.replace(re, (_all, v) => {
-      fn(v);
+  const take = (re: RegExp, fn: (...v: string[]) => void) => {
+    text = text.replace(re, (_all, ...v) => {
+      fn(...v);
       return ' ';
     });
   };
+  const tz = searchZone(opts.tz);
+  // Começo do dia (shift = 1: do dia seguinte) como parâmetro; data que não existe é recusada com o formato certo.
+  const dayParam = (op: string, v: string, shift = 0) => {
+    const day = parseSearchDay(v);
+    if (!day) throw badRequest('error-invalid-date', `Data inválida em ${op}:${v}. Use AAAA-MM-DD ou DD/MM/AAAA.`);
+    return `$${params.push(dayStartIn(tz, day[0], day[1], day[2] + shift).toISOString())}::timestamptz`;
+  };
   take(/\bfrom:@?([0-9a-zA-Z._-]+)/gi, (v) => w.push(`lower(m.username) = lower($${params.push(v)})`));
   take(/\bin:#?([0-9a-zA-ZÀ-ſ._-]+)/gi, (v) => w.push(`m.room_id IN (SELECT id FROM rooms WHERE lower(name) = lower($${params.push(v)}))`));
-  take(/\bbefore:(\d{4}-\d{2}-\d{2})/gi, (v) => w.push(`m.created_at < $${params.push(v)}::date`));
-  take(/\bafter:(\d{4}-\d{2}-\d{2})/gi, (v) => w.push(`m.created_at >= ($${params.push(v)}::date + 1)`));
-  take(/\bon:(\d{4}-\d{2}-\d{2})/gi, (v) => w.push(`m.created_at::date = $${params.push(v)}::date`));
+  take(/\b(before|after|on):(\d[\d/.-]*)/gi, (op, v) => {
+    const k = op.toLowerCase();
+    if (k === 'before') w.push(`m.created_at < ${dayParam(k, v)}`);
+    if (k === 'after') w.push(`m.created_at >= ${dayParam(k, v, 1)}`);
+    if (k === 'on') w.push(`m.created_at >= ${dayParam(k, v)} AND m.created_at < ${dayParam(k, v, 1)}`);
+  });
   take(/\b(?:has|is):(file|link|star|starred|pin|pinned|thread|mention)\b/gi, (v) => {
     const k = v.toLowerCase();
     if (k === 'file') w.push(`jsonb_array_length(m.files) > 0`);
@@ -861,8 +912,11 @@ export async function searchMessages(ctx: Ctx, opts: { rid?: string; searchText:
         .map((t) => t.replace(/[^\p{L}\p{N}_-]/gu, ''))
         .filter(Boolean);
       if (terms.length) {
+        // Os dois lados dobrados (wescc_fold): o índice guarda o texto sem acento, com os arquivos e as legendas.
         const tsq = terms.map((t) => `${t}:*`).join(' & ');
-        w.push(`(m.search @@ to_tsquery('simple', $${params.push(tsq)}) OR m.msg ILIKE $${params.push(`%${text}%`)})`);
+        w.push(
+          `(m.search @@ to_tsquery('simple', wescc_fold($${params.push(tsq)})) OR m.search_text LIKE wescc_fold($${params.push(`%${text}%`)}))`,
+        );
       }
     }
   }

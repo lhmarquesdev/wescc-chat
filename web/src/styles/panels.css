@@ -556,6 +556,11 @@
   line-height: var(--lh-12);
   color: hsl(var(--muted-foreground));
 }
+/* Busca com mais resultados do que a página: o resto vem pelo botão no fim da lista. */
+.results-more {
+  width: 100%;
+  margin-top: var(--space-2);
+}
 ::highlight(search-hit) {
   background-color: hsl(var(--st-amber-solid) / 0.35);
   color: hsl(var(--foreground));
