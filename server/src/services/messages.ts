@@ -744,13 +744,18 @@ export async function react(ctx: Ctx, msgId: string, emoji: string, shouldReact?
   const has = users.includes(ctx.username);
   const add = shouldReact ?? !has;
   if (add === has) return withExtra(m);
+  // Reagir é participar, como enviar: quem só visualiza um canal (sem entrar) precisa entrar antes. Tirar a própria
+  // reação continua valendo depois de sair.
+  if (add && !(await getSubscriptionRow(m.room_id, ctx.userId))) throw forbidden('Você precisa entrar na sala para reagir.');
   // Reação nova só com emoji de verdade (da lista ou personalizado), nunca texto livre: :qualquer_coisa: aparecia como
   // texto embaixo da mensagem. Numa reação que já existe (importada, emoji personalizado que saiu) a pessoa ainda entra.
   if (add && !users.length && !(await isKnownEmoji(key))) throw badRequest('error-invalid-emoji', 'Escolha um emoji da lista para reagir.');
-  if (add) reactions[key] = { usernames: [...users, ctx.username] };
+  // ts: hora da primeira reação com o emoji. O jsonb guarda as chaves em outra ordem (:+1: antes de :tada:), e as
+  // reações trocavam de lugar na tela quando alguém reagia; a web ordena por ela.
+  if (add) reactions[key] = { ...reactions[key], usernames: [...users, ctx.username], ts: reactions[key]?.ts ?? new Date().toISOString() };
   else {
     const rest = users.filter((u) => u !== ctx.username);
-    if (rest.length) reactions[key] = { usernames: rest };
+    if (rest.length) reactions[key] = { ...reactions[key], usernames: rest };
     else delete reactions[key];
   }
   const row = await one('UPDATE messages SET reactions = $2, updated_at = now() WHERE id = $1 RETURNING *', [m.id, JSON.stringify(reactions)]);

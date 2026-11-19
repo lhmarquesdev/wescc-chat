@@ -910,8 +910,9 @@ texto. Por isso a proteção depende de o servidor do chat ser o original e de o
   avisos, arquivada, Operação); os destinos que não aceitam já aparecem desativados.
 - **Comandos de barra**: `/help` abre a lista dos comandos com o que cada um faz; um comando que não existe (por
   exemplo `/leav`) não vira mensagem: o chat avisa, sugere o mais parecido e oferece “Enviar como texto”. Reações só
-  com emojis da lista (os padrão e os personalizados da Administração). A descrição de um arquivo é o texto da
-  mensagem: aceita menções e formatação, e “Editar” muda essa descrição.
+  com emojis da lista (os padrão e os personalizados da Administração), na ordem em que apareceram, e só de quem está
+  na sala: quem só visualiza um canal público entra nele para reagir, citar ou responder. A descrição de um arquivo é o
+  texto da mensagem: aceita menções e formatação, e “Editar” muda essa descrição.
 - **Enquetes** (botão + › Criar enquete, `create-poll`: Administrador, Usuário, Dono, Moderador e Publicador): 2 a 10
   opções, com escolha múltipla, voto anônimo (ninguém vê quem votou, nem quem criou) e prazo opcional (de 5 minutos a
   90 dias). Votar não depende da permissão; encerrar antes do prazo, só quem criou ou um moderador da sala.

@@ -8,7 +8,7 @@ import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 import { listSettings } from '../src/services/settings';
 import { EMOJI as WEB_EMOJI, searchEmoji } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
-import { authorName, continuesGroup, editableKind, editTextOf, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageHref, messageLink, pastTimeLimit, pollMeta, pollShares, unknownSlashCommand } from '../../web/src/lib/messageRules';
+import { authorName, continuesGroup, reactionEntries, reactionTitle, editableKind, editTextOf, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageHref, messageLink, pastTimeLimit, pollMeta, pollShares, unknownSlashCommand } from '../../web/src/lib/messageRules';
 import { EMAIL_SRC, ITALIC_SRC, URL_SRC } from '@shared/markdownTokens';
 import { fromLocalInput, reminderPresets, schedulePresets, toLocalInput, whenText } from '../../web/src/lib/messageTimes';
 import { AHEAD_ERROR, aheadError, POLL_ERRORS, pollInputError, type MessageForward, type MessagePoll } from '@shared/messages';
@@ -131,6 +131,24 @@ describe('busca de emoji (seletor e atalho ":" do compositor)', () => {
     expect(searchEmoji('heart').length).toBe(10);
     expect(searchEmoji('heart', Infinity).length).toBeGreaterThan(10);
     expect(searchEmoji('  ')).toEqual([]);
+  });
+});
+
+describe('reações (ordem e dica)', () => {
+  it('na ordem da primeira de cada emoji; as antigas, sem hora, antes e como vieram', () => {
+    const r = { ':+1:': { usernames: ['a'], ts: '2026-11-19T10:00:03Z' }, ':old2:': { usernames: ['a'] }, ':tada:': { usernames: ['a'], ts: '2026-11-19T10:00:01Z' }, ':old1:': { usernames: ['b'] } };
+    expect(reactionEntries(r).map(([k]) => k)).toEqual([':old2:', ':old1:', ':tada:', ':+1:']);
+    expect(reactionEntries(undefined)).toEqual([]);
+  });
+  it('dica com o nome de exibição e o emoji; só pede os nomes que aparecem', () => {
+    const asked: string[] = [];
+    const nameOf = (u: string) => (asked.push(u), ({ 'alice.souza': 'Alice Souza', 'bruno.lima': 'Bruno Lima' })[u] ?? u);
+    expect(reactionTitle(':+1:', ['alice.souza', 'bruno.lima'], nameOf)).toBe('Alice Souza e Bruno Lima reagiram com 👍');
+    expect(reactionTitle(':tada:', ['alice.souza'], nameOf)).toBe('Alice Souza reagiu com 🎉');
+    expect(reactionTitle(':logo_empresa:', ['x'])).toBe('x reagiu com :logo_empresa:');
+    asked.length = 0;
+    expect(reactionTitle(':+1:', ['alice.souza', 'bruno.lima', 'c', 'd', 'e'], nameOf)).toBe('Alice Souza, Bruno Lima e mais 3 reagiram com 👍');
+    expect(asked).toEqual(['alice.souza', 'bruno.lima']);
   });
 });
 

@@ -230,6 +230,35 @@ describe('páginas da sala com mensagens na mesma hora', () => {
   });
 });
 
+describe('reações', () => {
+  it('guardam a hora da primeira de cada emoji (a ordem em que apareceram) e só quem é da sala reage', async () => {
+    const bruno = await newUser(A);
+    const carla = await newUser(A);
+    const ch = (await api('POST', 'channels.create', { name: `reacoes-${uniq()}`, members: [bruno.username] }, A)).channel;
+    const m = (await send(A, ch._id, 'ordem das reações')).message;
+    for (const e of ['tada', 'heart', '+1']) expect((await api('POST', 'chat.react', { messageId: m._id, emoji: e }, A)).success).toBe(true);
+    const r1 = (await api('GET', 'chat.getMessage', { msgId: m._id }, A)).message.reactions;
+    const order = (rs: Record<string, { ts?: string }>) => Object.entries(rs).sort(([, a], [, b]) => (a.ts ?? '').localeCompare(b.ts ?? '')).map(([k]) => k);
+    expect(order(r1)).toEqual([':tada:', ':heart:', ':+1:']);
+    // Mais alguém na mesma reação (e depois saindo dela) não muda a hora nem a ordem.
+    await api('POST', 'chat.react', { messageId: m._id, emoji: 'tada' }, bruno);
+    const r2 = (await api('GET', 'chat.getMessage', { msgId: m._id }, A)).message.reactions;
+    expect(r2[':tada:']).toEqual({ usernames: [A.username, bruno.username], ts: r1[':tada:'].ts });
+    await api('POST', 'chat.react', { messageId: m._id, emoji: 'tada' }, A);
+    expect((await api('GET', 'chat.getMessage', { msgId: m._id }, A)).message.reactions[':tada:']).toEqual({ usernames: [bruno.username], ts: r1[':tada:'].ts });
+    // Carla só visualiza o canal: reagir pede para entrar, como enviar.
+    const no = await api('POST', 'chat.react', { messageId: m._id, emoji: '+1' }, carla);
+    expect([no.status, no.error]).toEqual([403, 'Você precisa entrar na sala para reagir.']);
+    expect((await api('GET', 'chat.getMessage', { msgId: m._id }, A)).message.reactions[':+1:'].usernames).toEqual([A.username]);
+    await api('POST', 'channels.join', { roomId: ch._id }, carla);
+    expect((await api('POST', 'chat.react', { messageId: m._id, emoji: '+1' }, carla)).success).toBe(true);
+    // Quem saiu ainda tira a própria reação.
+    await api('POST', 'channels.leave', { roomId: ch._id }, carla);
+    expect((await api('POST', 'chat.react', { messageId: m._id, emoji: '+1' }, carla)).success).toBe(true);
+    expect((await api('GET', 'chat.getMessage', { msgId: m._id }, A)).message.reactions[':+1:'].usernames).toEqual([A.username]);
+  });
+});
+
 async function withSettings(values: Record<string, unknown>, fn: () => Promise<void>) {
   const before = Object.fromEntries(Object.keys(values).map((k) => [k, getSetting(k)]));
   const r = await api('POST', 'settings', { settings: values }, A);

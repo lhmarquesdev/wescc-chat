@@ -373,8 +373,9 @@ export function RoomPage() {
             : // Criptografia: sem a senha ou sem a chave da conversa não dá para escrever.
               e2eBlock?.text;
   // As mesmas recusas do servidor: reagir não exige poder escrever (canal de avisos com reações), mas sala arquivada,
-  // silêncio e DM bloqueada também barram a reação. Discussão e edição seguem as regras de envio.
-  const canReact = !!room && !room.archived && !muted && room.direct?.canSend !== false && (!room.ro || room.reactWhenReadOnly || canPostRO);
+  // silêncio e DM bloqueada também barram a reação. Discussão e edição seguem as regras de envio. Quem só visualiza o
+  // canal (sem entrar) não reage, não cita e não responde: o servidor recusa, e o convite para entrar fica no compositor.
+  const canReact = !!room && !!sub && !room.archived && !muted && room.direct?.canSend !== false && (!room.ro || room.reactWhenReadOnly || canPostRO);
   // Discussão dentro de discussão o servidor também recusa.
   const canDiscuss = !disabledReason && !room?.prid && (canWithRoles('start-discussion', roles) || canWithRoles('start-discussion-other-user', roles));
   // "Ocultar a lista de membros": o servidor recusa a lista para quem não tem view-broadcast-member-list.
@@ -411,8 +412,8 @@ export function RoomPage() {
   // Quem votou: num canal de avisos (ou com a lista oculta) só quem publica ou vê a lista.
   const canSeePollVoters = !(room?.notice || room?.broadcast) || canPostRO || (!!room?.broadcast && !membersHidden);
   const gate = useMemo(
-    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers, editLimit, deleteLimit }),
-    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers, editLimit, deleteLimit],
+    () => ({ canReact, canReply: !disabledReason && !!sub, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers, editLimit, deleteLimit }),
+    [canReact, disabledReason, sub, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers, editLimit, deleteLimit],
   );
 
   const actions = useMemo(

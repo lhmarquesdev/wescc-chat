@@ -173,6 +173,7 @@ export interface Subscription {
 
 export interface Reaction {
   usernames: string[];
+  ts?: string; // primeira reação com este emoji: as reações aparecem nessa ordem (o jsonb não guarda a ordem das chaves)
 }
 
 export interface Attachment {

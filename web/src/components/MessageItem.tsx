@@ -18,12 +18,12 @@ import {
 import { useNavigate } from 'react-router-dom';
 import type { Attachment, Message } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
-import { formatBytes, formatDateTime, formatRelative, formatTime, formatWhen, nameList, plural, roomPath, systemIcon, systemText } from '../lib/format';
+import { formatBytes, formatDateTime, formatRelative, formatTime, formatWhen, plural, roomPath, systemIcon, systemText } from '../lib/format';
 import { resolveEmoji } from '../lib/emoji';
 import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
 import { useHighlights } from '../lib/presence';
 import { findHighlight } from '@shared/highlights';
-import { authorName, editableKind, forwardableKind, messageHref, pastTimeLimit } from '../lib/messageRules';
+import { authorName, editableKind, forwardableKind, messageHref, pastTimeLimit, reactionEntries, reactionTitle } from '../lib/messageRules';
 import { markUnread } from '../lib/markUnread';
 import { canRemoveEverywhere, useStickers } from '../lib/stickers';
 import { useNames } from '../lib/names';
@@ -500,7 +500,8 @@ function EmojiGlyph({ code }: { code: string }) {
 
 function Reactions({ m, canReact, onAdd }: { m: Message; canReact: boolean; onAdd: (anchor: HTMLElement) => void }) {
   const me = useStore((s) => s.me);
-  const entries = Object.entries(m.reactions ?? {});
+  const nameOf = useNames();
+  const entries = reactionEntries(m.reactions);
   if (!entries.length) return null;
   const toggle = (code: string) => api.post('chat.react', { messageId: m._id, emoji: code }).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
   return (
@@ -508,7 +509,7 @@ function Reactions({ m, canReact, onAdd }: { m: Message; canReact: boolean; onAd
       <div className="reactions">
         {entries.map(([code, r]) => {
           const mine = r.usernames.includes(me?.username ?? '');
-          const title = `${nameList(r.usernames)} ${r.usernames.length === 1 ? 'reagiu' : 'reagiram'} com ${code}`;
+          const title = reactionTitle(code, r.usernames, nameOf);
           const content = (
             <>
               <span className="reaction-emoji">
@@ -977,6 +978,8 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
   const [forwarding, setForwarding] = useState(false);
   const [reminding, setReminding] = useState(false);
   const reminder = useStore((s) => (m.t ? undefined : s.reminders.find((r) => r.messageId === m._id)));
+  // Quem só visualiza o canal (sem entrar) não tem o que marcar como não lido.
+  const member = useStore((s) => !!s.subscriptions[m.rid]);
   const stickerGone = useStickers((st) => !!m.sticker && (m.sticker.removed || st.removed.has(m.sticker.fileId)));
   const createStickerRaw = useCreateSticker(m, inThread);
   const createSticker = m.e2e ? null : createStickerRaw;
@@ -1073,7 +1076,7 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
         label: tr.shown === 'translation' ? 'Ver original' : 'Traduzir',
         run: tr.toggle,
       }),
-      opt(!own, { key: 'unread', icon: 'mark-unread', label: 'Marcar como não lida', run: () => void markUnread(m.rid, () => navigate('/home'), m._id) }),
+      opt(!own && member, { key: 'unread', icon: 'mark-unread', label: 'Marcar como não lida', run: () => void markUnread(m.rid, () => navigate('/home'), m._id) }),
       opt(showReceipts, { key: 'receipts', icon: 'receipts', label: 'Confirmações de leitura', run: () => setReceipts(true) }),
       opt(m.sticker, { key: 'sticker', el: (close, sheetRole) => <StickerMenuItems message={m} close={close} sheetRole={sheetRole} /> }),
       opt(createSticker, { key: 'create-sticker', el: (close, sheetRole) => <CreateStickerItem message={m} close={close} sheetRole={sheetRole} inThread={inThread} /> }),

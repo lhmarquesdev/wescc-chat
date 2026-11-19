@@ -4,8 +4,22 @@
 import type { Message } from '@shared/index';
 import type { MessageForward, MessagePoll } from '@shared/messages';
 import { encryptedContent, messageHref, messageLink } from '@shared/messages';
+import { EMOJI } from '@shared/emoji';
 import { nameList } from './format';
 import { whenText } from './messageTimes';
+
+// Reações na ordem em que apareceram (ts da primeira de cada emoji; as antigas, sem ts, ficam antes, como vieram).
+export function reactionEntries(reactions: Message['reactions'] | undefined) {
+  return Object.entries(reactions ?? {}).sort(([, a], [, b]) => (a.ts ?? '').localeCompare(b.ts ?? ''));
+}
+
+// Dica de uma reação: "Alice Souza e Bruno Lima reagiram com 👍" (nomes de exibição, o emoji em vez do código). Só os
+// nomes que aparecem são pedidos (nameList mostra até três).
+export function reactionTitle(code: string, usernames: readonly string[], nameOf: (username: string) => string = (u) => u) {
+  const shown = usernames.length <= 3 ? usernames.length : 2;
+  const names = usernames.map((u, i) => (i < shown ? nameOf(u) : u));
+  return `${nameList(names)} ${usernames.length === 1 ? 'reagiu' : 'reagiram'} com ${EMOJI[code.replace(/^:|:$/g, '')] ?? code}`;
+}
 
 // O tipo aceita edição: nem mensagem de sistema, nem figurinha, nem enquete, nem encaminhada (o servidor recusa no chat.update).
 export const editableKind = (m: Message) => !m.t && !m.sticker && !m.poll && !m.forward;
