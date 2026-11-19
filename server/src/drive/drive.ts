@@ -268,17 +268,18 @@ export async function activity(ctx: Ctx, folderId: unknown, opts: { offset?: num
   const count = Math.min(Math.max(1, Math.floor(opts.count ?? 50)), 200);
   const offset = Math.min(Math.max(0, Math.floor(opts.offset ?? 0)), 1_000_000);
   // O histórico é de quem gerencia cada pasta: subpasta restrita que a pessoa não gerencia fica de fora. Os eventos da
-  // pasta de cima que citam uma subpasta que ela nem vê (criada, mandada para a lixeira, apagada) também saem; os
-  // antigos, sem o id da subpasta (sub), pelo nome.
+  // pasta de cima que citam uma subpasta que ela nem vê (criada, mandada para a lixeira, apagada), mesmo depois de
+  // levada para outro lugar, também saem; os antigos, sem o id da subpasta (sub), pelo nome. Restrita já apagada de vez
+  // (restricted): só quem gerencia todas as pastas vê.
   const tree = acc.subtree(f.id);
-  const hidden = tree.filter((id) => acc.level(id) === 0);
-  const hiddenNames = hidden.map((id) => `${acc.folders.get(id)!.parent_id}/${acc.folders.get(id)!.name.toLowerCase()}`);
+  const hidden = [...acc.folders.keys()].filter((id) => acc.level(id) === 0);
+  const hiddenNames = tree.filter((id) => acc.level(id) === 0).map((id) => `${acc.folders.get(id)!.parent_id}/${acc.folders.get(id)!.name.toLowerCase()}`);
   const rows = await many(
     `SELECT a.*, u.name AS actor_name, count(*) OVER() AS total FROM drive_activity a LEFT JOIN users u ON u.id = a.actor_id
      WHERE a.folder_id = ANY($1)
        AND NOT coalesce(a.data->>'sub' = ANY($2), false)
        AND NOT (a.action IN ('folder.add', 'folder.trash', 'folder.purge') AND NOT a.data ? 'sub' AND a.folder_id || '/' || lower(a.data->>'name') = ANY($3))
-       AND ($4 OR a.action <> 'folder.purge' OR a.data->>'restricted' IS DISTINCT FROM 'true')
+       AND ($4 OR a.data->>'restricted' IS DISTINCT FROM 'true')
      ORDER BY a.created_at DESC LIMIT $5 OFFSET $6`,
     [tree.filter((id) => acc.level(id) >= 3), hidden, hiddenNames, acc.all, count, offset],
   );
@@ -770,6 +771,10 @@ export async function restoreItems(ctx: Ctx, input: { fileIds?: string[]; folder
 }
 
 async function purgeFolderTree(ids: string[]) {
+  // Depois de apagada não dá mais para saber quem via uma subpasta restrita: os eventos que a citam em outras pastas
+  // (criada, mandada para a lixeira) ficam só para quem gerencia todas as pastas.
+  const restricted = (await many<{ id: string }>('SELECT id FROM drive_folders WHERE id = ANY($1) AND NOT inherit', [ids])).map((r) => r.id);
+  if (restricted.length) await query(`UPDATE drive_activity SET data = data || '{"restricted": true}'::jsonb WHERE data->>'sub' = ANY($1)`, [restricted]);
   const files = await many<{ storage_path: string }>('SELECT storage_path FROM drive_files WHERE folder_id = ANY($1)', [ids]);
   await query('DELETE FROM drive_folders WHERE id = ANY($1)', [ids]);
   for (const f of files) await deleteStored(f.storage_path).catch(() => {});

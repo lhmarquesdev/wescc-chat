@@ -427,6 +427,27 @@ describe('subpasta restrita dentro de uma pasta que outra pessoa gerencia', () =
     expect(r.events.map((e: any) => e._id)).not.toContain('legadoAAAAAAAAAAA');
     expect((await api('GET', 'files.activity', { folderId: rh }, A)).events.map((e: any) => e._id)).toContain('legadoAAAAAAAAAAA');
   });
+
+  it('subpasta restrita levada para outro lugar ou apagada de vez continua fora do histórico de cima', async () => {
+    const mk = async (name: string) => {
+      const id = (await api('POST', 'files.folder.create', { name, parentId: rh }, A)).folder._id;
+      expect((await share(id, [{ type: 'user', id: carla.userId, level: 3 }], A, false)).success).toBe(true);
+      return id;
+    };
+    const gone = await mk('Sigilo apagado');
+    const away = await mk('Sigilo levado');
+    const dest = (await api('POST', 'files.folder.create', { name: 'Pasta da Carla' }, A)).folder._id;
+    await share(dest, [{ type: 'user', id: A.userId, level: 3 }, { type: 'user', id: carla.userId, level: 3 }], A);
+    expect((await api('POST', 'files.trash', { folderIds: [gone] }, carla)).success).toBe(true);
+    expect((await api('POST', 'files.purge', { folderIds: [gone] }, carla)).success).toBe(true);
+    expect((await api('POST', 'files.move', { folderIds: [away], targetId: dest }, carla)).success).toBe(true);
+    const text = JSON.stringify((await api('GET', 'files.activity', { folderId: rh }, bruno)).events);
+    expect(text).not.toContain('Sigilo apagado');
+    expect(text).not.toContain('Sigilo levado');
+    const all = JSON.stringify((await api('GET', 'files.activity', { folderId: rh }, A)).events);
+    expect(all).toContain('Sigilo apagado');
+    expect(all).toContain('Sigilo levado');
+  });
 });
 
 describe('nomes, avisos e limites', () => {
