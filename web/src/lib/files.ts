@@ -4,6 +4,9 @@ import type { DriveAclEntry, DriveActivity, DriveFile, DriveFolder, DriveFolderV
 import { api, ApiError, uploadTo } from './api';
 import { usePermission, useSetting, useStore } from './store';
 
+// Item que ficou com outro nome ao mover ou restaurar (já havia um com o mesmo nome no lugar).
+export type DriveRenamed = { _id: string; from: string; name: string };
+
 export const filesApi = {
   home: () => api.get<{ folders: DriveFolder[]; canCreateRoot: boolean; manageAll: boolean; storage: DriveStorage }>('files.home'),
   folder: (folderId: string) => api.get<DriveFolderView>('files.folder', { folderId }),
@@ -17,10 +20,10 @@ export const filesApi = {
   share: (folderId: string, entries: { type: string; id: string; level: number }[], inherit: boolean) =>
     api.post<{ acl: DriveAclEntry[] }>('files.folder.share', { folderId, entries, inherit }).then((r) => r.acl),
   rename: (fileId: string, name: string) => api.post('files.rename', { fileId, name }),
-  move: (body: { fileIds?: string[]; folderIds?: string[]; targetId: string | null }) => api.post('files.move', body),
+  move: (body: { fileIds?: string[]; folderIds?: string[]; targetId: string | null }) => api.post<{ renamed?: DriveRenamed[] }>('files.move', body),
   trash: (body: { fileIds?: string[]; folderIds?: string[] }) => api.post('files.trash', body),
   trashList: () => api.get<{ days: number; folders: (DriveFolder & { path: { _id: string; name: string }[] })[]; files: DriveFile[] }>('files.trash.list'),
-  restore: (body: { fileIds?: string[]; folderIds?: string[] }) => api.post('files.restore', body),
+  restore: (body: { fileIds?: string[]; folderIds?: string[] }) => api.post<{ renamed?: DriveRenamed[] }>('files.restore', body),
   purge: (body: { fileIds?: string[]; folderIds?: string[]; all?: boolean }) => api.post<{ removed: number }>('files.purge', body),
 };
 

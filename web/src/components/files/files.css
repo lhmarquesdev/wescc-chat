@@ -1168,6 +1168,7 @@
 }
 .fl-tray-text small {
   font-size: var(--fs-12);
+  overflow-wrap: anywhere;
 }
 .fl-tray li.error small {
   color: hsl(var(--st-red));

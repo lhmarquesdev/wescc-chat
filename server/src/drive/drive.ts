@@ -414,13 +414,16 @@ export async function moveItems(ctx: Ctx, input: { fileIds?: string[]; folderIds
   if (!target && (fileIds.length || (!acc.all && !(await hasAnyPermission(ctx.userId, ['create-files-folder'])))))
     throw badRequest('error-invalid-params', 'Escolha a pasta de destino.');
   const touched = new Set<string | null>([targetId]);
+  // Já havia um item com o mesmo nome no destino: vai como "nome (2)" e a tela avisa.
+  const renamed: { _id: string; from: string; name: string }[] = [];
   for (const id of folderIds) {
     const f = needRemovableFolder(acc, id);
     // Virar pasta principal deixa quem moveu gerenciando: pede já gerenciar.
     if (!target && acc.level(f.id) < 3) throw forbidden(DRIVE_TEXT.needManage);
     if (target && acc.subtree(f.id).includes(target.id)) throw badRequest('error-invalid-move', `"${f.name}" não pode ir para dentro dela mesma.`);
     if (f.parent_id === targetId) continue;
-    const name = nextFreeName(f.name, await takenFolderNames(targetId, f.id));
+    const name = nextFreeName(f.name, await takenFolderNames(targetId, f.id), DRIVE_FOLDER_NAME_MAX);
+    if (name !== f.name) renamed.push({ _id: f.id, from: f.name, name });
     await query('UPDATE drive_folders SET parent_id = $2, name = $3, updated_at = now() WHERE id = $1', [f.id, targetId, name]);
     // Pasta que vira principal precisa de alguém que gerencie: quem moveu.
     if (!targetId) await query("INSERT INTO drive_acl (folder_id, subject_type, subject_id, level, granted_by) VALUES ($1,'user',$2,3,$2) ON CONFLICT DO NOTHING", [f.id, ctx.userId]);
@@ -434,7 +437,8 @@ export async function moveItems(ctx: Ctx, input: { fileIds?: string[]; folderIds
     const taken = await takenFileNames(target!.id);
     for (const r of rows) {
       if (r.folder_id === target!.id) continue;
-      const name = nextFreeName(r.name, taken);
+      const name = nextFreeName(r.name, taken, DRIVE_FILE_NAME_MAX);
+      if (name !== r.name) renamed.push({ _id: r.id, from: r.name, name });
       taken.add(name.toLowerCase());
       await query('UPDATE drive_files SET folder_id = $2, name = $3, updated_at = now() WHERE id = $1', [r.id, target!.id, name]);
       await logActivity(ctx, r.folder_id, r.id, 'file.move.out', { name: r.name, to: target!.name, toId: target!.id });
@@ -443,7 +447,7 @@ export async function moveItems(ctx: Ctx, input: { fileIds?: string[]; folderIds
     }
   }
   changed(...touched);
-  return {};
+  return { renamed };
 }
 
 // ---------- Compartilhamento ----------
@@ -730,6 +734,8 @@ export async function listTrash(ctx: Ctx) {
 export async function restoreItems(ctx: Ctx, input: { fileIds?: string[]; folderIds?: string[] }) {
   const acc = await loadAccess(ctx);
   const touched = new Set<string | null>();
+  // Já há outro item com o mesmo nome no lugar: volta como "nome (2)" e a tela avisa.
+  const renamed: { _id: string; from: string; name: string }[] = [];
   for (const id of (input.folderIds ?? []).slice(0, 100)) {
     const f = needRemovableFolder(acc, id, { allowTrashed: true });
     if (!acc.trashed(f.id)) continue;
@@ -739,7 +745,8 @@ export async function restoreItems(ctx: Ctx, input: { fileIds?: string[]; folder
       if (canRemoveFolder(acc, top)) throw badRequest('error-parent-trashed', `A pasta de cima de "${f.name}" também está na lixeira. Restaure "${top.name}" primeiro.`);
       throw badRequest('error-parent-trashed', `A pasta de cima de "${f.name}" está na lixeira. Peça a quem a gerencia para restaurá-la.`);
     }
-    const name = nextFreeName(f.name, await takenFolderNames(f.parent_id, f.id));
+    const name = nextFreeName(f.name, await takenFolderNames(f.parent_id, f.id), DRIVE_FOLDER_NAME_MAX);
+    if (name !== f.name) renamed.push({ _id: f.id, from: f.name, name });
     await query('UPDATE drive_folders SET trashed_at = NULL, trashed_by = NULL, name = $2, updated_at = now() WHERE id = $1', [f.id, name]);
     await logActivity(ctx, f.id, null, 'folder.restore', { name });
     touched.add(f.parent_id).add(f.id);
@@ -748,13 +755,14 @@ export async function restoreItems(ctx: Ctx, input: { fileIds?: string[]; folder
     const r = await needFile(acc, id, 2, { allowTrashed: true });
     if (!r.trashed_at) continue;
     if (acc.trashed(r.folder_id)) throw badRequest('error-parent-trashed', `A pasta de "${r.name}" está na lixeira. Restaure a pasta.`);
-    const name = nextFreeName(r.name, await takenFileNames(r.folder_id, r.id));
+    const name = nextFreeName(r.name, await takenFileNames(r.folder_id, r.id), DRIVE_FILE_NAME_MAX);
+    if (name !== r.name) renamed.push({ _id: r.id, from: r.name, name });
     await query('UPDATE drive_files SET trashed_at = NULL, trashed_by = NULL, name = $2, updated_at = now() WHERE id = $1', [r.id, name]);
     await logActivity(ctx, r.folder_id, r.id, 'file.restore', { name });
     touched.add(r.folder_id);
   }
   changed(...touched);
-  return {};
+  return { renamed };
 }
 
 async function purgeFolderTree(ids: string[]) {
@@ -775,6 +783,7 @@ export async function purgeItems(ctx: Ctx, input: { fileIds?: string[]; folderId
     fileIds = t.files.filter((f) => (f.level ?? 0) >= 3).map((f) => f._id);
   }
   let removed = 0;
+  const touched = new Set<string | null>();
   for (const id of folderIds) {
     const f = needFolder(acc, id, 3, { allowTrashed: true });
     if (!acc.trashed(f.id)) throw badRequest('error-not-in-trash', 'Mande para a lixeira antes de apagar de vez.');
@@ -782,6 +791,7 @@ export async function purgeItems(ctx: Ctx, input: { fileIds?: string[]; folderId
     if (input.all && restrictedInside(acc, f)) continue;
     assertWholeTree(acc, f);
     removed += await purgeFolderTree(acc.subtree(f.id));
+    touched.add(f.parent_id).add(f.id);
     // Depois de apagada não dá mais para saber quem a via: restrita, só quem gerencia todas as pastas vê o evento.
     if (f.parent_id) await logActivity(ctx, f.parent_id, null, 'folder.purge', { name: f.name, sub: f.id, restricted: !f.inherit });
     await audit({ id: ctx.userId, username: ctx.username, ip: ctx.ip }, 'drive.folder.purge', { folderId: f.id, name: f.name });
@@ -792,8 +802,11 @@ export async function purgeItems(ctx: Ctx, input: { fileIds?: string[]; folderId
     await query('DELETE FROM drive_files WHERE id = $1', [r.id]);
     await deleteStored(r.storage_path).catch(() => {});
     await logActivity(ctx, r.folder_id, null, 'file.purge', { name: r.name });
+    touched.add(r.folder_id);
     removed++;
   }
+  // A Lixeira e o medidor de espaço das outras telas atualizam.
+  if (touched.size) changed(...touched);
   return { removed };
 }
 

@@ -220,7 +220,7 @@ export function FilesPage() {
 
   let body: ReactNode;
   if (!enabled) body = <Empty icon="files-folder" title="A aba Arquivos está desligada">Um administrador pode ligá-la em Administração › Configurações › Arquivos.</Empty>;
-  else if (trash) body = <TrashView onChanged={reload} />;
+  else if (trash) body = <TrashView tick={tick} onChanged={reload} />;
   else if (search.trim().length >= 2) body = <SearchResults text={search.trim()} view={view} onOpenFile={(f) => setSelected({ kind: 'file', file: f })} />;
   else if (folderId && error) body = <Empty icon="files-locked" title="Não deu para abrir esta pasta" tone="danger" action={<Link className="btn" to="/files">Voltar para Arquivos</Link>}>{error}</Empty>;
   else if (folderId)
@@ -935,23 +935,29 @@ function SearchResults({ text, view, onOpenFile }: { text: string; view: ViewMod
   );
 }
 
-function TrashView({ onChanged }: { onChanged: () => void }) {
+// tick: a tela recarrega quando qualquer pasta muda (drive.changed), também por outra pessoa: a lista fica em dia.
+function TrashView({ tick, onChanged }: { tick: number; onChanged: () => void }) {
   const toast = useStore((s) => s.toast);
   const [r, setR] = useState<Awaited<ReturnType<typeof filesApi.trashList>> | null>(null);
-  const [tick, setTick] = useState(0);
   useEffect(() => {
-    filesApi.trashList().then(setR, (e) => toast(errorMessage(e), 'error'));
+    let alive = true;
+    filesApi.trashList().then(
+      (x) => alive && setR(x),
+      (e) => alive && toast(errorMessage(e), 'error'),
+    );
+    return () => {
+      alive = false;
+    };
   }, [tick, toast]);
-  const run = async (p: Promise<unknown>, ok: string) => {
+  async function run<T>(p: Promise<T>, ok: string | ((r: T) => string)) {
     try {
-      await p;
-      toast(ok, 'success');
-      setTick((t) => t + 1);
+      const out = await p;
+      toast(typeof ok === 'string' ? ok : ok(out), 'success');
       onChanged();
     } catch (e) {
       toast(errorMessage(e), 'error');
     }
-  };
+  }
   if (!r) return <GridSkeleton />;
   const canPurgeAny = r.folders.some((f) => f.level >= 3) || r.files.some((f) => (f.level ?? 0) >= 3);
   const empty = !r.folders.length && !r.files.length;
@@ -996,7 +1002,7 @@ function TrashView({ onChanged }: { onChanged: () => void }) {
               who={f.trashedBy?.name || f.trashedBy?.username || '—'}
               when={f.trashedAt}
               canPurge={f.level >= 3}
-              onRestore={() => run(filesApi.restore({ folderIds: [f._id] }), `“${f.name}” restaurada.`)}
+              onRestore={() => run(filesApi.restore({ folderIds: [f._id] }), (x) => (x.renamed?.length ? `“${f.name}” restaurada como “${x.renamed[0].name}”.` : `“${f.name}” restaurada.`))}
               onPurge={() => run(filesApi.purge({ folderIds: [f._id] }), `“${f.name}” apagada de vez.`)}
             />
           ))}
@@ -1009,7 +1015,11 @@ function TrashView({ onChanged }: { onChanged: () => void }) {
               who={f.trashedBy?.name || f.trashedBy?.username || '—'}
               when={f.trashedAt}
               canPurge={(f.level ?? 0) >= 3}
-              onRestore={() => run(filesApi.restore({ fileIds: [f._id] }), `“${f.name}” restaurado.`)}
+              onRestore={() =>
+                run(filesApi.restore({ fileIds: [f._id] }), (x) =>
+                  x.renamed?.length ? `“${f.name}” restaurado como “${x.renamed[0].name}”: já havia um arquivo com esse nome na pasta.` : `“${f.name}” restaurado.`,
+                )
+              }
               onPurge={() => run(filesApi.purge({ fileIds: [f._id] }), `“${f.name}” apagado de vez.`)}
             />
           ))}
@@ -1335,10 +1345,10 @@ function useItemActions(opts: {
   const toast = opts.toast ?? storeToast;
   const { setDialog, reload, navigate, openShare, parent, onGone } = opts;
   const run = useCallback(
-    async (p: Promise<unknown>, ok: string) => {
+    async <T,>(p: Promise<T>, ok: string | ((r: T) => string)) => {
       try {
-        await p;
-        toast(ok, 'success');
+        const out = await p;
+        toast(typeof ok === 'string' ? ok : ok(out), 'success');
         reload?.();
       } catch (e) {
         toast(errorMessage(e), 'error');
@@ -1413,7 +1423,17 @@ function useItemActions(opts: {
                 <Icon name="edit" />
                 Renomear
               </button>
-              <button type="button" onClick={() => (close(), move(`Mover “${f.name}”`, f.folderId, null, (t) => run(filesApi.move({ fileIds: [f._id], targetId: t._id }), `Movido para “${t.name}”.`)))}>
+              <button
+                type="button"
+                onClick={() =>
+                  (close(),
+                  move(`Mover “${f.name}”`, f.folderId, null, (t) =>
+                    run(filesApi.move({ fileIds: [f._id], targetId: t._id }), (x) =>
+                      x.renamed?.length ? `Movido para “${t.name}” como “${x.renamed[0].name}”: já havia um arquivo com esse nome lá.` : `Movido para “${t.name}”.`,
+                    ),
+                  ))
+                }
+              >
                 <Icon name="files-move" />
                 Mover para…
               </button>
@@ -1478,7 +1498,15 @@ function useItemActions(opts: {
             </button>
           )}
           {canRemoveFolder(f) && setDialog && f.parentId && (
-            <button type="button" onClick={() => (close(), move(`Mover a pasta “${f.name}”`, f.parentId, f._id, (t) => run(filesApi.move({ folderIds: [f._id], targetId: t._id }), `Pasta movida para “${t.name}”.`)))}>
+            <button
+              type="button"
+              onClick={() =>
+                (close(),
+                move(`Mover a pasta “${f.name}”`, f.parentId, f._id, (t) =>
+                  run(filesApi.move({ folderIds: [f._id], targetId: t._id }), (x) => (x.renamed?.length ? `Pasta movida para “${t.name}” como “${x.renamed[0].name}”.` : `Pasta movida para “${t.name}”.`)),
+                ))
+              }
+            >
               <Icon name="files-move" />
               Mover para…
             </button>
@@ -1688,6 +1716,15 @@ function MoveDialog({ title, currentId, excludeId, onClose, onPick }: { title: s
 
 // ---------- Fila de envios ----------
 
+// Enviado com outro nome: "escala (2).csv" porque já havia um "escala.csv" na pasta, ou o nome foi encurtado/limpo.
+function doneText(j: UploadJob) {
+  const saved = j.result?.name;
+  if (!saved || saved === j.name) return `Em ${j.folderName}`;
+  const m = /^(.*) \(\d+\)(\.[^.]*)?$/.exec(saved);
+  const dup = !!m && `${m[1]}${m[2] ?? ''}`.toLowerCase() === j.name.trim().toLowerCase();
+  return dup ? `Salvo como “${saved}”: já havia um arquivo com esse nome em ${j.folderName}` : `Salvo como “${saved}” em ${j.folderName}`;
+}
+
 function UploadTray() {
   const jobs = useUploads();
   const [min, setMin] = useState(false);
@@ -1716,8 +1753,8 @@ function UploadTray() {
               <FileGlyph file={{ name: j.name, type: '' }} size={16} />
               <span className="fl-tray-text">
                 <span className="ellipsis">{j.name}</span>
-                <small className="muted ellipsis">
-                  {j.state === 'error' ? j.error : j.state === 'canceled' ? 'Cancelado' : j.state === 'done' ? `Em ${j.folderName}` : `${formatBytes(j.size)} · ${j.folderName}`}
+                <small className={j.state === 'done' && j.result && j.result.name !== j.name ? 'muted' : 'muted ellipsis'}>
+                  {j.state === 'error' ? j.error : j.state === 'canceled' ? 'Cancelado' : j.state === 'done' ? doneText(j) : `${formatBytes(j.size)} · ${j.folderName}`}
                 </small>
                 {j.state === 'sending' && (
                   <span className="fl-meter thin">

@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { many, one, query } from '../src/db/pool';
 import { purgeExpiredTrash } from '../src/drive/drive';
 import { storedPath } from '../src/services/uploads';
-import { admin, api, newUser, raw, startServer, stopServer, type Auth } from './helpers';
+import { admin, api, connectWs, newUser, raw, startServer, stopServer, type Auth } from './helpers';
 
 // Arquivos: pastas com permissão por pasta (papel, canal, pessoa), herança, envio, download, lixeira, cota e histórico.
 
@@ -476,6 +476,21 @@ describe('nomes, avisos e limites', () => {
     expect((await api('POST', 'files.rename', { fileId: f._id, name: '...' }, bruno)).error).toBe('Nome inválido: use letras ou números.');
   });
 
+  it('mover e restaurar dizem quando o item ficou com outro nome', async () => {
+    const a = (await up(eq, 'escala.csv', 'v1', bruno, 'text/csv')).file;
+    const b = (await up(eq, 'escala.csv', 'v2', bruno, 'text/csv')).file;
+    expect(b.name).toBe('escala (2).csv');
+    await api('POST', 'files.trash', { fileIds: [a._id] }, bruno);
+    await api('POST', 'files.rename', { fileId: b._id, name: 'escala.csv' }, bruno);
+    const r = await api('POST', 'files.restore', { fileIds: [a._id] }, bruno);
+    expect(r.renamed).toEqual([{ _id: a._id, from: 'escala.csv', name: 'escala (2).csv' }]);
+    const dest = (await api('POST', 'files.folder.create', { name: 'Destino', parentId: eq }, bruno)).folder;
+    await up(dest._id, 'escala.csv', 'v3', bruno, 'text/csv');
+    const m = await api('POST', 'files.move', { fileIds: [b._id], targetId: dest._id }, bruno);
+    expect(m.renamed).toEqual([{ _id: b._id, from: 'escala.csv', name: 'escala (2).csv' }]);
+    expect((await api('POST', 'files.restore', { fileIds: [] }, bruno)).renamed).toEqual([]);
+  });
+
   it('"na lixeira" conta os arquivos de dentro de uma pasta mandada para a lixeira', async () => {
     const s0 = (await api('GET', 'files.storage', undefined, A)).storage;
     const lixo = (await api('POST', 'files.folder.create', { name: 'Lixo', parentId: eq }, bruno)).folder;
@@ -486,6 +501,20 @@ describe('nomes, avisos e limites', () => {
     const s1 = (await api('GET', 'files.storage', undefined, A)).storage;
     expect(s1.trash - s0.trash).toBe(10500);
     expect(s1.used - s0.used).toBe(10500);
+  });
+
+  it('apagar de vez avisa as outras telas (Lixeira e medidor de espaço)', async () => {
+    const f = (await up(eq, 'apagar.txt', 'x', carla)).file;
+    await api('POST', 'files.trash', { fileIds: [f._id] }, carla);
+    const ws = connectWs(bruno);
+    await ws.ready;
+    try {
+      expect((await api('POST', 'files.purge', { fileIds: [f._id] }, carla)).removed).toBe(1);
+      const ev = await ws.waitFor((e) => e.type === 'drive.changed' && e.folderIds.includes(eq));
+      expect(ev.folderIds).toEqual([eq]);
+    } finally {
+      ws.close();
+    }
   });
 
   it('histórico com offset ou count fora do normal não dá erro 500', async () => {
