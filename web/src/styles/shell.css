@@ -186,8 +186,11 @@
   color: hsl(var(--on-color));
   box-shadow: none;
 }
+/* Os avisos (.callout.ok, .info…) ficam translúcidos como o erro: o cartão branco do Atendeti, que vem depois,
+   escondia o ícone branco. */
 .auth-main .form-error,
-.auth-main .callout {
+.auth-main .callout,
+.auth-main .callout:is(.info, .ok, .warn, .err) {
   border-color: hsl(0 0% 100% / 0.35);
   background: hsl(0 0% 100% / 0.16);
   color: hsl(var(--on-color));
