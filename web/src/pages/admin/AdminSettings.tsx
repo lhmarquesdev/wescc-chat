@@ -174,6 +174,8 @@ export function AdminSettings() {
     return Object.keys(draft).filter((id) => !same(draft[id], byId.get(id)?.value));
   }, [draft, all]);
   const changedIn = (g: string) => changed.filter((id) => all.find((s: any) => s._id === id)?.group === g).length;
+  // Número vazio ou com casas decimais: o campo fica em vermelho e o Salvar espera (o servidor também recusa).
+  const invalid = useMemo(() => changed.filter((id) => all.find((s: any) => s._id === id)?.type === 'int' && !Number.isInteger(draft[id])), [changed, draft, all]);
 
   if (loading && !data)
     return (
@@ -370,7 +372,15 @@ export function AdminSettings() {
             <section key={section} className="settings-section">
               {section && <h3 className="section-title">{q ? section : (SECTION_LABEL[section] ?? section)}</h3>}
               {list.map((s: any) => (
-                <SettingRow key={s._id} s={s} value={value(s)} modified={changed.includes(s._id)} onChange={(v) => set(s, v)} onRevert={() => revert(s)} />
+                <SettingRow
+                  key={s._id}
+                  s={s}
+                  value={value(s)}
+                  modified={changed.includes(s._id)}
+                  error={invalid.includes(s._id) ? 'Preencha com um número inteiro.' : undefined}
+                  onChange={(v) => set(s, v)}
+                  onRevert={() => revert(s)}
+                />
               ))}
             </section>
           ))}
@@ -445,12 +455,16 @@ export function AdminSettings() {
         <div className="save-bar" role="region" aria-label="Alterações não salvas">
           <span className="save-bar-text">
             <span className="save-bar-dot" aria-hidden="true" />
-            {plural(changed.length, 'alteração não salva', 'alterações não salvas')}
+            {invalid.length > 0
+              ? invalid.length === 1
+                ? 'Corrija o campo em vermelho'
+                : 'Corrija os campos em vermelho'
+              : plural(changed.length, 'alteração não salva', 'alterações não salvas')}
           </span>
           <button className="btn ghost" onClick={() => setDraft({})} disabled={saving}>
             Descartar
           </button>
-          <button className="btn primary" onClick={save} disabled={saving} aria-busy={saving || undefined}>
+          <button className="btn primary" onClick={save} disabled={saving || invalid.length > 0} aria-busy={saving || undefined}>
             Salvar alterações
           </button>
         </div>
@@ -489,7 +503,7 @@ function SettingKey({ id }: { id: string }) {
 }
 
 // Linha da página de configurações: rótulo e descrição à esquerda (280px), controle à direita.
-function SettingRow({ s, value, modified, onChange, onRevert }: { s: any; value: any; modified: boolean; onChange: (v: unknown) => void; onRevert: () => void }) {
+function SettingRow({ s, value, modified, error, onChange, onRevert }: { s: any; value: any; modified: boolean; error?: string; onChange: (v: unknown) => void; onRevert: () => void }) {
   const id = useId();
   return (
     <div className={`setting-row${s.type === 'boolean' ? ' bool' : ''}${modified ? ' modified' : ''}`}>
@@ -510,7 +524,12 @@ function SettingRow({ s, value, modified, onChange, onRevert }: { s: any; value:
         {s.description && <span className="setting-desc">{s.description}</span>}
       </div>
       <div className="setting-control">
-        <SettingControl s={s} value={value} onChange={onChange} id={id} />
+        <SettingControl s={s} value={value} onChange={onChange} id={id} invalid={!!error} />
+        {error && (
+          <span className="field-error" id={`${id}-err`} role="alert">
+            {error}
+          </span>
+        )}
         {modified && (
           <button type="button" className="btn small ghost setting-revert" onClick={onRevert}>
             <Icon name="restore" />
@@ -548,7 +567,7 @@ function ChannelList({ value, onChange }: { value: unknown; onChange: (v: unknow
   );
 }
 
-function SettingControl({ s, value, onChange, id, label }: { s: any; value: any; onChange: (v: unknown) => void; id?: string; label?: ReactNode }) {
+function SettingControl({ s, value, onChange, id, label, invalid }: { s: any; value: any; onChange: (v: unknown) => void; id?: string; label?: ReactNode; invalid?: boolean }) {
   if (s._id === 'Language')
     return (
       <select id={id} value={value ?? 'pt-BR'} onChange={(e) => onChange(e.target.value)}>
@@ -565,7 +584,19 @@ function SettingControl({ s, value, onChange, id, label }: { s: any; value: any;
     case 'boolean':
       return <Toggle checked={!!value} onChange={onChange} label={label ?? <span className="visually-hidden">{labelOf(s)}</span>} />;
     case 'int':
-      return <input id={id} type="number" value={value ?? 0} onChange={(e) => onChange(Number(e.target.value))} />;
+      // Vazio continua vazio (Number('') virava 0 e travava limites como o de requisições por minuto).
+      return (
+        <input
+          id={id}
+          type="number"
+          inputMode="numeric"
+          step={1}
+          value={value ?? ''}
+          aria-invalid={invalid || undefined}
+          aria-describedby={invalid && id ? `${id}-err` : undefined}
+          onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
+        />
+      );
     case 'select':
       return (
         <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>

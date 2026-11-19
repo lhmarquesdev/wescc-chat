@@ -187,7 +187,7 @@ function parseDevice(d: DeviceInfo) {
 export async function createSession(userId: string, device: DeviceInfo) {
   const token = randomToken();
   const id = newId();
-  const days = getSetting<number>('Accounts_LoginExpiration') || 90;
+  const days = Math.max(1, Number(getSetting('Accounts_LoginExpiration')) || 90); // 0 ou negativo vencia o login na hora
   const parsed = parseDevice(device);
   const seen = await rememberLoginDevice(userId, device, parsed);
   await query(

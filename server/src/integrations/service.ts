@@ -499,7 +499,7 @@ async function callOutgoing(row: any, event: OutgoingEvent, data: Record<string,
   let status = 0;
   let responseText = '';
   try {
-    const timeout = getSetting<number>('Integrations_Outgoing_Timeout') * 1000;
+    const timeout = Math.max(1, Number(getSetting('Integrations_Outgoing_Timeout')) || 10) * 1000;
     const res = await fetch(request.url, {
       method: request.method ?? 'POST',
       headers: request.headers,
