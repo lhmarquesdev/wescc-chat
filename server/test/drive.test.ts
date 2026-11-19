@@ -439,6 +439,21 @@ describe('nomes, avisos e limites', () => {
     await share(hidden, [{ type: 'user', id: carla.userId, level: 3 }], A, false);
   });
 
+  it('pasta com o nome de uma subpasta restrita que a pessoa não vê é criada como "nome (2)", sem revelar a outra', async () => {
+    expect((await folder(eq, bruno)).folders.map((f: any) => f.name)).toEqual([]);
+    const r = await api('POST', 'files.folder.create', { name: 'avaliações individuais', parentId: eq }, bruno);
+    expect(r.success, JSON.stringify(r)).toBe(true);
+    expect(r.folder.name).toBe('avaliações individuais (2)');
+    // Com a outra visível, o aviso de nome repetido continua.
+    expect((await api('POST', 'files.folder.create', { name: 'Avaliações individuais', parentId: eq }, carla)).errorType).toBe('error-name-taken');
+    // Renomear para o nome escondido também não revela.
+    const x = (await api('POST', 'files.folder.create', { name: 'Rascunho', parentId: eq }, bruno)).folder;
+    const u = await api('POST', 'files.folder.update', { folderId: x._id, name: 'AVALIAÇÕES INDIVIDUAIS' }, bruno);
+    expect(u.success, JSON.stringify(u)).toBe(true);
+    expect(u.name).toBe('AVALIAÇÕES INDIVIDUAIS (3)');
+    expect((await api('POST', 'files.folder.update', { folderId: x._id, name: 'avaliações individuais (2)' }, bruno)).errorType).toBe('error-name-taken');
+  });
+
   it('nome longo é cortado sem perder a extensão nem partir um emoji; ".." tem aviso próprio', async () => {
     const long = `${'Relatório trimestral de indicadores '.repeat(7)}.xlsx`;
     const f = (await up(eq, long, 'x', bruno, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')).file;

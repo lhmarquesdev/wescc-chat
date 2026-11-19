@@ -318,6 +318,18 @@ const folderName = (raw: unknown) => {
   return n;
 };
 
+// O nome está ocupado aqui. Por uma pasta que a pessoa vê: recusa. Só por uma que ela não vê (subpasta restrita dos
+// outros): usa "nome (2)", sem dizer que a outra existe.
+async function freeFolderName(acc: Access, parentId: string | null, name: string, exceptId?: string) {
+  const taken = await takenFolderNames(parentId, exceptId);
+  if (!taken.has(name.toLowerCase())) return name;
+  const seen = [...acc.folders.values()].some(
+    (x) => x.parent_id === parentId && x.id !== exceptId && !x.trashed_at && x.name.toLowerCase() === name.toLowerCase() && acc.level(x.id) > 0,
+  );
+  if (seen) throw badRequest('error-name-taken', 'Já existe uma pasta com esse nome aqui.');
+  return nextFreeName(name, taken, DRIVE_FOLDER_NAME_MAX);
+}
+
 const uniqueViolation = (e: any) => e?.code === '23505';
 
 async function takenFolderNames(parentId: string | null, exceptId?: string) {
@@ -335,13 +347,12 @@ function checkColor(c: unknown) {
 export async function createFolder(ctx: Ctx, input: { parentId?: unknown; name?: unknown; color?: unknown }) {
   assertDriveOn();
   const acc = await loadAccess(ctx);
-  const name = folderName(input.name);
+  const wanted = folderName(input.name);
   const color = checkColor(input.color) ?? null;
   const parentId = input.parentId ? String(input.parentId) : null;
   if (parentId) needFolder(acc, parentId, 2);
   else if (!acc.all && !(await hasAnyPermission(ctx.userId, ['create-files-folder']))) throw forbidden('Você não pode criar pastas principais. Crie dentro de uma pasta que você edita.');
-  const taken = await takenFolderNames(parentId);
-  if (taken.has(name.toLowerCase())) throw badRequest('error-name-taken', 'Já existe uma pasta com esse nome aqui.');
+  const name = await freeFolderName(acc, parentId, wanted);
   const id = newId();
   try {
     await tx(async (c) => {
@@ -364,11 +375,10 @@ export async function updateFolder(ctx: Ctx, folderId: unknown, input: { name?: 
   const acc = await loadAccess(ctx);
   const f = needFolder(acc, folderId, 2);
   const color = checkColor(input.color);
-  const name = input.name !== undefined ? folderName(input.name) : f.name;
+  const wanted = input.name !== undefined ? folderName(input.name) : f.name;
   // Renomear a pasta principal mexe no que todos veem: pede gerenciar. Subpasta: editar a de cima basta.
-  if (name !== f.name && acc.level(f.id) < 3 && !(f.parent_id && acc.level(f.parent_id) >= 2)) throw forbidden(DRIVE_TEXT.needManage);
-  if (name.toLowerCase() !== f.name.toLowerCase() && (await takenFolderNames(f.parent_id, f.id)).has(name.toLowerCase()))
-    throw badRequest('error-name-taken', 'Já existe uma pasta com esse nome aqui.');
+  if (wanted !== f.name && acc.level(f.id) < 3 && !(f.parent_id && acc.level(f.parent_id) >= 2)) throw forbidden(DRIVE_TEXT.needManage);
+  const name = wanted.toLowerCase() !== f.name.toLowerCase() ? await freeFolderName(acc, f.parent_id, wanted, f.id) : wanted;
   try {
     await query('UPDATE drive_folders SET name = $2, color = $3, updated_at = now() WHERE id = $1', [f.id, name, color === undefined ? f.color : color]);
   } catch (e) {
@@ -377,7 +387,7 @@ export async function updateFolder(ctx: Ctx, folderId: unknown, input: { name?: 
   }
   if (name !== f.name) await logActivity(ctx, f.id, null, 'folder.rename', { from: f.name, to: name });
   changed(f.parent_id, f.id);
-  return {};
+  return { name };
 }
 
 // Mover, mandar para a lixeira ou restaurar uma pasta: quem gerencia, ou quem edita uma subpasta que herda o acesso e a

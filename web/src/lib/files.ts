@@ -13,7 +13,7 @@ export const filesApi = {
   activity: (folderId: string) => api.get<{ total: number; events: DriveActivity[] }>('files.activity', { folderId, count: 60 }),
   subjects: (text: string) => api.get<{ subjects: DriveSubject[] }>('files.subjects', { text }).then((r) => r.subjects),
   createFolder: (body: { name: string; parentId?: string | null; color?: string | null }) => api.post<{ folder: DriveFolder }>('files.folder.create', body).then((r) => r.folder),
-  updateFolder: (folderId: string, body: { name?: string; color?: string | null }) => api.post('files.folder.update', { folderId, ...body }),
+  updateFolder: (folderId: string, body: { name?: string; color?: string | null }) => api.post<{ name?: string }>('files.folder.update', { folderId, ...body }),
   share: (folderId: string, entries: { type: string; id: string; level: number }[], inherit: boolean) =>
     api.post<{ acl: DriveAclEntry[] }>('files.folder.share', { folderId, entries, inherit }).then((r) => r.acl),
   rename: (fileId: string, name: string) => api.post('files.rename', { fileId, name }),

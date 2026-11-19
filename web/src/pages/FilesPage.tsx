@@ -192,7 +192,7 @@ export function FilesPage() {
         onSave={async (name, color) => {
           const f = await filesApi.createFolder({ name, color, parentId: folder?._id ?? null });
           setDialog(null);
-          toast(`Pasta “${f.name}” criada.`, 'success');
+          toast(f.name === name ? `Pasta “${f.name}” criada.` : `Pasta criada como “${f.name}”.`, 'success');
           if (!folder) navigate(`/files/f/${f._id}`);
           else reload();
         }}
@@ -1464,9 +1464,9 @@ function useItemActions(opts: {
                     maxLength={DRIVE_FOLDER_NAME_MAX}
                     onClose={() => setDialog(null)}
                     onSave={async (name, color) => {
-                      await filesApi.updateFolder(f._id, canRenameFolder(f) ? { name, color } : { color });
+                      const r = await filesApi.updateFolder(f._id, canRenameFolder(f) ? { name, color } : { color });
                       setDialog(null);
-                      toast('Pasta atualizada.', 'success');
+                      toast(canRenameFolder(f) && r.name && r.name !== name ? `Pasta salva como “${r.name}”.` : 'Pasta atualizada.', 'success');
                       reload?.();
                     }}
                   />,
