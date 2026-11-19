@@ -7,6 +7,8 @@ let A: Auth;
 beforeAll(async () => {
   await startServer();
   A = await admin();
+  // Instalação nova vem com o cadastro desativado (login-security.test.ts): estes testes usam o cadastro público.
+  await api('POST', 'settings', { settings: { Accounts_RegistrationForm: 'Public' } }, A);
 });
 afterAll(stopServer);
 

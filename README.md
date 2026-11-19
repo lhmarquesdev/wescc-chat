@@ -1087,7 +1087,15 @@ como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os teste
   resolvida, a API só aceita as rotas para resolvê-la e o WebSocket fecha com o código 4005. Quem liga o 2FA
   obrigatório também precisa configurar o próprio 2FA.
 - Tentativas de login falhas (inclusive código 2FA errado) bloqueiam a conta e o IP por alguns minutos, em todas as
-  instâncias: Configurações › Contas › Sessão.
+  instâncias: Configurações › Contas › Sessão. Com o AD fora do ar (e sem `LDAP_Login_Fallback`), o login responde
+  "O servidor de rede (AD) não respondeu" e não conta tentativa.
+- Cada código do aplicativo autenticador vale uma vez só. Os códigos de backup têm 10 letras e números sem os que se
+  confundem (`XXXXX-XXXXX`), sem diferença de maiúsculas, espaços ou hífen.
+- Tokens de acesso pessoal: criar um pede a senha (e o código do 2FA, quando ligado). Redefinir a senha, a troca de
+  senha pelo administrador e o "Encerrar sessões" do administrador revogam os tokens da pessoa; desativar a conta
+  fecha as conexões abertas com eles.
+- Cadastro (`Accounts_RegistrationForm`): instalações novas começam com o cadastro desativado; as que já existiam
+  mantêm a opção de antes (migração 046). Com o cadastro público e sem aprovação manual, Configurações › Contas avisa.
 - A API só aceita chamadas de outros sites com CORS ligado (Configurações › Segurança › CORS). O cookie de sessão vale
   apenas para leituras (imagens e downloads) e para o WebSocket da própria página.
 - Avatares exigem login por padrão (`Accounts_AvatarBlockUnauthenticatedAccess`); avatares de salas privadas só para

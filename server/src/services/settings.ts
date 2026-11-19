@@ -67,9 +67,11 @@ add('Layout', 'Custom', 'Layout_Custom_CSS', 'code', '', { public: true, label: 
 add('Layout', 'Custom', 'Layout_Login_Terms', 'multiline', '', { public: true, label: 'Termos exibidos no login' });
 
 // ---------- Contas ----------
-add('Accounts', 'Registration', 'Accounts_RegistrationForm', 'select', 'Public', {
+// Chat interno: o cadastro começa desativado (a migração 046 mantém o "Público" de quem já usava o chat assim).
+add('Accounts', 'Registration', 'Accounts_RegistrationForm', 'select', 'Disabled', {
   public: true,
   label: 'Formulário de cadastro',
+  description: 'Público: qualquer pessoa que abrir o endereço do chat cria uma conta e lê os canais públicos. Para liberar só a quem você mandar o link, use “Somente com link secreto”.',
   values: [
     { key: 'Public', label: 'Público' },
     { key: 'Secret', label: 'Somente com link secreto' },

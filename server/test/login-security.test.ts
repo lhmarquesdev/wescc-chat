@@ -192,3 +192,31 @@ describe('esqueci minha senha sem e-mail configurado', () => {
     await api('POST', 'settings', { settings: { Accounts_PasswordReset: true } }, A);
   });
 });
+
+describe('cadastro', () => {
+  it('instalação nova: cadastro desativado; quem já usava o chat com o padrão antigo continua com o cadastro público', async () => {
+    const s = (await api('GET', 'settings', { group: 'Accounts' }, A)).settings.find((x: any) => x._id === 'Accounts_RegistrationForm');
+    expect(s.value).toBe('Disabled');
+    const r = await api('POST', 'users.register', { username: 'estranho', name: 'Estranho', email: 'estranho@gmail.com', pass: 'qualquer-123' });
+    expect([r.status, r.error]).toEqual([403, 'O cadastro está desativado.']);
+
+    // Instalação que já existia (com contas) e nunca mexeu na opção: a migração grava o valor de antes.
+    await pool.query(`DELETE FROM settings WHERE id = 'Accounts_RegistrationForm'`);
+    await pool.query(`DELETE FROM schema_migrations WHERE name = '046_login_seguro.sql'`);
+    await migrate(() => {});
+    await loadSettings();
+    try {
+      expect(getSetting('Accounts_RegistrationForm')).toBe('Public');
+      // Quem já tinha escolhido outro valor fica com ele.
+      await pool.query(`UPDATE settings SET value = '"Secret"' WHERE id = 'Accounts_RegistrationForm'`);
+      await pool.query(`DELETE FROM schema_migrations WHERE name = '046_login_seguro.sql'`);
+      await migrate(() => {});
+      await loadSettings();
+      expect(getSetting('Accounts_RegistrationForm')).toBe('Secret');
+    } finally {
+      await pool.query(`DELETE FROM settings WHERE id = 'Accounts_RegistrationForm'`);
+      await loadSettings();
+    }
+    expect(getSetting('Accounts_RegistrationForm')).toBe('Disabled');
+  });
+});
