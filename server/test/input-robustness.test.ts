@@ -106,10 +106,10 @@ describe('parâmetros inválidos', () => {
   });
 
   it('a rede do errorHandler: valor recusado pelo PostgreSQL ou data inválida viram 400 em português', () => {
-    const run = (err: any) => {
+    const run = (err: any, input: { query?: object; body?: object } = {}) => {
       const out: any = {};
       const reply: any = { status: (c: number) => ((out.status = c), reply), send: (b: any) => ((out.body = b), reply) };
-      const req: any = { log: { warn() {}, error() {} }, routeOptions: {} };
+      const req: any = { log: { warn() {}, error() {} }, routeOptions: {}, ...input };
       errorHandler(err, req, reply);
       return out;
     };
@@ -121,6 +121,12 @@ describe('parâmetros inválidos', () => {
     expect(run(db('42703', 'column "nan" does not exist')).status).toBe(400);
     expect(run(new RangeError('Invalid time value')).body.error).toBe('Data inválida.');
     expect(run(new TypeError('Cannot convert object to primitive value')).status).toBe(400);
+    // Quando só um parâmetro pode ter trazido o valor, a mensagem diz qual.
+    const ts = (v: string) => db('22007', `invalid input syntax for type timestamp with time zone: "${v}"`);
+    expect(run(ts('ontem'), { query: { roomId: 'x', latest: 'ontem' } }).body.error).toBe('O parâmetro "latest" deve ser uma data.');
+    expect(run(db('22P02', 'invalid input syntax for type integer: "abc"'), { body: { count: 'abc', roomId: 'x' } }).body.error).toBe('O parâmetro "count" tem um valor inválido.');
+    expect(run(new RangeError('Invalid time value'), { query: { start: 'abc', end: '2024-01-01', userId: 'x' } }).body.error).toBe('O parâmetro "start" deve ser uma data.');
+    expect(run(ts('x'), { query: { latest: 'x', oldest: 'x' } }).body.error).toBe('Data inválida.'); // os dois têm o valor
     // Coluna errada de verdade (erro do código) e falhas comuns continuam erro interno.
     expect(run(db('42703', 'column "nmae" does not exist')).status).toBe(500);
     expect(run(new TypeError('x is not a function')).status).toBe(500);
@@ -145,6 +151,9 @@ describe('caracteres invisíveis e de direção', () => {
     const me = await api('POST', 'users.updateOwnBasicInfo', { data: { name: 'a\u202eRLO-invertido' } }, user);
     expect(me.status).toBe(200);
     expect((await api('GET', 'me', undefined, user)).name).toBe('aRLO-invertido');
+    // A mensagem de status do menu do usuário (users.setStatus) também.
+    await api('POST', 'users.setStatus', { message: 'em reunião ‮até 15h' }, user);
+    expect((await api('GET', 'users.getStatus', undefined, user)).message).toBe('em reunião até 15h');
 
     const room = (await api('POST', 'channels.create', { name: `bidi-${Date.now().toString(36)}` }, A)).channel._id;
     await api('POST', 'channels.setTopic', { roomId: room, topic: '\u202e tópico invertido' }, A);

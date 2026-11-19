@@ -104,12 +104,13 @@ const FASTIFY_ERRORS: Record<string, string> = {
 };
 
 const INVALID_PARAM = 'Um dos parâmetros enviados tem um valor inválido.';
+const INVALID_DATE = 'Data inválida.';
 // Valor que o PostgreSQL recusa (U+0000, data, número, texto longo): a entrada veio errada, não é falha do servidor.
 const DB_INPUT_ERRORS: Record<string, string> = {
   '22021': 'O texto contém um caractere inválido.', // U+0000 em texto
   '22P05': 'O texto contém um caractere inválido.', // U+0000 em jsonb
-  '22007': 'Data inválida.',
-  '22008': 'Data inválida.', // fora do intervalo
+  '22007': INVALID_DATE,
+  '22008': INVALID_DATE, // fora do intervalo
   '22P02': INVALID_PARAM, // texto onde vai número, booleano...
   '22003': INVALID_PARAM, // número fora do intervalo
   '2201W': INVALID_PARAM, // LIMIT negativo
@@ -123,10 +124,29 @@ function inputError(err: any): string | undefined {
     // LIMIT ${n} com n = NaN ou Infinity: o banco lê como a coluna "nan".
     if (err.code === '42703' && /column "-?(nan|infinity)"/i.test(err.message ?? '')) return INVALID_PARAM;
   }
-  if (err instanceof RangeError && err.message === 'Invalid time value') return 'Data inválida.'; // toISOString()
+  if (err instanceof RangeError && err.message === 'Invalid time value') return INVALID_DATE; // toISOString()
   // String() de um objeto do JSON com toString/valueOf que não é função ({ "toString": 1 }).
   if (err instanceof TypeError && err.message === 'Cannot convert object to primitive value') return INVALID_PARAM;
   return undefined;
+}
+
+const DATE_PARAM = /^(latest|oldest|lastUpdate|updatedSince|start|end|from|to|[a-z]+(Date|At))$/;
+
+// O parâmetro (da consulta ou do corpo) que trouxe o valor recusado, quando só um pode ter sido: o PostgreSQL cita o
+// valor entre aspas; numa data inválida (toISOString), o único parâmetro de data que não é uma data.
+function badParam(req: FastifyRequest, err: any): string | undefined {
+  const msg = typeof err?.code === 'string' ? String(err.message ?? '') : '';
+  const quoted = (/: "(.*)"$/s.exec(msg) ?? /^value "(.*)" is out of range/s.exec(msg))?.[1];
+  if (quoted === undefined && !(err instanceof RangeError)) return undefined;
+  const hits = new Set<string>();
+  for (const src of [req.query, req.body]) {
+    if (!src || typeof src !== 'object' || Array.isArray(src)) continue;
+    for (const [k, v] of Object.entries(src as Record<string, unknown>)) {
+      if ((typeof v !== 'string' && typeof v !== 'number') || v === '') continue;
+      if (quoted !== undefined ? String(v) === quoted : DATE_PARAM.test(k) && Number.isNaN(Date.parse(String(v)))) hits.add(k);
+    }
+  }
+  return hits.size === 1 ? [...hits][0] : undefined;
 }
 
 const fmtLimit = (n: number) => (n >= 1024 * 1024 ? `${Math.round(n / (1024 * 1024))} MB` : `${Math.round(n / 1024)} KB`);
@@ -156,7 +176,9 @@ export function errorHandler(err: any, req: FastifyRequest, reply: FastifyReply)
   if (invalid) {
     // Fica no log como aviso, com a pilha, para achar a rota que deixou o valor passar.
     req.log.warn(err);
-    return reply.status(400).send({ success: false, error: invalid, errorType: 'error-invalid-params' });
+    const name = invalid === INVALID_DATE || invalid === INVALID_PARAM ? badParam(req, err) : undefined;
+    const error = !name ? invalid : invalid === INVALID_DATE ? `O parâmetro "${name}" deve ser uma data.` : `O parâmetro "${name}" tem um valor inválido.`;
+    return reply.status(400).send({ success: false, error, errorType: 'error-invalid-params' });
   }
   req.log.error(err);
   return reply.status(500).send({ success: false, error: 'Erro interno do servidor.', errorType: 'error-internal' });

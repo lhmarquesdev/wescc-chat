@@ -6,12 +6,13 @@ const NUL = /\u0000/g;
 // Controles de direção (incorporação, sobreposição e isolamento: U+202A–U+202E, U+2066–U+2069). Um RLO (U+202E)
 // num nome ou num tópico inverte o resto do texto na tela de todo mundo.
 const BIDI = /[\u202a-\u202e\u2066-\u2069]/g;
-// Nomes (de pessoa, de sala, de equipe, de discussão), tópico, descrição, anúncio, "Sobre" e mensagem de status: perdem
-// os controles de direção. O texto das mensagens fica como veio.
+// Nomes (de pessoa, de sala, de equipe, de discussão, o apelido de quem envia por integração), tópico, descrição,
+// anúncio, "Sobre" e mensagem de status: perdem os controles de direção. O texto das mensagens fica como veio.
 const DISPLAY_KEYS = new Set([
   'name',
   'fname',
   't_name',
+  'alias',
   'roomName',
   'topic',
   'roomTopic',
@@ -21,6 +22,7 @@ const DISPLAY_KEYS = new Set([
   'roomAnnouncement',
   'bio',
   'statusText',
+  'message', // users.setStatus: a mensagem de status (o menu do usuário manda por aqui; o texto do chat vem em msg/text)
 ]);
 // Corpo aninhado além disso não é de nenhuma rota; o que sobrar cai na rede do errorHandler.
 const MAX_DEPTH = 32;
