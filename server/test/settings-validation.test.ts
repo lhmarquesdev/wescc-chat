@@ -93,3 +93,32 @@ describe('validação das configurações', () => {
     expect((await save({ From_Email: 'chat@localhost', LDAP_Url: '' })).success).toBe(true);
   });
 });
+
+describe('canais padrão', () => {
+  const isDefault = async (name: string) => (await pool.query('SELECT is_default FROM rooms WHERE name = $1', [name])).rows[0].is_default as boolean;
+  const setting = async () => ((await api('GET', 'settings', undefined, A)).settings as any[]).find((s) => s._id === 'Default_Channels').value;
+
+  it('a lista vale na hora para quem entra, recusa canal que não existe e acompanha a marca de Administração › Salas', async () => {
+    const op = await api('POST', 'channels.create', { name: 'operacao' }, A);
+    await api('POST', 'groups.create', { name: 'privado' }, A);
+    const bad = await save({ Default_Channels: 'geral,naoexiste' });
+    expect(bad.status).toBe(400);
+    expect(bad.error).toBe('Canais padrão (separados por vírgula): Canal não encontrado: naoexiste.');
+    expect((await save({ Default_Channels: 'geral, #operacao, privado' })).success).toBe(true);
+    expect([await isDefault('geral'), await isDefault('operacao'), await isDefault('privado')]).toEqual([true, true, true]);
+    const u = await newUser(A);
+    const rooms = (await pool.query('SELECT r.name FROM subscriptions s JOIN rooms r ON r.id = s.room_id WHERE s.user_id = $1 ORDER BY r.name', [u.userId])).rows.map((r) => r.name);
+    expect(rooms).toEqual(['geral', 'operacao', 'privado']);
+    // Tirar da lista desmarca a sala.
+    expect((await save({ Default_Channels: 'operacao' })).success).toBe(true);
+    expect([await isDefault('geral'), await isDefault('operacao'), await isDefault('privado')]).toEqual([false, true, false]);
+    // Marcar em Administração › Salas, renomear e excluir regravam a configuração.
+    const geral = (await api('GET', 'channels.info', { roomName: 'geral' }, A)).channel._id;
+    expect((await api('POST', 'rooms.saveRoomSettings', { rid: geral, default: true }, A)).success).toBe(true);
+    expect(await setting()).toBe('geral,operacao');
+    expect((await api('POST', 'rooms.saveRoomSettings', { rid: op.channel._id, roomName: 'operacao-n1' }, A)).success).toBe(true);
+    expect(await setting()).toBe('geral,operacao-n1');
+    expect((await api('POST', 'rooms.delete', { roomId: op.channel._id }, A)).success).toBe(true);
+    expect(await setting()).toBe('geral');
+  });
+});

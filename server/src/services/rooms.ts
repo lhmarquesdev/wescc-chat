@@ -10,7 +10,7 @@ import { announceDeparture, announceRotate, assertCanToggleE2e, E2E_ERR, e2eOn, 
 import { mapRoom, mapSubscription, visibleStatusCustom } from './mappers';
 import { sendSystemMessage, withExtra } from './messages';
 import { hasPermission, rolesHavePermission, getUserRoles, roleInfos } from './permissions';
-import { getSetting } from './settings';
+import { getSetting, updateSettings } from './settings';
 import { actorOf, getUserById, type Ctx } from './users';
 import { emit } from './hooks';
 import { forgetRoomTranslations } from '../translate/forget';
@@ -242,6 +242,24 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
     else await sendSystemMessage(rid, 'ul', { id: user.id, username: user.username }, user.username);
   }
   if (user) emit('room.left', { room, user: { _id: user.id, username: user.username } });
+}
+
+// Canais padrão: Configurações › Geral e a marca "Padrão" de Administração › Salas são a mesma lista. Gravar a
+// configuração marca as salas da lista e desmarca as outras (antes ela só valia no primeiro boot, sem sala padrão);
+// marcar, desmarcar, renomear ou excluir uma sala padrão regrava a configuração.
+export async function applyDefaultChannels() {
+  const names = String(getSetting('Default_Channels') ?? '').split(',').map((s) => s.trim().replace(/^#/, '').toLowerCase()).filter(Boolean);
+  await query(
+    `UPDATE rooms SET is_default = (prid IS NULL AND lower(name) = ANY($1::text[])), updated_at = now()
+     WHERE t IN ('c','p') AND is_default IS DISTINCT FROM (prid IS NULL AND lower(name) = ANY($1::text[]))`,
+    [names],
+  );
+}
+
+async function syncDefaultChannelsSetting() {
+  const rows = await many(`SELECT name FROM rooms WHERE is_default AND t IN ('c','p') ORDER BY created_at`);
+  const value = rows.map((r) => r.name).join(',');
+  if (value !== String(getSetting('Default_Channels') ?? '')) await updateSettings({ Default_Channels: value });
 }
 
 export async function joinDefaultChannels(userId: string) {
@@ -578,6 +596,7 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
     for (const sub of await forgetRoomTranslations(rid)) await notifySubscription(sub.user_id, rid, 'updated', sub);
   }
   for (const [t, msg] of sys) await sendSystemMessage(rid, t, me, msg);
+  if ((s.default !== undefined && s.default !== !!room.is_default) || (s.roomName !== undefined && room.is_default)) await syncDefaultChannelsSetting();
   await audit(actorOf(ctx), 'room.settings.changed', { rid, name: room.name }, { fields: Object.keys(s) });
   await notifyRoomUpdated(rid);
   // Ligada de novo com a troca pendente (alguém voltou ou saiu enquanto estava desligada): quem tem a chave troca agora.
@@ -613,6 +632,7 @@ export async function deleteRoom(ctx: Ctx, rid: string) {
   await deleteRoomFiles(rid);
   // Discussões filhas são removidas em cascata.
   await query('DELETE FROM rooms WHERE id = $1', [rid]);
+  if (room.is_default) await syncDefaultChannelsSetting();
   if (room.prid && room.pmid) {
     await query('UPDATE messages SET dcount = GREATEST(dcount - 1, 0), drid = NULL WHERE id = $1', [room.pmid]);
   }

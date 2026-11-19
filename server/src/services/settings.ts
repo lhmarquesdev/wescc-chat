@@ -9,7 +9,7 @@ import { bus } from '../realtime/bus';
 import { roleScope } from './permissions';
 
 // validate devolve o texto do erro (mostrado ao administrador) ou null quando o valor serve.
-type Def = Omit<Setting, '_id' | 'value'> & { default: unknown; validate?: (value: unknown) => string | null };
+type Def = Omit<Setting, '_id' | 'value'> & { default: unknown; validate?: (value: unknown) => string | null | Promise<string | null> };
 
 const defs = new Map<string, Def>();
 let sorter = 0;
@@ -84,11 +84,20 @@ function validateCorsOrigins(v: unknown): string | null {
   return null;
 }
 
+// Canais padrão: cada nome precisa ser um canal ou grupo que existe (rooms.ts aplica a lista na marca "Padrão").
+async function validateDefaultChannels(v: unknown): Promise<string | null> {
+  const names = String(v ?? '').split(',').map((x) => x.trim().replace(/^#/, '')).filter(Boolean);
+  if (!names.length) return null;
+  const rows = await many<{ n: string }>(`SELECT lower(name) AS n FROM rooms WHERE lower(name) = ANY($1::text[]) AND t IN ('c','p') AND prid IS NULL`, [names.map((n) => n.toLowerCase())]);
+  const missing = names.find((n) => !rows.some((r) => r.n === n.toLowerCase()));
+  return missing ? `Canal não encontrado: ${missing}.` : null;
+}
+
 // ---------- Geral ----------
 add('General', 'Workspace', 'Site_Name', 'string', 'Wescc Chat', { public: true, label: 'Nome do workspace', validate: validateSiteName });
 add('General', 'Workspace', 'Site_Url', 'string', process.env.SITE_URL ?? 'http://localhost:3000', { public: true, label: 'URL do site', validate: validateHttpUrl });
 add('General', 'Workspace', 'Language', 'string', 'pt-BR', { public: true, label: 'Idioma padrão (destino das traduções de mensagens)' });
-add('General', 'Workspace', 'Default_Channels', 'string', 'geral', { label: 'Canais padrão (separados por vírgula)' });
+add('General', 'Workspace', 'Default_Channels', 'string', 'geral', { label: 'Canais padrão (separados por vírgula)', validate: validateDefaultChannels });
 add('Layout', 'Home', 'Layout_Home_Title', 'string', 'Início', { public: true, label: 'Título da página inicial' });
 add('Layout', 'Home', 'Layout_Home_Body', 'multiline', 'Boas-vindas ao chat interno.', { public: true, label: 'Conteúdo da página inicial (Markdown)' });
 // Tamanho do logo no topo do menu lateral, em pixels de altura: um valor para o menu aberto e outro para o recolhido.
@@ -549,7 +558,7 @@ export async function updateSettings(values: Record<string, unknown>) {
     if (!def) continue;
     if (def.type === 'password' && raw === '********') continue;
     const value = coerce(def, raw);
-    const err = def.validate?.(value);
+    const err = await def.validate?.(value);
     if (err) throw new Error(`${def.label}: ${err}`);
     accepted.push([id, value]);
   }

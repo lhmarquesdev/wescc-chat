@@ -10,7 +10,7 @@ import { getSetting, isKnownSetting, isSecretSetting, listSettings, updateSettin
 import { engagementChannels, engagementMessages, engagementUsers, workspaceStatistics } from '../services/stats';
 import { mailStatus, sendMail } from '../services/mailer';
 import { runRetention } from '../services/retention';
-import { getRoom, setRoomRole } from '../services/rooms';
+import { applyDefaultChannels, getRoom, setRoomRole } from '../services/rooms';
 import { mapUser } from '../services/mappers';
 import { actorOf } from '../services/users';
 import { bus } from '../realtime/bus';
@@ -55,6 +55,7 @@ export function adminRoutes(app: FastifyInstance) {
     const changed = await updateSettings(values).catch((e) => {
       throw badRequest('error-invalid-setting-value', String(e.message));
     });
+    if (changed.some((c) => c._id === 'Default_Channels')) await applyDefaultChannels();
     await audit(actorOf(ctx), 'settings.changed', {}, { settings: changed.map((c) => ({ _id: c._id, value: isSecretSetting(c._id) ? '***' : c.value })) });
     return { changed: changed.map((c) => c._id) };
   });
