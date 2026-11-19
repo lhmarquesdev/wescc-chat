@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { Message, Subscription } from '@shared/index';
 import { watchAcks } from '../lib/acks';
 import { api, errorMessage } from '../lib/api';
+import { readHeld, releaseRead } from '../lib/markUnread';
 import { formatDateTime, formatDay, formatTime, nameList, plural, roomDisplayName, roomIconName } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
 import { continuesGroup, joinsText, messageHref } from '../lib/messageRules';
@@ -144,6 +145,11 @@ export function MessageList({
     }
   }, [rid]);
 
+  // A sala foi aberta de novo: "Marcar como não lida" (que saiu dela) deixa de segurar a leitura.
+  useEffect(() => {
+    releaseRead(rid);
+  }, [rid]);
+
   useEffect(() => {
     atBottom.current = !jumpTo;
     if (jumpTo) {
@@ -251,7 +257,7 @@ export function MessageList({
   useEffect(() => {
     const mark = () => {
       const s = useStore.getState().subscriptions[rid];
-      if (!s || !document.hasFocus() || !atBottom.current) return;
+      if (!s || !document.hasFocus() || !atBottom.current || readHeld(rid)) return;
       if (s.unread > 0 || s.alert || s.userMentions > 0) void api.post('subscriptions.read', { rid }).catch(() => {});
     };
     mark();

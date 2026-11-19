@@ -12,6 +12,7 @@ import { renderMarkdown } from '../lib/markdown';
 import { sendText } from '../lib/direct';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { lastOwnEditable } from '../lib/messageRules';
+import { markUnread } from '../lib/markUnread';
 import { useTranslateAllowed } from '../lib/translate';
 import { Composer } from '../components/Composer';
 import { Icon, type IconName } from '../components/Icon';
@@ -725,7 +726,7 @@ export function RoomPage() {
                           <Icon name={sub.f ? 'unfavorite' : 'favorite'} />
                           {sub.f ? 'Remover dos favoritos' : 'Favoritar'}
                         </button>
-                        <button onClick={() => (api.post('subscriptions.unread', { roomId: rid }), close())}>
+                        <button onClick={() => (close(), void markUnread(rid, () => navigate('/home')))}>
                           <Icon name="mark-unread" />
                           Marcar como não lida
                         </button>

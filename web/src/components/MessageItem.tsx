@@ -24,6 +24,7 @@ import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
 import { useHighlights } from '../lib/presence';
 import { findHighlight } from '@shared/highlights';
 import { authorName, editableKind, forwardableKind, messageHref } from '../lib/messageRules';
+import { markUnread } from '../lib/markUnread';
 import { canRemoveEverywhere, useStickers } from '../lib/stickers';
 import { useNames } from '../lib/names';
 import { avatarBust, useSetting, useStore } from '../lib/store';
@@ -1026,7 +1027,7 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
         label: tr.shown === 'translation' ? 'Ver original' : 'Traduzir',
         run: tr.toggle,
       }),
-      opt(!own, { key: 'unread', icon: 'mark-unread', label: 'Marcar como não lida', run: () => void api.post('subscriptions.unread', { firstUnreadMessage: { _id: m._id } }).catch(fail) }),
+      opt(!own, { key: 'unread', icon: 'mark-unread', label: 'Marcar como não lida', run: () => void markUnread(m.rid, () => navigate('/home'), m._id) }),
       opt(showReceipts, { key: 'receipts', icon: 'receipts', label: 'Confirmações de leitura', run: () => setReceipts(true) }),
       opt(m.sticker, { key: 'sticker', el: (close, sheetRole) => <StickerMenuItems message={m} close={close} sheetRole={sheetRole} /> }),
       opt(createSticker, { key: 'create-sticker', el: (close, sheetRole) => <CreateStickerItem message={m} close={close} sheetRole={sheetRole} inThread={inThread} /> }),
