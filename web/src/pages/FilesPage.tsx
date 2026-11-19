@@ -161,7 +161,7 @@ export function FilesPage() {
     if (!fileParam || !data || data.folder._id !== folderId) return;
     const hit = data.files.find((f) => f._id === fileParam);
     if (hit) setSelected({ kind: 'file', file: hit });
-    else toast('Esse arquivo não está mais nesta pasta: ele pode ter sido movido, renomeado ou mandado para a lixeira.', 'warning');
+    else toast('Esse arquivo não está mais nesta pasta: ele pode ter sido movido, mandado para a lixeira ou apagado.', 'warning');
     setParams(
       (p) => {
         p.delete('file');
@@ -491,7 +491,8 @@ function TreeNode({ folder, depth, currentId, onPath, tick }: { folder: DriveFol
   const [open, setOpen] = useState(onPath.has(folder._id));
   const [children, setChildren] = useState<DriveFolder[] | null>(null);
   const [changes, setChanges] = useState(0);
-  const hasKids = open && children ? children.length > 0 : (folder.subfolders ?? folder.items ?? 0) > 0;
+  // Depois de pedir os filhos (aberta, ou fechada mas mudada por alguém), a seta segue o que veio.
+  const hasKids = children ? children.length > 0 : (folder.subfolders ?? folder.items ?? 0) > 0;
   useEffect(() => {
     if (onPath.has(folder._id)) setOpen(true);
   }, [onPath, folder._id]);
@@ -504,7 +505,7 @@ function TreeNode({ folder, depth, currentId, onPath, tick }: { folder: DriveFol
     };
   }, [folder._id]);
   useEffect(() => {
-    if (!open) return;
+    if (!open && !changes) return;
     let alive = true;
     filesApi.folder(folder._id).then(
       (d) => alive && setChildren(d.folders),
