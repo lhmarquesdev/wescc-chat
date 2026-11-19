@@ -1092,6 +1092,9 @@ como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os teste
 - Avatares exigem login por padrão (`Accounts_AvatarBlockUnauthenticatedAccess`); avatares de salas privadas só para
   quem tem acesso.
 - O LDAP só vincula uma conta local com o mesmo nome de usuário com `LDAP_Merge_Existing_Users` ligado.
+- A página do chat sai com Content-Security-Policy (só os scripts do próprio chat) e não abre dentro de outro site
+  (`X-Frame-Options` e `frame-ancestors`); todas as respostas levam `X-Content-Type-Options: nosniff` e
+  `Referrer-Policy`. Um proxy reverso na frente não deve trocar esses cabeçalhos.
 - Discussão é tão privada quanto a sala de origem: num grupo privado, numa conversa direta ou num canal de time
   privado, ela nasce grupo privado. Canal de time privado que sai do time (tirado do time, time excluído ou convertido
   em sala) vira grupo privado com os mesmos membros. Quem não participa não recebe nada dessas salas em tempo real
