@@ -607,11 +607,37 @@ export async function renameFile(ctx: Ctx, fileId: unknown, rawName: unknown) {
 
 // ---------- Lixeira ----------
 
+// O que vai junto para a lixeira (ou é apagado de vez) precisa ser da pessoa também: uma subpasta restrita que ela não
+// gerencia (e talvez nem veja) barra a ação, para não sumir com o que é de outras pessoas sem elas saberem.
+function restrictedInside(acc: Access, f: FolderRow): FolderRow | null {
+  for (const id of acc.subtree(f.id).slice(1)) {
+    const d = acc.folders.get(id)!;
+    const lvl = acc.level(id);
+    if (lvl < 3 && !(d.inherit && lvl >= 2)) return d;
+  }
+  return null;
+}
+
+function assertWholeTree(acc: Access, f: FolderRow) {
+  const d = restrictedInside(acc, f);
+  if (!d) return;
+  if (acc.level(d.id) === 0)
+    throw badRequest('error-restricted-inside', 'Esta pasta tem subpastas restritas que você não acessa. Peça a quem as gerencia, ou a um administrador, para tirá-las daqui antes.');
+  throw badRequest('error-restricted-inside', `A subpasta "${d.name}" é restrita e você não a gerencia. Peça a quem a gerencia para tirá-la daqui antes.`);
+}
+
+// A primeira pasta na lixeira, a própria ou uma de cima.
+function trashTop(acc: Access, f: FolderRow): FolderRow | null {
+  for (let p: FolderRow | undefined = f; p; p = p.parent_id ? acc.folders.get(p.parent_id) : undefined) if (p.trashed_at) return p;
+  return null;
+}
+
 export async function trashItems(ctx: Ctx, input: { fileIds?: string[]; folderIds?: string[] }) {
   const acc = await loadAccess(ctx);
   const touched = new Set<string | null>();
-  for (const id of (input.folderIds ?? []).slice(0, 100)) {
-    const f = needFolder(acc, id, 3);
+  const folders = (input.folderIds ?? []).slice(0, 100).map((id) => needFolder(acc, id, 3));
+  for (const f of folders) assertWholeTree(acc, f);
+  for (const f of folders) {
     await query('UPDATE drive_folders SET trashed_at = now(), trashed_by = $2 WHERE id = $1', [f.id, ctx.userId]);
     await logActivity(ctx, f.id, null, 'folder.trash', { name: f.name });
     if (f.parent_id) await logActivity(ctx, f.parent_id, null, 'folder.trash', { name: f.name, sub: f.id });
@@ -627,10 +653,23 @@ export async function trashItems(ctx: Ctx, input: { fileIds?: string[]; folderId
   return {};
 }
 
-// Itens no topo da lixeira (não os que estão dentro de uma pasta que já está lá) que a pessoa pode restaurar.
+// Itens no topo da lixeira (não os que estão dentro de uma pasta que já está na lista) que a pessoa pode restaurar.
+// Uma subpasta restrita que foi junto com a pasta de cima aparece para quem a gerencia, mesmo sem ver a de cima.
 export async function listTrash(ctx: Ctx) {
   const acc = await loadAccess(ctx);
-  const folders = [...acc.folders.values()].filter((f) => f.trashed_at && !(f.parent_id && acc.trashed(f.parent_id)) && acc.level(f.id) >= 3);
+  const memo = new Map<string, boolean>();
+  const listed = (f: FolderRow): boolean => {
+    const hit = memo.get(f.id);
+    if (hit !== undefined) return hit;
+    memo.set(f.id, false);
+    let out = acc.trashed(f.id) && (!!f.trashed_at || !f.inherit) && acc.level(f.id) >= 3;
+    for (let p = f.parent_id ? acc.folders.get(f.parent_id) : undefined; out && p; p = p.parent_id ? acc.folders.get(p.parent_id) : undefined) if (listed(p)) out = false;
+    memo.set(f.id, out);
+    return out;
+  };
+  const folders = [...acc.folders.values()]
+    .filter(listed)
+    .map((f) => (f.trashed_at ? f : { ...f, trashed_at: trashTop(acc, f)?.trashed_at ?? null, trashed_by: trashTop(acc, f)?.trashed_by ?? null }));
   const fileRows = await many('SELECT * FROM drive_files WHERE trashed_at IS NOT NULL ORDER BY trashed_at DESC LIMIT 500');
   const files = fileRows.filter((r) => !acc.trashed(r.folder_id) && acc.level(r.folder_id) >= 2);
   const users = await userCache([...files.flatMap((r) => [r.uploaded_by, r.trashed_by]), ...folders.flatMap((f) => [f.created_by, f.trashed_by])]);
@@ -647,8 +686,13 @@ export async function restoreItems(ctx: Ctx, input: { fileIds?: string[]; folder
   const touched = new Set<string | null>();
   for (const id of (input.folderIds ?? []).slice(0, 100)) {
     const f = needFolder(acc, id, 3, { allowTrashed: true });
-    if (!f.trashed_at) continue;
-    if (f.parent_id && acc.trashed(f.parent_id)) throw badRequest('error-parent-trashed', `A pasta de cima de "${f.name}" também está na lixeira. Restaure-a primeiro.`);
+    if (!acc.trashed(f.id)) continue;
+    if (f.parent_id && acc.trashed(f.parent_id)) {
+      // Foi para a lixeira junto com a de cima: restaurar é com quem a gerencia (que talvez a pessoa nem veja).
+      const top = trashTop(acc, acc.folders.get(f.parent_id)!)!;
+      if (acc.level(top.id) >= 3) throw badRequest('error-parent-trashed', `A pasta de cima de "${f.name}" também está na lixeira. Restaure "${top.name}" primeiro.`);
+      throw badRequest('error-parent-trashed', `A pasta de cima de "${f.name}" está na lixeira. Peça a quem a gerencia para restaurá-la.`);
+    }
     const name = nextFreeName(f.name, await takenFolderNames(f.parent_id, f.id));
     await query('UPDATE drive_folders SET trashed_at = NULL, trashed_by = NULL, name = $2, updated_at = now() WHERE id = $1', [f.id, name]);
     await logActivity(ctx, f.id, null, 'folder.restore', { name });
@@ -687,7 +731,10 @@ export async function purgeItems(ctx: Ctx, input: { fileIds?: string[]; folderId
   let removed = 0;
   for (const id of folderIds) {
     const f = needFolder(acc, id, 3, { allowTrashed: true });
-    if (!f.trashed_at) throw badRequest('error-not-in-trash', 'Mande para a lixeira antes de apagar de vez.');
+    if (!acc.trashed(f.id)) throw badRequest('error-not-in-trash', 'Mande para a lixeira antes de apagar de vez.');
+    // Esvaziar a lixeira deixa lá o que tem subpasta restrita de outras pessoas; apagar só ela explica o motivo.
+    if (input.all && restrictedInside(acc, f)) continue;
+    assertWholeTree(acc, f);
     removed += await purgeFolderTree(acc.subtree(f.id));
     // Depois de apagada não dá mais para saber quem a via: restrita, só quem gerencia todas as pastas vê o evento.
     if (f.parent_id) await logActivity(ctx, f.parent_id, null, 'folder.purge', { name: f.name, sub: f.id, restricted: !f.inherit });

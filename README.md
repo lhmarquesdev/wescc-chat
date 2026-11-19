@@ -1123,7 +1123,10 @@ A aba **Arquivos** guarda documentos da empresa em pastas, com permissão por pa
 
 Subpastas herdam o acesso da pasta de cima. Em **Compartilhar**, "Herdar o acesso da pasta de cima" desligado deixa a
 subpasta **restrita**: só quem está na lista dela entra (ex.: "Folha e salários" dentro de "Financeiro"). Quem tem
-acesso só a uma subpasta a vê como pasta principal, sem ver o nome das de cima.
+acesso só a uma subpasta a vê como pasta principal, sem ver o nome das de cima. Uma pasta com uma subpasta restrita
+que você não gerencia não vai para a lixeira nem é apagada de vez por você (peça a quem gerencia a subpasta para
+tirá-la de lá antes); se um administrador mandar a pasta de cima para a lixeira, quem gerencia a subpasta restrita a
+encontra na própria Lixeira.
 
 Permissões do RBAC (Papéis e permissões › Arquivos):
 

@@ -272,6 +272,29 @@ describe('subpasta restrita dentro de uma pasta que outra pessoa gerencia', () =
     expect(all).toContain('Demissões sigilosas');
   });
 
+  it('quem gerencia a pasta de cima não manda para a lixeira nem apaga de vez a subpasta restrita dos outros', async () => {
+    const t = await api('POST', 'files.trash', { folderIds: [rh] }, bruno);
+    expect(t.status).toBe(400);
+    expect(t.errorType).toBe('error-restricted-inside');
+    expect(t.error).toContain('não acessa');
+    expect((await folder(rh, bruno)).folder.trashedAt).toBeNull();
+    // O administrador pode (vê tudo): a subpasta vai junto, e quem a gerencia a encontra na própria lixeira.
+    expect((await api('POST', 'files.trash', { folderIds: [rh] }, A)).success).toBe(true);
+    const ct = await api('GET', 'files.trash.list', undefined, carla);
+    expect(ct.folders.map((f: any) => f.name)).toEqual(['Demissões sigilosas']);
+    expect(ct.folders[0].trashedAt).not.toBeNull();
+    const rs = await api('POST', 'files.restore', { folderIds: [secret] }, carla);
+    expect(rs.errorType).toBe('error-parent-trashed');
+    expect(rs.error).toContain('Peça a quem a gerencia');
+    // Apagar de vez também não leva junto o que é dos outros; esvaziar a lixeira deixa a pasta lá.
+    const p = await api('POST', 'files.purge', { folderIds: [rh] }, bruno);
+    expect(p.errorType).toBe('error-restricted-inside');
+    expect((await api('POST', 'files.purge', { all: true }, bruno)).removed).toBe(0);
+    expect(await one('SELECT 1 FROM drive_folders WHERE id = $1', [secret])).not.toBeNull();
+    expect((await api('POST', 'files.restore', { folderIds: [rh] }, A)).success).toBe(true);
+    expect((await folder(rh, carla)).folders.map((f: any) => f.name)).toContain('Demissões sigilosas');
+  });
+
   it('evento antigo, sem o id da subpasta, também some pelo nome', async () => {
     await query("INSERT INTO drive_activity (id, folder_id, actor_id, actor_username, action, data) VALUES ('legadoAAAAAAAAAAA', $1, $2, 'admin', 'folder.add', $3)", [
       rh,
