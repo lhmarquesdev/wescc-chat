@@ -766,13 +766,13 @@ export async function deleteUser(actor: Ctx, userId: string, opts: { confirmReli
       if (r.rest.length) keptDms.push(r.id);
     }
     // Agenda: o evento com convidados que a pessoa organizava continua, organizado pelo convidado mais antigo (quem
-    // aceitou vem antes), como o dono de sala. Evento só dela sai com a conta.
+    // aceitou vem antes e quem recusou por último), como o dono de sala. Evento só dela sai com a conta.
     const handed = await c.query(
       `WITH next AS (
          SELECT DISTINCT ON (a.event_id) a.event_id, a.user_id FROM calendar_attendees a
            JOIN calendar_events e ON e.id = a.event_id JOIN users o ON o.id = a.user_id
           WHERE e.owner_id = $1 AND a.user_id <> $1
-          ORDER BY a.event_id, o.active DESC, (a.response = 'accepted') DESC, a.added_at, a.user_id)
+          ORDER BY a.event_id, o.active DESC, CASE a.response WHEN 'accepted' THEN 0 WHEN 'tentative' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END, a.added_at, a.user_id)
        UPDATE calendar_events e SET owner_id = next.user_id, updated_at = now() FROM next WHERE e.id = next.event_id
        RETURNING e.id, next.user_id`,
       [userId],

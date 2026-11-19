@@ -77,7 +77,15 @@ describe('excluir usuário', () => {
     );
     expect(ev.success).toBe(true);
     await api('POST', 'calendar.respond', { eventId: ev.event._id, response: 'accepted' }, bruno);
-    const solo = await api('POST', 'calendar.create', { title: 'Só meu', startsAt: new Date(Date.now() + 86_400_000).toISOString(), endsAt: new Date(Date.now() + 90_000_000).toISOString() }, temp);
+    // Quem recusou não vira organizador enquanto houver outro convidado (os dois entraram juntos no convite).
+    const ev2 = await api(
+      'POST',
+      'calendar.create',
+      { title: 'Revisão', startsAt: new Date(Date.now() + 86_400_000).toISOString(), endsAt: new Date(Date.now() + 90_000_000).toISOString(), attendeeIds: [alice.userId, bruno.userId] },
+      temp,
+    );
+    await api('POST', 'calendar.respond', { eventId: ev2.event._id, response: 'declined' }, alice);
+    const solo =await api('POST', 'calendar.create', { title: 'Só meu', startsAt: new Date(Date.now() + 86_400_000).toISOString(), endsAt: new Date(Date.now() + 90_000_000).toISOString() }, temp);
 
     const del = await api('POST', 'users.delete', { userId: temp.userId }, A);
     expect(del.success).toBe(true);
@@ -107,6 +115,7 @@ describe('excluir usuário', () => {
     expect(ae.event.owner._id).toBe(bruno.userId);
     expect(ae.event.attendees.map((x: any) => x._id)).toEqual([alice.userId]);
     expect((await api('GET', 'calendar.event', { eventId: ev.event._id }, bruno)).event.canEdit).toBe(true);
+    expect((await api('GET', 'calendar.event', { eventId: ev2.event._id }, bruno)).event.owner._id).toBe(bruno.userId);
     expect((await pool.query('SELECT 1 FROM calendar_events WHERE id = $1', [solo.event._id])).rowCount).toBe(0);
 
     // Quando a outra pessoa também sai, a conversa a dois some (não sobra ninguém para ler); o grupo que ficou só com
