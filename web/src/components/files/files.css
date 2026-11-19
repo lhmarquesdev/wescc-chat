@@ -15,6 +15,7 @@
 }
 
 .fl-page {
+  container: fl-page / inline-size;
   overflow: hidden;
   position: relative;
 }
@@ -38,11 +39,16 @@
   gap: var(--space-2);
   margin-left: auto;
 }
+.fl-nav-toggle,
+.fl-nav-backdrop {
+  display: none;
+}
 .fl-phone-search {
   padding: 0 var(--space-4) var(--space-2);
 }
 
 .fl-layout {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: grid;
@@ -644,6 +650,9 @@
 .fl-trash-head p {
   margin: var(--space-1) 0 0;
 }
+.fl-trash-head > .btn {
+  flex-shrink: 0;
+}
 
 .fl-empty-wrap {
   flex: 1;
@@ -1190,9 +1199,92 @@
   }
 }
 
+/* Lixeira em área bem estreita: só o nome e as ações. */
+@container fl-main (max-width: 400px) {
+  .fl-row.trash {
+    grid-template-columns: minmax(0, 1fr) 156px;
+  }
+  .fl-row.trash > span:nth-child(4) {
+    display: none;
+  }
+}
+
+/* ---------- Tablet e janela estreita ---------- */
+
+/* Detalhes abertos sem espaço para as três colunas: a navegação sai enquanto eles estão abertos. */
+@container fl-page (max-width: 1099px) {
+  .fl-layout.with-details {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+  .fl-layout.with-details > .fl-nav:not(.open) {
+    display: none;
+  }
+  .fl-layout.with-details > .fl-main {
+    padding-inline: var(--space-4);
+  }
+}
+
+/* Página estreita (tablet em pé, janela pela metade): uma coluna. A navegação abre como gaveta pelo botão "Pastas",
+   os detalhes abrem por cima dos arquivos e a faixa do alto quebra a linha (a busca vai para baixo). */
+@container fl-page (max-width: 720px) {
+  .page-head.fl-head {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+  }
+  .fl-head h1 {
+    flex: 1 1 0;
+  }
+  .page-head.fl-head .fl-search {
+    order: 3;
+    flex: 1 1 100%;
+    max-width: none;
+    margin: 0;
+  }
+  .fl-nav-toggle {
+    display: inline-grid;
+    place-items: center;
+  }
+  .fl-layout,
+  .fl-layout.with-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fl-nav {
+    display: none;
+  }
+  .fl-layout > .fl-nav.open {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 31;
+    display: flex;
+    width: min(280px, 85%);
+    box-shadow: var(--shadow-3);
+  }
+  .fl-nav-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: block;
+    background: hsl(var(--brand-h) 30% 12% / 0.32);
+  }
+  .fl-details {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 29;
+    width: min(360px, 92%);
+    box-shadow: var(--shadow-3);
+  }
+  .fl-main {
+    padding: var(--space-4) var(--space-4) var(--space-12);
+  }
+}
+
 /* ---------- Celular ---------- */
 
 @media (max-width: 760px) {
+  .fl-head h1 {
+    flex: 0 0 auto;
+  }
   .fl-layout,
   .fl-layout.with-details {
     grid-template-columns: minmax(0, 1fr);

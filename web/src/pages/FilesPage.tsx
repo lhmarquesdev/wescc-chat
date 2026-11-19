@@ -80,6 +80,8 @@ export function FilesPage() {
   const [dialog, setDialog] = useState<ReactNode>(null);
   const [dragOver, setDragOver] = useState(false);
   const [tick, setTick] = useState(0);
+  // Página estreita (tablet, janela pela metade): a navegação de pastas vira uma gaveta aberta pelo botão "Pastas".
+  const [navOpen, setNavOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const reload = useCallback(() => setTick((t) => t + 1), []);
 
@@ -124,6 +126,7 @@ export function FilesPage() {
   }, [folderId, tick]);
 
   useEffect(() => setSelected(null), [folderId, trash]);
+  useEffect(() => setNavOpen(false), [location.pathname]);
 
   // Outra pessoa mudou uma pasta que está na tela: pede de novo (o servidor confere o acesso).
   useEffect(() => {
@@ -250,6 +253,11 @@ export function FilesPage() {
         <h1 data-eyebrow="Pastas compartilhadas">Arquivos</h1>
         {!phone && <SearchInput className="fl-search" value={search} onChange={setSearch} placeholder="Buscar em todas as pastas" />}
         <div className="fl-head-actions">
+          {!phone && (
+            <button type="button" className="icon-btn fl-nav-toggle" aria-label="Pastas" title="Pastas" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}>
+              <Icon name="files-all" />
+            </button>
+          )}
           {(folder ? canEdit : canCreateRoot) && !trash && (
             <button type="button" className="btn" onClick={newFolder}>
               <Icon name="files-folder-new" />
@@ -270,7 +278,8 @@ export function FilesPage() {
         </div>
       )}
       <div className={details && !phone ? 'fl-layout with-details' : 'fl-layout'}>
-        {!phone && <FilesNav home={home} currentId={folderId ?? null} path={data?.path ?? []} trash={trash} tick={tick} />}
+        {!phone && <FilesNav home={home} currentId={folderId ?? null} path={data?.path ?? []} trash={trash} tick={tick} open={navOpen} onClose={() => setNavOpen(false)} />}
+        {!phone && navOpen && <div className="fl-nav-backdrop" onClick={() => setNavOpen(false)} />}
         <main className="fl-main" aria-label={title}>
           {!trash && !search && folderId && <Breadcrumb data={data} />}
           {!trash && !(search.trim().length >= 2) && (folderId ? data : home) && (
@@ -374,10 +383,26 @@ export function FilesPage() {
 
 // ---------- Navegação lateral ----------
 
-function FilesNav({ home, currentId, path, trash, tick }: { home: Awaited<ReturnType<typeof filesApi.home>> | null; currentId: string | null; path: { _id: string; name: string }[]; trash: boolean; tick: number }) {
+function FilesNav({
+  home,
+  currentId,
+  path,
+  trash,
+  tick,
+  open,
+  onClose,
+}: {
+  home: Awaited<ReturnType<typeof filesApi.home>> | null;
+  currentId: string | null;
+  path: { _id: string; name: string }[];
+  trash: boolean;
+  tick: number;
+  open: boolean;
+  onClose: () => void;
+}) {
   const onPath = new Set(path.map((p) => p._id));
   return (
-    <nav className="fl-nav" aria-label="Pastas">
+    <nav className={open ? 'fl-nav open' : 'fl-nav'} aria-label="Pastas" onKeyDown={(e) => e.key === 'Escape' && open && onClose()}>
       <Link to="/files" className={!currentId && !trash ? 'fl-nav-row active' : 'fl-nav-row'}>
         <Icon name="files-all" />
         Início
