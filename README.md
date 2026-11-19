@@ -897,18 +897,23 @@ texto. Por isso a proteção depende de o servidor do chat ser o original e de o
 
 - **Busca da barra lateral** (Ctrl+K, ⌘K no Mac): primeiro as conversas da lista; a partir de 2 letras, também pessoas
   para conversar e canais públicos em que a pessoa ainda não está. `@ana` procura só pessoas, `#sup` só salas;
-  maiúsculas e acentos não importam.
+  maiúsculas e acentos não importam. Cada grupo mostra até 8; quando há mais, "Ver mais pessoas (ou canais) no
+  diretório" abre o diretório com a mesma busca.
 - **Busca de mensagens** (lupa no topo da sala): acentos e maiúsculas não importam ("reuniao" acha "reunião"), e ela
   procura também no nome e na legenda dos arquivos. Mostra o total e traz 50 resultados por vez ("Carregar mais
   resultados"). Filtros: `from:@usuario`, `has:file`, `has:link`, `is:pinned`, `in:#canal` e as datas `before:`,
   `after:` e `on:` com AAAA-MM-DD ou DD/MM/AAAA, no fuso do navegador de quem busca (data que não existe é recusada
-  com o formato certo). Resposta de tópico encontrada abre o tópico.
+  com o formato certo). Resposta de tópico encontrada abre o tópico. `%`, `_` e palavras com símbolos (`C++`, `50%`)
+  valem como texto: acham só as mensagens que os têm.
 - **Status personalizados**: em Administração › Status do usuário (`manage-user-status`), até 30, cada um com um tipo
   (Disponível, Ausente, Ocupado ou Invisível) que decide o comportamento; as pessoas escolhem no menu da própria foto.
   **Ocupado** (ou um personalizado do tipo Ocupado) silencia notificações, som, push e e-mail, inclusive de menções e
-  DMs; os contadores continuam subindo e as chamadas continuam tocando. Invisível aparece offline.
+  DMs; os contadores continuam subindo e as chamadas continuam tocando. Invisível aparece offline. O nome precisa de
+  uma letra ou um número (caracteres invisíveis não contam).
 - **Palavras destacadas** (Minha conta › Preferências): até 20 palavras ou expressões (2 a 40 caracteres) por pessoa.
   A mensagem com uma delas, inteira, fica marcada e avisa como uma menção; maiúsculas e acentos não importam.
+- **Conta desativada**: ninguém começa conversa direta nova nem liga para ela; a conversa que já existe abre só para
+  ler o histórico (o cartão da pessoa mostra "Conta desativada" e "Ver conversa").
 - **Encaminhar** (menu da mensagem, `forward-message`: Administrador, Usuário e Operação): para até 10 conversas por
   vez, com comentário opcional e os arquivos junto; a mensagem mostra de onde veio, sem revelar um grupo privado ou
   uma conversa direta a quem não participa dela. Valem as regras de envio de cada destino (somente leitura, canal de

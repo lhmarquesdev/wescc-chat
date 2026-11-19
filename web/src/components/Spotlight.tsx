@@ -15,6 +15,8 @@ import { Spinner, UserAvatar, useDelay } from './ui';
 interface SpotData {
   users: SpotlightUser[];
   rooms: SpotlightRoom[];
+  moreUsers?: boolean; // o servidor cortou em 8: há mais no diretório
+  moreRooms?: boolean;
 }
 
 // Cache pequeno em memória: as últimas 20 buscas valem por 30 s (apagar e voltar a digitar não pergunta de novo).
@@ -75,7 +77,7 @@ export function useSpotlight(raw: string, enabled = true): SpotlightState {
         .get<SpotData>('spotlight', { query: raw.trim() })
         .then((r) => {
           if (n !== seq.current) return;
-          const data = { users: r.users ?? [], rooms: r.rooms ?? [] };
+          const data = { users: r.users ?? [], rooms: r.rooms ?? [], moreUsers: !!r.moreUsers, moreRooms: !!r.moreRooms };
           remember(key, data);
           setState({ key, data, error: false });
         })
@@ -97,6 +99,8 @@ export function useSpotlight(raw: string, enabled = true): SpotlightState {
     key,
     users: current?.data.users ?? [],
     rooms: current?.data.rooms ?? [],
+    moreUsers: !!current?.data.moreUsers,
+    moreRooms: !!current?.data.moreRooms,
     loading: !!key && (loadingKey === key || !current),
     error: !!current?.error && loadingKey !== key,
     retry,
@@ -210,8 +214,23 @@ function RoomResult({ r, big, onDone }: { r: SpotlightRoom; big?: boolean; onDon
 }
 
 // Grupos "Pessoas" e "Canais e times para entrar", o carregamento, o erro e a contagem para o leitor de tela.
-// hint: a busca é curta demais para ir ao servidor; diz o que falta no lugar dos grupos.
-export function SpotlightResults({ spot, localCount, big, onDone, hint }: { spot: SpotlightState; localCount: number; big?: boolean; onDone: () => void; hint?: string }) {
+// hint: a busca é curta demais para ir ao servidor; diz o que falta no lugar dos grupos. onMore: o grupo veio cortado
+// (8 de cada); abre o diretório na aba dele com o texto da busca.
+export function SpotlightResults({
+  spot,
+  localCount,
+  big,
+  onDone,
+  hint,
+  onMore,
+}: {
+  spot: SpotlightState;
+  localCount: number;
+  big?: boolean;
+  onDone: () => void;
+  hint?: string;
+  onMore?: (users: boolean) => void;
+}) {
   const { people, rooms, direct } = useSpotlightRows(spot);
   const settled = spot.settledFor === spot.key && !!spot.key;
   return (
@@ -226,6 +245,13 @@ export function SpotlightResults({ spot, localCount, big, onDone, hint }: { spot
           {people.map((u) => (
             <PersonResult key={u._id} u={u} big={big} state={direct.state([partyOf(u)])} onDone={onDone} />
           ))}
+          {spot.moreUsers && onMore && (
+            <div className="spot-status">
+              <button type="button" className="link" onClick={() => onMore(true)}>
+                Ver mais pessoas no diretório
+              </button>
+            </div>
+          )}
         </div>
       )}
       {rooms.length > 0 && (
@@ -239,6 +265,13 @@ export function SpotlightResults({ spot, localCount, big, onDone, hint }: { spot
           {rooms.map((r) => (
             <RoomResult key={r._id} r={r} big={big} onDone={onDone} />
           ))}
+          {spot.moreRooms && onMore && (
+            <div className="spot-status">
+              <button type="button" className="link" onClick={() => onMore(false)}>
+                Ver mais canais no diretório
+              </button>
+            </div>
+          )}
         </div>
       )}
       {hint && <div className="spot-status">{hint}</div>}

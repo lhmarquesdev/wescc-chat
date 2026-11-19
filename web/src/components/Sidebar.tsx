@@ -731,10 +731,11 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
     first.click();
     return true;
   };
-  // "Abrir diretório" leva o texto da busca (com @, na aba Pessoas) e termina a busca daqui.
-  const openDirectory = () => {
+  // "Abrir diretório" leva o texto da busca (com @, na aba Pessoas) e termina a busca daqui. "Ver mais" de um grupo
+  // cortado da busca escolhe a aba (users: Pessoas).
+  const openDirectory = (users = parseSpotlightQuery(filter).scope === 'users') => {
     const q = parseSpotlightQuery(filter);
-    navigate(`/directory${q.scope === 'users' ? '/users' : ''}${q.text ? `?q=${encodeURIComponent(q.text)}` : ''}`);
+    navigate(`/directory${users ? '/users' : ''}${q.text ? `?q=${encodeURIComponent(q.text)}` : ''}`);
     finishSearch();
     onNavigate?.();
   };
@@ -777,7 +778,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
             icon="search"
             title={`Nada encontrado para “${filter.trim()}”`}
             action={
-              <button type="button" className="btn small" onClick={openDirectory}>
+              <button type="button" className="btn small" onClick={() => openDirectory()}>
                 Abrir diretório
               </button>
             }
@@ -906,7 +907,14 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
           />
         ))}
         {searching && !onlyUnread && (
-          <SpotlightResults spot={spot} localCount={localCount} big={list} onDone={spotDone} hint={spotIdle ? spotlightHint(parseSpotlightQuery(filter)) : undefined} />
+          <SpotlightResults
+            spot={spot}
+            localCount={localCount}
+            big={list}
+            onDone={spotDone}
+            hint={spotIdle ? spotlightHint(parseSpotlightQuery(filter)) : undefined}
+            onMore={openDirectory}
+          />
         )}
         {empty}
       </nav>
