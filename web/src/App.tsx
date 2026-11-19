@@ -3,6 +3,7 @@ import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation, useN
 import { ApiError, errorMessage, getCredentials, syncCredentials } from './lib/api';
 import { loadPublicSettings, logout, requestNotificationPermission, signedOutElsewhere, startSession } from './lib/session';
 import { useStore } from './lib/store';
+import { useNoticeAcks } from './lib/acks';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { MobileTabBar } from './components/MobileTabBar';
@@ -198,6 +199,7 @@ function Protected() {
   const view = pathname === '/home' ? 'list' : ROOM_ROUTE.test(pathname) ? 'room' : 'page';
   const asList = phone && view === 'list';
   useCallsSeen(pathname === '/calls');
+  useNoticeAcks();
 
   useEffect(() => {
     if (state !== 'loading') return;

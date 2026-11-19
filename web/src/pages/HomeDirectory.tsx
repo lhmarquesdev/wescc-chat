@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Subscription } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
-import { useAcks } from '../lib/acks';
+import { useAcks, usePendingAcks } from '../lib/acks';
 import { partyOf, useDirect } from '../lib/direct';
 import { badgeCount, plural, roomIconName, roomPath } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
@@ -38,7 +38,7 @@ function UnreadRow({ s }: { s: Subscription }) {
   const navigate = useNavigate();
   const dmUser = s.t === 'd' && !s.name.includes(',') ? s.name : null;
   const mention = s.userMentions > 0 || s.t === 'd';
-  const pending = useAcks((a) => (s.notice ? (a.byRoom[s.rid]?.pending.length ?? 0) : 0));
+  const pending = usePendingAcks(s.rid, s.notice);
   return (
     <button type="button" className="home-row" onClick={() => navigate(roomPath(s))}>
       {dmUser ? (
@@ -61,6 +61,8 @@ function UnreadRow({ s }: { s: Subscription }) {
         </span>
       )}
       {s.unread > 0 && <span className={mention ? 'badge mention' : s.groupMentions > 0 ? 'badge group' : 'badge'}>{badgeCount(s.unread)}</span>}
+      {/* Já abriu o canal, mas falta o "Ciente": o número de avisos que esperam a confirmação. */}
+      {s.unread === 0 && pending > 0 && <span className="badge group">{badgeCount(pending)}</span>}
       <Icon name="next" className="home-row-go" />
     </button>
   );
@@ -71,15 +73,17 @@ export function HomePage() {
   const body = useSetting<string>('Layout_Home_Body');
   const me = useStore((s) => s.me)!;
   const subs = useStore((s) => s.subscriptions);
+  const acks = useAcks((a) => a.byRoom);
   const forYou = useForYou(4);
   const [askNotif, setAskNotif] = useState(() => 'Notification' in window && Notification.permission === 'default');
-  const unread = useMemo(
-    () =>
-      Object.values(subs)
-        .filter((s) => s.unread > 0 || s.tunread.length > 0)
-        .sort((a, b) => b.userMentions - a.userMentions || (b._updatedAt ?? '').localeCompare(a._updatedAt ?? '')),
-    [subs],
-  );
+  // Canal de avisos com aviso esperando o "Ciente" fica em Não lidas até a pessoa confirmar (leitura obrigatória), junto
+  // das menções no topo.
+  const unread = useMemo(() => {
+    const pending = (s: Subscription) => (s.notice ? (acks[s.rid]?.pending.length ?? 0) : 0);
+    return Object.values(subs)
+      .filter((s) => s.unread > 0 || s.tunread.length > 0 || pending(s) > 0)
+      .sort((a, b) => b.userMentions + pending(b) - (a.userMentions + pending(a)) || (b._updatedAt ?? '').localeCompare(a._updatedAt ?? ''));
+  }, [subs, acks]);
   const now = new Date();
   return (
     <div className="page home-page">

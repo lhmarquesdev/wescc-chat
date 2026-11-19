@@ -5,7 +5,8 @@ import type { Subscription, UserStatus } from '@shared/index';
 import { parseSpotlightQuery } from '@shared/search';
 import { presenceLabel, shownCustomStatus, silencesNotifications, statusLine } from '@shared/status';
 import { api, errorMessage } from '../lib/api';
-import { badgeCount, MY_STATUS_LABEL, roomIconName, roomPath } from '../lib/format';
+import { badgeCount, MY_STATUS_LABEL, plural, roomIconName, roomPath } from '../lib/format';
+import { usePendingAcks } from '../lib/acks';
 import { matchesLocal, spotlightHint } from '../lib/spotlightRules';
 import { useInstallPrompt } from '../lib/install';
 import { logout } from '../lib/session';
@@ -65,6 +66,9 @@ function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPic
   // Sala silenciada ou com o contador oculto: só o selo de menção aparece.
   const count = s.unread > 0 && (mention || (!silenced && !s.notifications?.hideUnreadStatus)) ? s.unread : 0;
   const kind = mention ? 'mention' : s.groupMentions > 0 ? 'group' : '';
+  // Canal de avisos já aberto, com aviso esperando o "Ciente": o selo continua até a pessoa confirmar.
+  const pending = usePendingAcks(s.rid, s.notice);
+  const ackText = pending > 0 ? plural(pending, 'aviso aguardando seu “Ciente”', 'avisos aguardando seu “Ciente”') : '';
   // Chamadas em grupo: a outra pessoa da conversa a dois, para o "Em chamada".
   const otherId = useDirectPeer(s.rid, !!dmUser);
   // Conversa oculta (só aparece na busca): abrir volta a mostrá-la na lista.
@@ -72,7 +76,7 @@ function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPic
   return (
     <NavLink
       to={roomPath(s)}
-      className={({ isActive }) => ['side-item', isActive && 'active', (s.alert || s.unread) && 'unread', silenced && 'silenced'].filter(Boolean).join(' ')}
+      className={({ isActive }) => ['side-item', isActive && 'active', (s.alert || s.unread || pending) && 'unread', silenced && 'silenced'].filter(Boolean).join(' ')}
       onClick={() => {
         if (hidden) void api.post('rooms.open', { roomId: s.rid }).catch(() => {});
         onPick?.();
@@ -106,6 +110,11 @@ function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPic
             </span>
           )}
           {count > 0 && <span className={kind ? `badge ${kind}` : 'badge'}>{badgeCount(count)}</span>}
+          {count === 0 && pending > 0 && (
+            <span className="badge group" title={ackText} aria-label={ackText}>
+              {badgeCount(pending)}
+            </span>
+          )}
         </>
       )}
     </NavLink>
