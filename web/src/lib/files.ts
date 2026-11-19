@@ -2,7 +2,10 @@
 import { useSyncExternalStore } from 'react';
 import type { DriveAclEntry, DriveActivity, DriveFile, DriveFolder, DriveFolderView, DriveStorage, DriveSubject } from '@shared/drive';
 import { api, ApiError, uploadTo } from './api';
-import { usePermission, useSetting } from './store';
+import { usePermission, useSetting, useStore } from './store';
+
+// Item que ficou com outro nome ao mover ou restaurar (já havia um com o mesmo nome no lugar).
+export type DriveRenamed = { _id: string; from: string; name: string };
 
 export const filesApi = {
   home: () => api.get<{ folders: DriveFolder[]; canCreateRoot: boolean; manageAll: boolean; storage: DriveStorage }>('files.home'),
@@ -10,17 +13,17 @@ export const filesApi = {
   search: (text: string) => api.get<{ folders: (DriveFolder & { path: { _id: string; name: string }[] })[]; files: DriveFile[] }>('files.search', { text }),
   recent: () => api.get<{ files: DriveFile[] }>('files.recent').then((r) => r.files),
   storage: () => api.get<{ storage: DriveStorage }>('files.storage').then((r) => r.storage),
-  activity: (folderId: string) => api.get<{ total: number; events: DriveActivity[] }>('files.activity', { folderId, count: 60 }),
+  activity: (folderId: string, offset = 0) => api.get<{ total: number; events: DriveActivity[] }>('files.activity', { folderId, count: 60, offset }),
   subjects: (text: string) => api.get<{ subjects: DriveSubject[] }>('files.subjects', { text }).then((r) => r.subjects),
   createFolder: (body: { name: string; parentId?: string | null; color?: string | null }) => api.post<{ folder: DriveFolder }>('files.folder.create', body).then((r) => r.folder),
-  updateFolder: (folderId: string, body: { name?: string; color?: string | null }) => api.post('files.folder.update', { folderId, ...body }),
+  updateFolder: (folderId: string, body: { name?: string; color?: string | null }) => api.post<{ name?: string }>('files.folder.update', { folderId, ...body }),
   share: (folderId: string, entries: { type: string; id: string; level: number }[], inherit: boolean) =>
     api.post<{ acl: DriveAclEntry[] }>('files.folder.share', { folderId, entries, inherit }).then((r) => r.acl),
   rename: (fileId: string, name: string) => api.post('files.rename', { fileId, name }),
-  move: (body: { fileIds?: string[]; folderIds?: string[]; targetId: string | null }) => api.post('files.move', body),
+  move: (body: { fileIds?: string[]; folderIds?: string[]; targetId: string | null }) => api.post<{ renamed?: DriveRenamed[] }>('files.move', body),
   trash: (body: { fileIds?: string[]; folderIds?: string[] }) => api.post('files.trash', body),
   trashList: () => api.get<{ days: number; folders: (DriveFolder & { path: { _id: string; name: string }[] })[]; files: DriveFile[] }>('files.trash.list'),
-  restore: (body: { fileIds?: string[]; folderIds?: string[] }) => api.post('files.restore', body),
+  restore: (body: { fileIds?: string[]; folderIds?: string[] }) => api.post<{ renamed?: DriveRenamed[] }>('files.restore', body),
   purge: (body: { fileIds?: string[]; folderIds?: string[]; all?: boolean }) => api.post<{ removed: number }>('files.purge', body),
 };
 
@@ -77,6 +80,8 @@ function pump() {
         else {
           next.state = 'error';
           next.error = e instanceof Error ? e.message : String(e);
+          // Fora da tela Arquivos a fila não aparece: avisa aqui (o item Arquivos do menu fica marcado).
+          if (!window.location.pathname.startsWith('/files')) useStore.getState().toast(`Não deu para enviar “${next.name}”: ${next.error}`, 'error');
         }
       })
       .finally(() => {
@@ -90,7 +95,20 @@ function pump() {
 
 const pendingFiles = new Map<string, File>();
 
+// Fechar ou recarregar a aba no meio de um envio perde o envio: o navegador pergunta antes.
+let unloadGuard = false;
+function guardUnload() {
+  if (unloadGuard) return;
+  unloadGuard = true;
+  window.addEventListener('beforeunload', (e) => {
+    if (!jobs.some((j) => j.state === 'waiting' || j.state === 'sending')) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+}
+
 export function enqueueUploads(files: File[], folder: { _id: string; name: string }) {
+  guardUnload();
   for (const f of files) {
     const id = `u${++seq}`;
     pendingFiles.set(id, f);

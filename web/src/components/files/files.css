@@ -15,6 +15,7 @@
 }
 
 .fl-page {
+  container: fl-page / inline-size;
   overflow: hidden;
   position: relative;
 }
@@ -38,11 +39,16 @@
   gap: var(--space-2);
   margin-left: auto;
 }
+.fl-nav-toggle,
+.fl-nav-backdrop {
+  display: none;
+}
 .fl-phone-search {
   padding: 0 var(--space-4) var(--space-2);
 }
 
 .fl-layout {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: grid;
@@ -50,6 +56,10 @@
 }
 .fl-layout.with-details {
   grid-template-columns: 248px minmax(0, 1fr) 360px;
+}
+/* Aba desligada ou sem acesso: sem a navegação de pastas, só o aviso. */
+.fl-layout.no-nav {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* ---------- Navegação ---------- */
@@ -501,6 +511,9 @@
 .fl-folder-card:hover .fl-more,
 .fl-file-card:hover .fl-more,
 .fl-row:hover .fl-more,
+.fl-folder-card:focus-visible .fl-more,
+.fl-file-card:focus-visible .fl-more,
+.fl-row:focus-visible .fl-more,
 .fl-more[aria-expanded='true'],
 .fl-more:focus-visible,
 .selected .fl-more {
@@ -587,6 +600,10 @@
 .fl-row.selected {
   background: hsl(var(--primary) / 0.1);
 }
+.fl-row:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
+}
 .fl-row.head {
   min-height: 36px;
   font-size: var(--fs-12);
@@ -615,6 +632,10 @@
 .fl-row-title small {
   font-size: var(--fs-12);
 }
+/* Lixeira: de onde veio, quem apagou e quando, embaixo do nome só quando as colunas não cabem. */
+.fl-trash-sub {
+  display: none;
+}
 .fl-trash-actions {
   display: flex;
   justify-content: flex-end;
@@ -636,6 +657,9 @@
 }
 .fl-trash-head p {
   margin: var(--space-1) 0 0;
+}
+.fl-trash-head > .btn {
+  flex-shrink: 0;
 }
 
 .fl-empty-wrap {
@@ -831,6 +855,9 @@
   display: block;
   margin-top: 2px;
   font-size: var(--fs-12);
+}
+.fl-activity-more {
+  margin-top: var(--space-3);
 }
 .fl-act-icon {
   display: grid;
@@ -1152,6 +1179,7 @@
 }
 .fl-tray-text small {
   font-size: var(--fs-12);
+  overflow-wrap: anywhere;
 }
 .fl-tray li.error small {
   color: hsl(var(--st-red));
@@ -1174,18 +1202,98 @@
   .fl-row.head > span:nth-child(4) {
     display: none;
   }
+  /* Lixeira: as colunas saem e "Estava em · por · quando" vai para baixo do nome. */
   .fl-row.trash {
-    grid-template-columns: minmax(0, 1fr) 100px 156px;
+    grid-template-columns: minmax(0, 1fr) 156px;
   }
   .fl-row.trash > span:nth-child(2),
-  .fl-row.trash > span:nth-child(3) {
+  .fl-row.trash > span:nth-child(3),
+  .fl-row.trash > span:nth-child(4) {
     display: none;
+  }
+  .fl-row-title .fl-trash-sub {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* ---------- Tablet e janela estreita ---------- */
+
+/* Detalhes abertos sem espaço para as três colunas: a navegação sai enquanto eles estão abertos. */
+@container fl-page (max-width: 1099px) {
+  .fl-layout.with-details {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+  .fl-layout.with-details > .fl-nav:not(.open) {
+    display: none;
+  }
+  .fl-layout.with-details > .fl-main {
+    padding-inline: var(--space-4);
+  }
+}
+
+/* Página estreita (tablet em pé, janela pela metade): uma coluna. A navegação abre como gaveta pelo botão "Pastas",
+   os detalhes abrem por cima dos arquivos e a faixa do alto quebra a linha (a busca vai para baixo). */
+@container fl-page (max-width: 720px) {
+  .page-head.fl-head {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+  }
+  .fl-head h1 {
+    flex: 1 1 0;
+  }
+  .page-head.fl-head .fl-search {
+    order: 3;
+    flex: 1 1 100%;
+    max-width: none;
+    margin: 0;
+  }
+  .fl-nav-toggle {
+    display: inline-grid;
+    place-items: center;
+  }
+  .fl-layout,
+  .fl-layout.with-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fl-nav {
+    display: none;
+  }
+  .fl-layout > .fl-nav.open {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 31;
+    display: flex;
+    width: min(280px, 85%);
+    box-shadow: var(--shadow-3);
+  }
+  .fl-nav-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: block;
+    background: hsl(var(--brand-h) 30% 12% / 0.32);
+  }
+  .fl-details {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 29;
+    width: min(360px, 92%);
+    box-shadow: var(--shadow-3);
+  }
+  .fl-main {
+    padding: var(--space-4) var(--space-4) var(--space-12);
   }
 }
 
 /* ---------- Celular ---------- */
 
 @media (max-width: 760px) {
+  .fl-head h1 {
+    flex: 0 0 auto;
+  }
   .fl-layout,
   .fl-layout.with-details {
     grid-template-columns: minmax(0, 1fr);
@@ -1217,6 +1325,11 @@
   .fl-row.trash > span:nth-child(4) {
     display: none;
   }
+  .fl-row-title .fl-trash-sub {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .fl-trash-head {
     flex-direction: column;
   }
@@ -1225,6 +1338,10 @@
   }
   .fl-acl li {
     flex-wrap: wrap;
+  }
+  /* Compartilhar: o nome ocupa a linha (ao lado do ícone) e o nível desce para a linha de baixo. */
+  .fl-acl:not(.compact):not(.inherited) li .fl-subject-text {
+    flex: 1 1 calc(100% - 44px);
   }
   .fl-acl li .fl-level-select {
     margin-left: 44px;

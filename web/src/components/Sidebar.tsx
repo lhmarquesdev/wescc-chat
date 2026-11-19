@@ -18,6 +18,7 @@ import { Icon, type IconName } from './Icon';
 import { isMentionBadge, useForYou, type ForYouItem } from './navState';
 // Chamadas em grupo: ponto da sala com chamada viva, "Em chamada" nas conversas a dois e o selo de perdidas.
 import { CallsNavBadge, InCallBadge, RoomLiveDot } from './call/LiveIndicators';
+import { UploadsNavBadge } from './files/UploadsNavBadge';
 import { useDirectPeer } from '../lib/roomcall';
 import { useIsPhone, type Placement } from './overlay';
 import { SpotlightResults, useSpotlight, useSpotlightRows } from './Spotlight';
@@ -834,7 +835,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
           {callsEnabled && <NavRow to="/calls" icon="nav-calls" label="Chamadas" extra={<CallsNavBadge />} onNavigate={onNavigate} />}
           {calendarOn && <NavRow to="/calendar" icon="nav-calendar" label="Agenda" onNavigate={onNavigate} />}
           {remindersCount > 0 && <NavRow to="/reminders" icon="nav-reminders" label="Lembretes" badge={remindersFired} onNavigate={onNavigate} />}
-          {filesOn && <NavRow to="/files" icon="nav-files" label="Arquivos" onNavigate={onNavigate} />}
+          {filesOn && <NavRow to="/files" icon="nav-files" label="Arquivos" extra={<UploadsNavBadge />} onNavigate={onNavigate} />}
           <NavRow to="/directory" icon="nav-directory" label="Diretório" onNavigate={onNavigate} />
         </nav>
       )}

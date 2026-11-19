@@ -1148,9 +1148,16 @@ A aba **Arquivos** guarda documentos da empresa em pastas, com permissão por pa
 | Pode editar | Também enviar, renomear, mover, criar subpastas e mandar para a lixeira |
 | Gerencia | Também compartilhar, mudar permissões e apagar de vez da lixeira |
 
+Quem edita renomeia, move e manda para a lixeira as subpastas que herdam o acesso (editando também a pasta de cima).
+Pasta principal e subpasta restrita são de quem gerencia: só quem gerencia muda o nome de uma pasta principal e move
+ou manda para a lixeira uma pasta principal ou restrita (quem edita só muda a cor).
+
 Subpastas herdam o acesso da pasta de cima. Em **Compartilhar**, "Herdar o acesso da pasta de cima" desligado deixa a
 subpasta **restrita**: só quem está na lista dela entra (ex.: "Folha e salários" dentro de "Financeiro"). Quem tem
-acesso só a uma subpasta a vê como pasta principal, sem ver o nome das de cima.
+acesso só a uma subpasta a vê como pasta principal, sem ver o nome das de cima. Uma pasta com uma subpasta restrita
+que você não gerencia não vai para a lixeira nem é apagada de vez por você (peça a quem gerencia a subpasta para
+tirá-la de lá antes); se um administrador mandar a pasta de cima para a lixeira, quem gerencia a subpasta restrita a
+encontra na própria Lixeira.
 
 Permissões do RBAC (Papéis e permissões › Arquivos):
 
@@ -1158,9 +1165,15 @@ Permissões do RBAC (Papéis e permissões › Arquivos):
 - `create-files-folder`: criar pastas principais (só Administrador). Quem cria a pasta passa a gerenciá-la.
 - `manage-all-files`: ver e mudar qualquer pasta, mesmo fora do compartilhamento (só Administrador).
 
-Cada pasta tem o histórico (envios, downloads, renomeações, compartilhamento, lixeira) para quem a gerencia, e toda
-mudança de compartilhamento entra também no registro de auditoria (`drive.acl.update`). O que vai para a lixeira fica
-`Drive_Trash_Days` dias (padrão 30) e depois é apagado de vez às 4h.
+Cada pasta tem o histórico (envios, downloads, renomeações, compartilhamento com quem ganhou ou perdeu acesso,
+lixeira) para quem a gerencia, com "Ver mais" para os eventos antigos, e toda mudança de compartilhamento entra também
+no registro de auditoria (`drive.acl.update`). O que vai para a lixeira fica `Drive_Trash_Days` dias (padrão 30) e
+depois é apagado de vez às 4h.
+
+Nome repetido não apaga nada: enviar, mover ou restaurar um arquivo com o nome de outro que já está na pasta guarda
+como "nome (2)", e a tela avisa o nome final. Nomes longos são cortados em 120 caracteres (pasta) ou 200 (arquivo),
+mantendo a extensão. No menu "…" de um arquivo, **Copiar link do arquivo** gera um link que abre a pasta já com o
+arquivo selecionado; quem não tem acesso à pasta vê o aviso de sem acesso.
 
 Espaço (Administração › Configurações › Arquivos):
 
