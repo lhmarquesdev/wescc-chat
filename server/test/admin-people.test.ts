@@ -309,3 +309,25 @@ describe('dados da pessoa: nome, bio, nomes reservados e nome exibido do papel',
     expect((await pool.query(`SELECT description FROM roles WHERE id = 'equipe-branca'`)).rows[0].description).toBe('Equipe Branca');
   });
 });
+
+describe('editor de usuário: própria senha, e-mail verificado e dispositivos', () => {
+  it('a própria senha não muda pelo editor da administração (só em Minha conta, com a senha atual)', async () => {
+    const r = await api('POST', 'users.update', { userId: A.userId, data: { password: 'outra-senha-123' } }, A);
+    expect(r.status).toBe(400);
+    expect(r.error).toMatch(/Minha conta › Segurança/);
+    expect((await login('admin', 'admin-pass-123')).username).toBe('admin');
+    // A de outra pessoa continua mudando, e os outros dados da própria conta também.
+    const u = await newUser(A);
+    expect((await api('POST', 'users.update', { userId: u.userId, data: { password: 'nova-senha-123' } }, A)).success).toBe(true);
+    expect((await api('POST', 'users.update', { userId: A.userId, data: { bio: 'Administra o chat' } }, A)).success).toBe(true);
+  });
+
+  it('trocar o e-mail desmarca "verificado", a não ser que a administração mantenha marcado na mesma gravação', async () => {
+    const u = await newUser(A, { verified: true });
+    expect((await api('GET', 'users.info', { userId: u.userId }, A)).user.emailVerified).toBe(true);
+    await api('POST', 'users.update', { userId: u.userId, data: { email: 'trocado1@test.local' } }, A);
+    expect((await api('GET', 'users.info', { userId: u.userId }, A)).user.emailVerified).toBe(false);
+    await api('POST', 'users.update', { userId: u.userId, data: { verified: true } }, A);
+    await api('POST', 'users.update', { userId: u.userId, data: { email: 'trocado2@test.local', verified: true } }, A);
+    expect((await api('GET', 'users.info', { userId: u.userId }, A)).user.emailVerified).toBe(true);
+  });});

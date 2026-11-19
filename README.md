@@ -739,6 +739,9 @@ Em Administração › Usuários:
   por e-mail; **Recusar cadastro** exclui o cadastro.
 - **Nome e nome de usuário**: o nome é obrigatório (até 100 caracteres) e a bio vai até 500. `all`, `here` e `system`
   são nomes de usuário reservados (@all e @here avisam a sala inteira).
+- **Editor de usuário**: Redefinir 2FA e Remover avatar pedem confirmação; trocar o e-mail desmarca "E-mail
+  verificado" (a revisão mostra, e dá para manter marcado na aba Segurança); a sua própria senha você troca em Minha
+  conta › Segurança, com a senha atual.
 - **Desativar** impede o acesso e guarda tudo; ninguém desativa a própria conta, e o último administrador ativo não
   é desativado.
 - **Excluir conta** não dá para desfazer: as mensagens da pessoa continuam nas salas e nas conversas em grupo (só ela

@@ -481,6 +481,8 @@ export function usersRoutes(app: FastifyInstance) {
       await assertRoleChange(ctx, userId, current, roles);
     }
     if (d.password && !(await hasPermission(ctx.userId, 'edit-other-user-password'))) throw forbidden();
+    // A própria senha só muda com a senha atual (Minha conta): uma sessão esquecida aberta não tranca o dono para fora.
+    if (d.password && userId === ctx.userId) throw badRequest('error-action-not-allowed', 'Para trocar a sua própria senha, use Minha conta › Segurança (pede a senha atual).');
     let row = await updateUser(ctx, userId, d, { asAdmin: true });
     if (roles) {
       // Os papéis gravam com o histórico, na mesma transação dele.
