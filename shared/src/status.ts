@@ -64,11 +64,13 @@ export const statusLine = (label: string, custom: boolean, text?: string | null)
 
 // NFC, espaços colapsados, 1..40, com pelo menos uma letra ou número; não pode ser (sem acento) um nome reservado.
 // Caracteres invisíveis (largura zero, controle) saem antes: um nome só com eles virava uma linha vazia no menu, e
-// "Em pausa" com um deles no meio passava por outro nome. Fica só o ZWJ, que junta emojis (👩‍💻).
+// "Em pausa" com um deles no meio passava por outro nome. Fica só o ZWJ entre dois emojis, onde ele os junta
+// (👩‍💻); colado numa letra ("Ocupado" + ZWJ) ele sai também.
+const LOOSE_ZWJ = /(^|[^\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F])\u200d|\u200d(?!\p{Extended_Pictographic})/gu;
 export function normalizeStatusName(
   raw: unknown,
 ): { ok: true; name: string } | { ok: false; error: string; code: 'error-invalid-name' | 'error-status-name-reserved' } {
-  const name = typeof raw === 'string' ? raw.normalize('NFC').replace(/[\p{Cc}\p{Cf}]/gu, (c) => (/\s/.test(c) ? ' ' : c === '\u200d' ? c : '')).replace(/\s+/g, ' ').trim() : '';
+  const name = typeof raw === 'string' ? raw.normalize('NFC').replace(/[\p{Cc}\p{Cf}]/gu, (c) => (/\s/.test(c) ? ' ' : c === '\u200d' ? c : '')).replace(LOOSE_ZWJ, '$1').replace(/\s+/g, ' ').trim() : '';
   const len = [...name].length;
   const typed = typeof raw === 'string' && !!raw.trim();
   if (len > STATUS_NAME_MAX || (len < 1 && !typed)) return { ok: false, code: 'error-invalid-name', error: `O nome precisa ter de 1 a ${STATUS_NAME_MAX} caracteres.` };

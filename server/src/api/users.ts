@@ -202,6 +202,8 @@ export function usersRoutes(app: FastifyInstance) {
   // ---------- Perfil próprio ----------
   route(app, 'POST', 'users.updateOwnBasicInfo', {}, async (req, _rep, ctx) => {
     const d = b(req).data ?? {};
+    // Mensagem de status que não é texto: aviso claro (antes, erro interno).
+    if (ctx.setup !== 'password' && d.statusText !== undefined && typeof d.statusText !== 'string') throw badRequest('error-invalid-params', 'O parâmetro "statusText" deve ser texto.');
     // Na troca de senha obrigatória só a senha pode ser alterada.
     const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: typeof d.statusText === 'string' ? clampStatusText(d.statusText) : d.statusText };
     const row = await updateUser(

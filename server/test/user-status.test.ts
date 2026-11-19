@@ -283,6 +283,15 @@ describe('status: nome invisível e mensagem', () => {
     } finally {
       await remove(A, ok.customUserStatus._id);
     }
+    // ZWJ colado numa letra sai (não burla o reservado nem o repetido); entre dois emojis ele fica.
+    expect(await err(create(A, 'Ocupado\u200d', 'busy'))).toEqual([400, 'error-status-name-reserved', 'Esse nome já é de um status padrão.']);
+    expect(await err(create(A, 'Em\u200d pausa', 'away'))).toEqual([400, 'error-status-name-exists', 'Já existe um status com esse nome.']);
+    const dev = await create(A, '\u{1F469}\u200d\u{1F4BB} Dev', 'busy');
+    try {
+      expect(dev.customUserStatus.name).toBe('\u{1F469}\u200d\u{1F4BB} Dev');
+    } finally {
+      await remove(A, dev.customUserStatus._id);
+    }
   });
 
   it('mensagem cortada em 120 sem partir emoji; o que não é texto é recusado', async () => {
@@ -301,6 +310,11 @@ describe('status: nome invisível e mensagem', () => {
     expect((await pick(u, { message: '' })).success).toBe(true);
     expect(await text()).toBe('');
     expect((await api('POST', 'users.updateOwnBasicInfo', { data: { statusText: `${'b'.repeat(119)}😀` } }, u)).success).toBe(true);
+    expect(await text()).toBe('b'.repeat(119));
+    for (const statusText of [{ a: 1 }, 42, null]) {
+      const r = await api('POST', 'users.updateOwnBasicInfo', { data: { statusText } }, u);
+      expect([r.status, r.error], JSON.stringify(statusText)).toEqual([400, 'O parâmetro "statusText" deve ser texto.']);
+    }
     expect(await text()).toBe('b'.repeat(119));
   });
 });
