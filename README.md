@@ -1097,7 +1097,8 @@ como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os teste
   um conhecido). Com o AD fora do ar (e sem `LDAP_Login_Fallback`), o login responde "O servidor de rede (AD) não
   respondeu" e não conta tentativa.
 - Cada código do aplicativo autenticador vale uma vez só. Os códigos de backup têm 10 letras e números sem os que se
-  confundem (`XXXXX-XXXXX`), sem diferença de maiúsculas, espaços ou hífen.
+  confundem (`XXXXX-XXXXX`), sem diferença de maiúsculas, espaços ou hífen. Desativar o 2FA pede a senha e um código;
+  senha ou código errados contam para um bloqueio de alguns minutos, como no login.
 - Tokens de acesso pessoal: criar um pede a senha (e o código do 2FA, quando ligado). Redefinir a senha, a troca de
   senha pelo administrador e o "Encerrar sessões" do administrador revogam os tokens da pessoa; desativar a conta
   fecha as conexões abertas com eles.

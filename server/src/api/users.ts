@@ -141,7 +141,8 @@ export function usersRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'users.2fa.verifyTotp', {}, async (req, _rep, ctx) => verifyAndEnableTotp(ctx, str(b(req).code, 'code')));
   route(app, 'POST', 'users.2fa.disableTotp', {}, async (req, _rep, ctx) => {
-    await disableTotp(ctx, str(b(req).code, 'code'));
+    const body = b(req);
+    await disableTotp(ctx, str(body.code, 'code'), typeof body.password === 'string' ? body.password : undefined);
     return {};
   });
 

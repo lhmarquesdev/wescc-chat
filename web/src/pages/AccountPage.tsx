@@ -646,6 +646,9 @@ export function TwoFactorCard() {
   const [setup, setSetup] = useState<{ secret: string; url: string } | null>(null);
   const [code, setCode] = useState('');
   const [codes, setCodes] = useState<string[] | null>(null);
+  // Desativar pede também a senha (contas com senha do chat), como gerar um token.
+  const needsPassword = !me.authSource || me.authSource === 'local';
+  const [password, setPassword] = useState('');
   const site = useSetting<string>('Site_Name') || 'Wescc Chat';
   const codesText = () => `Códigos de backup do ${site} (@${me.username}). Cada um funciona uma vez.\n\n${codes!.join('\n')}\n`;
   const downloadCodes = () => {
@@ -705,6 +708,11 @@ export function TwoFactorCard() {
             <Icon name="success" />
             <span>Ativado com aplicativo autenticador.</span>
           </div>
+          {needsPassword && (
+            <Field label="Sua senha" hint="Para confirmar que é você.">
+              <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            </Field>
+          )}
           {/* Aceita também um código de backup (XXXXX-XXXXX, letras e números): sem o teclado só numérico. */}
           <Field label="Código atual para desativar" hint="O código do aplicativo ou um dos códigos de backup.">
             <input
@@ -721,11 +729,11 @@ export function TwoFactorCard() {
           <div className="form-actions">
             <button
               className="btn danger"
-              disabled={!code}
+              disabled={!code || (needsPassword && !password)}
               onClick={() =>
                 api
-                  .post('users.2fa.disableTotp', { code })
-                  .then(() => (useStore.getState().setMe({ ...me, twoFactorEnabled: false }), setCode(''), ok('2FA desativado.')))
+                  .post('users.2fa.disableTotp', { code, password: needsPassword ? password : undefined })
+                  .then(() => (useStore.getState().setMe({ ...me, twoFactorEnabled: false }), setCode(''), setPassword(''), ok('2FA desativado.')))
                   .catch(fail)
               }
             >

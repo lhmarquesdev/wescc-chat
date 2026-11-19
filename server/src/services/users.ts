@@ -160,19 +160,21 @@ async function assertNotBlocked(login: string, ip?: string, knownDevice?: string
   throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas falhas. Tente novamente em alguns minutos.');
 }
 
-async function recordFailedAttempt(login: string, ip?: string, knownDevice?: string | null) {
+async function countFailure(key: string, max: number) {
   const minutes = blockMinutes();
-  for (const { key, max } of attemptKeys(login, ip, knownDevice)) {
-    // A contagem recomeça depois de um período sem falhas.
-    await query(
-      `INSERT INTO login_attempts (key, count, updated_at) VALUES ($1, 1, now())
-       ON CONFLICT (key) DO UPDATE SET
-         count = CASE WHEN login_attempts.updated_at < now() - make_interval(mins => $2) THEN 1 ELSE login_attempts.count + 1 END,
-         updated_at = now()`,
-      [key, minutes],
-    );
-    await query(`UPDATE login_attempts SET blocked_until = now() + make_interval(mins => $3), count = 0 WHERE key = $1 AND count >= $2`, [key, max, minutes]);
-  }
+  // A contagem recomeça depois de um período sem falhas.
+  await query(
+    `INSERT INTO login_attempts (key, count, updated_at) VALUES ($1, 1, now())
+     ON CONFLICT (key) DO UPDATE SET
+       count = CASE WHEN login_attempts.updated_at < now() - make_interval(mins => $2) THEN 1 ELSE login_attempts.count + 1 END,
+       updated_at = now()`,
+    [key, minutes],
+  );
+  await query(`UPDATE login_attempts SET blocked_until = now() + make_interval(mins => $3), count = 0 WHERE key = $1 AND count >= $2`, [key, max, minutes]);
+}
+
+async function recordFailedAttempt(login: string, ip?: string, knownDevice?: string | null) {
+  for (const { key, max } of attemptKeys(login, ip, knownDevice)) await countFailure(key, max);
 }
 
 async function clearFailedAttempts(login: string, knownDevice?: string | null) {
@@ -515,10 +517,19 @@ export async function verifyAndEnableTotp(ctx: Ctx, code: string) {
   return { codes };
 }
 
-export async function disableTotp(ctx: Ctx, code: string) {
+export async function disableTotp(ctx: Ctx, code: string, password?: string) {
   const u = await getUserById(ctx.userId);
   if (!u?.totp_enabled) return;
-  if (!(await check2fa(u, code))) throw badRequest('invalid-totp', 'Código inválido ou já usado.');
+  // Quem pegou uma sessão aberta não desliga o 2FA no chute: pede a senha (contas com senha do chat) e cada erro, de
+  // senha ou de código, conta para um bloqueio de alguns minutos, como no login (com o bloqueio do login desligado,
+  // 10 tentativas).
+  const key = `2fa-disable:${u.id}`;
+  const fail = async (e: ApiError) => (await countFailure(key, getSetting<number>('Accounts_Block_Failed_Login_Attempts') || 10), e);
+  if (await one('SELECT 1 FROM login_attempts WHERE key = $1 AND blocked_until > now()', [key]))
+    throw new ApiError(429, 'error-login-blocked', 'Muitas tentativas erradas. Tente novamente em alguns minutos.');
+  if (u.password_hash && !(await verifyPassword(password ?? '', u.password_hash))) throw await fail(badRequest('error-invalid-password', 'Senha atual incorreta.'));
+  if (!(await check2fa(u, code))) throw await fail(badRequest('invalid-totp', 'Código inválido ou já usado.'));
+  await query('DELETE FROM login_attempts WHERE key = $1', [key]);
   await query("UPDATE users SET totp_enabled = false, totp_secret = NULL, backup_codes = '{}', totp_last_step = NULL WHERE id = $1", [ctx.userId]);
   await audit(actorOf(ctx), 'user.2fa.disabled', { userId: ctx.userId });
 }

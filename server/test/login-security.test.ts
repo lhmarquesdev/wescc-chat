@@ -202,6 +202,29 @@ describe('2FA', () => {
     expect((await api('POST', 'login', { user: u.username, password: PW, code: 'aB-c_9xY' })).data?.userId).toBe(u.userId);
     await pool.query('DELETE FROM login_attempts');
   });
+
+  it('desativar o 2FA pede a senha e bloqueia depois de várias tentativas erradas', async () => {
+    await api('POST', 'settings', { settings: { Accounts_Block_Failed_Login_Attempts: 3 } }, A);
+    try {
+      const u = await newUser(A);
+      const en = await api('POST', 'users.2fa.enableTotp', {}, u);
+      await api('POST', 'users.2fa.verifyTotp', { code: totpCode(en.secret) }, u);
+      const off = (body: Record<string, unknown>) => api('POST', 'users.2fa.disableTotp', body, u);
+      const next = totpCode(en.secret, Date.now() + 30_000);
+      expect(await off({ code: next })).toMatchObject({ status: 400, errorType: 'error-invalid-password', error: 'Senha atual incorreta.' });
+      expect(await off({ code: '000000', password: PW })).toMatchObject({ status: 400, errorType: 'invalid-totp' });
+      expect(await off({ code: '000001', password: PW })).toMatchObject({ status: 400, errorType: 'invalid-totp' });
+      // A terceira falha (senha ou código) bloqueia por alguns minutos, mesmo com a senha e o código certos.
+      expect(await off({ code: next, password: PW })).toMatchObject({ status: 429, errorType: 'error-login-blocked', error: 'Muitas tentativas erradas. Tente novamente em alguns minutos.' });
+      expect((await pool.query('SELECT totp_enabled FROM users WHERE id = $1', [u.userId])).rows[0].totp_enabled).toBe(true);
+      await pool.query(`DELETE FROM login_attempts WHERE key = $1`, [`2fa-disable:${u.userId}`]);
+      expect((await off({ code: next, password: PW })).success).toBe(true);
+      expect((await pool.query('SELECT totp_enabled FROM users WHERE id = $1', [u.userId])).rows[0].totp_enabled).toBe(false);
+    } finally {
+      await pool.query('DELETE FROM login_attempts');
+      await api('POST', 'settings', { settings: { Accounts_Block_Failed_Login_Attempts: 10 } }, A);
+    }
+  });
 });
 
 describe('troca de senha', () => {
