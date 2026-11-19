@@ -39,9 +39,11 @@ describe('chat.search: arquivos', () => {
     const id = up.message._id;
     for (const q of ['escala', 'novembro', 'plantao-novembro', 'Escala de novembro', 'plantão']) expect(ids(await search(q)), q).toContain(id);
     // O nome genérico de um arquivo cifrado não entra na busca.
-    await pool.query(`UPDATE messages SET e2e = '{"ct":"x"}'::jsonb WHERE id = $1`, [id]);
+    // A legenda fica no texto da mensagem (msg); cifrada, a mensagem não tem texto (messages_e2e_no_text).
+    const { rows } = await pool.query<{ msg: string }>('SELECT msg FROM messages WHERE id = $1', [id]);
+    await pool.query(`UPDATE messages SET e2e = '{"ct":"x"}'::jsonb, msg = '' WHERE id = $1`, [id]);
     expect(ids(await search('escala'))).not.toContain(id);
-    await pool.query(`UPDATE messages SET e2e = NULL WHERE id = $1`, [id]);
+    await pool.query(`UPDATE messages SET e2e = NULL, msg = $2 WHERE id = $1`, [id, rows[0].msg]);
     expect(ids(await search('escala'))).toContain(id);
   });
 });
