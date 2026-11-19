@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 
 const env = process.env;
@@ -64,10 +65,31 @@ function proxyEntryOk(s: string) {
   return /^\d{1,3}$/.test(bits) && Number(bits) >= 1 && Number(bits) <= (v === 4 ? 32 : 128);
 }
 
-// TRUST_PROXY: true, false, ou endereços/faixas separados por vírgula. Sem a variável: false com HTTPS próprio, true sem ele.
-export function parseTrustProxy(v: string | undefined, nativeTls: boolean): boolean | string[] {
+// Redes do próprio container (Docker, Podman), em CIDR: um proxy reverso no host ou em outro container chega por elas
+// (o gateway ou o IP do container dele); quem acessa a porta publicada direto chega com o próprio IP, de fora delas.
+// Fora de container: nenhuma (a rede do servidor é a mesma dos computadores da empresa).
+export function containerNetworks(): string[] {
+  if (!fs.existsSync('/.dockerenv') && !fs.existsSync('/run/.containerenv')) return [];
+  const out: string[] = [];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const i of list ?? []) {
+      if (i.internal || i.family !== 'IPv4' || !i.cidr) continue;
+      const bits = Number(i.cidr.split('/')[1]);
+      const mask = bits ? (2 ** 32 - 2 ** (32 - bits)) >>> 0 : 0;
+      const base = (i.address.split('.').reduce((n, o) => n * 256 + Number(o), 0) & mask) >>> 0;
+      out.push(`${[base >>> 24, (base >>> 16) & 255, (base >>> 8) & 255, base & 255].join('.')}/${bits}`);
+    }
+  }
+  return out;
+}
+
+// TRUST_PROXY: true, false, ou endereços/faixas separados por vírgula. Sem a variável: false com HTTPS próprio; sem
+// ele, só um proxy na mesma máquina (loopback) ou, num container, na rede do container. Confiar em qualquer
+// X-Forwarded-For deixaria quem acessa direto escolher o próprio IP (bloqueio de login por IP, limite de requisições,
+// auditoria e o e-mail de novo acesso).
+export function parseTrustProxy(v: string | undefined, nativeTls: boolean, networks: string[] = containerNetworks()): boolean | string[] {
   const s = (v ?? '').trim();
-  if (!s) return !nativeTls;
+  if (!s) return nativeTls ? false : ['loopback', ...networks];
   const low = s.toLowerCase();
   if (low === 'true' || low === '1') return true;
   if (low === 'false' || low === '0') return false;
@@ -115,6 +137,7 @@ export const config = {
   httpRedirectPorts: (env.HTTP_REDIRECT_PORT ?? '').split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0 && n < 65536),
   internalPort: portVar('INTERNAL_PORT', 3080), // só 127.0.0.1, só com HTTPS próprio: webhooks do LiveKit
   trustProxy: parseTrustProxy(env.TRUST_PROXY, !!(env.TLS_PFX_FILE || env.TLS_CERT_FILE)),
+  trustProxyDefault: !(env.TRUST_PROXY ?? '').trim(), // sem TRUST_PROXY: avisa no log se chegar X-Forwarded-For de fora
   livekit: {
     url: env.LIVEKIT_URL || null,
     apiKey: env.LIVEKIT_API_KEY || null,

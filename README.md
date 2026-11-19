@@ -50,7 +50,7 @@ Para desenvolver o front com recarga automática, rode `npm run dev -w web` em o
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` / `TLS_CA_FILE` | — | HTTPS próprio com certificado e chave em PEM (com os dois, vale o PFX) |
 | `HTTP_REDIRECT_PORT` | — | Portas HTTP que redirecionam para o `SITE_URL`, separadas por vírgula (ex.: `80,3000`) |
 | `INTERNAL_PORT` | `3080` | Só com HTTPS próprio: porta em `127.0.0.1` para os webhooks do servidor de chamadas |
-| `TRUST_PROXY` | `false` com HTTPS próprio, `true` sem | Proxies cujo `X-Forwarded-For` vale: `true`, `false` ou endereços e faixas separados por vírgula |
+| `TRUST_PROXY` | `false` com HTTPS próprio; sem ele, só proxy na mesma máquina (ou na rede do container) | Proxies cujo `X-Forwarded-For` vale: `true`, `false` ou endereços e faixas separados por vírgula |
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET_FILE` | — | Servidor de chamadas em grupo (o instalador do LiveKit grava os valores) |
 | `SECRETS_KEY_FILE` / `SECRETS_KEY` | — | Chave de segredos das integrações (Jira): caminho completo de um arquivo com 32 bytes aleatórios em base64 (ou o valor) |
 | `SECRETS_KEY_PREVIOUS_FILE` / `SECRETS_KEY_PREVIOUS` | — | Chave anterior, só durante a troca da chave de segredos |
@@ -121,9 +121,13 @@ Sem nenhuma variável `TLS_*`, tudo fica como antes: HTTP na porta `PORT`.
   porta nunca é liberada no firewall e não pode ser a mesma de `PORT` nem de `HTTP_REDIRECT_PORT` (o chat não sobe).
   `PORT` ou `INTERNAL_PORT` vazios valem o padrão; um valor que não é porta (1 a 65535) impede o chat de subir.
 - **IP de quem acessa**: com HTTPS próprio, o `X-Forwarded-For` é ignorado (`TRUST_PROXY=false`) e vale o IP da
-  conexão (bloqueio de login, limites de requisições e auditoria). Atrás de um proxy reverso (sem `TLS_*`), o padrão
-  continua `true`; para aceitar só os seus proxies, liste-os: `TRUST_PROXY=127.0.0.1,10.0.0.0/8` (máscara em
-  pontos também vale, desde que contínua: `10.0.0.0/255.0.0.0`).
+  conexão (bloqueio de login, limites de requisições e auditoria). Sem `TLS_*`, o padrão aceita o `X-Forwarded-For`
+  só de um proxy reverso na mesma máquina (`127.0.0.1`/`::1`) e, com o chat num container (Docker, Podman), também da
+  rede do container (o proxy no host ou em outro container); de qualquer outro endereço vale o IP da conexão, para
+  ninguém escolher o próprio IP e escapar do bloqueio por IP. Proxy em outra máquina: liste-o,
+  `TRUST_PROXY=10.0.0.5` ou `TRUST_PROXY=127.0.0.1,10.0.0.0/8` (máscara em pontos também vale, desde que contínua:
+  `10.0.0.0/255.0.0.0`); sem isso, o log avisa uma vez "X-Forwarded-For de … ignorado" com o valor a definir.
+  `TRUST_PROXY=true` volta a aceitar o `X-Forwarded-For` de qualquer um.
 - Um erro de configuração ao subir (`TRUST_PROXY`, arquivo `*_FILE` que não existe ou sem permissão de leitura,
   porta inválida) sai só com a mensagem, em uma linha no `wescc-chat.err.log`.
 - Os logs de requisição escondem os parâmetros `access_token` e `join_request` (`***`).
