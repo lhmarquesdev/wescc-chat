@@ -610,6 +610,7 @@ export interface Call {
   answeredAt: string | null;
   endedAt: string | null;
   endedBy: string | null;
+  endedByUser?: UserRef | null; // quem encerrou (nome para o aviso "Encerrada por …")
   endedReason: CallEndReason | null;
   duration: number | null; // segundos: atendimento → fim (a dois) ou início → fim (grupo)
   listenOnly: boolean; // transmissão
@@ -696,7 +697,13 @@ export interface RoomCallState {
   serverTime: string;
 }
 
-export type CallSignal = { sdp: { type: 'offer' | 'answer'; sdp: string } } | { candidate: Record<string, unknown> | null };
+// state: microfone, câmera e tela de quem manda (a dois): desligar só apaga a faixa, e o outro lado não teria como saber.
+export type CallSignal = { sdp: { type: 'offer' | 'answer'; sdp: string } } | { candidate: Record<string, unknown> | null } | { state: CallMediaState };
+export interface CallMediaState {
+  mic: boolean;
+  camera: boolean;
+  screen: boolean;
+}
 
 export type ClientEvent =
   | { type: 'auth'; token: string }

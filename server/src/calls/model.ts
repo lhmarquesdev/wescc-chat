@@ -190,6 +190,7 @@ export function mapCall(r: any, x: Partial<CallStats> & { guard?: CallGuardState
     answeredAt: r.answered_at,
     endedAt: r.ended_at,
     endedBy: r.ended_by,
+    endedByUser: r.ended_by && r.ended_by_username ? { _id: r.ended_by, username: r.ended_by_username, name: r.ended_by_name } : null,
     endedReason: r.ended_reason ?? null,
     duration: start && ended ? Math.max(0, Math.round((ended - start) / 1000)) : null,
     listenOnly: !!r.listen_only,

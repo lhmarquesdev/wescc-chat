@@ -38,6 +38,7 @@ export const CAL_TEXT = {
   meetingPermission: 'Você não tem permissão para criar reuniões.',
   meetingOff: 'Não é possível desfazer a reunião de um evento. Cancele o evento se ela não vai mais acontecer.',
   invitedOnly: 'Só os convidados entram nesta reunião. Peça a quem organizou para convidar você.',
+  invitedOnlyBy: (owner: string) => `Só os convidados entram nesta reunião. Peça a ${owner} para convidar você.`,
   range: 'Escolha um período de até 400 dias.',
   card: (title: string, url: string) => `Reunião: [${title}](${url})`,
   cardText: 'Reunião do chat',
@@ -453,12 +454,20 @@ async function meetingRow(code: unknown) {
   return row;
 }
 
+// Barrado por não ser convidado: a página do link não mostra a reunião, então o aviso diz quem organizou, para a pessoa
+// saber a quem pedir o convite (ao entrar, a página já mostra "Organizada por").
+async function invitedOnly(row: any) {
+  const owner = await one<{ name: string | null; username: string }>('SELECT name, username FROM users WHERE id = $1', [row.owner_id]);
+  const who = owner?.name?.trim() || owner?.username;
+  return forbidden(who ? CAL_TEXT.invitedOnlyBy(who) : CAL_TEXT.invitedOnly);
+}
+
 export async function meetingInfo(ctx: Ctx, code: unknown): Promise<MeetingInfo> {
   assertCalendar();
   const row = await meetingRow(code);
   const invited = await canSee(ctx.userId, row);
   // Quem não foi convidado só vê a reunião aberta para a organização.
-  if (!invited && row.meeting_access !== 'org') throw forbidden(CAL_TEXT.invitedOnly);
+  if (!invited && row.meeting_access !== 'org') throw await invitedOnly(row);
   const joined = !!(row.room_id && (await one('SELECT 1 FROM subscriptions WHERE room_id = $1 AND user_id = $2', [row.room_id, ctx.userId])));
   const [event] = await hydrate([row], ctx);
   // Fora da lista de convidados, a lista de quem vai não aparece.

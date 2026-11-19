@@ -147,6 +147,21 @@ export const api = {
   del: <T = any>(path: string) => request<T>('DELETE', path),
 };
 
+// Pedido que precisa sair com a página fechando (pagehide): keepalive, sem esperar a resposta.
+export function postOnUnload(path: string, body: Record<string, unknown>) {
+  if (!creds) return;
+  try {
+    void fetch(`/api/v1/${path}`, {
+      method: 'POST',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': creds.userId, 'X-Auth-Token': creds.authToken },
+      body: JSON.stringify(body),
+    }).catch(() => {});
+  } catch {
+    // navegador sem keepalive: a varredura do servidor encerra a chamada
+  }
+}
+
 // Upload com progresso (XMLHttpRequest). Os campos vão antes do arquivo: o servidor lê o multipart em ordem.
 export function uploadTo<T = any>(path: string, file: File, fields: Record<string, string>, onProgress?: (p: number) => void, signal?: AbortSignal) {
   return new Promise<T>((resolve, reject) => {

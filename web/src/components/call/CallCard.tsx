@@ -37,7 +37,9 @@ function DirectCallCard({ m }: { m: Message & Record<string, any> }) {
       : caller
         ? status === 'canceled'
           ? 'Chamada cancelada'
-          : 'Chamada não atendida'
+          : status === 'busy'
+            ? 'Ocupado: em outra chamada'
+            : 'Chamada não atendida'
         : 'Chamada perdida';
   // O título já diz o tipo (vídeo ou voz) ou o desfecho: a linha de baixo não repete nenhum dos dois.
   const meta = missed ? `${video ? 'Vídeo' : 'Voz'} · ${formatTime(m.ts)}` : `${formatDuration(c.duration ?? 0)} · ${formatTime(m.ts)}`;

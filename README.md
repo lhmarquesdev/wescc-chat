@@ -270,10 +270,16 @@ dispositivo em Minha conta › Preferências.
 
 Em qualquer mensagem direta entre duas pessoas, os botões 📞 e 🎥 no topo da conversa ligam para a outra pessoa, que
 recebe o toque em todos os dispositivos com o chat aberto (e uma notificação push se estiver com o chat fechado). Dá
-para atender só com áudio, desligar o microfone ou a câmera, compartilhar a tela e ampliar a janela. Cada chamada fica
-registrada na conversa e no histórico em 📞 Chamadas, na barra lateral.
+para atender só com áudio, desligar o microfone ou a câmera, compartilhar a tela, ampliar a janela e trocar o
+microfone, a câmera ou a saída de áudio (⚙ Configurações de áudio e vídeo, na janela da chamada). Ligando para alguém
+offline ou Ocupado, a janela avisa quem liga enquanto toca (o toque para quem está Ocupado continua, de propósito). Cada
+chamada fica registrada na conversa e no histórico em 📞 Chamadas, na barra lateral.
 
 - O áudio e o vídeo vão direto entre os navegadores (WebRTC); o servidor só repassa a sinalização e guarda o histórico.
+- Uma queda curta da conexão com o servidor (rede instável, notebook que dormiu, servidor reiniciado) não derruba a
+  chamada: o navegador se reconecta sozinho e a chamada segue. Quem não volta em 30 s encerra a chamada como queda, com
+  a duração até a queda, e a outra pessoa é avisada do motivo. Fechar ou recarregar a página, ou sair da conta, no meio
+  da chamada encerra a chamada na hora, com o aviso nos dois lados.
 - Na mesma rede isso funciona sem configuração. Para chamadas entre redes diferentes (casa e escritório, 4G), configure
   um servidor TURN (por exemplo o coturn) em Administração › Configurações › Videoconferência.
 - Fora de `localhost`, o navegador só libera câmera e microfone com o site em HTTPS (veja HTTPS e serviço do
@@ -1116,10 +1122,13 @@ como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os teste
 Em **Agenda** cada pessoa vê os próprios eventos (mês, semana ou lista), cria eventos e reuniões e responde aos
 convites (vou, talvez, não vou). Uma **reunião com link** cria uma sala privada com os convidados (chat e chamada de
 vídeo em grupo) e um link `https://<site>/meet/<código>`. Em "Quem entra pelo link", "Só convidados" barra quem não
-foi convidado; "Qualquer pessoa do chat" deixa entrar quem tiver o link (e a pessoa passa a ser convidada). As regras
+foi convidado (a página do link diz quem organizou, para a pessoa pedir o convite); "Qualquer pessoa do chat" deixa
+entrar quem tiver o link (e a pessoa passa a ser convidada). As regras
 da Operação valem também aqui: quem não pode chamar alguém numa conversa direta também não o convida. Criar reuniões
 com link pede a permissão `create-calendar-meeting` (papéis `admin` e `user`). Os lembretes chegam no chat e por push
-(padrão 10 minutos antes). A chamada da reunião usa o servidor das chamadas em grupo (veja **Chamadas em grupo**).
+(padrão 10 minutos antes). A chamada da reunião usa o servidor das chamadas em grupo (veja **Chamadas em grupo**);
+sem ele, a página da reunião oferece só "Abrir o chat da reunião" e avisa que a chamada de vídeo ainda não está
+disponível.
 
 ### Só agenda interna
 

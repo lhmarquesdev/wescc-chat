@@ -177,13 +177,20 @@ async function startDirect(ctx: Ctx, room: any, kind: CallKind, connectionId: un
   return callView(row, ctx.userId, { participants: true, mine: true, room: true });
 }
 
+// Quanto tempo a chamada a dois espera o lado cuja conexão em tempo real caiu voltar (calls.reattach) antes de
+// terminar como queda. Cobre uma queda curta da rede e o servidor reiniciando (o navegador tenta de novo em 1, 3, 7 e
+// 15 s); a mídia segue direto entre os navegadores nesse tempo.
+export const DIRECT_REATTACH_SECONDS = 30;
+
 // Muda o estado só se a chamada ainda estiver em um dos estados esperados (evita corrida entre atender e desligar).
-// leftOf: o motivo de saída de cada lado no histórico por pessoa.
-async function finishDirect(id: string, from: CallStatus[], to: CallStatus, by: string | null, reason: CallEndReason | null, leftOf: (userId: string) => CallLeftReason) {
+// leftOf: o motivo de saída de cada lado no histórico por pessoa. lost: queda sem volta (varredura): só se um dos lados
+// ainda estiver fora há mais de DIRECT_REATTACH_SECONDS, e a chamada termina no momento da primeira queda.
+async function finishDirect(id: string, from: CallStatus[], to: CallStatus, by: string | null, reason: CallEndReason | null, leftOf: (userId: string) => CallLeftReason, o: { lost?: boolean } = {}) {
   const row = await withCallLock(id, async (c) => {
     const r = await one(
-      `UPDATE calls SET status = $3, ended_at = now(), ended_by = $4, ended_reason = $5 WHERE id = $1 AND status = ANY($2) RETURNING *`,
-      [id, from, to, by, reason],
+      `UPDATE calls SET status = $3, ended_at = CASE WHEN $6 THEN least(caller_lost_at, callee_lost_at) ELSE now() END, ended_by = $4, ended_reason = $5
+        WHERE id = $1 AND status = ANY($2) AND (NOT $6 OR least(caller_lost_at, callee_lost_at) < now() - make_interval(secs => $7)) RETURNING *`,
+      [id, from, to, by, reason, !!o.lost, DIRECT_REATTACH_SECONDS],
       c,
     );
     if (!r) return null;
@@ -194,9 +201,9 @@ async function finishDirect(id: string, from: CallStatus[], to: CallStatus, by: 
             state = CASE WHEN state = 'ringing' THEN $3 ELSE 'left' END,
             left_reason = CASE WHEN state = 'ringing' THEN NULL ELSE $4 END,
             seconds = CASE WHEN state = 'ringing' THEN 0 ELSE $5::int END,
-            left_at = now(), hand_at = NULL
+            left_at = $6, hand_at = NULL
           WHERE call_id = $1 AND user_id = $2 AND state IN ('ringing', 'joining', 'joined')`,
-        [id, uid, to === 'declined' ? 'declined' : 'missed', leftOf(uid), seconds],
+        [id, uid, to === 'declined' ? 'declined' : 'missed', leftOf(uid), seconds, r.ended_at],
       );
     }
     return r;
@@ -264,7 +271,9 @@ export async function declineCall(ctx: Ctx, callId: string): Promise<Call> {
 
 // Desligar a dois: cancela (quem ligou), recusa (quem recebe) ou encerra a chamada em andamento. Em grupo, encerrar
 // para todos: anfitrião ou moderate-call na sala.
-export async function endCall(ctx: Ctx, callId: string): Promise<Call> {
+// dropped: a conexão direta entre os navegadores caiu (ou a página foi recarregada no meio da chamada). A chamada a
+// dois termina como queda, sem culpar nenhum dos lados.
+export async function endCall(ctx: Ctx, callId: string, o: { dropped?: boolean } = {}): Promise<Call> {
   const r = await loadCall(callId);
   if (r.scope === 'group') {
     if (r.status !== 'ongoing') return view(callId, ctx.userId);
@@ -276,7 +285,10 @@ export async function endCall(ctx: Ctx, callId: string): Promise<Call> {
   }
   if (r.caller_id !== ctx.userId && r.callee_id !== ctx.userId) throw forbidden();
   if (r.status === 'ringing') await finishDirect(callId, ['ringing'], r.caller_id === ctx.userId ? 'canceled' : 'declined', ctx.userId, null, hangupBy(ctx.userId));
-  else if (r.status === 'ongoing') await finishDirect(callId, ['ongoing'], 'ended', ctx.userId, 'hangup', hangupBy(ctx.userId));
+  else if (r.status === 'ongoing') {
+    if (o.dropped) await finishDirect(callId, ['ongoing'], 'ended', null, 'dropped', () => 'failed');
+    else await finishDirect(callId, ['ongoing'], 'ended', ctx.userId, 'hangup', hangupBy(ctx.userId));
+  }
   return view(callId, ctx.userId);
 }
 
@@ -471,32 +483,78 @@ export async function relaySignal(fromConn: string, userId: string, callId: unkn
   if (to) bus.publish({ conn: to }, { type: 'call.signal', callId, data });
 }
 
-// A conexão de um dos lados fechou (aba fechada, recarregada, sem rede): a chamada a dois termina.
+// A conexão de um dos lados fechou (aba fechada, recarregada, sem rede, servidor reiniciando). Tocando, quem ligou
+// cancela. Em andamento, o áudio e o vídeo seguem direto entre os navegadores: a chamada só guarda quando o lado caiu e
+// espera ele voltar com a conexão nova (reattachCall). Quem não volta a tempo encerra a chamada (sweepDirectCalls).
 export async function connectionClosed(connId: string) {
   const rows = await many(
     `SELECT id, status, caller_conn, caller_id, callee_id FROM calls WHERE status = ANY($2) AND media = 'p2p' AND (caller_conn = $1 OR callee_conn = $1)`,
     [connId, ACTIVE],
   );
   for (const r of rows) {
-    const by = r.caller_conn === connId ? r.caller_id : r.callee_id;
-    const leftOf = (u: string): CallLeftReason => (u === by ? 'disconnected' : 'ended');
-    if (r.status === 'ongoing') await finishDirect(r.id, ['ongoing'], 'ended', by, 'dropped', leftOf);
-    else if (r.caller_conn === connId) await finishDirect(r.id, ['ringing'], 'canceled', r.caller_id, null, leftOf);
+    if (r.status === 'ongoing') {
+      await query(
+        `UPDATE calls SET caller_lost_at = CASE WHEN caller_conn = $2 THEN coalesce(caller_lost_at, now()) ELSE caller_lost_at END,
+                          callee_lost_at = CASE WHEN callee_conn = $2 THEN coalesce(callee_lost_at, now()) ELSE callee_lost_at END
+          WHERE id = $1 AND status = 'ongoing'`,
+        [r.id, connId],
+      );
+    } else if (r.caller_conn === connId) await finishDirect(r.id, ['ringing'], 'canceled', r.caller_id, null, (u) => (u === r.caller_id ? 'disconnected' : 'ended'));
   }
+}
+
+// A conexão em tempo real de quem está na chamada a dois voltou (outro id): a sinalização passa a usar a nova. A antiga
+// precisa estar fechada ou ser da mesma sessão (o servidor ainda não percebeu a queda). Responde sempre com a chamada
+// como ela está: se acabou enquanto a pessoa estava sem conexão, a web fecha a janela com o motivo.
+export async function reattachCall(ctx: Ctx, callId: string, connectionId: unknown): Promise<Call> {
+  const r = await loadCall(callId);
+  if (r.scope !== 'direct') throw badRequest('error-invalid-params', 'Esta chamada não é a dois.');
+  const side = r.caller_id === ctx.userId ? 'caller' : r.callee_id === ctx.userId ? 'callee' : null;
+  if (!side) throw forbidden();
+  const conn = await assertOwnConnection(ctx, connectionId);
+  const changed = await withCallLock(callId, async (c) => {
+    const cur = await one(`SELECT status, media, caller_conn, callee_conn FROM calls WHERE id = $1`, [callId], c);
+    const old: string | null = cur?.[`${side}_conn`] ?? null;
+    // Quem recebe só tem conexão na chamada depois de atender.
+    if (!cur || cur.media !== 'p2p' || !ACTIVE.includes(cur.status) || !old || old === conn) return false;
+    const prev = await one('SELECT session_id FROM presence_connections WHERE id = $1', [old], c);
+    if (prev && prev.session_id !== ctx.sessionId) throw forbidden('Esta chamada está aberta em outro aparelho.');
+    await c.query(`UPDATE calls SET ${side}_conn = $2, ${side}_lost_at = NULL WHERE id = $1`, [callId, conn]);
+    await c.query(`UPDATE call_participants SET session_id = $3 WHERE call_id = $1 AND user_id = $2 AND state = 'joined'`, [callId, ctx.userId, conn]);
+    return true;
+  });
+  if (changed) await publishCall(callId);
+  return view(callId, ctx.userId);
 }
 
 // Passos 1 e 2 da varredura (calls/sweep.ts): toque esgotado e chamadas P2P cujas conexões sumiram (instância que caiu).
 export async function sweepDirectCalls() {
   const expired = await many(`SELECT id FROM calls WHERE scope = 'direct' AND status = 'ringing' AND created_at < now() - make_interval(secs => $1)`, [ringTimeout()]);
   for (const r of expired) await finishDirect(r.id, ['ringing'], 'missed', null, 'no-answer', () => 'ended');
+  // Tocando, a conexão de quem ligou sumiu: cancela.
   const orphans = await many(
-    `SELECT id, status FROM calls c WHERE scope = 'direct' AND media = 'p2p' AND status = ANY($1) AND created_at < now() - interval '15 seconds'
-       AND (NOT EXISTS (SELECT 1 FROM presence_connections p WHERE p.id = c.caller_conn)
-            OR (c.callee_conn IS NOT NULL AND NOT EXISTS (SELECT 1 FROM presence_connections p WHERE p.id = c.callee_conn)))`,
-    [ACTIVE],
+    `SELECT id FROM calls c WHERE scope = 'direct' AND media = 'p2p' AND status = 'ringing' AND created_at < now() - interval '15 seconds'
+       AND NOT EXISTS (SELECT 1 FROM presence_connections p WHERE p.id = c.caller_conn)`,
   );
-  for (const r of orphans) {
-    const ongoing = r.status === 'ongoing';
-    await finishDirect(r.id, [r.status], ongoing ? 'ended' : 'canceled', null, ongoing ? 'dropped' : null, () => 'disconnected');
+  for (const r of orphans) await finishDirect(r.id, ['ringing'], 'canceled', null, null, () => 'disconnected');
+  // Em andamento, a conexão de um lado sumiu sem o aviso de fechamento (instância que caiu): a queda conta de agora.
+  await query(
+    `UPDATE calls c SET
+        caller_lost_at = CASE WHEN caller_lost_at IS NULL AND NOT EXISTS (SELECT 1 FROM presence_connections p WHERE p.id = c.caller_conn) THEN now() ELSE caller_lost_at END,
+        callee_lost_at = CASE WHEN callee_lost_at IS NULL AND NOT EXISTS (SELECT 1 FROM presence_connections p WHERE p.id = c.callee_conn) THEN now() ELSE callee_lost_at END
+      WHERE scope = 'direct' AND media = 'p2p' AND status = 'ongoing' AND (caller_lost_at IS NULL OR callee_lost_at IS NULL)`,
+  );
+  // Quem caiu e não voltou a tempo: a chamada termina como queda (por quem caiu primeiro), com a duração até a queda.
+  const dropped = await many(
+    `SELECT id, caller_id, callee_id, caller_lost_at, callee_lost_at FROM calls
+      WHERE scope = 'direct' AND media = 'p2p' AND status = 'ongoing' AND least(caller_lost_at, callee_lost_at) < now() - make_interval(secs => $1)`,
+    [DIRECT_REATTACH_SECONDS],
+  );
+  for (const r of dropped) {
+    const lost = new Set<string>();
+    if (r.caller_lost_at) lost.add(r.caller_id);
+    if (r.callee_lost_at) lost.add(r.callee_id);
+    const by = r.caller_lost_at && (!r.callee_lost_at || r.caller_lost_at <= r.callee_lost_at) ? r.caller_id : r.callee_id;
+    await finishDirect(r.id, ['ongoing'], 'ended', by, 'dropped', (u) => (lost.has(u) ? 'disconnected' : 'ended'), { lost: true });
   }
 }

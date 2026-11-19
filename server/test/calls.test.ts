@@ -35,6 +35,14 @@ const generalId = async () => (await pool.query(`SELECT id FROM rooms WHERE is_d
 
 const callEvent = (ws: Awaited<ReturnType<typeof online>>, id: string, status: string) => ws.waitFor((e) => e.type === 'call' && e.call._id === id && e.call.status === status);
 
+async function until(cond: () => Promise<boolean>, ms = 5000) {
+  const end = Date.now() + ms;
+  while (!(await cond())) {
+    if (Date.now() > end) throw new Error('condição não aconteceu a tempo');
+    await sleep(50);
+  }
+}
+
 describe('chamadas em mensagens diretas', () => {
   it('toca, é atendida, repassa a sinalização só entre as duas conexões e registra a duração', async () => {
     const u = await newUser(A);
@@ -63,6 +71,9 @@ describe('chamadas em mensagens diretas', () => {
     expect(got).toEqual({ type: 'call.signal', callId: id, data: { sdp: { type: 'offer', sdp: 'v=0 oferta' } } });
     wu.send({ type: 'call.signal', callId: id, data: { candidate: { candidate: 'c1' } } });
     await wa.waitFor((e) => e.type === 'call.signal' && e.data.candidate?.candidate === 'c1');
+    // Microfone e câmera desligados chegam ao outro lado (desligar só apaga a faixa, que continua viva).
+    wa.send({ type: 'call.signal', callId: id, data: { state: { mic: false, camera: false, screen: false } } });
+    expect((await wu.waitFor((e) => e.type === 'call.signal' && 'state' in e.data)).data).toEqual({ state: { mic: false, camera: false, screen: false } });
     // Terceiro não injeta sinalização.
     wi.send({ type: 'call.signal', callId: id, data: { sdp: { type: 'answer', sdp: 'falsa' } } });
     await sleep(300);
@@ -100,7 +111,7 @@ describe('chamadas em mensagens diretas', () => {
     for (const w of [wa, wu, wo]) w.close();
   });
 
-  it('recusar e cancelar; a chamada termina se uma das conexões cai', async () => {
+  it('recusar e cancelar; a chamada termina se uma das conexões cai e não volta a tempo', async () => {
     const u = await newUser(A);
     const [wa, wu] = await Promise.all([online(A), online(u)]);
     const rid = await dmWith(A, u);
@@ -112,10 +123,94 @@ describe('chamadas em mensagens diretas', () => {
     const c3 = (await api('POST', 'calls.start', { roomId: rid, kind: 'video', connectionId: wa.connectionId }, A)).call;
     await api('POST', 'calls.accept', { callId: c3._id, connectionId: wu.connectionId }, u);
     wu.close();
+    // A chamada não cai junto com a conexão: anota a queda e espera a pessoa voltar.
+    await until(async () => !!(await pool.query('SELECT callee_lost_at FROM calls WHERE id = $1', [c3._id])).rows[0].callee_lost_at);
+    await sweepCalls();
+    expect((await api('GET', 'calls.info', { callId: c3._id }, A)).call.status).toBe('ongoing');
+    // Sem volta a tempo: a varredura encerra como queda de quem caiu, com a duração até a queda (não até a varredura).
+    await pool.query(`UPDATE calls SET answered_at = now() - interval '90 seconds', callee_lost_at = now() - interval '40 seconds' WHERE id = $1`, [c3._id]);
+    await sweepCalls();
     await callEvent(wa, c3._id, 'ended');
     const info = await api('GET', 'calls.info', { callId: c3._id }, A);
-    expect(info.call.endedBy).toBe(u.userId);
+    expect(info.call).toMatchObject({ endedBy: u.userId, endedReason: 'dropped', duration: 50 });
+    const hist = await api('GET', 'im.history', { roomId: rid }, A);
+    expect(hist.messages[0]).toMatchObject({ t: 'call_ended', call: { _id: c3._id, duration: 50 } });
+    expect((await api('GET', 'calls.list', {}, u)).calls[0]).toMatchObject({ _id: c3._id, mine: { leftReason: 'disconnected', seconds: 50 } });
+    expect((await api('GET', 'calls.list', {}, A)).calls[0]).toMatchObject({ _id: c3._id, mine: { leftReason: 'ended', seconds: 50 } });
     wa.close();
+  });
+
+  it('a conexão em tempo real cai e volta: a chamada a dois segue, com a sinalização pela conexão nova', async () => {
+    const u = await newUser(A);
+    const intruder = await newUser(A);
+    const [wa, wu] = await Promise.all([online(A), online(u)]);
+    const rid = await dmWith(A, u);
+    const c = (await api('POST', 'calls.start', { roomId: rid, kind: 'audio', connectionId: wa.connectionId }, A)).call;
+    await api('POST', 'calls.accept', { callId: c._id, connectionId: wu.connectionId }, u);
+    await callEvent(wa, c._id, 'ongoing');
+    wu.close();
+    await until(async () => !!(await pool.query('SELECT callee_lost_at FROM calls WHERE id = $1', [c._id])).rows[0].callee_lost_at);
+    const wu2 = await online(u);
+    // Só quem está na chamada, com uma conexão da própria sessão.
+    expect((await api('POST', 'calls.reattach', { callId: c._id, connectionId: wu2.connectionId }, intruder)).status).toBe(403);
+    expect((await api('POST', 'calls.reattach', { callId: c._id, connectionId: wa.connectionId }, u)).errorType).toBe('error-call-connection');
+    const back = await api('POST', 'calls.reattach', { callId: c._id, connectionId: wu2.connectionId }, u);
+    expect(back.call).toMatchObject({ status: 'ongoing', calleeConnectionId: wu2.connectionId, callerConnectionId: wa.connectionId });
+    await wa.waitFor((e) => e.type === 'call' && e.call._id === c._id && e.call.calleeConnectionId === wu2.connectionId);
+    expect((await pool.query('SELECT callee_lost_at FROM calls WHERE id = $1', [c._id])).rows[0].callee_lost_at).toBeNull();
+    // A sinalização (renegociação, compartilhar tela) passa pela conexão nova.
+    wa.send({ type: 'call.signal', callId: c._id, data: { sdp: { type: 'offer', sdp: 'v=0 de novo' } } });
+    await wu2.waitFor((e) => e.type === 'call.signal' && e.data.sdp?.sdp === 'v=0 de novo');
+    wu2.send({ type: 'call.signal', callId: c._id, data: { candidate: { candidate: 'c2' } } });
+    await wa.waitFor((e) => e.type === 'call.signal' && e.data.candidate?.candidate === 'c2');
+    // A varredura não encerra quem voltou.
+    await pool.query(`UPDATE calls SET created_at = now() - interval '5 minutes' WHERE id = $1`, [c._id]);
+    await sweepCalls();
+    expect((await api('GET', 'calls.info', { callId: c._id }, A)).call.status).toBe('ongoing');
+
+    // Servidor reiniciado: a conexão some sem o aviso de fechamento; a varredura anota a queda e espera a volta.
+    await pool.query('DELETE FROM presence_connections WHERE id = $1', [wa.connectionId]);
+    await sweepCalls();
+    expect((await pool.query('SELECT caller_lost_at FROM calls WHERE id = $1', [c._id])).rows[0].caller_lost_at).not.toBeNull();
+    expect((await api('GET', 'calls.info', { callId: c._id }, A)).call.status).toBe('ongoing');
+    const wa2 = await online(A);
+    expect((await api('POST', 'calls.reattach', { callId: c._id, connectionId: wa2.connectionId }, A)).call).toMatchObject({ status: 'ongoing', callerConnectionId: wa2.connectionId });
+
+    // Desligou enquanto a outra pessoa estava sem conexão: ao voltar, ela recebe a chamada encerrada, com o motivo.
+    wu2.close();
+    await until(async () => !!(await pool.query('SELECT callee_lost_at FROM calls WHERE id = $1', [c._id])).rows[0].callee_lost_at);
+    expect((await api('POST', 'calls.end', { callId: c._id }, A)).call.status).toBe('ended');
+    const wu3 = await online(u);
+    expect((await api('POST', 'calls.reattach', { callId: c._id, connectionId: wu3.connectionId }, u)).call).toMatchObject({ status: 'ended', endedReason: 'hangup', endedBy: A.userId });
+    for (const w of [wa, wu, wa2, wu3]) w.close();
+  });
+
+  it('administrador encerra a chamada a dois: o evento já traz quem encerrou, para o aviso nos dois lados', async () => {
+    const u = await newUser(A);
+    const v = await newUser(A);
+    const [wu, wv] = await Promise.all([online(u), online(v)]);
+    const rid = await dmWith(u, v);
+    for (const answer of [true, false]) {
+      const c = (await api('POST', 'calls.start', { roomId: rid, kind: 'audio', connectionId: wu.connectionId }, u)).call;
+      if (answer) await api('POST', 'calls.accept', { callId: c._id, connectionId: wv.connectionId }, v);
+      const status = answer ? 'ended' : 'canceled';
+      const evs = [callEvent(wu, c._id, status), callEvent(wv, c._id, status)];
+      expect((await api('POST', 'calls.admin.end', { callId: c._id }, A)).call.status).toBe(status);
+      for (const e of await Promise.all(evs)) expect(e.call).toMatchObject({ endedReason: 'moderator', endedBy: A.userId, endedByUser: { _id: A.userId, username: 'admin' } });
+    }
+    for (const w of [wu, wv]) w.close();
+  });
+
+  it('a conexão direta entre os navegadores caiu: calls.end com dropped encerra como queda, sem culpar ninguém', async () => {
+    const u = await newUser(A);
+    const [wa, wu] = await Promise.all([online(A), online(u)]);
+    const rid = await dmWith(A, u);
+    const c = (await api('POST', 'calls.start', { roomId: rid, kind: 'audio', connectionId: wa.connectionId }, A)).call;
+    await api('POST', 'calls.accept', { callId: c._id, connectionId: wu.connectionId }, u);
+    const ended = (await api('POST', 'calls.end', { callId: c._id, dropped: true }, u)).call;
+    expect(ended).toMatchObject({ status: 'ended', endedReason: 'dropped', endedBy: null });
+    await callEvent(wa, c._id, 'ended');
+    for (const w of [wa, wu]) w.close();
   });
 
   it('configuração entrega os servidores ICE (TURN com credenciais só para quem está logado)', async () => {

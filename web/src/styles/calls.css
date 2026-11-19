@@ -234,7 +234,8 @@
   padding: 0 var(--space-6) calc(env(safe-area-inset-bottom) + 48px);
   border: 0;
   border-radius: 0;
-  background: radial-gradient(120% 80% at 50% 0%, hsl(var(--primary) / 0.1) 0%, hsl(var(--background)) 60%);
+  /* O brilho por cima de um fundo sólido: a página por trás não aparece no alto. */
+  background: radial-gradient(120% 80% at 50% 0%, hsl(var(--primary) / 0.1) 0%, transparent 60%), hsl(var(--background));
   box-shadow: none;
   animation: call-fade var(--dur-3) var(--ease-out);
 }
@@ -467,6 +468,13 @@
 .call-placeholder > .call-status {
   font-size: var(--fs-15);
   line-height: var(--lh-15);
+}
+/* Aviso de uma frase (pessoa offline ou Ocupado): quebra em linhas, em vez de passar da janela. */
+.call-placeholder > .call-ring-note {
+  max-width: 36ch;
+  margin-top: var(--space-2);
+  padding: 0 var(--space-4);
+  white-space: normal;
 }
 .call-hidden {
   position: absolute;
@@ -920,6 +928,11 @@
 }
 .call-muted {
   color: hsl(var(--st-red));
+}
+/* Microfone desligado do outro lado, antes do nome (chamada a dois). */
+:where(.call-who, .call-placeholder) .call-muted {
+  margin-right: var(--space-1);
+  vertical-align: -2px;
 }
 .call-hand-up {
   color: hsl(var(--st-amber));

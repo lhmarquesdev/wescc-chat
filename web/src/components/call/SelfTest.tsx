@@ -20,6 +20,8 @@ const TEXT = {
   audio: 'Não foi possível enviar áudio. Confira o microfone e a permissão do navegador.',
   video: 'Não foi possível enviar vídeo. Confira a câmera e a permissão do navegador.',
   down: 'O servidor de chamadas não está configurado ou não responde.',
+  // Para quem administra (Administração › Chamadas): o que fazer, e não "peça ao administrador".
+  adminNotConfigured: 'O servidor de chamadas (LiveKit) não está configurado. Instale e ligue o servidor antes de testar: veja a seção “Chamadas em grupo” do README.',
   inCall: 'Saia da chamada para testar a conexão.',
 };
 
@@ -34,9 +36,11 @@ function verdict(steps: SelfTestStep[]): { text: string; kind: 'ok' | 'warn' | '
 
 const idle = (): SelfTestStep[] => STEPS.map(() => ({ status: 'idle' }));
 
-export function SelfTest({ onClose }: { onClose: () => void }) {
+export function SelfTest({ onClose, admin = false }: { onClose: () => void; admin?: boolean }) {
   const [steps, setSteps] = useState<SelfTestStep[]>(idle);
   const [error, setError] = useState<string | null>(null);
+  // Sem servidor configurado, testar de novo não muda nada: o botão some.
+  const [notConfigured, setNotConfigured] = useState(false);
   const [done, setDone] = useState(false);
   const [running, setRunning] = useState(false);
   const alive = useRef(true);
@@ -49,6 +53,7 @@ export function SelfTest({ onClose }: { onClose: () => void }) {
 
   const run = useCallback(async () => {
     setError(null);
+    setNotConfigured(false);
     setDone(false);
     setSteps(idle());
     if (isInCall()) return setError(TEXT.inCall);
@@ -62,12 +67,14 @@ export function SelfTest({ onClose }: { onClose: () => void }) {
       if (!alive.current) return;
       const status = e instanceof ApiError ? e.status : 0;
       // Sem servidor de chamadas configurado (também 503): o texto que diz onde ativar, não o de fora do ar.
-      if (e instanceof ApiError && e.errorType === 'error-call-sfu-not-configured') setError(CALL_SFU_NOT_CONFIGURED);
-      else setError(status === 503 ? TEXT.down : status === 409 ? TEXT.inCall : errorMessage(e));
+      if (e instanceof ApiError && e.errorType === 'error-call-sfu-not-configured') {
+        setNotConfigured(true);
+        setError(admin ? TEXT.adminNotConfigured : CALL_SFU_NOT_CONFIGURED);
+      } else setError(status === 503 ? TEXT.down : status === 409 ? TEXT.inCall : errorMessage(e));
     } finally {
       if (alive.current) setRunning(false);
     }
-  }, []);
+  }, [admin]);
 
   useEffect(() => {
     void run();
@@ -84,9 +91,11 @@ export function SelfTest({ onClose }: { onClose: () => void }) {
           <button type="button" className="btn" onClick={onClose}>
             Fechar
           </button>
-          <button type="button" className="btn primary" disabled={running} onClick={() => void run()}>
-            Testar de novo
-          </button>
+          {!notConfigured && (
+            <button type="button" className="btn primary" disabled={running} onClick={() => void run()}>
+              Testar de novo
+            </button>
+          )}
         </>
       }
     >

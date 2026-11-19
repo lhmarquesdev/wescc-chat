@@ -2,6 +2,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { whenLabel } from '../../lib/calendar';
+import { useCallStore } from '../../lib/call/store';
 import { realtime } from '../../lib/realtime';
 import { useStore } from '../../lib/store';
 
@@ -24,8 +25,9 @@ export function CalendarNotices() {
         toast(`${e.title} · ${whenLabel(e)}`, 'info', {
           icon: 'cal-reminder',
           duration: 30_000,
+          // Sem chamadas em grupo não há vídeo para entrar: o botão só abre a página da reunião.
           action: meet
-            ? { label: 'Entrar', onClick: () => navigate(`/meet/${meet.code}`) }
+            ? { label: useCallStore.getState().config?.groupEnabled === false ? 'Abrir' : 'Entrar', onClick: () => navigate(`/meet/${meet.code}`) }
             : { label: 'Ver', onClick: () => navigate(`/calendar?evento=${encodeURIComponent(e._id)}`) },
         });
       }
