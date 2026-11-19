@@ -57,15 +57,23 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
   const [location, setLocation] = useState(editing?.location ?? '');
   const [description, setDescription] = useState(editing?.description ?? '');
   const [reminder, setReminder] = useState<number | null>(editing ? editing.reminderMinutes : 10);
+  const [initial] = useState(() => ({ allDay, date, endDate, startTime, endTime }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Evento com horário de 24 horas ou mais (criado pela API ou por uma integração): o editor mostra também a data do fim,
+  // para não encurtar o evento para um dia.
+  const longTimed = !!editing && !editing.allDay && new Date(editing.endsAt).getTime() - new Date(editing.startsAt).getTime() >= DAY_MS;
 
   // Mudar o início leva o fim junto (mesma duração), como nas agendas de sempre.
   const moveStart = (t: string) => {
-    const dur = fromInputs(date, endTime).getTime() - fromInputs(date, startTime).getTime();
+    const multi = longTimed && !allDay;
+    const dur = fromInputs(multi ? endDate : date, endTime).getTime() - fromInputs(date, startTime).getTime();
     const ns = fromInputs(date, t);
     setStartTime(t);
-    if (dur > 0) setEndTime(timeInput(new Date(ns.getTime() + dur)));
+    if (!(dur > 0)) return;
+    const ne = new Date(ns.getTime() + dur);
+    setEndTime(timeInput(ne));
+    if (multi) setEndDate(dateInput(ne));
   };
 
   const range = useMemo(() => {
@@ -74,13 +82,18 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
       const e = addDays(fromInputs(endDate || date, '00:00'), 1);
       return { s, e, ok: e > s };
     }
+    if (longTimed) {
+      const s = fromInputs(date, startTime);
+      const e = fromInputs(endDate, endTime);
+      return { s, e, ok: e > s && e.getTime() - s.getTime() <= 31 * DAY_MS };
+    }
     const s = fromInputs(date, startTime);
     let e = fromInputs(date, endTime);
     // Fim antes do início: termina depois da meia-noite (o editor mostra o aviso). Fim igual ao início não vale.
     const overnight = e < s;
     if (overnight) e = new Date(e.getTime() + DAY_MS);
     return { s, e, overnight, ok: e > s && e.getTime() - s.getTime() <= 24 * 60 * 60_000 };
-  }, [allDay, date, endDate, startTime, endTime]);
+  }, [allDay, longTimed, date, endDate, startTime, endTime]);
 
   // Quem já tem compromisso no horário (só início e fim; o título dos outros nunca chega aqui).
   const [conflicts, setConflicts] = useState<string[]>([]);
@@ -126,9 +139,11 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
       return setError(
         allDay
           ? 'O último dia precisa ser igual ou depois do primeiro.'
-          : range.e.getTime() === range.s.getTime()
+          : range.e.getTime() <= range.s.getTime()
             ? 'O fim precisa ser depois do início.'
-            : 'Um evento com horário pode durar até 24 horas. Para mais, use dia inteiro.',
+            : longTimed
+              ? 'Um evento pode durar até 31 dias.'
+              : 'Um evento com horário pode durar até 24 horas. Para mais, use dia inteiro.',
       );
     setBusy(true);
     setError(null);
@@ -144,8 +159,13 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
       meetingAccess: access,
       reminderMinutes: reminder,
     };
+    // Sem mexer em data e horário, a edição não reenvia o horário: o evento continua exatamente como estava.
+    const timing = { allDay, date, endDate, startTime, endTime };
+    const sameTiming = !!editing && (Object.keys(timing) as (keyof typeof timing)[]).every((k) => timing[k] === initial[k]);
     try {
-      const saved = editing ? await calendarApi.update(editing._id, input) : await calendarApi.create(input);
+      const saved = editing
+        ? await calendarApi.update(editing._id, sameTiming ? { ...input, allDay: undefined, startsAt: undefined, endsAt: undefined } : input)
+        : await calendarApi.create(input);
       useStore.getState().toast(editing ? 'Evento atualizado.' : meeting ? 'Reunião marcada. Os convidados foram avisados.' : people.length ? 'Evento criado. Os convidados foram avisados.' : 'Evento criado.', 'success');
       onSaved(saved);
     } catch (e) {
@@ -191,7 +211,7 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
           </div>
         )}
 
-        <div className="cal-when">
+        <div className={longTimed && !allDay ? 'cal-when long' : 'cal-when'}>
           <Field label={allDay ? 'Primeiro dia' : 'Data'}>
             <input
               type="date"
@@ -199,6 +219,11 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
               onChange={(e) => {
                 const v = e.target.value;
                 if (allDay && endDate < v) setEndDate(v);
+                // Evento de vários dias: mudar a data leva o fim junto (mesma duração).
+                if (longTimed && !allDay && range.ok) {
+                  const ns = fromInputs(v, startTime);
+                  if (!Number.isNaN(ns.getTime())) setEndDate(dateInput(new Date(ns.getTime() + range.e.getTime() - range.s.getTime())));
+                }
                 setDate(v);
               }}
             />
@@ -212,6 +237,11 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
               <Field label="Início">
                 <input type="time" step={300} value={startTime} onChange={(e) => moveStart(e.target.value)} />
               </Field>
+              {longTimed && (
+                <Field label="Data do fim">
+                  <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)} />
+                </Field>
+              )}
               <Field label="Fim">
                 <input type="time" step={300} value={endTime} onChange={(e) => setEndTime(e.target.value)} />
               </Field>
@@ -269,6 +299,8 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
         <Field label="Lembrete">
           <select value={reminder === null ? 'none' : String(reminder)} onChange={(e) => setReminder(e.target.value === 'none' ? null : Number(e.target.value))}>
             <option value="none">Sem lembrete</option>
+            {/* Lembrete fora das opções (vindo da API ou de uma integração): continua escolhido. */}
+            {reminder !== null && !REMINDER_CHOICES.includes(reminder) && <option value={reminder}>{reminderLabel(reminder)}</option>}
             {REMINDER_CHOICES.map((m) => (
               <option key={m} value={m}>
                 {reminderLabel(m)}

@@ -94,6 +94,13 @@ describe('eventos', () => {
     expect([u.event.startsAt, u.event.endsAt]).toEqual([c.event.startsAt, c.event.endsAt]);
   });
 
+  it('editar só o título mantém o horário de vários dias e o lembrete fora das opções', async () => {
+    const c = await api('POST', 'calendar.create', { title: 'Congresso', startsAt: at(10 * DAY), endsAt: at(11 * DAY + 9 * H), reminderMinutes: 120 }, ana);
+    const u = await api('POST', 'calendar.update', { eventId: c.event._id, title: 'Congresso (sala 2)', reminderMinutes: 120 }, ana);
+    expect(u.success, JSON.stringify(u)).toBe(true);
+    expect([u.event.startsAt, u.event.endsAt, u.event.reminderMinutes]).toEqual([c.event.startsAt, c.event.endsAt, 120]);
+  });
+
   it('resposta do convidado, e mudar o horário pede resposta de novo', async () => {
     const c = await api('POST', 'calendar.create', { title: 'Revisão', startsAt: at(2 * DAY), endsAt: at(2 * DAY + H), attendeeIds: [bruno.userId, carla.userId] }, ana);
     expect((await api('POST', 'calendar.respond', { eventId: c.event._id, response: 'accepted' }, bruno)).event.myResponse).toBe('accepted');
