@@ -97,8 +97,21 @@ export function ListStrip({
 }
 
 export function Chips<T extends string>({ value, onChange, items, label }: { value: T; onChange: (v: T) => void; items: { id: T; label: string; count?: number | string }[]; label: string }) {
+  // Trilha que rola de lado (celular): o filtro escolhido fica à vista, como o "Aguardando aprovação" aberto pelo link do e-mail.
+  const track = useRef<HTMLDivElement>(null);
+  // As contagens chegam depois e alargam os filtros: a conta refaz quando elas mudam.
+  const sizes = items.map((i) => `${i.id}:${i.count ?? ''}`).join('|');
+  useEffect(() => {
+    const box = track.current;
+    const on = box?.querySelector<HTMLElement>('[aria-checked="true"]');
+    if (!box || !on || box.scrollWidth <= box.clientWidth) return;
+    const b = box.getBoundingClientRect();
+    const r = on.getBoundingClientRect();
+    if (r.right > b.right) box.scrollLeft += r.right - b.right + 24;
+    else if (r.left < b.left) box.scrollLeft -= b.left - r.left + 24;
+  }, [value, sizes]);
   return (
-    <div className="rbac-chips" role="radiogroup" aria-label={label}>
+    <div className="rbac-chips" role="radiogroup" aria-label={label} ref={track}>
       {items.map((i) => (
         <button key={i.id} type="button" role="radio" aria-checked={value === i.id} className={value === i.id ? 'on' : ''} onClick={() => onChange(i.id)}>
           {i.label}
