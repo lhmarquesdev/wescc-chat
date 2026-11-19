@@ -282,7 +282,7 @@ function Protected() {
         <Sidebar onNavigate={() => setNavOpen(false)} mode={asList ? 'list' : 'side'} />
       </aside>
       <div className="sidebar-backdrop" onClick={() => setNavOpen(false)} />
-      <main className="main" id="conteudo" tabIndex={-1}>
+      <main className="main" id="conteudo">
         {/* Gaveta antiga: fica como reserva, escondida (a barra de abas e o voltar das salas substituem). */}
         <button className="mobile-nav-btn" aria-label="Abrir menu" onClick={() => setNavOpen(true)}>
           <Icon name="nav-menu" />
@@ -307,7 +307,14 @@ function Protected() {
 function skipToContent(e: React.MouseEvent<HTMLAnchorElement>) {
   e.preventDefault();
   const target = document.querySelector<HTMLElement>('.room-main .composer textarea:not(:disabled)') ?? document.getElementById('conteudo');
-  target?.focus({ preventScroll: true });
+  if (!target) return;
+  // A área principal só recebe o foco por aqui: com o tabindex fixo, um clique na lista levaria o foco para ela e as
+  // setas e o Page Up/Down deixariam de rolar as mensagens.
+  if (!target.matches('textarea')) {
+    target.tabIndex = -1;
+    target.addEventListener('blur', () => target.removeAttribute('tabindex'), { once: true });
+  }
+  target.focus({ preventScroll: true });
 }
 
 function OfflineBar() {
