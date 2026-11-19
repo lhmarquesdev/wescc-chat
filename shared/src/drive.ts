@@ -101,10 +101,15 @@ export interface DriveSubject {
   sublabel?: string;
 }
 
-// Nome de pasta ou arquivo: sem barras, controle ou só pontos; espaços nas pontas saem.
+// Caracteres invisíveis de direção do texto (ex.: U+202E antes de "fdp.exe" faz "relatorio" + U+202E + "fdp.exe" aparecer
+// como "relatorioexe.pdf") e de largura zero. O ZWJ (U+200D) fica: ele junta emojis.
+export const INVISIBLE_NAME_CHARS = /[\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g;
+
+// Nome de pasta ou arquivo: sem barras, controle, caracteres invisíveis ou só pontos; espaços nas pontas saem.
 export function cleanDriveName(raw: unknown, max: number): string | null {
   const s = String(raw ?? '')
     .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(INVISIBLE_NAME_CHARS, '')
     .replace(/[\\/]/g, '-')
     .trim()
     .slice(0, max)

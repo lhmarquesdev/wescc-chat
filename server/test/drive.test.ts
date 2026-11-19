@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { one, query } from '../src/db/pool';
+import { many, one, query } from '../src/db/pool';
 import { purgeExpiredTrash } from '../src/drive/drive';
 import { storedPath } from '../src/services/uploads';
 import { admin, api, newUser, raw, startServer, stopServer, type Auth } from './helpers';
@@ -276,6 +276,29 @@ describe('arquivos', () => {
       await api('POST', 'settings', { settings: { Drive_Enabled: true } }, A);
     }
     expect((await api('GET', 'files.folder', { folderId: root }, bruno)).files.map((x: any) => x.name)).toContain('aba-desligada.txt');
+  });
+
+  it('caracteres invisíveis de direção saem do nome (envio, renomear e nomes já gravados)', async () => {
+    const r = await up(root, 'relatorio-anual\u202efdp.exe', 'MZ', bruno, 'application/octet-stream');
+    expect(r.file.name).toBe('relatorio-anualfdp.exe');
+    expect((await api('POST', 'files.rename', { fileId: r.file._id, name: '\u2066planilha\u2069\u200f.xlsx' }, bruno)).success).toBe(true);
+    expect((await one('SELECT name FROM drive_files WHERE id = $1', [r.file._id]))!.name).toBe('planilha.xlsx');
+    expect((await api('POST', 'files.folder.create', { name: '\u202e\u200b' }, A)).errorType).toBe('error-invalid-name');
+    // Gravados antes da correção: a migração 038 limpa, sem repetir nome na pasta.
+    const ins = (id: string, name: string) =>
+      query("INSERT INTO drive_files (id, folder_id, name, type, size, storage_path) VALUES ($1, $2, $3, 'text/plain', 1, '2026/01/' || $1)", [id, root, name]);
+    await ins('bidiAAAAAAAAAAAAA', 'Duplicado.txt');
+    await ins('bidiBBBBBBBBBBBBB', 'duplicado\u202e.txt');
+    await ins('bidiCCCCCCCCCCCCC', 'contrato\u202efdp.exe');
+    await query("INSERT INTO drive_folders (id, parent_id, name) VALUES ('bidiPASTAAAAAAAAA', $1, $2)", [root, '\u202e']);
+    const sql = fs.readFileSync(new URL('../src/db/migrations/038_arquivos.sql', import.meta.url), 'utf8');
+    await query(sql);
+    await query(sql); // de novo: nada muda
+    const names = async (ids: string[]) => (await many('SELECT id, name FROM drive_files WHERE id = ANY($1) ORDER BY id', [ids])).map((x: any) => x.name);
+    expect(await names(['bidiAAAAAAAAAAAAA', 'bidiBBBBBBBBBBBBB', 'bidiCCCCCCCCCCCCC'])).toEqual(['Duplicado.txt', 'duplicado (2).txt', 'contratofdp.exe']);
+    expect((await one("SELECT name FROM drive_folders WHERE id = 'bidiPASTAAAAAAAAA'"))!.name).toBe('pasta');
+    await query("DELETE FROM drive_files WHERE id LIKE 'bidi%'");
+    await query("DELETE FROM drive_folders WHERE id = 'bidiPASTAAAAAAAAA'");
   });
 
   it('cota cheia recusa o envio com aviso claro', async () => {
