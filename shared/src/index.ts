@@ -453,6 +453,10 @@ export type ServerEvent =
   | { type: 'calendar.changed' }
   | { type: 'calendar.invite'; event: CalendarEvent; by: UserRef }
   | { type: 'calendar.reminder'; event: CalendarEvent }
+  // Agenda: o evento mudou de horário, foi cancelado ou a pessoa saiu da lista de convidados (aviso na tela)
+  | { type: 'calendar.updated'; event: CalendarEvent; by: UserRef; moved: boolean }
+  | { type: 'calendar.canceled'; event: CalendarEvent; by: UserRef }
+  | { type: 'calendar.removed'; event: CalendarEvent; by: UserRef }
   // Meus dados (LGPD): o pedido da pessoa mudou de estado (na fila, preparando, pronto, falhou, expirou)
   | { type: 'userdata.changed'; request: UserDataRequest }
   // Status personalizados criados, editados ou excluídos: a lista nova inteira (sem usersCount)

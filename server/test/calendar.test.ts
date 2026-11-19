@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { many, one, query } from '../src/db/pool';
-import { CAL_TEXT } from '../src/calendar/events';
+import { CAL_TEXT, CAL_TZ } from '../src/calendar/events';
 import { sendDueReminders } from '../src/calendar/reminders';
 import { admin, api, connectWs, newUser, sleep, startServer, stopServer, urlOf, type Auth } from './helpers';
 
@@ -136,6 +136,46 @@ describe('eventos', () => {
     expect(ev.event.myResponse).toBe('pending');
     ws.close();
   });
+
+  it('mudança de horário, cancelamento e saída da lista avisam os convidados na hora', async () => {
+    const wsA = connectWs(ana);
+    const wsB = connectWs(bruno);
+    const wsC = connectWs(carla);
+    await Promise.all([wsA.ready, wsB.ready, wsC.ready]);
+    const c = await api('POST', 'calendar.create', { title: 'Avisos', startsAt: at(DAY), endsAt: at(DAY + H), attendeeIds: [bruno.userId, carla.userId] }, ana);
+    const [start, end] = [at(2 * DAY), at(2 * DAY + H)];
+    await api('POST', 'calendar.update', { eventId: c.event._id, startsAt: start, endsAt: end }, ana);
+    const mv = await wsB.waitFor((e) => e.type === 'calendar.updated' && e.event._id === c.event._id);
+    expect([mv.moved, mv.by._id, mv.event.startsAt, mv.event.myResponse]).toEqual([true, ana.userId, start, 'pending']);
+    // Só o título: sem aviso.
+    await api('POST', 'calendar.update', { eventId: c.event._id, title: 'Avisos 2' }, ana);
+    await api('POST', 'calendar.update', { eventId: c.event._id, attendeeIds: [bruno.userId] }, ana);
+    const rm = await wsC.waitFor((e) => e.type === 'calendar.removed' && e.event._id === c.event._id);
+    expect([rm.by._id, rm.event.title]).toEqual([ana.userId, 'Avisos 2']);
+    await api('POST', 'calendar.cancel', { eventId: c.event._id }, ana);
+    const cc = await wsB.waitFor((e) => e.type === 'calendar.canceled' && e.event._id === c.event._id);
+    expect([cc.by._id, cc.event.status]).toEqual([ana.userId, 'canceled']);
+    await sleep(200);
+    expect(wsB.events.filter((e) => e.type === 'calendar.updated' && e.event._id === c.event._id)).toHaveLength(1);
+    expect(wsC.events.some((e) => e.type === 'calendar.canceled' && e.event._id === c.event._id)).toBe(false);
+    // Quem fez a mudança não recebe aviso dela.
+    expect(wsA.events.some((e) => ['calendar.updated', 'calendar.canceled', 'calendar.removed'].includes(e.type))).toBe(false);
+    for (const w of [wsA, wsB, wsC]) w.close();
+  });
+
+  it('convidado desativado não trava a edição; desativado novo é recusado pelo nome', async () => {
+    const saiu = await newUser(A, { name: 'Saiu da Empresa' });
+    const c = await api('POST', 'calendar.create', { title: 'Com quem saiu', startsAt: at(DAY), endsAt: at(DAY + H), attendeeIds: [saiu.userId, bruno.userId] }, ana);
+    expect((await api('POST', 'users.setActiveStatus', { userId: saiu.userId, activeStatus: false }, A)).success).toBe(true);
+    // O editor reenvia a lista inteira.
+    const u = await api('POST', 'calendar.update', { eventId: c.event._id, title: 'Com quem saiu (novo)', attendeeIds: [saiu.userId, bruno.userId] }, ana);
+    expect(u.success, JSON.stringify(u)).toBe(true);
+    expect(u.event.attendees.map((a: any) => a._id).sort()).toEqual([saiu.userId, bruno.userId].sort());
+    const outro = await newUser(A);
+    await api('POST', 'users.setActiveStatus', { userId: outro.userId, activeStatus: false }, A);
+    expect((await api('POST', 'calendar.update', { eventId: c.event._id, attendeeIds: [saiu.userId, outro.userId] }, ana)).error).toBe(CAL_TEXT.inactiveAttendee(outro.username));
+    expect((await api('POST', 'calendar.create', { title: 'X', startsAt: at(DAY), endsAt: at(DAY + H), attendeeIds: [saiu.userId] }, ana)).error).toBe(CAL_TEXT.inactiveAttendee(saiu.username));
+  });
 });
 
 describe('reuniões', () => {
@@ -223,6 +263,22 @@ describe('lembretes', () => {
     expect(wsB.events.slice(n).some((e) => e.type === 'calendar.reminder' && e.event._id === c.event._id)).toBe(false);
     wsB.close();
     wsC.close();
+  });
+});
+
+describe('lembretes de dia inteiro', () => {
+  it('contam a partir de 00:00 no fuso da empresa, e não de 00:00 UTC (a noite anterior no Brasil)', async () => {
+    const day = new Date(Date.now() + 2 * DAY).toISOString().slice(0, 10);
+    const zone = new Intl.DateTimeFormat('en-US', { timeZone: CAL_TZ, timeZoneName: 'longOffset' }).formatToParts(new Date(`${day}T12:00:00Z`));
+    const offset = zone.find((p) => p.type === 'timeZoneName')!.value.replace('GMT', '') || '+00:00';
+    const minutes = Math.floor((Date.parse(`${day}T00:00:00${offset}`) - Date.now()) / 60_000);
+    const c = await api('POST', 'calendar.create', { title: 'Feriado com lembrete', allDay: true, startsAt: day, endsAt: day, reminderMinutes: minutes - 5 }, ana);
+    expect(c.success, JSON.stringify(c)).toBe(true);
+    await sendDueReminders();
+    expect((await one('SELECT reminded_at FROM calendar_events WHERE id = $1', [c.event._id])).reminded_at).toBeNull();
+    await api('POST', 'calendar.update', { eventId: c.event._id, reminderMinutes: minutes + 1 }, ana);
+    await sendDueReminders();
+    expect((await one('SELECT reminded_at FROM calendar_events WHERE id = $1', [c.event._id])).reminded_at).not.toBeNull();
   });
 });
 

@@ -33,6 +33,7 @@ export const CAL_TEXT = {
   dateRange: 'Escolha uma data entre um ano atrás e cinco anos à frente.',
   attendees: 'Convide até 200 pessoas por evento.',
   badAttendee: 'Uma das pessoas convidadas não existe ou está desativada.',
+  inactiveAttendee: (username: string) => `@${username} está desativado. Tire da lista de convidados.`,
   reminder: 'Escolha um lembrete entre 0 minutos e 7 dias antes.',
   response: 'Resposta inválida.',
   notInvited: 'Você não está entre os convidados deste evento.',
@@ -45,6 +46,8 @@ export const CAL_TEXT = {
   canceledMsg: (title: string) => `A reunião **${title}** foi cancelada.`,
   movedMsg: (title: string, when: string) => `A reunião **${title}** mudou de horário: ${when}.`,
   invitePush: (by: string) => `${by} convidou você`,
+  movedPush: (by: string) => `${by} mudou o horário`,
+  removedPush: (by: string) => `${by} tirou você da lista de convidados.`,
 };
 
 const MAX_ATTENDEES = 200;
@@ -245,8 +248,14 @@ async function clean(ctx: Ctx, input: Partial<CalendarEventInput>, prev?: any): 
     if (!Array.isArray(input.attendeeIds)) throw badRequest('error-invalid-params', CAL_TEXT.badAttendee);
     const ids = [...new Set(input.attendeeIds.filter((x): x is string => typeof x === 'string' && !!x))].filter((id) => id !== (prev?.owner_id ?? ctx.userId));
     if (ids.length > MAX_ATTENDEES) throw badRequest('error-invalid-params', CAL_TEXT.attendees);
-    const found = ids.length ? await many(`SELECT id FROM users WHERE id = ANY($1) AND active AND type = 'user'`, [ids]) : [];
-    if (found.length !== ids.length) throw badRequest('error-invalid-params', CAL_TEXT.badAttendee);
+    // Quem já era convidado continua na lista mesmo desativado (alguém que saiu da empresa não trava a edição); só quem
+    // entra agora precisa estar ativo.
+    const kept = prev ? new Set((await many(`SELECT user_id FROM calendar_attendees WHERE event_id = $1`, [prev.id])).map((r) => r.user_id as string)) : new Set<string>();
+    const fresh = ids.filter((id) => !kept.has(id));
+    const found = fresh.length ? await many(`SELECT id, username, active FROM users WHERE id = ANY($1) AND type = 'user'`, [fresh]) : [];
+    if (found.length !== fresh.length) throw badRequest('error-invalid-params', CAL_TEXT.badAttendee);
+    const off = found.find((u) => !u.active);
+    if (off) throw badRequest('error-invalid-params', CAL_TEXT.inactiveAttendee(off.username));
     attendeeIds = ids;
   }
   let reminderMinutes: number | null = prev ? (prev.reminder_minutes ?? null) : 10;
@@ -277,17 +286,29 @@ export async function changed(userIds: string[]) {
   bus.publish({ users: ids }, { type: 'calendar.changed' });
 }
 
-const whenFmt = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: process.env.TZ || 'America/Sao_Paulo' });
+// Fuso da empresa: horários nos textos do servidor (notas na sala, push) e começo do dia dos eventos de dia inteiro.
+export const CAL_TZ = process.env.TZ || 'America/Sao_Paulo';
+const whenFmt = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: CAL_TZ });
+const zoneFmt = new Intl.DateTimeFormat('pt-BR', { timeZone: CAL_TZ, timeZoneName: 'long' });
 const dayFmt = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeZone: 'UTC' });
+// O texto vai igual para todos (nota na sala, push): o horário diz o fuso, "18/12/2026, 15:00 (horário de Brasília)".
+function zoneLabel(d: Date): string {
+  const name = zoneFmt.formatToParts(d).find((p) => p.type === 'timeZoneName')?.value ?? '';
+  return name ? ` (${name.replace(' Padrão', '').replace(/^H/, 'h')})` : '';
+}
 export function whenText(e: { allDay: boolean; startsAt: string | Date }) {
   const d = new Date(e.startsAt);
-  return e.allDay ? `${dayFmt.format(d)} (dia inteiro)` : whenFmt.format(d);
+  return e.allDay ? `${dayFmt.format(d)} (dia inteiro)` : `${whenFmt.format(d)}${zoneLabel(d)}`;
+}
+
+async function actorRef(actor: { userId: string; username: string }) {
+  const by = await one('SELECT id, username, name FROM users WHERE id = $1', [actor.userId]);
+  return { _id: actor.userId, username: String(by?.username ?? actor.username), name: String(by?.name ?? '') };
 }
 
 async function announceInvites(ctx: Ctx, eventId: string, userIds: string[]) {
   if (!userIds.length) return;
-  const by = await one('SELECT id, username, name FROM users WHERE id = $1', [ctx.userId]);
-  const byRef = { _id: ctx.userId, username: String(by?.username ?? ctx.username), name: String(by?.name ?? '') };
+  const byRef = await actorRef(ctx);
   for (const uid of userIds) {
     const ev = await eventFor(eventId, uid);
     if (ev) bus.publish({ user: uid }, { type: 'calendar.invite', event: ev, by: byRef });
@@ -300,6 +321,28 @@ async function announceInvites(ctx: Ctx, eventId: string, userIds: string[]) {
     url: `/calendar?evento=${encodeURIComponent(eventId)}`,
     tag: `calendar-${eventId}`,
   }).catch(() => {});
+}
+
+// Mudança de horário, cancelamento e saída da lista de convidados: aviso na tela (como o do convite) e push para os
+// envolvidos, menos quem fez a mudança.
+type ChangeKind = 'moved' | 'canceled' | 'removed';
+async function announceChange(actor: { userId: string; username: string }, eventId: string, userIds: string[], kind: ChangeKind) {
+  const others = [...new Set(userIds)].filter((u) => u !== actor.userId);
+  if (!others.length) return;
+  const by = await actorRef(actor);
+  for (const uid of others) {
+    const event = await eventFor(eventId, uid);
+    if (!event) continue;
+    if (kind === 'moved') bus.publish({ user: uid }, { type: 'calendar.updated', event, by, moved: true });
+    else if (kind === 'canceled') bus.publish({ user: uid }, { type: 'calendar.canceled', event, by });
+    else bus.publish({ user: uid }, { type: 'calendar.removed', event, by });
+  }
+  const ev = await eventFor(eventId, actor.userId);
+  if (!ev) return;
+  const name = by.name || by.username;
+  const body = kind === 'moved' ? `${CAL_TEXT.movedPush(name)} · ${whenText(ev)}` : kind === 'canceled' ? CAL_TEXT.canceled : CAL_TEXT.removedPush(name);
+  const url = kind === 'removed' ? '/calendar' : `/calendar?evento=${encodeURIComponent(eventId)}`;
+  void sendPush(others, { title: ev.title, body, url, tag: `calendar-${eventId}` }).catch(() => {});
 }
 
 // ---------- Reunião: sala e cartão ----------
@@ -423,6 +466,8 @@ export async function updateEvent(ctx: Ctx, id: string, input: Partial<CalendarE
   await audit(actorOf(ctx), 'calendar.event.updated', { eventId: id }, { added: added.length, removed: removed.length, moved });
   await changed([ctx.userId, ...before, ...added]);
   await announceInvites(ctx, id, added);
+  if (moved) await announceChange(ctx, id, next.filter((u) => before.includes(u)), 'moved');
+  if (removed.length) await announceChange(ctx, id, removed, 'removed');
   return (await eventFor(id, ctx.userId))!;
 }
 
@@ -432,12 +477,9 @@ export async function cancelEvent(ctx: Ctx, id: string): Promise<void> {
   const people = await involved(id, row.owner_id);
   await query(`UPDATE calendar_events SET status = 'canceled', canceled_at = now(), updated_at = now() WHERE id = $1`, [id]);
   if (row.is_meeting) await roomNote(ctx, row.room_id, CAL_TEXT.canceledMsg(row.title));
-  const others = people.filter((u) => u !== ctx.userId);
-  if (others.length) {
-    void sendPush(others, { title: row.title, body: CAL_TEXT.canceled, url: '/calendar', tag: `calendar-${id}` }).catch(() => {});
-  }
   await audit(actorOf(ctx), 'calendar.event.canceled', { eventId: id }, {});
   await changed(people);
+  await announceChange(ctx, id, people, 'canceled');
 }
 
 export async function respond(ctx: Ctx, id: string, response: unknown): Promise<CalendarEvent> {
