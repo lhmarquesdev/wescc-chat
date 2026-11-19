@@ -6,6 +6,7 @@ import { Icon, type IconName } from './Icon';
 import { useMentionTotal } from './navState';
 // Chamadas em grupo: o selo de perdidas vem do servidor (calls.missedCount), com o rótulo para leitores de tela.
 import { CallsNavBadge } from './call/LiveIndicators';
+import { UploadsNavBadge } from './files/UploadsNavBadge';
 import { useMyStatus, UserMenu } from './Sidebar';
 import { UserAvatar } from './ui';
 import { useFilesTab } from '../lib/files';
@@ -60,7 +61,7 @@ export function MobileTabBar() {
       <Tab to="/home" icon="nav-chats" label="Conversas" badge={mentions} badgeKind="mention" />
       {callsEnabled && <Tab to="/calls" icon="nav-calls" label="Chamadas" extra={<CallsNavBadge />} />}
       {calendarOn && <Tab to="/calendar" icon="nav-calendar" label="Agenda" />}
-      {filesOn && <Tab to="/files" icon="nav-files" label="Arquivos" />}
+      {filesOn && <Tab to="/files" icon="nav-files" label="Arquivos" extra={<UploadsNavBadge />} />}
       <Tab to="/directory" icon="nav-directory" label="Diretório" />
       <UserMenu
         trigger={

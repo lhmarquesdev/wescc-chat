@@ -2,7 +2,7 @@
 import { useSyncExternalStore } from 'react';
 import type { DriveAclEntry, DriveActivity, DriveFile, DriveFolder, DriveFolderView, DriveStorage, DriveSubject } from '@shared/drive';
 import { api, ApiError, uploadTo } from './api';
-import { usePermission, useSetting } from './store';
+import { usePermission, useSetting, useStore } from './store';
 
 export const filesApi = {
   home: () => api.get<{ folders: DriveFolder[]; canCreateRoot: boolean; manageAll: boolean; storage: DriveStorage }>('files.home'),
@@ -77,6 +77,8 @@ function pump() {
         else {
           next.state = 'error';
           next.error = e instanceof Error ? e.message : String(e);
+          // Fora da tela Arquivos a fila não aparece: avisa aqui (o item Arquivos do menu fica marcado).
+          if (!window.location.pathname.startsWith('/files')) useStore.getState().toast(`Não deu para enviar “${next.name}”: ${next.error}`, 'error');
         }
       })
       .finally(() => {
@@ -90,7 +92,20 @@ function pump() {
 
 const pendingFiles = new Map<string, File>();
 
+// Fechar ou recarregar a aba no meio de um envio perde o envio: o navegador pergunta antes.
+let unloadGuard = false;
+function guardUnload() {
+  if (unloadGuard) return;
+  unloadGuard = true;
+  window.addEventListener('beforeunload', (e) => {
+    if (!jobs.some((j) => j.state === 'waiting' || j.state === 'sending')) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+}
+
 export function enqueueUploads(files: File[], folder: { _id: string; name: string }) {
+  guardUnload();
   for (const f of files) {
     const id = `u${++seq}`;
     pendingFiles.set(id, f);

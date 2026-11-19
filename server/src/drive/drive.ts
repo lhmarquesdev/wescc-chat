@@ -578,6 +578,8 @@ export async function uploadFile(ctx: Ctx, folderId: unknown, req: any) {
     stored.name = name;
   } catch (e: any) {
     if (stored) await deleteStored(stored.rel).catch(() => {});
+    // Envio interrompido no meio (Cancelar, aba fechada, rede caiu): não é erro do servidor.
+    if (e?.code === 'ERR_STREAM_PREMATURE_CLOSE' || req.raw?.aborted || req.raw?.readableAborted) throw badRequest('error-upload-aborted', 'Envio cancelado.');
     if (e?.code === 'FST_REQ_FILE_TOO_LARGE') throw new ApiError(413, 'error-file-too-large', `Arquivo maior que o permitido (${fmtSize(max)}).`);
     if (e?.code === 'FST_FILES_LIMIT' || e?.code === 'FST_PARTS_LIMIT' || e?.code === 'FST_FIELDS_LIMIT') throw new ApiError(413, 'error-too-many-parts', 'Envie um arquivo por vez.');
     throw e;
