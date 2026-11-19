@@ -306,8 +306,17 @@ export function applyEvent(ev: ServerEvent) {
       st.setPollVotes({ [ev.messageId]: ev.optionIds });
       break;
     case 'message.reminder':
-      if (ev.action === 'removed') st.removeReminder(ev.reminder._id);
-      else st.upsertReminder(ev.reminder);
+      if (ev.action === 'removed') {
+        st.removeReminder(ev.reminder._id);
+        // Saiu sem a pessoa pedir: ela fica sabendo, para não perder o que queria lembrar.
+        if (ev.reason === 'no-access') st.toast('Um lembrete foi removido porque você não tem mais acesso à conversa.', 'info', { icon: 'remind', duration: 8000, key: 'reminder-removed' });
+        else if (ev.reason === 'message-deleted') {
+          const sub = st.subscriptions[ev.reminder.rid];
+          const label = sub ? sub.fname || sub.name : '';
+          const where = !label ? '' : sub!.t === 'd' ? ` da conversa com ${label}` : ` de ${sub!.t === 'c' ? '#' : ''}${label}`;
+          st.toast(`Um lembrete${where} foi removido porque a mensagem foi apagada.`, 'info', { icon: 'remind', duration: 8000, key: 'reminder-removed' });
+        }
+      } else st.upsertReminder(ev.reminder);
       break;
     case 'message.scheduled':
       if (ev.action === 'removed') st.removeScheduled(ev.scheduled._id);

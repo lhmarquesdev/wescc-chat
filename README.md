@@ -919,8 +919,9 @@ texto. Por isso a proteção depende de o servidor do chat ser o original e de o
   desativado, com o motivo. Sair da conversa no meio de uma gravação travada de 3 segundos ou mais pergunta antes de
   descartar.
 - **Lembrar-me** (menu da mensagem): a pessoa escolhe quando quer ser lembrada (até 200 lembretes); na hora chegam o
-  aviso no chat e o push, e o lembrete fica em **Lembretes**, na barra lateral, até ela concluir ou adiar. Só a
-  própria pessoa vê os seus.
+  aviso no chat e o push, e o lembrete fica em **Lembretes**, na barra lateral, até ela concluir ou adiar. Nos
+  próximos, **Mudar horário** (atalhos ou data e hora à escolha); Remover tem Desfazer. Se a mensagem for apagada (ou a
+  pessoa perder o acesso à conversa), o lembrete sai e ela é avisada. Só a própria pessoa vê os seus.
 - **Agendar envio** (seta ao lado de Enviar, `schedule-message`: Administrador, Usuário, Dono, Moderador e Publicador):
   só texto, com tópico e “Ciente”, de 1 minuto a 1 ano à frente (até 100 por pessoa). Sai em nome da pessoa se ela
   ainda puder escrever na sala. A que não sai (por exemplo, a pessoa não pode mais escrever ali, ou o servidor ficou

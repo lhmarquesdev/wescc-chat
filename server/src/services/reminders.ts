@@ -31,8 +31,9 @@ function mapReminder(row: any, room: any, message: Message | null, named: boolea
   return r;
 }
 
-const publish = (userId: string, action: 'upserted' | 'fired' | 'removed', reminder: MessageReminder) =>
-  bus.publish({ user: userId }, { type: 'message.reminder', action, reminder });
+// reason: o lembrete saiu sem a pessoa pedir (a web avisa com um toast).
+const publish = (userId: string, action: 'upserted' | 'fired' | 'removed', reminder: MessageReminder, reason?: 'message-deleted' | 'no-access') =>
+  bus.publish({ user: userId }, { type: 'message.reminder', action, reminder, ...(reason ? { reason } : {}) });
 
 // ---------- Marcar e adiar ----------
 
@@ -102,8 +103,8 @@ export async function removeRemindersOfMessage(messageId: string | string[]): Pr
   const rows = await many('DELETE FROM message_reminders WHERE message_id = ANY($1) RETURNING *', [ids]);
   if (!rows.length) return;
   const rooms = new Map((await many('SELECT * FROM rooms WHERE id = ANY($1)', [[...new Set(rows.map((r) => r.room_id))]])).map((r) => [r.id as string, r]));
-  // "removed" leva só o id, a sala e o tipo: a web só tira da lista.
-  for (const r of rows) publish(r.user_id, 'removed', mapReminder(r, rooms.get(r.room_id), null, false));
+  // "removed" leva só o id, a sala e o tipo: a web tira da lista e avisa o motivo.
+  for (const r of rows) publish(r.user_id, 'removed', mapReminder(r, rooms.get(r.room_id), null, false), 'message-deleted');
 }
 
 // ---------- Avisar (agendador) ----------
@@ -132,10 +133,12 @@ export async function fireDueReminders(): Promise<number> {
     if (!users.get(r.user_id)?.active) continue; // conta desativada: fica avisado, sem evento nem push
     const room = rooms.get(r.room_id);
     const m = await getMessageRow(r.message_id);
-    if (!room || !m || m.t === 'rm' || !(await canAccessRoom(r.user_id, room))) {
-      // Perdeu o acesso (ou a mensagem sumiu): o lembrete sai sem levar nada da mensagem.
+    const access = !!room && (await canAccessRoom(r.user_id, room));
+    if (!access || !m || m.t === 'rm') {
+      // Perdeu o acesso (ou a mensagem sumiu): o lembrete sai sem levar nada da mensagem. Sem acesso, o motivo não diz
+      // nada da mensagem.
       await query('DELETE FROM message_reminders WHERE id = $1', [r.id]);
-      publish(r.user_id, 'removed', mapReminder(r, room, null, false));
+      publish(r.user_id, 'removed', mapReminder(r, room, null, false), access ? 'message-deleted' : 'no-access');
       continue;
     }
     publish(r.user_id, 'fired', mapReminder(r, room, withExtra(m), true));
