@@ -14,7 +14,8 @@ import { applyDefaultChannels, getRoom, setRoomRole } from '../services/rooms';
 import { mapUser } from '../services/mappers';
 import { actorOf } from '../services/users';
 import { bus } from '../realtime/bus';
-import { b, bool, paging, q, route, str, strArray } from './http';
+import { escapeLike } from '@shared/search';
+import { assertDateOrder, b, bool, dateParam, paging, q, route, str, strArray } from './http';
 import { resolveUserParam } from './users';
 
 // A web recarrega "me" (e as permissões) ao ver os papéis mudarem; as outras telas atualizam a política de DM.
@@ -167,11 +168,19 @@ export function adminRoutes(app: FastifyInstance) {
 
   // ---------- Estatísticas e dashboard de engajamento ----------
   route(app, 'GET', 'statistics', { permissions: ['view-statistics'] }, async () => workspaceStatistics());
-  route(app, 'GET', 'engagement-dashboard/users', { permissions: ['view-engagement-dashboard'] }, async (req) => engagementUsers(q(req).start, q(req).end));
-  route(app, 'GET', 'engagement-dashboard/messages', { permissions: ['view-engagement-dashboard'] }, async (req) => engagementMessages(q(req).start, q(req).end));
+  // Período do engajamento: datas válidas, início antes do fim e até um ano (cada dia é uma linha calculada).
+  const period = (req: any): [string | undefined, string | undefined] => {
+    const start = dateParam(q(req).start, 'start', { optional: true });
+    const end = dateParam(q(req).end, 'end', { optional: true });
+    assertDateOrder(start, end);
+    if (start && new Date(end ?? Date.now()).getTime() - new Date(start).getTime() > 366 * 86400_000) throw badRequest('error-invalid-date', 'Escolha um período de até um ano.');
+    return [start, end];
+  };
+  route(app, 'GET', 'engagement-dashboard/users', { permissions: ['view-engagement-dashboard'] }, async (req) => engagementUsers(...period(req)));
+  route(app, 'GET', 'engagement-dashboard/messages', { permissions: ['view-engagement-dashboard'] }, async (req) => engagementMessages(...period(req)));
   route(app, 'GET', 'engagement-dashboard/channels', { permissions: ['view-engagement-dashboard'] }, async (req) => {
     const p = paging(q(req));
-    return engagementChannels(q(req).start, q(req).end, p.offset, p.count);
+    return engagementChannels(...period(req), p.offset, p.count);
   });
 
   // ---------- Auditoria ----------
@@ -179,18 +188,23 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'POST', 'audit.messages', { permissions: ['can-audit'] }, async (req, _rep, ctx) => {
     const body = b(req);
     const type = String(body.type ?? 'room');
-    const start = str(body.startDate, 'startDate');
-    const end = str(body.endDate, 'endDate');
+    const start = dateParam(body.startDate, 'startDate')!;
+    const end = dateParam(body.endDate, 'endDate')!;
+    assertDateOrder(start, end);
     const params: unknown[] = [start, end];
     const w = ['m.created_at BETWEEN $1 AND $2'];
-    if (body.msg) w.push(`m.msg ILIKE $${params.push(`%${body.msg}%`)}`);
+    // O texto é procurado como foi digitado: % e _ não viram curinga.
+    if (body.msg) w.push(`m.msg ILIKE $${params.push(`%${escapeLike(String(body.msg))}%`)}`);
     if (type === 'room') {
       w.push(`m.room_id = $${params.push(str(body.rid, 'rid'))}`);
     } else if (type === 'u') {
-      const users = strArray(body.users);
+      const users = [...new Set(strArray(body.users).map((u) => u.trim().replace(/^@/, '')).filter(Boolean))];
       if (users.length < 2) throw badRequest('error-invalid-params', 'Informe ao menos dois usuários.');
-      const ids = (await many('SELECT id FROM users WHERE username = ANY($1)', [users])).map((r) => r.id);
-      w.push(`m.room_id IN (SELECT id FROM rooms WHERE t = 'd' AND uids @> $${params.push(ids)})`);
+      const found = await many<{ id: string; username: string }>('SELECT id, username FROM users WHERE lower(username) = ANY($1)', [users.map((u) => u.toLowerCase())]);
+      // Nome que não existe não some da busca (sem ele, a busca mostrava todas as conversas da outra pessoa).
+      const missing = users.filter((u) => !found.some((f) => f.username.toLowerCase() === u.toLowerCase()));
+      if (missing.length) throw notFound('error-user-not-found', `Usuário não encontrado: ${missing.join(', ')}.`);
+      w.push(`m.room_id IN (SELECT id FROM rooms WHERE t = 'd' AND uids @> $${params.push(found.map((f) => f.id))})`);
     } else if (type === 'user') {
       const u = await resolveUserParam({ username: body.username, userId: body.userId });
       w.push(`m.user_id = $${params.push(u.id)}`);
@@ -208,18 +222,25 @@ export function adminRoutes(app: FastifyInstance) {
     await audit(actorOf(ctx), 'audit.messages.query', { type, rid: body.rid, users: body.users, username: body.username }, { startDate: start, endDate: end, msg: body.msg, results: rows.length });
     return { messages: rows.map((r) => ({ ...withExtra(r), roomName: r.room_name, roomType: r.room_t })) };
   });
+  // Período do registro de ações: datas inválidas viram 400 (antes, erro do banco e 500).
+  const logPeriod = (startRaw: unknown, endRaw: unknown, names: [string, string]) => {
+    const start = dateParam(startRaw, names[0], { optional: true });
+    const end = dateParam(endRaw, names[1], { optional: true });
+    assertDateOrder(start, end);
+    return { start, end };
+  };
   route(app, 'GET', 'audit.auditions', { permissions: ['can-audit-log'] }, async (req) => {
     const p = paging(q(req));
-    return listAuditLog({ start: q(req).startDate, end: q(req).endDate, action: 'audit.%', ...p });
+    return listAuditLog({ ...logPeriod(q(req).startDate, q(req).endDate, ['startDate', 'endDate']), action: 'audit.*', ...p });
   });
   route(app, 'GET', 'audit.log', { permissions: ['can-audit-log'] }, async (req) => {
     const query2 = q(req);
     const p = paging(query2);
-    return listAuditLog({ start: query2.start, end: query2.end, action: query2.action, actor: query2.actor, ...p });
+    return listAuditLog({ ...logPeriod(query2.start ?? query2.startDate, query2.end ?? query2.endDate, ['start', 'end']), action: query2.action, actor: query2.actor, ...p });
   });
   route(app, 'GET', 'audit.settings', { permissions: ['can-audit-log'] }, async (req) => {
     const p = paging(q(req));
-    return listAuditLog({ start: q(req).start, end: q(req).end, action: 'settings.%', ...p });
+    return listAuditLog({ ...logPeriod(q(req).start, q(req).end, ['start', 'end']), action: 'settings.*', ...p });
   });
 
   // ---------- Retenção ----------

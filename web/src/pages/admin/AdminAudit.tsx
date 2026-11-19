@@ -191,7 +191,7 @@ function ActionLog({ fixed }: { fixed?: string }) {
     <>
       {!fixed && (
         <div className="filters admin-filters">
-          <SearchInput value={action} onChange={(v) => (setAction(v), setOffset(0))} placeholder="Ação (ex.: user.*, settings.*, auth.login)" />
+          <SearchInput value={action} onChange={(v) => (setAction(v), setOffset(0))} placeholder="Ação (ex.: settings, user.*, login)" />
           <SearchInput value={actor} onChange={(v) => (setActor(v), setOffset(0))} placeholder="Usuário que fez" />
         </div>
       )}
