@@ -118,6 +118,14 @@ export function MessageList({
   const jumpTo = threadOpen ? null : params.get('msg');
   const jumpRef = useRef(jumpTo);
   jumpRef.current = jumpTo;
+  // A lista não chega à última mensagem (link para uma antiga, primeira não lida): no fim dela, carrega as seguintes.
+  const newerRef = useRef(!!data?.hasNewer);
+  newerRef.current = !!data?.hasNewer;
+  const loadingNewer = useRef(false);
+  // Página de mensagens seguintes entrando no fim: não conta como mensagem nova nem fixa a lista no fim.
+  const paging = useRef(false);
+  // Aberta com não lidas: a divisória "Novas mensagens" fica no alto da tela quando ela está acima do que se vê.
+  const toUnread = useRef(!jumpTo && !!unreadSince);
   const groupingPeriod = useSetting<number>('Message_GroupingPeriod') ?? 300;
   // Avisos antigos podem pedir "Ciente" mesmo depois que a opção foi desligada no canal.
   const hasAck = list.some((m) => m.ackRequired);
@@ -134,15 +142,26 @@ export function MessageList({
   };
 
   const [failed, setFailed] = useState(false);
-  const load = useCallback(async () => {
+  const load = useCallback(async (fromUnread = false) => {
     setFailed(false);
     try {
+      // Muitas não lidas (a primeira fica fora das últimas 50): abre nela; as de depois carregam ao rolar até o fim.
+      if (fromUnread && unreadSince) {
+        const u = await api.get('rooms.history', { roomId: rid, oldest: unreadSince, count: 50 });
+        if (u.messages.length === 50) {
+          seen.current = null;
+          atBottom.current = false;
+          useStore.getState().setMessages(rid, u.messages.slice().reverse(), true, true);
+          return;
+        }
+      }
       const r = await api.get('rooms.history', { roomId: rid, count: 50 });
       seen.current = null;
       useStore.getState().setMessages(rid, r.messages.slice().reverse(), r.messages.length === 50);
     } catch {
       setFailed(true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rid]);
 
   // A sala foi aberta de novo: "Marcar como não lida" (que saiu dela) deixa de segurar a leitura.
@@ -151,7 +170,7 @@ export function MessageList({
   }, [rid]);
 
   useEffect(() => {
-    atBottom.current = !jumpTo;
+    atBottom.current = !jumpTo && !useStore.getState().messages[rid]?.hasNewer;
     if (jumpTo) {
       void (async () => {
         const r = await api.get('chat.getMessagesAround', { msgId: jumpTo, count: 30 });
@@ -164,7 +183,9 @@ export function MessageList({
         }
         if (jumpRef.current !== jumpTo) return;
         seen.current = null;
-        useStore.getState().setMessages(rid, msgs, true);
+        // Mais 30 depois do destino: pode haver outras até a última, que carregam ao rolar até o fim.
+        const after = target ? msgs.length - 1 - msgs.indexOf(target) : 0;
+        useStore.getState().setMessages(rid, msgs, true, after >= 30);
         requestAnimationFrame(() => {
           document.getElementById(`msg-${jumpTo}`)?.scrollIntoView({ block: 'center' });
           atBottom.current = false;
@@ -177,7 +198,7 @@ export function MessageList({
         if (jumpRef.current === jumpTo) leaveJump();
       });
     } else if (!data?.loaded) {
-      void load();
+      void load(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rid, jumpTo]);
@@ -197,15 +218,26 @@ export function MessageList({
     const el = scroller.current;
     if (!el) return;
     const last = list[list.length - 1];
-    const appended = !!last && !!lastId.current && last._id !== lastId.current && list.some((x) => x._id === lastId.current);
+    const appended = !paging.current && !!last && !!lastId.current && last._id !== lastId.current && list.some((x) => x._id === lastId.current);
+    paging.current = false;
     if (appended && last.u._id === meId && !jumpRef.current) atBottom.current = true; // quem envia vai para o fim
     if (prepend.current !== null) {
       el.scrollTop = el.scrollHeight - prepend.current;
       prepend.current = null;
       autoTop.current = el.scrollTop;
-    } else if (atBottom.current && !jumpRef.current) {
+    } else if (atBottom.current && !jumpRef.current && !newerRef.current) {
       el.scrollTop = el.scrollHeight;
       autoTop.current = el.scrollTop;
+    }
+    if (toUnread.current && data?.loaded) {
+      toUnread.current = false;
+      const sep = el.querySelector<HTMLElement>('.unread-sep');
+      const off = sep ? sep.getBoundingClientRect().top - el.getBoundingClientRect().top : 0;
+      if (sep && (off < 0 || newerRef.current)) {
+        el.scrollTop += off - 8;
+        autoTop.current = el.scrollTop;
+        atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      }
     }
     measure();
     if (appended && !atBottom.current) {
@@ -227,7 +259,7 @@ export function MessageList({
     const c = content.current;
     if (!el || !c || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => {
-      if (atBottom.current && !jumpRef.current && prepend.current === null) {
+      if (atBottom.current && !jumpRef.current && !newerRef.current && prepend.current === null) {
         el.scrollTop = el.scrollHeight;
         autoTop.current = el.scrollTop;
       }
@@ -253,11 +285,40 @@ export function MessageList({
     }
   };
 
-  // Marca como lida quando a janela está em foco e o fim da lista está visível.
+  // As seguintes, no fim de uma lista que não chega à última mensagem. A última página (menos de 50) fecha a lista.
+  const loadNewer = async () => {
+    const cur = useStore.getState().messages[rid];
+    const last = cur?.list[cur.list.length - 1];
+    if (loadingNewer.current || !cur?.hasNewer || !last) return;
+    loadingNewer.current = true;
+    try {
+      const r = await api.get('rooms.history', { roomId: rid, oldest: last.ts, count: 50 });
+      const page: Message[] = r.messages.slice().reverse();
+      for (const x of page) seen.current?.add(x._id);
+      paging.current = true;
+      atBottom.current = false;
+      useStore.getState().appendMessages(rid, page, r.messages.length === 50);
+    } catch {
+      // tenta de novo na próxima rolagem até o fim
+    } finally {
+      loadingNewer.current = false;
+    }
+  };
+
+  // Enviou daqui com a lista longe do fim: volta para as últimas mensagens, onde a dela aparece.
+  const toLatestAsk = data?.toLatest;
+  useEffect(() => {
+    if (toLatestAsk) leaveJump();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toLatestAsk]);
+
+  // Marca como lida quando a janela está em foco e o fim da lista (a última mensagem) está visível.
   useEffect(() => {
     const mark = () => {
       const s = useStore.getState().subscriptions[rid];
-      if (!s || !document.hasFocus() || !atBottom.current || readHeld(rid)) return;
+      const cur = useStore.getState().messages[rid];
+      // Antes de a lista carregar não há o que estar à vista (abrir com 120 não lidas marcava todas na hora).
+      if (!s || !cur?.loaded || cur.hasNewer || !document.hasFocus() || !atBottom.current || readHeld(rid)) return;
       if (s.unread > 0 || s.alert || s.userMentions > 0) void api.post('subscriptions.read', { rid }).catch(() => {});
     };
     mark();
@@ -325,7 +386,12 @@ export function MessageList({
     markStuck(user);
     if (atBottom.current) setFreshCount(0);
     if (el.scrollTop < 120) void loadOlder();
-    if (atBottom.current && jumpTo) leaveJump();
+    if (atBottom.current && newerRef.current) void loadNewer();
+    else if (atBottom.current && jumpTo) {
+      // Chegou à última mensagem a partir de um link: a lista já é a de sempre, só o destino sai do endereço.
+      params.delete('msg');
+      setParams(params, { replace: true });
+    }
   };
 
   // Setas entre mensagens a partir do nome (ou da hora, nas agrupadas): dá para chegar à barra de ações de qualquer
@@ -343,7 +409,7 @@ export function MessageList({
   };
 
   const toLatest = () => {
-    if (jumpTo) return leaveJump();
+    if (jumpTo || newerRef.current) return leaveJump();
     const el = scroller.current;
     if (!el) return;
     const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -530,7 +596,7 @@ export function MessageList({
             <EphemeralRow key={`eph-${e._id}`} m={e} />
           ))}
       </div>
-      {(far || fresh > 0 || !!jumpTo) && (
+      {(far || fresh > 0 || !!jumpTo || !!data.hasNewer) && (
         <div className="jump-wrap">
           <button type="button" className="jump-pill" onClick={toLatest}>
             <Icon name="jump-latest" size={16} />

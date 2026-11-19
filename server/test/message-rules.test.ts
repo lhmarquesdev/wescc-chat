@@ -177,3 +177,16 @@ describe('menção a quem não está na sala', () => {
     expect(r.mentionsNotInRoom).toBeUndefined();
   });
 });
+
+describe('abrir uma mensagem antiga (?msg=)', () => {
+  it('a janela traz a mensagem e as 30 de depois, sem faltar nenhuma', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `janela-${uniq()}` }, A)).channel;
+    const ids: string[] = [];
+    for (let i = 1; i <= 45; i++) ids.push((await send(A, ch._id, `m${i}`)).message._id);
+    const target = ids[9];
+    const around = (await api('GET', 'chat.getMessagesAround', { msgId: target, count: 30 }, A)).messages.filter((x: any) => !x.t);
+    const got = around.map((x: any) => x._id).reverse();
+    expect(got.indexOf(target)).toBe(9);
+    expect(got.slice(got.indexOf(target))).toEqual(ids.slice(9, 40));
+  });
+});

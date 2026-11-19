@@ -20,6 +20,11 @@ export type Me = User & { permissions: string[]; requirePasswordChange?: boolean
 interface RoomMessages {
   list: Message[];
   hasMore: boolean;
+  // A lista não chega à última mensagem (aberta num link para uma antiga ou na primeira não lida): as de depois
+  // carregam quando a pessoa rola até o fim, e as que chegam em tempo real ficam para essa hora.
+  hasNewer?: boolean;
+  // A pessoa enviou daqui com a lista longe do fim: a lista volta para as últimas (MessageList).
+  toLatest?: number;
   loaded: boolean;
   stale?: boolean; // a pessoa saiu da sala: o que veio depois não chegou (se voltar, carrega de novo)
 }
@@ -52,8 +57,10 @@ interface State {
   upsertSubscription(s: Subscription): void;
   removeSubscription(rid: string): void;
   upsertRoom(r: Room): void;
-  setMessages(rid: string, list: Message[], hasMore: boolean): void;
+  setMessages(rid: string, list: Message[], hasMore: boolean, hasNewer?: boolean): void;
   prependMessages(rid: string, list: Message[], hasMore: boolean): void;
+  appendMessages(rid: string, list: Message[], hasNewer: boolean): void;
+  sentFromRoom(rid: string): void;
   upsertMessage(m: Message): void;
   removeMessage(rid: string, id: string, tmid?: string | null): void;
   setThread(tmid: string, list: Message[]): void;
@@ -131,19 +138,32 @@ export const useStore = create<State>((set, get) => ({
     set({ subscriptions: subs });
   },
   upsertRoom: (r) => set({ rooms: { ...get().rooms, [r._id]: r } }),
-  setMessages: (rid, list, hasMore) => set({ messages: { ...get().messages, [rid]: { list, hasMore, loaded: true } } }),
+  setMessages: (rid, list, hasMore, hasNewer = false) => set({ messages: { ...get().messages, [rid]: { list, hasMore, hasNewer, loaded: true } } }),
   prependMessages: (rid, list, hasMore) => {
     const cur = get().messages[rid];
     const ids = new Set(cur?.list.map((m) => m._id));
     const merged = [...list.filter((m) => !ids.has(m._id)), ...(cur?.list ?? [])];
     set({ messages: { ...get().messages, [rid]: { ...cur, list: merged, hasMore, loaded: true } } });
   },
+  appendMessages: (rid, list, hasNewer) => {
+    const cur = get().messages[rid];
+    if (!cur) return;
+    const ids = new Set(cur.list.map((m) => m._id));
+    set({ messages: { ...get().messages, [rid]: { ...cur, list: [...cur.list, ...list.filter((m) => !ids.has(m._id))], hasNewer } } });
+  },
+  sentFromRoom: (rid) => {
+    const cur = get().messages[rid];
+    if (cur?.hasNewer) set({ messages: { ...get().messages, [rid]: { ...cur, toLatest: Date.now() } } });
+  },
   upsertMessage: (m) => {
     const st = get();
     const out: Partial<State> = {};
     const isReply = !!m.tmid && !(m as any).tshow;
     const cur = st.messages[m.rid];
-    if (cur && (!isReply || cur.list.some((x) => x._id === m._id))) {
+    const last = cur?.list[cur.list.length - 1];
+    // Lista longe do fim (hasNewer): a mensagem nova entra quando a pessoa rolar até lá, sem buraco no meio.
+    const beyond = !!cur?.hasNewer && !!last && m.ts > last.ts && !cur.list.some((x) => x._id === m._id);
+    if (cur && !beyond && (!isReply || cur.list.some((x) => x._id === m._id))) {
       out.messages = { ...st.messages, [m.rid]: { ...cur, list: insertSorted(cur.list, m) } };
     }
     if (m.tmid && st.threads[m.tmid]) {

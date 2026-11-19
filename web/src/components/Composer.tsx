@@ -422,6 +422,8 @@ function ComposerView({
         const r = await api.post('chat.sendMessage', { message: { _id, rid, msg, tmid, tshow: tmid ? alsoChannel || undefined : undefined, attachments, ackRequired } });
         sendKey.current = null;
         if (quoting) setQuoting(null);
+        // A lista longe do fim (link para uma antiga, primeira não lida): volta para as últimas, onde a mensagem aparece.
+        if (!tmid) useStore.getState().sentFromRoom(rid);
         warnNotInRoom(r.mentionsNotInRoom);
       }
       // O que a pessoa começou a escrever enquanto a mensagem saía fica no compositor.
@@ -512,6 +514,7 @@ function ComposerView({
         if (room?.encrypted) await sendEncryptedFile(room, f, { msg: caption, tmid, meta: await e2eMeta(f, extra), onProgress: progress, signal: abort.signal });
         else await uploadTo(`rooms.upload/${rid}`, f, { description: caption, tmid: tmid ?? '', ...extra }, progress, abort.signal);
         caption = '';
+        if (!tmid) useStore.getState().sentFromRoom(rid);
       } catch (e) {
         // Cancelado por quem enviou: a barra some e basta.
         if (!(e instanceof ApiError && e.errorType === 'aborted')) useStore.getState().toast(errorMessage(e), 'error');

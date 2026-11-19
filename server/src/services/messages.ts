@@ -821,13 +821,15 @@ export async function messagesAround(ctx: Ctx, msgId: string, count = 30) {
   const m = await getMessageRow(msgId);
   if (!m) throw notFound('error-message-not-found', 'Mensagem não encontrada.');
   await loadRoomForUser(ctx, m.room_id);
+  // A hora da própria linha (microssegundos), não a do Date do JavaScript (milissegundos): senão o destino caía entre as
+  // de depois, e a lista tinha uma a menos do que o pedido.
   const before = await many(
-    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at <= $2 ORDER BY created_at DESC LIMIT $3`,
-    [m.room_id, m.created_at, count],
+    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at <= (SELECT created_at FROM messages WHERE id = $2) ORDER BY created_at DESC LIMIT $3`,
+    [m.room_id, m.id, count],
   );
   const after = await many(
-    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at > $2 ORDER BY created_at ASC LIMIT $3`,
-    [m.room_id, m.created_at, count],
+    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at > (SELECT created_at FROM messages WHERE id = $2) ORDER BY created_at ASC LIMIT $3`,
+    [m.room_id, m.id, count],
   );
   return [...after.reverse(), ...before].map(withExtra);
 }
