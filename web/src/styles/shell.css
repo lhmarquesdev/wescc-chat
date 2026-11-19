@@ -1527,11 +1527,12 @@ button.side-item {
   flex-wrap: wrap;
 }
 /* Takeover: em Administração e Minha conta a navegação de seções toma o lugar do menu lateral, de alto a baixo;
-   a barra do topo fica só sobre o conteúdo. */
-:where(.layout:has(.takeover)) > .sidebar-wrap {
+   a barra do topo fica só sobre o conteúdo. O :has() fica no próprio elemento estilizado: num ancestral (.layout,
+   .main), cada tecla digitada no compositor fazia o navegador recalcular a lista de mensagens inteira. */
+.sidebar-wrap:where(:has(~ .main > .takeover)) {
   display: none;
 }
-.main:has(> .takeover) > .topbar {
+.main > .topbar:has(~ .takeover) {
   margin-left: var(--side-w);
   transition: margin-left 200ms var(--ease-out);
 }
@@ -1541,7 +1542,7 @@ button.side-item {
 .takeover > .page-body {
   margin-top: var(--header-h);
 }
-[data-side='icon'] .main:has(> .takeover) > .topbar {
+[data-side='icon'] .main > .topbar:has(~ .takeover) {
   margin-left: var(--side-w-icon);
 }
 [data-side='icon'] .page-nav {

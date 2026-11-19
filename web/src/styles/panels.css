@@ -319,11 +319,12 @@
   background: linear-gradient(to top, hsl(var(--background)), transparent);
 }
 /* Enquanto alguém digita, o fim da lista e a pílula "ir para o fim" sobem a altura da faixa: no fim da lista ela
-   nunca cobre a última mensagem. */
-:where(.room-main:has(.typing-row)) .messages-list {
+   nunca cobre a última mensagem. O data-typing vem do TypingIndicator (RoomPage): com :has() na .room-main, cada
+   tecla digitada no compositor fazia o navegador recalcular a lista de mensagens inteira. */
+:where(.room-main[data-typing]) .messages-list {
   padding-bottom: calc(var(--space-3) + 22px);
 }
-:where(.room-main:has(.typing-row)) .jump-pill {
+:where(.room-main[data-typing]) .jump-pill {
   bottom: calc(var(--space-3) + 22px);
 }
 .typing-text {
