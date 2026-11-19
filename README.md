@@ -922,6 +922,14 @@ texto. Por isso a proteção depende de o servidor do chat ser o original e de o
   parado mais de 1 hora depois do horário) avisa por push e fica em vermelho acima do campo de mensagem, também num
   canal de avisos, até ser reagendada, enviada ou excluída no painel Mensagens agendadas da sala. Só a própria pessoa
   vê as suas.
+- **Links de convite** (painel Link de convite da sala, `create-invite-links`: Administrador, Dono e Moderador): prazo
+  de 1 a 30 dias ou sem prazo, e limite de usos opcional (pela API, de 0 a 365 dias e de 0 a 1000 usos; 0 é sem prazo
+  ou sem limite). Só quem participa da sala cria um link, e ele só vale enquanto quem o criou continua na sala, com a
+  conta ativa e com a permissão ali; sala arquivada não recebe ninguém pelo link. Quem já participa e abre o link só é
+  levado para a sala, sem gastar um uso, e o limite vale mesmo com várias pessoas entrando ao mesmo tempo. O painel
+  lista todos os links da sala com a situação (Ativo, Esgotado, Expirado, Sala arquivada ou Sem efeito), e quem pode
+  criar links ali revoga os de qualquer pessoa. Administração › Convites (`view-room-administration`) mostra todos os
+  links do chat; Revogar aparece só para quem criou o link ou tem `create-invite-links` na sala.
 - **Exportar mensagens da sala** (painel Exportar mensagens, `export-room-messages`: Administrador e Dono da sala;
   numa DM, só por um papel global): as mensagens de um período em HTML, CSV ou JSON, com ou sem os arquivos (num
   .zip, até `DataExport_Max_Files_MB`, padrão 2048 MB, em Configurações › Mensagens › Exportação). Cada exportação
