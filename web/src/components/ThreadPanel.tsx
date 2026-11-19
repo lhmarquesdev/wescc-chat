@@ -74,7 +74,12 @@ export function ThreadPanel({
         void Promise.all([api.get('chat.getMessage', { msgId: tmid }), api.get('chat.getThreadMessages', { tmid, count: 500 })])
           .then(([m, r]) => {
             setRoot(m.message);
-            useStore.getState().setThread(tmid, r.messages);
+            // Respostas que o tempo real trouxe enquanto a busca estava no ar continuam no fim.
+            const got: Message[] = r.messages;
+            const last = got[got.length - 1]?.ts ?? '';
+            const ids = new Set(got.map((x) => x._id));
+            const live = (useStore.getState().threads[tmid] ?? []).filter((x) => x.ts > last && !ids.has(x._id));
+            useStore.getState().setThread(tmid, [...got, ...live]);
             setError('');
           })
           .catch(() => {});

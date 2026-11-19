@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { useSearchParams } from 'react-router-dom';
 import type { Message, Subscription } from '@shared/index';
 import { watchAcks } from '../lib/acks';
-import { api } from '../lib/api';
+import { api, noConnection } from '../lib/api';
 import { onReconnectWhileShown } from '../lib/catchup';
 import { formatDateTime, formatDay, formatTime, nameList, plural, roomDisplayName, roomIconName } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
@@ -178,8 +178,12 @@ export function MessageList({
             catchingUp.current = false;
             useStore.getState().mergeLatest(rid, r.messages.slice().reverse(), r.messages.length === 50);
           })
-          .catch(() => {
-            // Caiu de novo: a próxima reconexão tenta outra vez (e até lá não marca como lida).
+          .catch((e) => {
+            // Caiu de novo: a próxima reconexão tenta outra vez (e até lá não marca como lida). Outro erro (o servidor
+            // recusou): carrega a sala de novo, sem deixar a leitura presa até a próxima queda.
+            if (noConnection(e)) return;
+            catchingUp.current = false;
+            void load();
           });
       }),
     [rid, load],
