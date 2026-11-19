@@ -1020,7 +1020,7 @@ function ComposerView({
             aria-label="Descrição"
             value={fileDesc}
             onChange={(e) => setFileDesc(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && confirmPending()}
+            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), confirmPending())}
           />
         </Modal>
       )}
