@@ -1,5 +1,6 @@
 import { Fragment, useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
+import { addDays, dateInput } from '../../lib/calendar';
 import { formatDateTime } from '../../lib/format';
 import { renderMarkdown } from '../../lib/markdown';
 import { usePermission, useStore } from '../../lib/store';
@@ -43,17 +44,29 @@ export function AdminAudit() {
 }
 
 function MessagesAudit() {
-  const today = new Date().toISOString().slice(0, 10);
+  // Datas locais (toISOString é UTC: depois das 21h, "hoje" já era amanhã).
+  const today = dateInput(new Date());
   const [type, setType] = useState<'room' | 'u' | 'user' | 'd'>('room');
   const [room, setRoom] = useState<PickedRoom | null>(null);
   const [users, setUsers] = useState<PickedUser[]>([]);
-  const [start, setStart] = useState(new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10));
+  const [start, setStart] = useState(dateInput(addDays(new Date(), -7)));
   const [end, setEnd] = useState(today);
   const [msg, setMsg] = useState('');
   const [result, setResult] = useState<any[] | null>(null);
   const [busy, setBusy] = useState(false);
+  // Erros do formulário, mostrados no campo ao clicar em Auditar (antes saíam "Invalid time value" ou o nome do parâmetro).
+  const [errors, setErrors] = useState<{ target?: string; start?: string; end?: string }>({});
 
   const run = async () => {
+    const errs: typeof errors = {};
+    if (type === 'room' && !room) errs.target = 'Escolha uma sala.';
+    if (type === 'u' && users.length < 2) errs.target = 'Escolha pelo menos duas pessoas.';
+    if ((type === 'user' || type === 'd') && !users.length) errs.target = 'Escolha um usuário.';
+    if (!start) errs.start = 'Escolha a data de início.';
+    if (!end) errs.end = 'Escolha a data final.';
+    if (start && end && start > end) errs.start = 'A data inicial é depois da final.';
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
     setBusy(true);
     try {
       const body: any = { type, startDate: new Date(`${start}T00:00:00`).toISOString(), endDate: new Date(`${end}T23:59:59`).toISOString(), msg: msg || undefined };
@@ -80,7 +93,7 @@ function MessagesAudit() {
         </div>
         <div className="form">
           <Field label="Tipo de busca">
-            <select value={type} onChange={(e) => (setType(e.target.value as any), setUsers([]))}>
+            <select value={type} onChange={(e) => (setType(e.target.value as any), setUsers([]), setErrors({}))}>
               <option value="room">Mensagens de uma sala</option>
               <option value="u">Conversa direta entre usuários</option>
               <option value="user">Mensagens enviadas por um usuário</option>
@@ -88,20 +101,20 @@ function MessagesAudit() {
             </select>
           </Field>
           {type === 'room' ? (
-            <Field label="Sala">
-              <RoomPicker value={room} onChange={setRoom} />
+            <Field label="Sala" error={errors.target}>
+              <RoomPicker value={room} onChange={(r) => (setRoom(r), setErrors((x) => ({ ...x, target: undefined })))} />
             </Field>
           ) : (
-            <Field label={type === 'u' ? 'Usuários (dois ou mais)' : 'Usuário'}>
-              <UserPicker value={users} onChange={setUsers} single={type !== 'u'} />
+            <Field label={type === 'u' ? 'Usuários (dois ou mais)' : 'Usuário'} error={errors.target}>
+              <UserPicker value={users} onChange={(u) => (setUsers(u), setErrors((x) => ({ ...x, target: undefined })))} single={type !== 'u'} />
             </Field>
           )}
           <div className="two-col">
-            <Field label="De">
-              <input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+            <Field label="De" error={errors.start}>
+              <input type="date" value={start} max={end || undefined} onChange={(e) => (setStart(e.target.value), setErrors((x) => ({ ...x, start: undefined })))} />
             </Field>
-            <Field label="Até">
-              <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+            <Field label="Até" error={errors.end}>
+              <input type="date" value={end} min={start || undefined} onChange={(e) => (setEnd(e.target.value), setErrors((x) => ({ ...x, start: undefined, end: undefined })))} />
             </Field>
           </div>
           <Field label="Contendo o texto (opcional)">
