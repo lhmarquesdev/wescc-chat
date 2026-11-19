@@ -94,6 +94,38 @@ describe('validação das configurações', () => {
   });
 });
 
+describe('padrão e retenção', () => {
+  it('a lista traz o padrão de cada configuração, menos o das senhas e das chaves geradas (admsys-30)', async () => {
+    expect((await save({ Message_MaxAllowedSize: 7000 })).success).toBe(true);
+    const list = (await api('GET', 'settings', undefined, A)).settings as any[];
+    const by = (id: string) => list.find((s) => s._id === id);
+    expect(by('Message_MaxAllowedSize')).toMatchObject({ value: 7000, packageValue: 5000 });
+    expect(by('Accounts_RegistrationForm')).toHaveProperty('packageValue');
+    expect(by('SMTP_Password')).not.toHaveProperty('packageValue');
+    expect(by('Push_VAPID_Public_Key')).not.toHaveProperty('packageValue');
+    // A lista pública (sem login) continua só com chave e valor.
+    const pub = (await api('GET', 'settings.public')).settings as any[];
+    expect(pub.every((s) => Object.keys(s).sort().join() === '_id,value')).toBe(true);
+    // Restaurar = gravar o padrão.
+    expect((await save({ Message_MaxAllowedSize: by('Message_MaxAllowedSize').packageValue })).success).toBe(true);
+  });
+
+  it('executar a limpeza com a política desligada explica em vez de dizer "0 itens removidos" (admsys-28)', async () => {
+    await save({ RetentionPolicy_Enabled: false });
+    expect(await api('POST', 'retention.run', {}, A)).toMatchObject({
+      status: 400,
+      errorType: 'error-retention-disabled',
+      error: 'A política de retenção está desligada. Ligue-a e salve antes de executar a limpeza.',
+    });
+    await save({ RetentionPolicy_Enabled: true });
+    try {
+      expect(await api('POST', 'retention.run', {}, A)).toMatchObject({ success: true, removed: 0 });
+    } finally {
+      await save({ RetentionPolicy_Enabled: false });
+    }
+  });
+});
+
 describe('canais padrão', () => {
   const isDefault = async (name: string) => (await pool.query('SELECT is_default FROM rooms WHERE name = $1', [name])).rows[0].is_default as boolean;
   const setting = async () => ((await api('GET', 'settings', undefined, A)).settings as any[]).find((s) => s._id === 'Default_Channels').value;

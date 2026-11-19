@@ -9,7 +9,8 @@ import { bus } from '../realtime/bus';
 import { roleScope } from './permissions';
 
 // validate devolve o texto do erro (mostrado ao administrador) ou null quando o valor serve.
-type Def = Omit<Setting, '_id' | 'value'> & { default: unknown; validate?: (value: unknown) => string | null | Promise<string | null> };
+// generated: valor criado pelo próprio servidor (chaves do push); a tela não oferece "Restaurar padrão".
+type Def = Omit<Setting, '_id' | 'value'> & { default: unknown; generated?: boolean; validate?: (value: unknown) => string | null | Promise<string | null> };
 
 const defs = new Map<string, Def>();
 let sorter = 0;
@@ -350,7 +351,7 @@ add('Security', 'E2E Encryption', 'E2E_Enable', 'boolean', false, {
 });
 add('Security', 'Push', 'Push_enable', 'boolean', true, { public: true, label: 'Notificações push no navegador e no app instalado' });
 add('Security', 'Push', 'Push_Privacy_Hide_Content', 'boolean', false, { public: true, label: 'Ocultar conteúdo nas notificações push' });
-add('Security', 'Push', 'Push_VAPID_Public_Key', 'string', '', { public: true, label: 'Chave pública VAPID (gerada automaticamente)' });
+add('Security', 'Push', 'Push_VAPID_Public_Key', 'string', '', { public: true, label: 'Chave pública VAPID (gerada automaticamente)', generated: true });
 add('Security', 'Push', 'Push_VAPID_Private_Key', 'password', '', { label: 'Chave privada VAPID (gerada automaticamente)' });
 
 // ---------- Chamadas ----------
@@ -588,8 +589,9 @@ export function listSettings(opts: { publicOnly?: boolean } = {}): Setting[] {
     let value = getSetting(id);
     if (def.type === 'password' && opts.publicOnly) continue;
     if (def.type === 'password' && value) value = '********';
-    const { default: _d, validate: _v, ...rest } = def;
-    out.push({ _id: id, value, ...rest });
+    const { default: packageValue, validate: _v, generated, ...rest } = def;
+    // O padrão vai junto (a tela mostra "Padrão: …" e "Restaurar padrão"), menos o das senhas e dos valores gerados.
+    out.push({ _id: id, value, ...rest, ...(opts.publicOnly || generated || def.type === 'password' ? {} : { packageValue }) });
   }
   return out;
 }

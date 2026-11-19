@@ -1,5 +1,6 @@
 import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { foldText } from '@shared/search';
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime, plural } from '../../lib/format';
 import { usePermission, useStore } from '../../lib/store';
@@ -28,6 +29,8 @@ const GROUP_LABEL: Record<string, string> = {
   Integrations: 'Integrações',
   Import: 'Importação',
   Calendar: 'Agenda',
+  // Aba Arquivos (pastas compartilhadas)
+  Drive: 'Arquivos',
   // Integração com o Jira: nome do grupo (aparece na busca de outras telas, nunca na navegação daqui)
   Jira: 'Jira',
   // Tradução de mensagens (LibreTranslate da empresa)
@@ -98,6 +101,26 @@ const LABEL_OVERRIDE: Record<string, string> = { Default_Channels: 'Canais padr�
 const labelOf = (s: any): string => LABEL_OVERRIDE[s._id] ?? s.label;
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+// Busca sem acento e sem o plural em -ões/-ães: "notificacao" acha "Notificações" (q já vem sem acento).
+const singular = (t: string) => t.replace(/[ao]es\b/g, 'ao');
+const matches = (text: string, q: string) => {
+  const t = foldText(text);
+  return t.includes(q) || singular(t).includes(singular(q));
+};
+
+// "Padrão: …" de uma configuração, no texto da tela (sem a chave do valor).
+function defaultText(s: any): string {
+  const v = s.packageValue;
+  if (s.type === 'boolean') return v ? 'Ligado' : 'Desligado';
+  const option = (s._id === 'Language' ? LANGUAGES : (s.values ?? [])).find((o: any) => o.key === v);
+  if (option) return option.label;
+  const t = String(v ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!t) return 'em branco';
+  return t.length > 60 ? `${t.slice(0, 60)}…` : t;
+}
 
 // E-mail: a última falha de envio desta instância (o envio é em segundo plano: senão ninguém fica sabendo) e o e-mail
 // de teste, que mostra o motivo. O teste usa o que está salvo.
@@ -174,8 +197,8 @@ export function AdminSettings() {
   const groups = useMemo(() => [...new Set<string>(all.map((s: any) => s.group))], [all]);
   // Abre no primeiro grupo; no celular a troca de grupo é pelo botão no alto, que abre a folha com os grupos.
   const group = picked ?? groups[0] ?? 'General';
-  const q = filter.trim().toLowerCase();
-  const visible = all.filter((s: any) => (q ? `${labelOf(s)} ${s._id} ${GROUP_LABEL[s.group] ?? s.group}`.toLowerCase().includes(q) : s.group === group));
+  const q = foldText(filter.trim());
+  const visible = all.filter((s: any) => (q ? matches(`${labelOf(s)} ${s._id} ${GROUP_LABEL[s.group] ?? s.group}`, q) : s.group === group));
   const sections = useMemo(() => {
     const out: Record<string, any[]> = {};
     for (const s of visible) (out[q ? `${GROUP_LABEL[s.group] ?? s.group} › ${SECTION_LABEL[s.section] ?? s.section ?? ''}` : (s.section ?? '')] ??= []).push(s);
@@ -228,6 +251,8 @@ export function AdminSettings() {
       delete n[s._id];
       return n;
     });
+  // Volta ao padrão no rascunho (vale ao salvar); se o salvo já é o padrão, só desfaz a alteração.
+  const restoreDefault = (s: any) => (same(s.value, s.packageValue) ? revert(s) : set(s, s.packageValue));
 
   const save = async () => {
     setSaving(true);
@@ -246,6 +271,15 @@ export function AdminSettings() {
   // A limpeza usa o que está salvo: com alterações na tela o botão espera, e a confirmação mostra os prazos salvos.
   const saved = (id: string) => all.find((s: any) => s._id === id)?.value;
   const retentionUnsaved = changedIn('RetentionPolicy') > 0;
+  // Política desligada (no que está salvo): não há o que executar; antes a limpeza dizia "0 itens removidos em 0 salas".
+  const retentionOff = !saved('RetentionPolicy_Enabled');
+  const retentionHint = !canRunRetention
+    ? 'Só quem pode rodar a política de retenção executa a limpeza.'
+    : retentionUnsaved
+      ? 'Salve as alterações antes de executar.'
+      : retentionOff
+        ? 'Ligue a política de retenção e salve para executar a limpeza.'
+        : '';
   const runRetention = async () => {
     const kinds = (
       [
@@ -277,7 +311,7 @@ export function AdminSettings() {
     if (!yes) return;
     api
       .post('retention.run')
-      .then((r) => ok(`${plural(r.removed, 'item removido', 'itens removidos')} em ${plural(r.rooms, 'sala', 'salas')}.`))
+      .then((r) => ok(r.removed ? `${plural(r.removed, 'item removido', 'itens removidos')} em ${plural(r.rooms, 'sala', 'salas')}.` : 'Nada para remover: nenhuma mensagem ou arquivo passou do prazo.'))
       .catch(fail);
   };
   // Tradução: testa o rascunho da tela (endereço e chave ainda não salvos); a chave mascarada vale como a gravada.
@@ -433,6 +467,7 @@ export function AdminSettings() {
                   disabled={!canEdit}
                   onChange={(v) => set(s, v)}
                   onRevert={() => revert(s)}
+                  onRestoreDefault={() => restoreDefault(s)}
                 />
               ))}
             </section>
@@ -493,15 +528,15 @@ export function AdminSettings() {
               <button
                 className="btn danger"
                 onClick={runRetention}
-                disabled={retentionUnsaved || !canRunRetention}
-                aria-describedby={retentionUnsaved || !canRunRetention ? 'retention-run-hint' : undefined}
+                disabled={!!retentionHint}
+                aria-describedby={retentionHint ? 'retention-run-hint' : undefined}
               >
                 <Icon name="retention" />
                 Executar limpeza agora
               </button>
-              {(retentionUnsaved || !canRunRetention) && (
+              {retentionHint && (
                 <span id="retention-run-hint" className="muted small">
-                  {!canRunRetention ? 'Só quem pode rodar a política de retenção executa a limpeza.' : 'Salve as alterações antes de executar.'}
+                  {retentionHint}
                 </span>
               )}
             </div>
@@ -576,6 +611,7 @@ function SettingRow({
   disabled,
   onChange,
   onRevert,
+  onRestoreDefault,
 }: {
   s: any;
   value: any;
@@ -584,8 +620,11 @@ function SettingRow({
   disabled?: boolean;
   onChange: (v: unknown) => void;
   onRevert: () => void;
+  onRestoreDefault: () => void;
 }) {
   const id = useId();
+  // Fora do padrão: mostra qual é e oferece voltar a ele (senhas e chaves geradas não têm padrão na lista).
+  const custom = 'packageValue' in s && !same(value, s.packageValue);
   return (
     <div className={`setting-row${s.type === 'boolean' ? ' bool' : ''}${modified ? ' modified' : ''}`}>
       <div className="setting-label">
@@ -603,6 +642,7 @@ function SettingRow({
           <SettingKey id={s._id} />
         </span>
         {s.description && <span className="setting-desc">{s.description}</span>}
+        {custom && <span className="setting-desc setting-default">Padrão: {defaultText(s)}</span>}
       </div>
       <div className="setting-control">
         <SettingControl s={s} value={value} onChange={onChange} id={id} invalid={!!error} disabled={disabled} />
@@ -611,11 +651,21 @@ function SettingRow({
             {error}
           </span>
         )}
-        {modified && (
-          <button type="button" className="btn small ghost setting-revert" onClick={onRevert}>
-            <Icon name="restore" />
-            Desfazer
-          </button>
+        {(modified || (custom && !disabled)) && (
+          <div className="setting-actions">
+            {modified && (
+              <button type="button" className="btn small ghost setting-revert" onClick={onRevert}>
+                <Icon name="restore" />
+                Desfazer
+              </button>
+            )}
+            {custom && !disabled && (
+              <button type="button" className="btn small ghost setting-revert" onClick={onRestoreDefault} aria-label={`Restaurar padrão: ${labelOf(s)}`}>
+                <Icon name="restore" />
+                Restaurar padrão
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

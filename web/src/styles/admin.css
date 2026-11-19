@@ -679,6 +679,16 @@ h4 .head-count {
 .setting-revert {
   margin-left: calc(var(--space-2) * -1);
 }
+/* "Desfazer" e "Restaurar padrão" lado a lado, embaixo do controle (a margem negativa fica no grupo). */
+.setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-left: calc(var(--space-2) * -1);
+}
+.setting-actions > .setting-revert {
+  margin-left: 0;
+}
 .setting-name > .setting-dot {
   display: inline-block;
   margin-right: var(--space-1-5);

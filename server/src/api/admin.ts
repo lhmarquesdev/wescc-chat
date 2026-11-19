@@ -245,6 +245,8 @@ export function adminRoutes(app: FastifyInstance) {
 
   // ---------- Retenção ----------
   route(app, 'POST', 'retention.run', { permissions: ['manage-retention-policy'] }, async (_req, _rep, ctx) => {
+    // Política desligada: antes respondia "0 itens removidos em 0 salas", como se tivesse rodado sem achar nada.
+    if (!getSetting('RetentionPolicy_Enabled')) throw badRequest('error-retention-disabled', 'A política de retenção está desligada. Ligue-a e salve antes de executar a limpeza.');
     const r = await runRetention();
     await audit(actorOf(ctx), 'retention.run.manual', {}, r);
     return r;
