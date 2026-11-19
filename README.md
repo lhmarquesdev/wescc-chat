@@ -1105,7 +1105,9 @@ vídeo em grupo) e um link `https://<site>/meet/<código>`. Em "Quem entra pelo 
 foi convidado; "Qualquer pessoa do chat" deixa entrar quem tiver o link (e a pessoa passa a ser convidada). As regras
 da Operação valem também aqui: quem não pode chamar alguém numa conversa direta também não o convida. Criar reuniões
 com link pede a permissão `create-calendar-meeting` (papéis `admin` e `user`). Os lembretes chegam no chat e por push
-(padrão 10 minutos antes). A chamada da reunião usa o servidor das chamadas em grupo (veja **Chamadas em grupo**).
+(padrão 10 minutos antes). A chamada da reunião usa o servidor das chamadas em grupo (veja **Chamadas em grupo**);
+sem ele, a página da reunião oferece só "Abrir o chat da reunião" e avisa que a chamada de vídeo ainda não está
+disponível.
 
 ### Só agenda interna
 

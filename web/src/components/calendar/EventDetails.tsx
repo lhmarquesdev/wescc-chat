@@ -5,6 +5,7 @@ import type { AttendeeResponse, CalendarEvent } from '@shared/calendar';
 import { RESPONSE_LABEL } from '@shared/calendar';
 import { errorMessage } from '../../lib/api';
 import { calendarApi, reminderLabel, whenLabel } from '../../lib/calendar';
+import { useCallStore } from '../../lib/call/store';
 import { useStore } from '../../lib/store';
 import { Icon, type IconName } from '../Icon';
 import { confirmDialog, Modal, UserAvatar } from '../ui';
@@ -72,6 +73,8 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
 
   const canRespond = event.myResponse !== 'organizer';
   const meetPath = event.meeting ? `/meet/${event.meeting.code}` : null;
+  // Sem chamadas em grupo (servidor de chamadas não configurado), a reunião é só a conversa: "Abrir", não "Entrar".
+  const groupOn = useCallStore((s) => s.config?.groupEnabled) !== false;
 
   return (
     <Modal
@@ -112,7 +115,7 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
             </div>
             <button type="button" className="btn primary" onClick={() => (onClose(), navigate(meetPath!))}>
               <Icon name="meeting-join" />
-              Entrar na reunião
+              {groupOn ? 'Entrar na reunião' : 'Abrir a reunião'}
             </button>
           </div>
         )}
