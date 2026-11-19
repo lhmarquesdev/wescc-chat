@@ -398,11 +398,13 @@ export function RoomPage() {
           ? 'Você está silenciado nesta sala.'
           : directBlocked || '';
   const canClosePolls = canWithRoles('delete-message', roles);
+  // Editar a mensagem de outra pessoa: a permissão com os papéis da sala (dono, moderador), como o servidor confere.
+  const canEditOthers = canWithRoles('edit-message', roles);
   // Quem votou: num canal de avisos (ou com a lista oculta) só quem publica ou vê a lista.
   const canSeePollVoters = !(room?.notice || room?.broadcast) || canPostRO || (!!room?.broadcast && !membersHidden);
   const gate = useMemo(
-    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters }),
-    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters],
+    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers }),
+    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers],
   );
 
   const actions = useMemo(

@@ -79,6 +79,8 @@ export type MessageGate = Pick<MessageActions, 'canReact' | 'canReply' | 'canDis
   voteBlocked?: string;
   canClosePolls?: boolean;
   canSeePollVoters?: boolean;
+  // Editar mensagens de outras pessoas: edit-message com os papéis globais e os da sala (dono, moderador).
+  canEditOthers?: boolean;
 };
 
 // As mesmas regras para toda mensagem da sala, inclusive as da thread, que monta as próprias ações.
@@ -992,7 +994,7 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
   // editableKind: a mesma regra da seta para cima no compositor (RoomPage.editLast).
   // Mensagem cifrada: só com a criptografia ligada (o texto novo vai cifrado) e depois de decifrar.
   const e2eEditable = !m.e2e || (roomEncrypted && !!e2eContent);
-  const canEdit = editableKind(m) && e2eEditable && canReply && ((own && allowEdit) || (!own && perms.includes('edit-message') && canModerate));
+  const canEdit = editableKind(m) && e2eEditable && canReply && ((own && allowEdit) || (!own && (gate.canEditOthers ?? (perms.includes('edit-message') && canModerate))));
   const opt = (on: unknown, item: MenuEntry) => (on ? item : null);
   const groups = [
     [
