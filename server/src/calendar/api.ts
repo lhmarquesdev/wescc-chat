@@ -8,7 +8,7 @@ export function calendarRoutes(app: FastifyInstance) {
   // Eventos
   route(app, 'GET', 'calendar.events', {}, async (req, _r, ctx) => {
     const query = q(req);
-    return { events: await listEvents(ctx, { from: query.from, to: query.to, hideDeclined: bool(query.hideDeclined) === true }) };
+    return { events: await listEvents(ctx, { from: query.from, to: query.to, hideDeclined: bool(query.hideDeclined) === true, pending: bool(query.pending) === true }) };
   });
   route(app, 'GET', 'calendar.event', {}, async (req, _r, ctx) => ({ event: await getEvent(ctx, str(q(req).eventId, 'eventId', { max: 64 })) }));
   route(app, 'POST', 'calendar.create', {}, async (req, _r, ctx) => ({ event: await createEvent(ctx, b(req)) }));

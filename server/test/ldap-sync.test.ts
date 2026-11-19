@@ -562,7 +562,7 @@ describe('foto', () => {
     expect((await userRow('foto.1')).avatar_etag).toBe(etag);
 
     // A pessoa escolhe a própria foto: uma foto nova no AD não passa por cima.
-    const own = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(32, 7)]);
+    const own = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32, 7)]);
     const set = await api('POST', 'users.setAvatar', { userId: (await userRow('foto.1')).id, avatarUrl: `data:image/png;base64,${own.toString('base64')}` }, A);
     expect(set.success).toBe(true);
     f1.photo = jpeg(3);
@@ -746,10 +746,25 @@ describe('API da sincronização', () => {
     expect((await api('POST', 'login', { user: u.username, password: 'errada-123' })).status).toBe(401);
     await settings({ LDAP_Login_Fallback: false });
     try {
-      expect((await api('POST', 'login', { user: u.username, password: 'senha-forte-1' })).status).toBe(401);
+      // Sem a senha local para conferir: diz que o AD não respondeu e não conta como tentativa falha.
+      await pool.query('DELETE FROM login_attempts');
+      for (let i = 0; i < 3; i++) {
+        const down = await api('POST', 'login', { user: u.username, password: 'senha-forte-1' });
+        expect([down.status, down.errorType, down.error]).toEqual([503, 'error-ldap-unavailable', 'O servidor de rede (AD) não respondeu. Tente de novo em alguns minutos.']);
+      }
+      expect((await pool.query('SELECT 1 FROM login_attempts')).rowCount).toBe(0);
     } finally {
       await settings({ LDAP_Login_Fallback: true });
     }
+    // Com a opção ligada (o padrão), a conta do AD sem senha no chat (a importada pela sincronização) também ouve que o
+    // AD não respondeu, sem contar tentativa.
+    await pool.query('UPDATE users SET password_hash = NULL WHERE id = $1', [u.userId]);
+    await pool.query('DELETE FROM login_attempts');
+    for (let i = 0; i < 3; i++) {
+      const down = await api('POST', 'login', { user: u.username, password: 'senha-forte-1' });
+      expect([down.status, down.errorType]).toEqual([503, 'error-ldap-unavailable']);
+    }
+    expect((await pool.query('SELECT 1 FROM login_attempts')).rowCount).toBe(0);
     const test = await api('POST', 'ldap.testMapping', { login: 'ana' }, A);
     expect(test).toMatchObject({ status: 400, errorType: 'error-ldap-connection' });
     expect(test.error).toContain('Falha na conexão: conexão recusada');

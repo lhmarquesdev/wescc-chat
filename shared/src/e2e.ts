@@ -151,8 +151,9 @@ export function normalizePassphrase(s: string): string {
 
 // A sala criptografada monta o texto no navegador e envia cifrado. O servidor usa os mesmos textos
 // (server/src/services/commands.ts), então /shrug sai igual com ou sem criptografia.
+// O braço do /shrug é uma barra só: o markdown não abre itálico num "_" logo depois de "\" (markdownTokens.ts).
 const SAY: Record<string, string> = {
-  shrug: '¯\\\\_(ツ)_/¯',
+  shrug: '¯\\_(ツ)_/¯',
   tableflip: '(╯°□°）╯︵ ┻━┻',
   unflip: '┬─┬ ノ( ゜-゜ノ)',
   lennyface: '( ͡° ͜ʖ ͡°)',
@@ -160,7 +161,8 @@ const SAY: Record<string, string> = {
 export const LOCAL_TEXT_COMMANDS = ['me', 'gimme', ...Object.keys(SAY)];
 
 export function localCommandText(command: string, args: string): string | null {
-  if (command === 'me') return `_${args}_`;
+  // /me sem a ação não tem texto: o servidor responde como usar (antes saía a mensagem "__").
+  if (command === 'me') return args ? `_${args}_` : null;
   if (command === 'gimme') return `༼ つ ◕_◕ ༽つ ${args}`.trim();
   const text = SAY[command];
   if (text === undefined) return null;

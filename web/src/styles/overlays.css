@@ -303,6 +303,12 @@
 .menu button.danger:where(:hover, :focus-visible) {
   background: hsl(var(--st-red-soft));
 }
+/* Destrutivo desativado ("Apagar" depois do prazo): cinza como os outros itens desativados, sem o vermelho. */
+.menu button.danger:disabled,
+.menu button.danger:disabled .icon {
+  background: none;
+  color: hsl(var(--text-5));
+}
 /* O ponto de status ocupa a largura de um ícone: os rótulos ficam na mesma coluna. */
 .menu :where(button, a) > .status-dot {
   margin-inline: calc((16px - var(--dot, 10px)) / 2);
@@ -1109,8 +1115,10 @@
   gap: 6px;
   padding: 2px 10px;
   border-radius: var(--radius-full);
-  background: hsl(var(--brand-h) 30% 12% / 0.32);
-  color: hsl(var(--foreground));
+  /* Por cima do vídeo: cores fixas, legíveis em qualquer tema. */
+  background: hsl(0 0% 0% / 0.55);
+  color: #fff;
+  text-shadow: 0 1px 2px hsl(0 0% 0% / 0.5);
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   font-variant-numeric: tabular-nums;
@@ -1132,12 +1140,12 @@
   right: 10px;
   bottom: 10px;
   border-radius: var(--radius-full);
-  background: hsl(var(--brand-h) 30% 12% / 0.32);
-  color: hsl(var(--foreground));
+  background: hsl(0 0% 0% / 0.55);
+  color: #fff;
 }
 .icon-btn.vr-sound:hover {
-  background: hsl(var(--brand-h) 30% 12% / 0.32);
-  color: hsl(var(--foreground));
+  background: hsl(0 0% 0% / 0.7);
+  color: #fff;
 }
 .vr-controls {
   position: relative;

@@ -18,15 +18,16 @@ import {
 import { useNavigate } from 'react-router-dom';
 import type { Attachment, Message } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
-import { formatBytes, formatDateTime, formatRelative, formatTime, formatWhen, nameList, plural, roomPath, systemIcon, systemText } from '../lib/format';
+import { formatBytes, formatDateTime, formatRelative, formatTime, formatWhen, plural, roomPath, systemIcon, systemText } from '../lib/format';
 import { resolveEmoji } from '../lib/emoji';
 import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
 import { useHighlights } from '../lib/presence';
 import { findHighlight } from '@shared/highlights';
-import { authorName, editableKind, forwardableKind } from '../lib/messageRules';
+import { authorName, editableKind, forwardableKind, messageHref, pastTimeLimit, reactionEntries, reactionTitle } from '../lib/messageRules';
+import { markUnread } from '../lib/markUnread';
 import { canRemoveEverywhere, useStickers } from '../lib/stickers';
 import { useNames } from '../lib/names';
-import { avatarBust, useSetting, useStore } from '../lib/store';
+import { useSetting, useStore } from '../lib/store';
 import { useMessageTranslation, type MessageTranslationView } from '../lib/translate';
 import { languageLabel } from '../lib/translateRules';
 import { EmojiPicker, recentEmoji } from './EmojiPicker';
@@ -79,6 +80,11 @@ export type MessageGate = Pick<MessageActions, 'canReact' | 'canReply' | 'canDis
   voteBlocked?: string;
   canClosePolls?: boolean;
   canSeePollVoters?: boolean;
+  // Editar mensagens de outras pessoas: edit-message com os papéis globais e os da sala (dono, moderador).
+  canEditOthers?: boolean;
+  // Prazo (minutos) para editar e para apagar as próprias mensagens; 0 = sem prazo para esta pessoa nesta sala.
+  editLimit?: number;
+  deleteLimit?: number;
 };
 
 // As mesmas regras para toda mensagem da sala, inclusive as da thread, que monta as próprias ações.
@@ -200,7 +206,7 @@ function attachmentColor(c?: string) {
 // blobName: imagem decifrada no navegador (blob:): baixa com o nome real e não abre em nova aba.
 function Lightbox({ src, title, download, m, blobName, onClose }: { src: string; title?: string; download?: string; m?: Message; blobName?: string; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEscape(true, onClose);
+  useEscape(true, onClose, true);
   useScrollLock(true);
   useFocusTrap(ref, true);
   const name = m ? authorName(m) : '';
@@ -217,7 +223,7 @@ function Lightbox({ src, title, download, m, blobName, onClose }: { src: string;
           if (!(e.target as HTMLElement).closest('.lightbox-img, .lightbox-bar a, .lightbox-bar button')) onClose();
         }}
       >
-        <img className="lightbox-img" src={src} alt={title ?? ''} />
+        <img className="lightbox-img" src={src} alt={title ?? ''} referrerPolicy="no-referrer" />
         <div className="lightbox-bar">
           <div className="lightbox-who">
             {m && (
@@ -276,7 +282,7 @@ export function ImageView({
   return (
     <span className={`${thumb ? 'att-thumb-box' : 'att-image-box'}${loaded ? ' loaded' : ''}`}>
       <button type="button" className="att-image-open" onClick={() => setOpen(true)} aria-label={title ? `Ampliar ${title}` : 'Ampliar imagem'}>
-        <img className={thumb ? 'att-thumb' : 'att-image'} src={src} alt={title ?? ''} loading="lazy" onLoad={done} onError={done} />
+        <img className={thumb ? 'att-thumb' : 'att-image'} src={src} alt={title ?? ''} loading="lazy" referrerPolicy="no-referrer" onLoad={done} onError={done} />
       </button>
       {!thumb && (
         <span className="att-image-actions">
@@ -357,7 +363,7 @@ function RichAttachment({ a, m }: { a: Attachment; m?: Message }) {
   const fields = (a.fields ?? []).filter((f) => f && (f.title || f.value));
   const author = a.author_name || authorIcon ? (
     <div className="att-author">
-      {authorIcon && <img src={authorIcon} alt="" width={16} height={16} loading="lazy" />}
+      {authorIcon && <img src={authorIcon} alt="" width={16} height={16} loading="lazy" referrerPolicy="no-referrer" />}
       {a.author_name &&
         (authorLink ? (
           <a href={authorLink} target="_blank" rel="noopener noreferrer">
@@ -413,22 +419,53 @@ function RichAttachment({ a, m }: { a: Attachment; m?: Message }) {
   );
 }
 
+// Mensagem citada (?msg=<id>) ou fixada (/msg/<id>).
+const quotedId = (link?: string) => link?.match(/(?:\/msg\/|[?&]msg=)([A-Za-z0-9]{10,24})/)?.[1];
+
+// Abre a original com ela destacada: na sala dela (a citação pode ser de outra sala) ou no tópico, se for resposta.
+async function openQuoted(id: string, navigate: (to: string) => void) {
+  try {
+    const m: Message = (await api.get('chat.getMessage', { msgId: id })).message;
+    const st = useStore.getState();
+    navigate(messageHref(roomPath({ _id: m.rid, t: st.rooms[m.rid]?.t ?? st.subscriptions[m.rid]?.t ?? 'c' }), m));
+  } catch (e) {
+    useStore.getState().toast(errorMessage(e), 'error');
+  }
+}
+
 // Citação: o servidor manda o @usuário do autor; aparece o nome, e a data no formato curto ("Ontem 10:24").
 // Mensagem com apelido (webhooks): o nome é o apelido, com o avatar da conta que publicou.
+// Clicar na citação (ou na nota "fixou uma mensagem") leva à original; no teclado, a data é o botão.
 function QuoteAttachment({ a }: { a: Attachment }) {
   const nameOf = useNames();
+  const navigate = useNavigate();
+  const target = a.removed ? undefined : quotedId(a.message_link);
+  const go = () => target && void openQuoted(target, navigate);
+  // Link, menção ou texto selecionado dentro da citação ficam com o próprio clique.
+  const onClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('a, button, .mention') || window.getSelection()?.toString()) return;
+    go();
+  };
+  const when = a.ts && (
+    <time className="muted" dateTime={a.ts} title={formatDateTime(a.ts)}>
+      {formatWhen(a.ts)}
+    </time>
+  );
   return (
-    <div className="quote-att">
+    <div className={target ? 'quote-att linked' : 'quote-att'} onClick={target ? onClick : undefined} title={target ? 'Ir para a mensagem original' : undefined}>
       <div className="quote-head">
         {a.author_name && <Avatar username={a.author_name} size={16} />}
         <strong>{a.author_alias || (a.author_name ? nameOf(a.author_name) : '')}</strong>
-        {a.ts && (
-          <time className="muted" dateTime={a.ts} title={formatDateTime(a.ts)}>
-            {formatWhen(a.ts)}
-          </time>
+        {target ? (
+          <button type="button" className="quote-jump" onClick={go} aria-label={`Ir para a mensagem original${a.ts ? `, de ${formatDateTime(a.ts)}` : ''}`}>
+            {when || 'Ir para a mensagem'}
+          </button>
+        ) : (
+          when
         )}
       </div>
-      <div className="quote-body">{renderMarkdown(a.text ?? '')}</div>
+      {/* A original foi apagada: o servidor tirou o texto da cópia. */}
+      <div className="quote-body">{a.removed ? <em className="muted">Mensagem removida</em> : renderMarkdown(a.text ?? '')}</div>
     </div>
   );
 }
@@ -463,7 +500,8 @@ function EmojiGlyph({ code }: { code: string }) {
 
 function Reactions({ m, canReact, onAdd }: { m: Message; canReact: boolean; onAdd: (anchor: HTMLElement) => void }) {
   const me = useStore((s) => s.me);
-  const entries = Object.entries(m.reactions ?? {});
+  const nameOf = useNames();
+  const entries = reactionEntries(m.reactions);
   if (!entries.length) return null;
   const toggle = (code: string) => api.post('chat.react', { messageId: m._id, emoji: code }).catch((e) => useStore.getState().toast(errorMessage(e), 'error'));
   return (
@@ -471,7 +509,7 @@ function Reactions({ m, canReact, onAdd }: { m: Message; canReact: boolean; onAd
       <div className="reactions">
         {entries.map(([code, r]) => {
           const mine = r.usernames.includes(me?.username ?? '');
-          const title = `${nameList(r.usernames)} ${r.usernames.length === 1 ? 'reagiu' : 'reagiram'} com ${code}`;
+          const title = reactionTitle(code, r.usernames, nameOf);
           const content = (
             <>
               <span className="reaction-emoji">
@@ -561,14 +599,14 @@ function ReportModal({ m, onClose }: { m: Message; onClose: () => void }) {
           <button type="button" className="btn ghost" onClick={onClose}>
             Cancelar
           </button>
-          <button type="button" className="btn danger solid" disabled={busy} onClick={send}>
+          <button type="button" className="btn danger solid" disabled={busy || text.trim().length < 3} onClick={send}>
             Denunciar
           </button>
         </>
       }
     >
-      <Field label="Motivo" hint={encrypted ? 'Esta conversa é criptografada: a moderação não vê a mensagem. Descreva o problema no motivo.' : undefined}>
-        <textarea rows={4} placeholder="Descreva o motivo" value={text} onChange={(e) => setText(e.target.value)} />
+      <Field label="Motivo" hint={encrypted ? 'Esta conversa é criptografada: a moderação não vê a mensagem. Descreva o problema no motivo.' : 'Obrigatório: conte aos moderadores o que há de errado.'}>
+        <textarea rows={4} placeholder="Descreva o motivo" value={text} maxLength={1000} onChange={(e) => setText(e.target.value)} />
       </Field>
     </Modal>
   );
@@ -674,6 +712,7 @@ const E2E_ICON: Record<Exclude<E2eViewState, 'ok'>, IconName> = {
   unsupported: 'e2e-warning',
   locked: 'encrypted',
   'old-key': 'encrypted',
+  reset: 'encrypted',
   failed: 'e2e-warning',
 };
 function E2ePlaceholder({ state }: { state: Exclude<E2eViewState, 'ok'> }) {
@@ -803,12 +842,12 @@ function useReplyFaces(m: Message): { id: string; src: string }[] {
     const known = new Map<string, string>();
     for (const x of s.threads[m._id] ?? []) known.set(x.u._id, x.u.username);
     for (const x of s.messages[m.rid]?.list ?? []) if (!known.has(x.u._id)) known.set(x.u._id, x.u.username);
-    return ids.map((id) => `${id}:${known.get(id) ?? ''}`).join(' ');
+    return ids.map((id) => `${id}:${known.get(id) ?? ''}:${s.avatarEtags[known.get(id) ?? ''] ?? ''}`).join(' ');
   });
   if (!key) return [];
   return key.split(' ').map((pair) => {
-    const [id, username] = pair.split(':');
-    return { id, src: username ? `/avatar/${encodeURIComponent(username)}?v=${avatarBust[username] ?? ''}` : `/avatar/uid/${encodeURIComponent(id)}` };
+    const [id, username, bust] = pair.split(':');
+    return { id, src: username ? `/avatar/${encodeURIComponent(username)}?v=${bust}` : `/avatar/uid/${encodeURIComponent(id)}` };
   });
 }
 
@@ -916,6 +955,9 @@ interface MenuItem {
   label: string;
   run: () => void;
   danger?: boolean;
+  // Desativado, com o motivo embaixo do rótulo (prazo de edição ou de exclusão).
+  disabled?: boolean;
+  hint?: string;
 }
 // Itens que são componentes (os das figurinhas): recebem o close do menu e o papel da folha.
 type MenuEntry = MenuItem | { key: string; el: (close: () => void, sheetRole?: boolean) => ReactNode };
@@ -926,6 +968,8 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
   const e2eView = m.e2eView;
   const e2eContent = e2eView?.state === 'ok' ? e2eView.content : undefined;
   const roomEncrypted = useStore((s) => !!s.rooms[m.rid]?.encrypted);
+  // Emoji personalizado criado, trocado ou apagado: a mensagem se redesenha com a lista nova (sem recarregar a página).
+  useStore((s) => s.emojiVersion);
   const me = useStore((s) => s.me)!;
   const navigate = useNavigate();
   const [picker, setPicker] = useState<{ anchor: HTMLElement | null; bar?: boolean } | null>(null);
@@ -937,6 +981,8 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
   const [forwarding, setForwarding] = useState(false);
   const [reminding, setReminding] = useState(false);
   const reminder = useStore((s) => (m.t ? undefined : s.reminders.find((r) => r.messageId === m._id)));
+  // Quem só visualiza o canal (sem entrar) não tem o que marcar como não lido.
+  const member = useStore((s) => !!s.subscriptions[m.rid]);
   const stickerGone = useStickers((st) => !!m.sticker && (m.sticker.removed || st.removed.has(m.sticker.fileId)));
   const createStickerRaw = useCreateSticker(m, inThread);
   const createSticker = m.e2e ? null : createStickerRaw;
@@ -978,8 +1024,10 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
   const text = lifted ? lifted.rest : shownMsg;
   const starred = m.starred?.some((s) => s._id === me._id);
   const bot = !!m.alias || !!m.bot;
+  // Resposta de tópico: o link abre o tópico com ela destacada.
+  const roomBase = () => location.pathname.split('/thread/')[0];
   const copyLink = () => {
-    const url = `${location.origin}${location.pathname.split('/thread/')[0]}?msg=${m._id}`;
+    const url = `${location.origin}${messageHref(roomBase(), m)}`;
     copyText(url, 'Link copiado.');
   };
   const del = async () => {
@@ -991,11 +1039,21 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
   // editableKind: a mesma regra da seta para cima no compositor (RoomPage.editLast).
   // Mensagem cifrada: só com a criptografia ligada (o texto novo vai cifrado) e depois de decifrar.
   const e2eEditable = !m.e2e || (roomEncrypted && !!e2eContent);
-  const canEdit = editableKind(m) && e2eEditable && canReply && ((own && allowEdit) || (!own && perms.includes('edit-message') && canModerate));
+  const canEdit = editableKind(m) && e2eEditable && canReply && ((own && allowEdit) || (!own && (gate.canEditOthers ?? (perms.includes('edit-message') && canModerate))));
+  // Passado o prazo de edição ou de exclusão, o item fica desativado com o motivo (antes a pessoa reescrevia tudo e só
+  // então via o erro do servidor).
+  const editExpired = own && pastTimeLimit(m.ts, gate.editLimit);
+  const deleteExpired = own && pastTimeLimit(m.ts, gate.deleteLimit);
   const opt = (on: unknown, item: MenuEntry) => (on ? item : null);
   const groups = [
     [
-      opt(canEdit, { key: 'edit', icon: 'edit', label: 'Editar', run: () => actions.onEdit?.(m) }),
+      opt(canEdit, {
+        key: 'edit',
+        icon: 'edit',
+        label: 'Editar',
+        run: () => actions.onEdit?.(m),
+        ...(editExpired ? { disabled: true, hint: `O prazo para editar (${gate.editLimit} min) acabou` } : {}),
+      }),
       opt(!m.drid && !inThread && actions.onDiscussion && canDiscuss, { key: 'disc', icon: 'start-discussion', label: 'Iniciar discussão', run: () => actions.onDiscussion?.(m) }),
       opt(perms.includes('forward-message') && forwardableKind(m) && gate.canForwardFrom !== false, { key: 'forward', icon: 'forward', label: 'Encaminhar', run: () => setForwarding(true) }),
     ],
@@ -1021,7 +1079,7 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
         label: tr.shown === 'translation' ? 'Ver original' : 'Traduzir',
         run: tr.toggle,
       }),
-      opt(!own, { key: 'unread', icon: 'mark-unread', label: 'Marcar como não lida', run: () => void api.post('subscriptions.unread', { firstUnreadMessage: { _id: m._id } }).catch(fail) }),
+      opt(!own && member, { key: 'unread', icon: 'mark-unread', label: 'Marcar como não lida', run: () => void markUnread(m.rid, () => navigate('/home'), m._id) }),
       opt(showReceipts, { key: 'receipts', icon: 'receipts', label: 'Confirmações de leitura', run: () => setReceipts(true) }),
       opt(m.sticker, { key: 'sticker', el: (close, sheetRole) => <StickerMenuItems message={m} close={close} sheetRole={sheetRole} /> }),
       opt(createSticker, { key: 'create-sticker', el: (close, sheetRole) => <CreateStickerItem message={m} close={close} sheetRole={sheetRole} inThread={inThread} /> }),
@@ -1042,7 +1100,14 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
         key: 'remove-all',
         el: (close, sheetRole) => <StickerRemoveItem message={m} close={close} sheetRole={sheetRole} />,
       }),
-      opt(own ? allowDelete : canModerate || perms.includes('delete-message'), { key: 'del', icon: 'delete', label: 'Apagar', run: () => void del(), danger: true }),
+      opt(own ? allowDelete : canModerate || perms.includes('delete-message'), {
+        key: 'del',
+        icon: 'delete',
+        label: 'Apagar',
+        run: () => void del(),
+        danger: true,
+        ...(deleteExpired ? { disabled: true, hint: `O prazo para apagar (${gate.deleteLimit} min) acabou` } : {}),
+      }),
     ],
   ]
     .map((g) => g.filter((x): x is MenuEntry => !!x))
@@ -1060,13 +1125,21 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
               type="button"
               role={sheetRole ? 'menuitem' : undefined}
               className={it.danger ? 'danger' : undefined}
+              disabled={it.disabled}
               onClick={() => {
                 close();
                 it.run();
               }}
             >
               <Icon name={it.icon} size={16} />
-              {it.label}
+              {it.hint ? (
+                <span className="menu-text">
+                  {it.label}
+                  <span className="menu-desc">{it.hint}</span>
+                </span>
+              ) : (
+                it.label
+              )}
             </button>
           ),
         )}
@@ -1143,6 +1216,23 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
         editada
       </span>
     ) : null;
+  // Fixada e favoritada: no cabeçalho; na linha agrupada (sem cabeçalho), no fim do texto, como o "editada", ou numa
+  // linha própria embaixo quando não há texto (arquivo, figurinha, enquete).
+  const flags =
+    m.pinned || starred ? (
+      <>
+        {m.pinned && (
+          <span className="msg-flag pin" title="Fixada" role="img" aria-label="Fixada">
+            <Icon name="pin" size={12} />
+          </span>
+        )}
+        {starred && (
+          <span className="msg-flag star" title="Favoritada" role="img" aria-label="Favoritada">
+            <Icon name="star" size={12} fill />
+          </span>
+        )}
+      </>
+    ) : null;
   const receipt =
     receiptsOn && own && !m.t ? (
       <span className={`receipt ${m.unread ? '' : 'read'}`} title={m.unread ? 'Enviada' : 'Lida por todos'} role="img" aria-label={m.unread ? 'Enviada' : 'Lida por todos'}>
@@ -1180,6 +1270,7 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
         <div className="msg-body">
           {withCopy(renderMarkdown(forward.comment, { me: me.username, mentions: m.mentions, channels: m.channels, onUserClick: actions.onUserClick, highlights: own ? null : hlm }))}
           {grouped && edited}
+          {grouped && flags}
         </div>
       )}
       <ForwardCard f={forward}>
@@ -1198,12 +1289,14 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
             {body}
             {grouped && edited}
             {grouped && <TranslationMark tr={tr} />}
+            {grouped && text && flags}
           </div>
         ))}
       {!stickerView && !call && <TranslationLine tr={tr} />}
       {attachments}
     </>
   );
+  const flagsInText = forward ? !!forward.comment : !poll && !stickerView && !call && !!text;
 
   const cls = [
     'msg',
@@ -1276,20 +1369,15 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
             </time>
             {edited}
             <TranslationMark tr={tr} />
-            {m.pinned && (
-              <span className="msg-flag pin" title="Fixada" role="img" aria-label="Fixada">
-                <Icon name="pin" size={12} />
-              </span>
-            )}
-            {starred && (
-              <span className="msg-flag star" title="Favoritada" role="img" aria-label="Favoritada">
-                <Icon name="star" size={12} fill />
-              </span>
-            )}
+            {flags}
             {receipt}
           </div>
         )}
-        {m.tmid && !inThread && m.tshow && <div className="muted small msg-thread-hint">respondeu em um tópico</div>}
+        {m.tmid && !inThread && m.tshow && (
+          <button type="button" className="msg-thread-hint" onClick={() => navigate(messageHref(roomBase(), m))}>
+            respondeu em um tópico
+          </button>
+        )}
         {notice ? (
           <div className="notice-card">
             <div className="notice-card-head">
@@ -1309,6 +1397,7 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
         ) : (
           content
         )}
+        {grouped && flags && !flagsInText && <div className="msg-flags">{flags}</div>}
         {/* Integrações (Jira): cartões depois do corpo e antes das reações; mensagem removida não mostra cartão */}
         {!m.t && m.jira && <JiraCard jira={m.jira} message={m} />}
         {!m.t && m.meeting && <MeetingCard meeting={m.meeting} />}

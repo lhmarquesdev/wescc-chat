@@ -1,12 +1,14 @@
-import { Component, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { ApiError, errorMessage, getCredentials, syncCredentials } from './lib/api';
 import { loadPublicSettings, logout, requestNotificationPermission, signedOutElsewhere, startSession } from './lib/session';
 import { useStore } from './lib/store';
+import { useNoticeAcks } from './lib/acks';
+import { realtime } from './lib/realtime';
 import { Sidebar } from './components/Sidebar';
-import { Topbar } from './components/Topbar';
+import { Topbar, useTrail } from './components/Topbar';
 import { MobileTabBar } from './components/MobileTabBar';
-import { markCallsSeen, useMissedCalls } from './components/navState';
+import { countsInTitle, markCallsSeen, useMissedCalls } from './components/navState';
 import { useIsPhone } from './components/overlay';
 import { BrandMark } from './components/BrandIcons';
 import { Icon } from './components/Icon';
@@ -16,14 +18,17 @@ import { ChangePasswordPage, ForgotPasswordPage, InvitePage, LoginPage, Register
 import { DirectoryPage, HomePage } from './pages/HomeDirectory';
 import { RoomPage } from './pages/RoomPage';
 import { AccountPage, applyTheme, TwoFactorCard } from './pages/AccountPage';
-import { AdminPage } from './pages/admin/AdminPage';
-import { CallsPage } from './pages/CallsPage';
-import { CalendarPage } from './pages/CalendarPage';
-import { FilesPage } from './pages/FilesPage'; // Arquivos (pastas compartilhadas)
-import { MeetPage } from './pages/MeetPage';
 import { CalendarNotices } from './components/calendar/CalendarNotices';
 import { MessageNotices } from './components/MessageNotices';
-import { RemindersPage } from './pages/RemindersPage';
+
+// Telas de uso eventual, cada uma no seu pedaço, baixado ao abrir: o primeiro acesso (login e conversas) não espera
+// pela Administração, que sozinha era quase um terço do app.
+const AdminPage = lazy(() => import('./pages/admin/AdminPage').then((m) => ({ default: m.AdminPage })));
+const CallsPage = lazy(() => import('./pages/CallsPage').then((m) => ({ default: m.CallsPage })));
+const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })));
+const FilesPage = lazy(() => import('./pages/FilesPage').then((m) => ({ default: m.FilesPage }))); // Arquivos (pastas compartilhadas)
+const MeetPage = lazy(() => import('./pages/MeetPage').then((m) => ({ default: m.MeetPage })));
+const RemindersPage = lazy(() => import('./pages/RemindersPage').then((m) => ({ default: m.RemindersPage })));
 
 function useCustomCss() {
   const css = useStore((s) => s.settings.Layout_Custom_CSS as string | undefined);
@@ -38,13 +43,27 @@ function useCustomCss() {
   }, [css]);
 }
 
+// Telas fora da conta (a trilha do topo não cobre).
+const AUTH_TITLES: [RegExp, string][] = [
+  [/^\/login/, 'Entrar'],
+  [/^\/register/, 'Criar conta'],
+  [/^\/forgot-password/, 'Esqueci minha senha'],
+  [/^\/reset-password/, 'Nova senha'],
+  [/^\/invite\//, 'Convite'],
+];
+
 function useTitle() {
   const site = useStore((s) => s.settings.Site_Name as string | undefined);
-  const unread = useStore((s) => Object.values(s.subscriptions).reduce((n, x) => n + (x.alert || x.unread ? 1 : 0), 0));
+  // Sala silenciada ou com o contador oculto só conta com menção (como na barra lateral).
+  const unread = useStore((s) => Object.values(s.subscriptions).reduce((n, x) => n + (countsInTitle(x) ? 1 : 0), 0));
+  const { pathname } = useLocation();
+  const trail = useTrail();
+  // A tela atual na aba e no histórico do navegador: "(2) geral · Wescc Chat", "Agenda · Wescc Chat".
+  const page = AUTH_TITLES.find(([re]) => re.test(pathname))?.[1] ?? trail[trail.length - 1]?.label;
   useEffect(() => {
     // Antes das configurações chegarem fica o título do index.html.
-    if (site) document.title = `${unread ? `(${unread}) ` : ''}${site}`;
-  }, [site, unread]);
+    if (site) document.title = `${unread ? `(${unread}) ` : ''}${page ? `${page} · ` : ''}${site}`;
+  }, [site, unread, page]);
 }
 
 // Tela de abertura: a marca com o indicador de carregamento embaixo.
@@ -198,6 +217,7 @@ function Protected() {
   const view = pathname === '/home' ? 'list' : ROOM_ROUTE.test(pathname) ? 'room' : 'page';
   const asList = phone && view === 'list';
   useCallsSeen(pathname === '/calls');
+  useNoticeAcks();
 
   useEffect(() => {
     if (state !== 'loading') return;
@@ -258,13 +278,17 @@ function Protected() {
 
   return (
     <div className={`layout ${navOpen ? 'nav-open' : ''}`} data-view={view} data-side={sideIcon && !phone ? 'icon' : 'full'}>
+      {/* Primeira parada do Tab (só aparece com o foco): pula o menu e a lista de conversas. */}
+      <a className="skip-link" href="#conteudo" onClick={skipToContent}>
+        Pular para o conteúdo
+      </a>
       {/* Celular fora da lista: a gaveta fica fora da tela e fora do Tab e do leitor de tela. */}
       <aside className="sidebar-wrap" inert={phone && !asList && !navOpen}>
         {asList && !connected && <OfflineBar />}
         <Sidebar onNavigate={() => setNavOpen(false)} mode={asList ? 'list' : 'side'} />
       </aside>
       <div className="sidebar-backdrop" onClick={() => setNavOpen(false)} />
-      <main className="main">
+      <main className="main" id="conteudo">
         {/* Gaveta antiga: fica como reserva, escondida (a barra de abas e o voltar das salas substituem). */}
         <button className="mobile-nav-btn" aria-label="Abrir menu" onClick={() => setNavOpen(true)}>
           <Icon name="nav-menu" />
@@ -273,7 +297,15 @@ function Protected() {
         {!connected && <OfflineBar />}
         {!asList && (
           <ErrorBoundary resetKey={pathname}>
-            <Outlet />
+            <Suspense
+              fallback={
+                <div className="fullscreen-center">
+                  <Spinner />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
           </ErrorBoundary>
         )}
       </main>
@@ -285,11 +317,28 @@ function Protected() {
   );
 }
 
+// Na conversa, o "Pular para o conteúdo" vai direto para o campo de mensagem; nas outras telas, para a área principal.
+function skipToContent(e: React.MouseEvent<HTMLAnchorElement>) {
+  e.preventDefault();
+  const target = document.querySelector<HTMLElement>('.room-main .composer textarea:not(:disabled)') ?? document.getElementById('conteudo');
+  if (!target) return;
+  // A área principal só recebe o foco por aqui: com o tabindex fixo, um clique na lista levaria o foco para ela e as
+  // setas e o Page Up/Down deixariam de rolar as mensagens.
+  if (!target.matches('textarea')) {
+    target.tabIndex = -1;
+    target.addEventListener('blur', () => target.removeAttribute('tabindex'), { once: true });
+  }
+  target.focus({ preventScroll: true });
+}
+
 function OfflineBar() {
   return (
     <div className="offline-bar" role="status">
       <Icon name="offline" size={14} />
       Reconectando…
+      <button type="button" className="offline-retry" onClick={() => realtime.reconnectNow()}>
+        Tentar agora
+      </button>
     </div>
   );
 }

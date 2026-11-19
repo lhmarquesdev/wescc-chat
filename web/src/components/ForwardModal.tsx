@@ -22,6 +22,7 @@ type Target = { key: string; kind: 'room'; rid: string; label: string; sub: Subs
 interface Candidate {
   target: Target;
   reason?: string; // linha desativada
+  check?: string; // conversa cujas regras o servidor confere (chat.forwardTargets)
 }
 
 interface Failure {
@@ -48,6 +49,10 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
   const [summary, setSummary] = useState('');
   const [listOpen, setListOpen] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Motivos do servidor para as conversas listadas (silêncio, DM bloqueada pela política e as outras regras de envio): a
+  // inscrição não traz esses sinais. Uma vez por conversa enquanto a janela está aberta; null: dá para enviar.
+  const [checked, setChecked] = useState<Record<string, string | null>>({});
+  const asked = useRef(new Set<string>());
 
   useEffect(() => {
     if (!term.trim()) {
@@ -77,7 +82,7 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
     if (ro && !s.notice && !canWithRoles('post-readonly', [...me.roles, ...s.roles])) return 'Esta sala é somente leitura.';
     if ((room as { muted?: string[] } | undefined)?.muted?.includes(me.username)) return 'Você está silenciado nesta sala.';
     if (room?.direct?.canSend === false) return room.direct.sendBlockedReason || 'Você não pode enviar mensagens nesta conversa.';
-    return undefined;
+    return checked[s.rid] ?? undefined;
   };
 
   const full = picked.length >= FORWARD_MAX_TARGETS;
@@ -91,7 +96,7 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
     const roomCands = (q ? all.filter((s) => foldText(`${s.fname || ''} ${s.name || ''}`).includes(q)) : recent)
       .filter((s) => !pickedKeys.has(`r:${s.rid}`))
       .slice(0, 8)
-      .map<Candidate>((s) => ({ target: { key: `r:${s.rid}`, kind: 'room', rid: s.rid, label: s.fname || s.name, sub: s }, reason: roomReason(s) }));
+      .map<Candidate>((s) => ({ target: { key: `r:${s.rid}`, kind: 'room', rid: s.rid, label: s.fname || s.name, sub: s }, reason: roomReason(s), check: s.rid }));
     // Pessoas: sem quem já tem a DM listada nas conversas.
     const listedDm = new Set(roomCands.filter((c) => c.target.kind === 'room' && c.target.sub.t === 'd').map((c) => (c.target as { sub: Subscription }).sub.name));
     const userCands = q
@@ -104,13 +109,34 @@ export function ForwardModal({ m, onClose }: { m: Message; onClose: () => void }
             return {
               target: { key: `u:${u.username.toLowerCase()}`, kind: 'user', username: u.username, label: u.name || u.username, userId: u._id },
               reason: (dm && roomReason(dm)) || (st.kind !== 'open' ? st.text : undefined),
+              check: dm?.rid,
             };
           })
       : [];
     return { rooms: roomCands, users: userCands };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subs, rooms, term, people, picked, direct]);
+  }, [subs, rooms, term, people, picked, direct, checked]);
   const flat = [...sections.rooms, ...sections.users];
+  const toCheck = [...new Set(flat.map((c) => c.check).filter((rid): rid is string => !!rid && !asked.current.has(rid)))].join(',');
+  useEffect(() => {
+    if (!toCheck) return;
+    const t = setTimeout(() => {
+      const rids = toCheck.split(',').filter((rid) => !asked.current.has(rid));
+      if (!rids.length) return;
+      rids.forEach((rid) => asked.current.add(rid));
+      api
+        .get('chat.forwardTargets', { rids })
+        .then((r: { targets: { rid: string; reason?: string }[] }) =>
+          setChecked((c) => {
+            const next = { ...c };
+            for (const x of r.targets) next[x.rid] = x.reason ?? null;
+            return next;
+          }),
+        )
+        .catch(() => {}); // sem a resposta, vale o que a lista já sabe (o envio confere de novo)
+    }, 120);
+    return () => clearTimeout(t);
+  }, [toCheck]);
   const reasonOf = (c: Candidate) => c.reason ?? (full ? `Até ${FORWARD_MAX_TARGETS} destinos por vez.` : undefined);
   const add = (c: Candidate) => {
     if (reasonOf(c)) return;

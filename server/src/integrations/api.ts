@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { b, paging, q, route, str } from '../api/http';
+import { b, errorHandler, paging, q, route, str } from '../api/http';
 import { badRequest } from '../lib/errors';
 import { integrationsCoreRoutes } from './core-api';
 import { jiraRoutes } from './jira/api';
@@ -52,8 +52,11 @@ export function integrationsRoutes(app: FastifyInstance) {
     if (!id || !token) throw badRequest('error-invalid-integration', 'URL inválida.');
     return handleIncoming(id, token, { body: req.body, headers: req.headers, url: req.url, query: req.query ?? {} });
   };
-  app.post('/hooks/:id/:token', incoming);
-  app.get('/hooks/:id/:token', incoming);
+  // Corpo que não é JSON válido: resposta em português para quem montou a chamada (antes, o texto do Fastify em inglês).
+  const hookErrors = (err: any, req: any, reply: any) =>
+    errorHandler(err?.code === 'FST_ERR_CTP_INVALID_JSON_BODY' ? badRequest('error-invalid-payload', 'O corpo da requisição não é um JSON válido.') : err, req, reply);
+  app.post('/hooks/:id/:token', { errorHandler: hookErrors }, incoming);
+  app.get('/hooks/:id/:token', { errorHandler: hookErrors }, incoming);
   // Formulários (formato do Slack) chegam como application/x-www-form-urlencoded.
   app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) => {
     try {

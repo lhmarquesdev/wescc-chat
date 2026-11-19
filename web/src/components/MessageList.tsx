@@ -1,11 +1,13 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { Message, Subscription } from '@shared/index';
 import { watchAcks } from '../lib/acks';
-import { api } from '../lib/api';
+import { api, errorMessage, noConnection } from '../lib/api';
+import { onReconnectWhileShown } from '../lib/catchup';
+import { readHeld, releaseRead } from '../lib/markUnread';
 import { formatDateTime, formatDay, formatTime, nameList, plural, roomDisplayName, roomIconName } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
-import { continuesGroup, joinsText } from '../lib/messageRules';
+import { continuesGroup, joinsText, messageHref } from '../lib/messageRules';
 import { rememberName, useNames } from '../lib/names';
 import { useSetting, useStore } from '../lib/store';
 import { AckBar } from './AckBar';
@@ -74,6 +76,7 @@ export function MessageList({
   actions,
   canModerate,
   notice,
+  threadOpen,
 }: {
   rid: string;
   sub?: Subscription;
@@ -81,6 +84,8 @@ export function MessageList({
   canModerate: boolean;
   // Canal de avisos: "Ciente" ligado e se quem vê publica aqui.
   notice?: { ack: boolean; canPost: boolean };
+  // Tópico aberto ao lado: o ?msg= é a resposta destacada no painel dele, não um destino desta lista.
+  threadOpen?: boolean;
 }) {
   const data = useStore((s) => s.messages[rid]);
   const meId = useStore((s) => s.me?._id);
@@ -110,9 +115,21 @@ export function MessageList({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [unreadSince] = useState(() => (sub && sub.unread > 0 ? sub.ls : null));
   const [params, setParams] = useSearchParams();
-  const jumpTo = params.get('msg');
+  const navigate = useNavigate();
+  const jumpTo = threadOpen ? null : params.get('msg');
   const jumpRef = useRef(jumpTo);
   jumpRef.current = jumpTo;
+  // Indo até a mensagem do ?msg= e a rolagem até ela ainda não aconteceu: as rolagens do navegador nesse meio-tempo
+  // (o painel da busca que fecha, a lista trocada que encolhe) não contam como "chegou ao fim, volta ao recente".
+  const jumping = useRef(!!jumpTo);
+  // A lista não chega à última mensagem (link para uma antiga, primeira não lida): no fim dela, carrega as seguintes.
+  const newerRef = useRef(!!data?.hasNewer);
+  newerRef.current = !!data?.hasNewer;
+  const loadingNewer = useRef(false);
+  // Página de mensagens seguintes entrando no fim: não conta como mensagem nova nem fixa a lista no fim.
+  const paging = useRef(false);
+  // Aberta com não lidas: a divisória "Novas mensagens" fica no alto da tela quando ela está acima do que se vê.
+  const toUnread = useRef(!jumpTo && !!unreadSince);
   const groupingPeriod = useSetting<number>('Message_GroupingPeriod') ?? 300;
   // Avisos antigos podem pedir "Ciente" mesmo depois que a opção foi desligada no canal.
   const hasAck = list.some((m) => m.ackRequired);
@@ -129,36 +146,101 @@ export function MessageList({
   };
 
   const [failed, setFailed] = useState(false);
-  const load = useCallback(async () => {
+  const load = useCallback(async (fromUnread = false) => {
     setFailed(false);
     try {
+      // Muitas não lidas (a primeira fica fora das últimas 50): abre nela; as de depois carregam ao rolar até o fim.
+      if (fromUnread && unreadSince) {
+        const u = await api.get('rooms.history', { roomId: rid, oldest: unreadSince, count: 50 });
+        if (u.messages.length === 50) {
+          seen.current = null;
+          atBottom.current = false;
+          useStore.getState().setMessages(rid, u.messages.slice().reverse(), true, true);
+          return;
+        }
+      }
       const r = await api.get('rooms.history', { roomId: rid, count: 50 });
       seen.current = null;
       useStore.getState().setMessages(rid, r.messages.slice().reverse(), r.messages.length === 50);
     } catch {
       setFailed(true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rid]);
+
+  // A sala foi aberta de novo: "Marcar como não lida" (que saiu dela) deixa de segurar a leitura.
+  useEffect(() => {
+    releaseRead(rid);
   }, [rid]);
 
   useEffect(() => {
-    atBottom.current = !jumpTo;
+    atBottom.current = !jumpTo && !useStore.getState().messages[rid]?.hasNewer;
+    jumping.current = !!jumpTo;
     if (jumpTo) {
-      void api.get('chat.getMessagesAround', { msgId: jumpTo, count: 30 }).then((r) => {
+      // A rolagem até a mensagem chega no quadro seguinte: só então as rolagens voltam a contar como "chegou ao fim".
+      const done = () => {
+        if (jumpRef.current === jumpTo) jumping.current = false;
+      };
+      void (async () => {
+        const r = await api.get('chat.getMessagesAround', { msgId: jumpTo, count: 30 });
         const msgs: Message[] = r.messages.slice().reverse();
+        const target = msgs.find((x) => x._id === jumpTo);
+        if (!target) {
+          // Resposta de um tópico (link antigo, Arquivos): abre o tópico com ela destacada.
+          const m: Message | undefined = (await api.get('chat.getMessage', { msgId: jumpTo })).message;
+          if (m?.tmid) return navigate(messageHref(location.pathname.split('/thread/')[0], m), { replace: true });
+        }
+        if (jumpRef.current !== jumpTo) return;
         seen.current = null;
-        useStore.getState().setMessages(rid, msgs, true);
+        // Mais 30 depois do destino: pode haver outras até a última, que carregam ao rolar até o fim.
+        const after = target ? msgs.length - 1 - msgs.indexOf(target) : 0;
+        useStore.getState().setMessages(rid, msgs, true, after >= 30);
         requestAnimationFrame(() => {
           document.getElementById(`msg-${jumpTo}`)?.scrollIntoView({ block: 'center' });
           atBottom.current = false;
           setFlash(jumpTo);
           setTimeout(() => setFlash((f) => (f === jumpTo ? null : f)), 2500);
+          requestAnimationFrame(done);
         });
+      })().catch((e) => {
+        done();
+        // Mensagem apagada (ou sem acesso): a sala abre nas últimas, com o motivo.
+        useStore.getState().toast(errorMessage(e), 'error');
+        if (jumpRef.current === jumpTo) leaveJump();
       });
     } else if (!data?.loaded) {
-      void load();
+      void load(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rid, jumpTo]);
+
+  // Reconexão: o que chegou (ou mudou) enquanto a conexão estava fora. Até a busca terminar, a sala não é marcada
+  // como lida, para o contador não sumir com mensagens que a pessoa nem viu. Num link para uma mensagem (?msg=) ou numa
+  // lista que não chega à última, a volta para o fim (ou a página seguinte) já busca do servidor.
+  const catchingUp = useRef(false);
+  useEffect(
+    () =>
+      onReconnectWhileShown('room', rid, () => {
+        const cur = useStore.getState().messages[rid];
+        if (jumpRef.current || cur?.hasNewer) return;
+        if (!cur?.loaded) return void load();
+        catchingUp.current = true;
+        api
+          .get('rooms.history', { roomId: rid, count: 50 })
+          .then((r) => {
+            catchingUp.current = false;
+            useStore.getState().mergeLatest(rid, r.messages.slice().reverse(), r.messages.length === 50);
+          })
+          .catch((e) => {
+            // Caiu de novo: a próxima reconexão tenta outra vez (e até lá não marca como lida). Outro erro (o servidor
+            // recusou): carrega a sala de novo, sem deixar a leitura presa até a próxima queda.
+            if (noConnection(e)) return;
+            catchingUp.current = false;
+            void load();
+          });
+      }),
+    [rid, load],
+  );
 
   // As mensagens desta sala saíram da memória com a conversa aberta (a pessoa saiu e voltou): carrega de novo.
   const hadData = useRef<string | null>(data ? rid : null);
@@ -175,15 +257,29 @@ export function MessageList({
     const el = scroller.current;
     if (!el) return;
     const last = list[list.length - 1];
-    const appended = !!last && !!lastId.current && last._id !== lastId.current && list.some((x) => x._id === lastId.current);
+    const paged = paging.current;
+    const appended = !paged && !!last && !!lastId.current && last._id !== lastId.current && list.some((x) => x._id === lastId.current);
+    paging.current = false;
+    // A página seguinte entrou embaixo: a pessoa fica onde estava (no fim só se a página couber na tela).
+    if (paged) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     if (appended && last.u._id === meId && !jumpRef.current) atBottom.current = true; // quem envia vai para o fim
     if (prepend.current !== null) {
       el.scrollTop = el.scrollHeight - prepend.current;
       prepend.current = null;
       autoTop.current = el.scrollTop;
-    } else if (atBottom.current && !jumpRef.current) {
+    } else if (atBottom.current && !jumpRef.current && !newerRef.current) {
       el.scrollTop = el.scrollHeight;
       autoTop.current = el.scrollTop;
+    }
+    if (toUnread.current && data?.loaded) {
+      toUnread.current = false;
+      const sep = el.querySelector<HTMLElement>('.unread-sep');
+      const off = sep ? sep.getBoundingClientRect().top - el.getBoundingClientRect().top : 0;
+      if (sep && (off < 0 || newerRef.current)) {
+        el.scrollTop += off - 8;
+        autoTop.current = el.scrollTop;
+        atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      }
     }
     measure();
     if (appended && !atBottom.current) {
@@ -205,7 +301,7 @@ export function MessageList({
     const c = content.current;
     if (!el || !c || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => {
-      if (atBottom.current && !jumpRef.current && prepend.current === null) {
+      if (atBottom.current && !jumpRef.current && !newerRef.current && prepend.current === null) {
         el.scrollTop = el.scrollHeight;
         autoTop.current = el.scrollTop;
       }
@@ -221,7 +317,7 @@ export function MessageList({
     loadingRef.current = true;
     setLoadingOlder(true);
     try {
-      const r = await api.get('rooms.history', { roomId: rid, latest: list[0].ts, count: 50 });
+      const r = await api.get('rooms.history', { roomId: rid, latest: list[0].ts, latestId: list[0]._id, count: 50 });
       const el = scroller.current;
       if (el) prepend.current = el.scrollHeight - el.scrollTop;
       useStore.getState().prependMessages(rid, r.messages.slice().reverse(), r.messages.length === 50);
@@ -231,11 +327,40 @@ export function MessageList({
     }
   };
 
-  // Marca como lida quando a janela está em foco e o fim da lista está visível.
+  // As seguintes, no fim de uma lista que não chega à última mensagem. A última página (menos de 50) fecha a lista.
+  const loadNewer = async () => {
+    const cur = useStore.getState().messages[rid];
+    const last = cur?.list[cur.list.length - 1];
+    if (loadingNewer.current || !cur?.hasNewer || !last) return;
+    loadingNewer.current = true;
+    try {
+      const r = await api.get('rooms.history', { roomId: rid, oldest: last.ts, oldestId: last._id, count: 50 });
+      const page: Message[] = r.messages.slice().reverse();
+      for (const x of page) seen.current?.add(x._id);
+      // Página vazia (as não lidas eram múltiplo de 50): a pessoa já está na última mensagem, e a sala fica lida.
+      if (page.length) paging.current = true;
+      useStore.getState().appendMessages(rid, page, r.messages.length === 50);
+    } catch {
+      // tenta de novo na próxima rolagem até o fim
+    } finally {
+      loadingNewer.current = false;
+    }
+  };
+
+  // Enviou daqui com a lista longe do fim: volta para as últimas mensagens, onde a dela aparece.
+  const toLatestAsk = data?.toLatest;
+  useEffect(() => {
+    if (toLatestAsk) leaveJump();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toLatestAsk]);
+
+  // Marca como lida quando a janela está em foco e o fim da lista (a última mensagem) está visível.
   useEffect(() => {
     const mark = () => {
       const s = useStore.getState().subscriptions[rid];
-      if (!s || !document.hasFocus() || !atBottom.current) return;
+      const cur = useStore.getState().messages[rid];
+      // Antes de a lista carregar não há o que estar à vista (abrir com 120 não lidas marcava todas na hora).
+      if (!s || !cur?.loaded || cur.hasNewer || !document.hasFocus() || !atBottom.current || readHeld(rid) || catchingUp.current) return;
       if (s.unread > 0 || s.alert || s.userMentions > 0) void api.post('subscriptions.read', { rid }).catch(() => {});
     };
     mark();
@@ -248,8 +373,10 @@ export function MessageList({
   }, [rid]);
 
   const leaveJump = () => {
-    params.delete('msg');
-    setParams(params, { replace: true });
+    if (params.has('msg') && !threadOpen) {
+      params.delete('msg');
+      setParams(params, { replace: true });
+    }
     atBottom.current = true;
     void load();
   };
@@ -294,14 +421,19 @@ export function MessageList({
   const onScroll = () => {
     const el = scroller.current!;
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-    atBottom.current = dist < 80;
+    atBottom.current = dist < 80 && !jumping.current;
     setFar(dist > 400);
     const user = autoTop.current === null || Math.abs(el.scrollTop - autoTop.current) > 1;
     autoTop.current = null;
     markStuck(user);
     if (atBottom.current) setFreshCount(0);
     if (el.scrollTop < 120) void loadOlder();
-    if (atBottom.current && jumpTo) leaveJump();
+    if (atBottom.current && newerRef.current) void loadNewer();
+    else if (atBottom.current && jumpTo) {
+      // Chegou à última mensagem a partir de um link: a lista já é a de sempre, só o destino sai do endereço.
+      params.delete('msg');
+      setParams(params, { replace: true });
+    }
   };
 
   // Setas entre mensagens a partir do nome (ou da hora, nas agrupadas): dá para chegar à barra de ações de qualquer
@@ -319,7 +451,7 @@ export function MessageList({
   };
 
   const toLatest = () => {
-    if (jumpTo) return leaveJump();
+    if (jumpTo || newerRef.current) return leaveJump();
     const el = scroller.current;
     if (!el) return;
     const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -506,7 +638,7 @@ export function MessageList({
             <EphemeralRow key={`eph-${e._id}`} m={e} />
           ))}
       </div>
-      {(far || fresh > 0 || !!jumpTo) && (
+      {(far || fresh > 0 || !!jumpTo || !!data.hasNewer) && (
         <div className="jump-wrap">
           <button type="button" className="jump-pill" onClick={toLatest}>
             <Icon name="jump-latest" size={16} />

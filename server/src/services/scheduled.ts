@@ -1,8 +1,9 @@
 import type { Message } from '@shared/index';
-import { AHEAD_ERROR, aheadError, encryptedContent, SCHEDULE_LATE_MINUTES, SCHEDULED_MAX, type ScheduledMessage } from '@shared/messages';
+import { AHEAD_ERROR, aheadError, encryptedContent, SCHEDULE_LATE_MINUTES, SCHEDULE_THREAD_GONE, SCHEDULED_MAX, type ScheduledMessage } from '@shared/messages';
 import { many, one, query, tx } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
+import { hasVisibleText } from '../lib/sanitize';
 import { bus } from '../realtime/bus';
 import { canPostInRoom, getMessageRow, MENTION_RE, sendMessage, withExtra } from './messages';
 import { getUserRoles, hasPermission, rolesHavePermission } from './permissions';
@@ -47,7 +48,7 @@ function publish(row: any, action: 'upserted' | 'removed', extra: { messageId?: 
 
 function cleanText(msg: unknown): string {
   const text = typeof msg === 'string' ? msg.trim() : '';
-  if (!text) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  if (!hasVisibleText(text)) throw badRequest('error-invalid-message', 'Mensagem vazia.');
   const max = getSetting<number>('Message_MaxAllowedSize');
   if (text.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
   if (text.startsWith('/')) throw badRequest('error-schedule-command', 'Comandos não podem ser agendados.');
@@ -94,11 +95,11 @@ export async function scheduleMessage(ctx: Ctx, input: ScheduleInput, sendAt: un
   }
   let tmid: string | null = input.tmid || null;
   if (tmid) {
-    if (!getSetting('Threads_enabled')) throw badRequest('error-threads-disabled', 'Threads estão desativadas.');
+    if (!getSetting('Threads_enabled')) throw badRequest('error-threads-disabled', 'Os tópicos estão desativados.');
     let parent = await getMessageRow(tmid);
-    if (!parent || parent.room_id !== room.id) throw badRequest('error-invalid-thread', 'Thread inválida.');
+    if (!parent || parent.room_id !== room.id) throw badRequest('error-invalid-thread', 'Tópico inválido.');
     if (parent.tmid) parent = await getMessageRow(parent.tmid); // resposta de resposta vira a raiz
-    if (!parent) throw badRequest('error-invalid-thread', 'Thread inválida.');
+    if (!parent) throw badRequest('error-invalid-thread', 'Tópico inválido.');
     tmid = parent.id;
   }
   checkGroupMentions(msg, roles, room);
@@ -133,9 +134,11 @@ async function ownRow(ctx: Ctx, id: string) {
   return row;
 }
 
-export async function updateScheduled(ctx: Ctx, id: string, patch: { msg?: unknown; sendAt?: unknown }): Promise<ScheduledMessage> {
+// tmid: null tira do tópico (a resposta vai para a conversa); outro tópico não dá para escolher.
+export async function updateScheduled(ctx: Ctx, id: string, patch: { msg?: unknown; sendAt?: unknown; tmid?: null }): Promise<ScheduledMessage> {
   const cur = await ownRow(ctx, id);
   if (cur.status === 'sending') throw sendingError();
+  const outOfThread = patch.tmid === null && !!cur.tmid;
   const msg = patch.msg !== undefined ? cleanText(patch.msg) : cur.msg;
   const at = patch.sendAt !== undefined ? checkSendAt(patch.sendAt) : cur.send_at;
   // Sem horário novo, o guardado precisa ainda estar à frente (uma que falhou por atraso volta com outro horário).
@@ -144,6 +147,7 @@ export async function updateScheduled(ctx: Ctx, id: string, patch: { msg?: unkno
   if (room) checkGroupMentions(msg, await getUserRoles(ctx.userId, room.id), room);
   const row = await one(
     `UPDATE scheduled_messages SET msg = $3, send_at = $4, status = 'pending', error = NULL, attempts = 0, claimed_at = NULL, updated_at = now()
+       ${outOfThread ? ', tmid = NULL, tshow = false' : ''}
       WHERE id = $1 AND user_id = $2 AND status <> 'sending' RETURNING *`,
     [id, ctx.userId, msg, at],
   );
@@ -220,6 +224,8 @@ async function deliver(row: any, reqCtx?: Ctx): Promise<Message> {
     // Reconfere tudo na hora: inscrição, somente leitura e aviso, silêncio, arquivada, DM restrita, "Ciente", tópico, @all, tamanho.
     message = (await sendMessage(ctx, { _id: row.id, rid: room.id, msg: row.msg, tmid: row.tmid, tshow: row.tshow, ackRequired: row.ack_required }, { skipCommands: true })) as Message;
   } catch (e) {
+    // A raiz do tópico foi apagada: o motivo diz isso, e o painel oferece enviar na conversa.
+    if (e instanceof ApiError && e.errorType === 'error-invalid-thread' && row.tmid) e = badRequest('error-invalid-thread', SCHEDULE_THREAD_GONE);
     if (e instanceof ApiError) {
       await markFailed(row, e.message, fromScheduler);
       throw e;
@@ -236,9 +242,11 @@ async function deliver(row: any, reqCtx?: Ctx): Promise<Message> {
   return message;
 }
 
-export async function sendScheduledNow(ctx: Ctx, id: string): Promise<Message> {
+// inRoom: "Enviar na conversa" (a resposta cujo tópico foi apagado sai fora do tópico).
+export async function sendScheduledNow(ctx: Ctx, id: string, opts: { inRoom?: boolean } = {}): Promise<Message> {
   const row = await one(
     `UPDATE scheduled_messages SET status = 'sending', attempts = attempts + 1, claimed_at = now(), updated_at = now()
+       ${opts.inRoom ? ', tmid = NULL, tshow = false' : ''}
       WHERE id = $1 AND user_id = $2 AND status IN ('pending', 'failed') RETURNING *`,
     [id, ctx.userId],
   );

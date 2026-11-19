@@ -7,10 +7,14 @@ import { useStore } from '../lib/store';
 import { Field, Modal } from './ui';
 
 // "Lembrar-me desta mensagem": atalhos de horário ou data e hora à escolha. Só a própria pessoa vê.
-export function ReminderModal({ m, onClose }: { m: Message; onClose: () => void }) {
+// startCustom: abre já na data e hora (o "Escolher data e hora…" da página Lembretes).
+export function ReminderModal({ m, onClose, startCustom = false }: { m: Message; onClose: () => void; startCustom?: boolean }) {
   const reminder = useStore((s) => s.reminders.find((r) => r.messageId === m._id));
-  const [custom, setCustom] = useState(false);
-  const [value, setValue] = useState(() => toLocalInput(new Date(Date.now() + 3600_000)));
+  const [custom, setCustom] = useState(startCustom);
+  // Trocar o horário de um lembrete que ainda vai avisar começa no horário dele.
+  const [value, setValue] = useState(() =>
+    toLocalInput(reminder && !reminder.firedAt && new Date(reminder.remindAt).getTime() > Date.now() + AHEAD_MIN_MS ? new Date(reminder.remindAt) : new Date(Date.now() + 3600_000)),
+  );
   const [busy, setBusy] = useState(false);
   const now = new Date();
   const toast = useStore.getState().toast;

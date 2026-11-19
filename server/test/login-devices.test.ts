@@ -202,7 +202,7 @@ describe('login em dispositivo novo', () => {
     await settle();
     expect(await devices(u.id)).toHaveLength(1);
     expect(outbox).toHaveLength(0);
-    const ok = await browserLogin(u.username, { code: totpCode(secret) });
+    const ok = await browserLogin(u.username, { code: totpCode(secret, Date.now() + 30_000) }); // o da ativação já foi usado
     expect(ok.auth).toBeTruthy();
     await announced(u.id, 1);
     expect(outbox).toHaveLength(1);
@@ -282,6 +282,28 @@ describe('login em dispositivo novo', () => {
     expect(rows.some((d) => d.device_hash === 'velho1')).toBe(true);
     // Já havia dispositivos: o login avisa.
     await announced(u.id, 1);
+  });
+});
+
+describe('nome do dispositivo', () => {
+  it('iPhone e iPad são iOS (não macOS); Chrome, Firefox e Edge de celular têm o nome certo', async () => {
+    const u = await account();
+    const cases: [string, string][] = [
+      ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1', 'Safari em iOS'],
+      ['Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1', 'Safari em iOS'],
+      ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/119.0.6045.169 Mobile/15E148 Safari/604.1', 'Chrome em iOS'],
+      ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/120.0 Mobile/15E148 Safari/605.1.15', 'Firefox em iOS'],
+      ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 EdgiOS/120.0.2210.84 Mobile/15E148 Safari/605.1.15', 'Edge em iOS'],
+      ['Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EdgA/120.0.0.0', 'Edge em Android'],
+      ['Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36', 'Chrome em Android'],
+      [FIREFOX_MAC, 'Firefox em macOS'],
+      [CHROME, 'Chrome em Windows'],
+    ];
+    for (const [ua, name] of cases) {
+      const { auth } = await browserLogin(u.username, { ua });
+      const s = (await api('GET', 'sessions.list', {}, auth)).sessions.find((x: any) => x.current);
+      expect(s.device.name).toBe(name);
+    }
   });
 });
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import type http from 'node:http';
@@ -17,11 +18,14 @@ import { chatRoutes } from './api/chat';
 import { e2eRoutes } from './api/e2e';
 import { messageToolsRoutes } from './api/messageTools';
 import { authenticate, errorHandler } from './api/http';
+import { cleanInput } from './lib/sanitize';
+import { assetCacheHeaders, compressJson } from './lib/compress';
 import { roomsRoutes } from './api/rooms';
 import { usersRoutes } from './api/users';
 import { ApiError } from './lib/errors';
 import { registerWebsocket } from './realtime/ws';
 import { isCorsOriginAllowed } from './services/origins';
+import { hasPermission } from './services/permissions';
 import { getSetting } from './services/settings';
 import { MAX_HEADER_SIZE, safeReq } from './tls';
 
@@ -55,11 +59,14 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   });
   await app.register(rateLimit, {
     global: true,
-    max: () => (getSetting('API_Enable_Rate_Limiter') ? getSetting<number>('API_Enable_Rate_Limiter_Limit_Calls_Default') : 1_000_000),
+    // Um valor salvo antes da validação (0, negativo) não trava todo mundo: no mínimo 10 por minuto.
+    max: () => (getSetting('API_Enable_Rate_Limiter') ? Math.max(10, Number(getSetting('API_Enable_Rate_Limiter_Limit_Calls_Default')) || 300) : 1_000_000),
     timeWindow: 60_000,
     // Usuário autenticado (o hook de autenticação roda antes) ou IP; nunca o cabeçalho x-user-id sem token.
     keyGenerator: (req) => req.ctx?.userId || req.ip,
-    allowList: (req) => !req.url.startsWith('/api/'),
+    // As configurações ficam fora para quem pode alterá-las: sempre dá para desfazer um limite baixo demais.
+    allowList: async (req) =>
+      !req.url.startsWith('/api/') || (!!req.ctx?.userId && /^\/api\/v1\/settings(\?|$)/.test(req.url) && (await hasPermission(req.ctx.userId, 'edit-privileged-setting'))),
     // O plugin lança o que este construtor devolve: um ApiError passa pelo errorHandler com o texto e o errorType
     // (um objeto comum saía como { error: undefined, errorType: 'error' } e a web mostrava "Erro 429").
     errorResponseBuilder: (_req, ctx) => {
@@ -73,7 +80,33 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   app.addHook('onRequest', async (req) => {
     if (req.url.startsWith('/api/') || req.url.startsWith('/file-upload/') || req.url.startsWith('/avatar/') || req.url.startsWith('/sticker/')) await authenticate(req);
   });
+  // Corpo, consulta e parâmetros sem U+0000; nomes e tópicos sem controles de direção (lib/sanitize.ts). Corpo cru
+  // (texto ou bytes de webhooks com assinatura) fica como veio.
+  app.addHook('preValidation', async (req) => {
+    if (req.body && typeof req.body === 'object') cleanInput(req.body);
+    cleanInput(req.query);
+    cleanInput(req.params);
+  });
+  app.addHook('onSend', compressJson); // JSON da API comprimido (lib/compress.ts)
   app.setErrorHandler(errorHandler);
+  // Cabeçalhos de segurança em toda resposta: o navegador não adivinha o tipo (nosniff), o endereço completo não vai para
+  // outro site e nenhuma página do chat abre dentro de outro site (clickjacking). Quem define os seus (arquivos) fica com eles.
+  app.addHook('onSend', async (_req, reply, payload) => {
+    if (!reply.hasHeader('x-content-type-options')) reply.header('X-Content-Type-Options', 'nosniff');
+    if (!reply.hasHeader('referrer-policy')) reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    if (!reply.hasHeader('x-frame-options')) reply.header('X-Frame-Options', 'SAMEORIGIN');
+    return payload;
+  });
+  // Sem TRUST_PROXY, o X-Forwarded-For de um proxy em outra máquina é ignorado (vale o IP da conexão): avisa uma vez,
+  // com o que definir, para quem está atrás de um proxy não ficar com o IP dele em todo login e na auditoria.
+  if (config.trustProxyDefault && config.trustProxy !== false) {
+    let warned = false;
+    app.addHook('onRequest', async (req) => {
+      if (warned || !req.headers['x-forwarded-for'] || req.ip !== req.socket.remoteAddress) return;
+      warned = true;
+      app.log.warn(`X-Forwarded-For de ${req.ip} ignorado. Se o chat está atrás de um proxy reverso nesse endereço, defina TRUST_PROXY=${req.ip.replace(/^::ffff:/, '')}.`);
+    });
+  }
 
   usersRoutes(app);
   roomsRoutes(app);
@@ -116,15 +149,41 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   const notFound = (reply: FastifyReply) => reply.status(404).send({ success: false, error: 'Não encontrado.', errorType: 'error-not-found' });
   const webDist = config.webDist ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
   if (fs.existsSync(path.join(webDist, 'index.html'))) {
-    await app.register(fastifyStatic, { root: webDist, wildcard: false, index: false });
     // Relê o index.html quando o build muda (o nome dos assets muda a cada build).
     const indexPath = path.join(webDist, 'index.html');
-    let cached = { mtime: 0, html: Buffer.alloc(0) };
+    let cached = { mtime: 0, html: Buffer.alloc(0), csp: '' };
     const indexHtml = () => {
       const mtime = fs.statSync(indexPath).mtimeMs;
-      if (mtime !== cached.mtime) cached = { mtime, html: fs.readFileSync(indexPath) };
-      return cached.html;
+      if (mtime !== cached.mtime) {
+        const html = fs.readFileSync(indexPath);
+        cached = { mtime, html, csp: spaCsp(html.toString('utf8')) };
+      }
+      return cached;
     };
+    // Cada página .html tem os próprios scripts embutidos (a offline.html tem o do tema e o de tentar de novo): a política
+    // leva os hashes do arquivo servido, não os do index.html.
+    const cspByFile = new Map<string, { mtime: number; csp: string }>();
+    const cspFor = (file: string) => {
+      const src = file.replace(/\.(br|gz)$/, '');
+      if (path.resolve(src) === path.resolve(indexPath)) return indexHtml().csp;
+      const mtime = fs.statSync(src).mtimeMs;
+      const hit = cspByFile.get(src);
+      if (hit && hit.mtime === mtime) return hit.csp;
+      const csp = spaCsp(fs.readFileSync(src, 'utf8'));
+      cspByFile.set(src, { mtime, csp });
+      return csp;
+    };
+    // preCompressed: as cópias .br/.gz que o build do web grava ao lado de cada arquivo (web/vite.config.ts).
+    await app.register(fastifyStatic, {
+      root: webDist,
+      wildcard: false,
+      index: false,
+      preCompressed: true,
+      setHeaders: (reply, file) => {
+        assetCacheHeaders(reply, path.relative(webDist, file));
+        if (/\.html(?:\.(?:br|gz))?$/.test(file)) reply.header('Content-Security-Policy', cspFor(file));
+      },
+    });
     app.setNotFoundHandler((req, reply) => {
       // Upgrades de WebSocket e caminhos do servidor nunca recebem a SPA.
       if (req.method !== 'GET' || req.headers.upgrade || !isSpaPath(req.url)) return notFound(reply);
@@ -139,12 +198,34 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
       // Arquivo do build que não existe (pedaço sob demanda de um build anterior, pedido por uma aba aberta antes da
       // atualização): 404, nunca o index.html com 200. O import() falha claro e a web recarrega (vite:preloadError).
       if (/^assets(?:[/\\]|$)/.test(rel)) return notFound(reply);
-      return reply.type('text/html').header('cache-control', 'no-cache').send(indexHtml());
+      const page = indexHtml();
+      return reply.type('text/html').header('cache-control', 'no-cache').header('Content-Security-Policy', page.csp).send(page.html);
     });
   } else {
     app.setNotFoundHandler((_req, reply) => notFound(reply));
   }
   return app;
+}
+
+// Política da página do chat: só os scripts do build (e os embutidos no index.html, como o do tema, pelo hash), sem
+// plugins nem <base>, e só dentro do próprio chat. Imagens e mídia de integrações (webhooks) podem vir de fora.
+export function spaCsp(html: string): string {
+  const inline = [...html.matchAll(/<script\b(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => `'sha256-${createHash('sha256').update(m[1], 'utf8').digest('base64')}'`);
+  return [
+    "default-src 'self'",
+    ["script-src 'self'", ...inline].join(' '),
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https: http:",
+    "media-src 'self' data: blob: https: http:",
+    "font-src 'self' data:",
+    "connect-src 'self' blob: data:",
+    "worker-src 'self' blob:",
+    "frame-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+  ].join('; ');
 }
 
 // Prefixos do servidor (API, arquivos, webhooks, login externo, servidor de chamadas): um endereço errado neles responde

@@ -84,7 +84,8 @@ export async function dispatchNotifications(ctx: Ctx, room: any, row: any, menti
     const mentioned = direct || !!word || ackNotice;
     const following = followers.has(m.user_id);
     let desktop: string = prefs.desktop && prefs.desktop !== 'default' ? prefs.desktop : m.preferences?.desktopNotifications ?? (isDM ? 'all' : 'mentions');
-    if (isDM && (!prefs.desktop || prefs.desktop === 'default')) desktop = 'all';
+    // Conversa direta avisa de tudo, menos para quem escolheu "Avisar sobre: Nada" em Minha conta.
+    if (isDM && (!prefs.desktop || prefs.desktop === 'default') && m.preferences?.desktopNotifications !== 'nothing') desktop = 'all';
     const notify = desktop === 'all' ? !row.tmid || following || mentioned : desktop === 'mentions' ? mentioned || (isDM && !row.tmid) || following : false;
     if (notify) {
       bus.publish(

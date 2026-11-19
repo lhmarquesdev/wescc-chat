@@ -103,6 +103,9 @@ if (creds) setCredentials(creds);
 
 type Params = Record<string, unknown> | undefined;
 
+export const NETWORK_TEXT = 'Sem conexão com o servidor. Confira a sua rede e tente de novo.';
+export const noConnection = (e: unknown) => e instanceof ApiError && e.status === 0 && e.errorType === 'network';
+
 async function request<T = any>(method: string, path: string, data?: Params | FormData): Promise<T> {
   const headers: Record<string, string> = {};
   if (creds) {
@@ -125,7 +128,13 @@ async function request<T = any>(method: string, path: string, data?: Params | Fo
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify(data);
   }
-  const res = await fetch(url, { method, headers, body });
+  let res: Response;
+  try {
+    res = await fetch(url, { method, headers, body });
+  } catch {
+    // Sem rede ou servidor fora do ar: o navegador só diz "Failed to fetch".
+    throw new ApiError(0, 'network', NETWORK_TEXT);
+  }
   let json: any = {};
   try {
     json = await res.json();
@@ -133,7 +142,8 @@ async function request<T = any>(method: string, path: string, data?: Params | Fo
     // resposta sem corpo
   }
   if (!res.ok || json.success === false) {
-    if (res.status === 401 && path !== 'login') onUnauthorized?.();
+    // Sair com a sessão já encerrada não é uma saída forçada: logout() limpa o navegador sozinho.
+    if (res.status === 401 && path !== 'login' && path !== 'logout') onUnauthorized?.();
     if (res.status === 403 && (json.errorType === 'error-2fa-setup-required' || json.errorType === 'error-password-change-required')) setupRequired();
     throw new ApiError(res.status, json.errorType ?? 'error', readableError(res.status, json.errorType, json.error), json.details);
   }
@@ -146,6 +156,21 @@ export const api = {
   put: <T = any>(path: string, body?: Params) => request<T>('PUT', path, body ?? {}),
   del: <T = any>(path: string) => request<T>('DELETE', path),
 };
+
+// Pedido que precisa sair com a página fechando (pagehide): keepalive, sem esperar a resposta.
+export function postOnUnload(path: string, body: Record<string, unknown>) {
+  if (!creds) return;
+  try {
+    void fetch(`/api/v1/${path}`, {
+      method: 'POST',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': creds.userId, 'X-Auth-Token': creds.authToken },
+      body: JSON.stringify(body),
+    }).catch(() => {});
+  } catch {
+    // navegador sem keepalive: a varredura do servidor encerra a chamada
+  }
+}
 
 // Upload com progresso (XMLHttpRequest). Os campos vão antes do arquivo: o servidor lê o multipart em ordem.
 export function uploadTo<T = any>(path: string, file: File, fields: Record<string, string>, onProgress?: (p: number) => void, signal?: AbortSignal) {
@@ -187,6 +212,8 @@ export function uploadFile(rid: string, file: File, fields: Record<string, strin
 
 export function errorMessage(e: unknown) {
   if (e instanceof ApiError) return e.message;
+  // fetch direto (fora do request) que não chegou ao servidor
+  if (e instanceof TypeError && /failed to fetch|networkerror|load failed|network request failed/i.test(e.message)) return NETWORK_TEXT;
   if (e instanceof Error) return e.message;
   return String(e);
 }

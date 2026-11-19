@@ -154,10 +154,11 @@ describe('criptografia: contas', () => {
 
 describe('criptografia: regras puras', () => {
   it('comandos que só publicam texto: o mesmo texto do servidor', () => {
-    // O texto do /shrug leva a barra escapada para o markdown (aparece uma barra só).
-    expect(localCommandText('shrug', 'oi')).toBe('oi ¯\\\\_(ツ)_/¯');
-    expect(localCommandText('shrug', '')).toBe('¯\\\\_(ツ)_/¯');
+    // O /shrug leva uma barra só: o markdown não abre itálico depois de "\".
+    expect(localCommandText('shrug', 'oi')).toBe('oi ¯\\_(ツ)_/¯');
+    expect(localCommandText('shrug', '')).toBe('¯\\_(ツ)_/¯');
     expect(localCommandText('me', 'sai')).toBe('_sai_');
+    expect(localCommandText('me', '')).toBeNull();
     expect(localCommandText('tableflip', '')).toBe('(╯°□°）╯︵ ┻━┻');
     expect(localCommandText('unflip', '')).toBe('┬─┬ ノ( ゜-゜ノ)');
     expect(localCommandText('lennyface', '')).toBe('( ͡° ͜ʖ ͡°)');

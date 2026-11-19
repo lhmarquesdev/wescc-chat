@@ -7,6 +7,8 @@ let A: Auth;
 beforeAll(async () => {
   await startServer();
   A = await admin();
+  // Instalação nova vem com o cadastro desativado (login-security.test.ts): estes testes usam o cadastro público.
+  await api('POST', 'settings', { settings: { Accounts_RegistrationForm: 'Public' } }, A);
 });
 afterAll(stopServer);
 
@@ -42,7 +44,8 @@ describe('autenticação', () => {
     expect(ver.codes).toHaveLength(12);
     const r1 = await api('POST', 'login', { user: u.username, password: 'senha-forte-1' });
     expect(r1.errorType).toBe('totp-required');
-    const r2 = await api('POST', 'login', { user: u.username, password: 'senha-forte-1', code: totpCode(en.secret) });
+    // O código da ativação já foi usado: vale o próximo do aplicativo.
+    const r2 = await api('POST', 'login', { user: u.username, password: 'senha-forte-1', code: totpCode(en.secret, Date.now() + 30_000) });
     expect(r2.data.authToken).toBeTruthy();
     // código de backup funciona uma única vez
     const r3 = await api('POST', 'login', { user: u.username, password: 'senha-forte-1', code: ver.codes[0] });

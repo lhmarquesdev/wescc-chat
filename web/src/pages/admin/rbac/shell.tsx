@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { useNavigate } from 'react-router-dom';
 import { Icon, type IconName } from '../../../components/Icon';
 import { Segmented, Tooltip } from '../../../components/ui';
+import { leaveTo } from './leaveGuard';
 
 const nf = new Intl.NumberFormat('pt-BR');
 
@@ -56,8 +57,18 @@ export function ListStrip({
   countUnit?: [string, string];
   children?: ReactNode;
 }) {
+  // Sem espaço a faixa quebra em mais linhas: o cabeçalho da tabela, preso logo abaixo dela, acompanha a altura.
+  const strip = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = strip.current;
+    const host = el?.parentElement;
+    if (!el || !host || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => host.style.setProperty('--rbac-strip-h', `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
-    <div className="rbac-strip">
+    <div className="rbac-strip" ref={strip}>
       <div className="rbac-strip-title">
         <span className="rbac-eyebrow">{eyebrow}</span>
         <h1>{title}</h1>
@@ -86,8 +97,21 @@ export function ListStrip({
 }
 
 export function Chips<T extends string>({ value, onChange, items, label }: { value: T; onChange: (v: T) => void; items: { id: T; label: string; count?: number | string }[]; label: string }) {
+  // Trilha que rola de lado (celular): o filtro escolhido fica à vista, como o "Aguardando aprovação" aberto pelo link do e-mail.
+  const track = useRef<HTMLDivElement>(null);
+  // As contagens chegam depois e alargam os filtros: a conta refaz quando elas mudam.
+  const sizes = items.map((i) => `${i.id}:${i.count ?? ''}`).join('|');
+  useEffect(() => {
+    const box = track.current;
+    const on = box?.querySelector<HTMLElement>('[aria-checked="true"]');
+    if (!box || !on || box.scrollWidth <= box.clientWidth) return;
+    const b = box.getBoundingClientRect();
+    const r = on.getBoundingClientRect();
+    if (r.right > b.right) box.scrollLeft += r.right - b.right + 24;
+    else if (r.left < b.left) box.scrollLeft -= b.left - r.left + 24;
+  }, [value, sizes]);
   return (
-    <div className="rbac-chips" role="radiogroup" aria-label={label}>
+    <div className="rbac-chips" role="radiogroup" aria-label={label} ref={track}>
       {items.map((i) => (
         <button key={i.id} type="button" role="radio" aria-checked={value === i.id} className={value === i.id ? 'on' : ''} onClick={() => onChange(i.id)}>
           {i.label}
@@ -166,7 +190,7 @@ export function EditorShell<T extends string>({
   }, [index]);
   const back = async () => {
     if (onBack && !(await onBack())) return;
-    navigate(backTo);
+    leaveTo(navigate, backTo);
   };
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
     const n = e.key === 'ArrowRight' ? index + 1 : e.key === 'ArrowLeft' ? index - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? visible.length - 1 : null;

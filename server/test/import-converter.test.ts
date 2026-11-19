@@ -19,7 +19,7 @@ let A: Auth;
 beforeAll(async () => {
   await startServer();
   A = await admin();
-  await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: false } }, A);
+  await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: false, Accounts_RegistrationForm: 'Public' } }, A);
 });
 afterAll(() => stopServer());
 
@@ -434,11 +434,12 @@ describe('usuários', () => {
     const carlos = await newUser(A, { verified: true });
     const dani = await newUser(A, { verified: true });
     await pool.query(`UPDATE users SET auth_source = 'ldap' WHERE id = $1`, [dani.userId]);
-    // Login externo que troca o próprio e-mail (sem senha nem confirmação) para o do Otávio: o login externo não o
-    // torna confiável.
+    // Login externo com o e-mail do Otávio que ninguém confirmou (de antes de o perfil recusar a troca do e-mail sem
+    // senha): o login externo não o torna confiável.
     const oscar = await newUser(A, { verified: true });
     await pool.query(`UPDATE users SET auth_source = 'oauth', password_hash = NULL WHERE id = $1`, [oscar.userId]);
-    expect((await api('POST', 'users.updateOwnBasicInfo', { data: { email: `otavio${t}@explorer.example` } }, oscar)).success).toBe(true);
+    expect((await api('POST', 'users.updateOwnBasicInfo', { data: { email: `otavio${t}@explorer.example` } }, oscar)).status).toBe(403);
+    await pool.query(`UPDATE users SET email = $2, email_verified = false WHERE id = $1`, [oscar.userId, `otavio${t}@explorer.example`]);
     expect(await row('SELECT email_verified, auth_source FROM users WHERE id = $1', [oscar.userId])).toEqual({ email_verified: false, auth_source: 'oauth' });
     const bruno = await newUser(A);
     const { opId, result } = await convert([

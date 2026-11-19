@@ -9,9 +9,9 @@ import './e2e.css';
 
 type Block = { key: 'none' | 'locked' | 'waiting' | 'preparing' | 'unsupported' | 'error'; text: string; icon: IconName };
 
-function blockOf(status: E2eStatus, roomState: E2eRoomState | undefined, resetByAdmin = false, returned = false): Block | null {
+function blockOf(status: E2eStatus, roomState: E2eRoomState | undefined, resetByAdmin = false, returned = false, resetBySelf = false): Block | null {
   if (status === 'unsupported') return { key: 'unsupported', text: E2E_UI.unsupported, icon: 'e2e-warning' };
-  if (status === 'none') return { key: 'none', text: resetByAdmin ? E2E_UI.resetByAdmin : E2E_UI.none, icon: 'e2e-key' };
+  if (status === 'none') return { key: 'none', text: resetByAdmin ? E2E_UI.resetByAdmin : resetBySelf ? E2E_UI.resetBySelf : E2E_UI.none, icon: 'e2e-key' };
   if (status === 'locked') return { key: 'locked', text: E2E_UI.locked, icon: 'e2e-key' };
   if (status === 'loading' || !roomState || roomState === 'creating' || roomState === 'rotating') return { key: 'preparing', text: E2E_UI.preparing, icon: 'e2e-waiting' };
   if (roomState === 'waiting') return { key: 'waiting', text: returned ? E2E_UI.waitingNew : E2E_UI.waiting, icon: 'e2e-waiting' };
@@ -24,9 +24,10 @@ export function useE2eBlock(room: Room | null | undefined): Block | null {
   const status = useE2e((s) => s.status);
   const roomState = useE2e((s) => (room ? s.rooms[room._id] : undefined));
   const resetByAdmin = useStore((s) => !!s.me?.e2eResetByAdmin);
+  const resetBySelf = useStore((s) => !!s.me?.e2eResetAt);
   const returned = useE2e((s) => !!(room && s.returned[room._id]));
   if (!room?.encrypted) return null;
-  return blockOf(status, roomState, resetByAdmin, returned);
+  return blockOf(status, roomState, resetByAdmin, returned, resetBySelf);
 }
 
 // Esperando a chave com a conversa aberta: pede de novo a cada 2 minutos (com a aba à vista). Quem tem a chave entrega

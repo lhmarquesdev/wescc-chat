@@ -5,7 +5,8 @@ import type { ReactNode } from 'react';
 import type { Call, CallJoin, CallKind, CallModerationAction, CallNotice, CallParticipant, CallRoomRef, CallsConfig, CallSource, Room, ServerEvent, UserRef } from '@shared/index';
 import { CALL_LIMITS, callEndedReasonText, callNamesLabel, callPeopleLabel, callUserLabel, formatCallDuration } from '@shared/calls';
 import { cameraLimitReached } from '@shared/call-layout';
-import { api, ApiError, errorMessage } from '../api';
+import { api, ApiError, errorMessage, postOnUnload } from '../api';
+import { roomDisplayName } from '../format';
 import { nameOf } from '../names';
 import { realtime } from '../realtime';
 import { useStore } from '../store';
@@ -127,6 +128,7 @@ const ENDED_TEXT: Record<string, string> = {
   canceled: 'Chamada cancelada.',
   ended: 'Chamada encerrada.',
 };
+const LOST_LINK = 'A chamada caiu porque a sua conexão com o servidor foi perdida.';
 const NO_MIC = 'Não foi possível usar o microfone. Confira a permissão do navegador.';
 const NO_LINK = 'Sem conexão com o servidor. Tente de novo em instantes.';
 const JOIN_FAILED = 'Não foi possível entrar na chamada.';
@@ -292,12 +294,33 @@ export function answerConfirm(ok: boolean) {
   c?.resolve(ok);
 }
 
+// O que a pessoa quer fazer depois de sair da chamada atual: ligar (ou iniciar numa sala), entrar ou atender.
+type LeaveNext = { kind: 'call'; rid: string; room: Room | null; direct: boolean } | { kind: 'join' } | { kind: 'answer' };
+
 // Já em outra chamada: pergunta antes, e a próxima entrada leva leaveCurrent.
-async function leaveFirst(): Promise<boolean> {
+async function leaveFirst(next: LeaveNext = { kind: 'join' }): Promise<boolean> {
   leaveNext = false;
   if (!isInCall()) return true;
-  const name = callRoomName(get().room) || 'outra sala';
-  const ok = await confirmInCall({ title: 'Sair da chamada atual?', body: `Você está em uma chamada em ${name}. Para entrar nesta, você sai da outra.`, confirmLabel: 'Sair e entrar' });
+  const s = get();
+  const cur = s.call!;
+  // A dois: com quem (pelo nome, não pelo login); em grupo: em qual sala.
+  const where = cur.scope === 'direct' ? `com ${label(cur.caller._id === meRef()?._id ? cur.callee : cur.caller)}` : `em ${callRoomName(s.room) || 'outra sala'}`;
+  let then = 'Para entrar nesta, você sai da outra.';
+  let confirmLabel = 'Sair e entrar';
+  if (next.kind === 'call') {
+    const name = roomDisplayName(useStore.getState().subscriptions[next.rid], next.room);
+    if (next.direct) {
+      then = `Para ligar para ${name || 'esta pessoa'}, você sai dela.`;
+      confirmLabel = 'Sair e ligar';
+    } else {
+      then = `Para iniciar uma chamada${name ? ` em ${name}` : ' nesta sala'}, você sai dela.`;
+      confirmLabel = 'Sair e continuar';
+    }
+  } else if (next.kind === 'answer') {
+    then = 'Para atender esta, você sai dela.';
+    confirmLabel = 'Sair e atender';
+  }
+  const ok = await confirmInCall({ title: 'Sair da chamada atual?', body: `Você está em uma chamada ${where}. ${then}`, confirmLabel });
   if (!ok) return false;
   leaveNext = true;
   return true;
@@ -548,8 +571,12 @@ function onEngineState(state: 'connecting' | 'connected' | 'reconnecting' | 'dis
   // Desconectado.
   if (s.call?.scope === 'direct') {
     if (reason === 'failed') {
+      // A conexão direta entre os navegadores caiu: o outro lado fica sabendo que foi queda, não que desliguei.
+      const callId = s.call._id;
       toast('A conexão da chamada caiu.', 'error');
-      void leaveCall();
+      teardown();
+      set({ ...callIdle });
+      void api.post('calls.end', { callId, dropped: true }).catch(() => {});
     }
     return;
   }
@@ -776,7 +803,7 @@ async function begin(call: Call, join: CallJoin | undefined, o: { mic: boolean; 
   joinedAtLocal = Date.now();
   awayAt = 0;
   stopAway();
-  if (call.scope === 'group') markLive(call._id);
+  markLive(call._id);
   refusedOnce = false;
   retryStep = 0;
   settled = false;
@@ -875,13 +902,24 @@ async function getRoom(rid: string): Promise<Room | null> {
   }
 }
 
+// Uma ligação sendo aberta (sala, pergunta, microfone e calls.start): um clique duplo no botão não liga duas vezes.
+let opening = false;
+
 export async function openCall(rid: string, kind: CallKind): Promise<void> {
-  if (get().preflight) return;
-  const room = await getRoom(rid);
-  if (!(await leaveFirst())) return;
-  // Conversa a dois: toca na hora, como sempre (sem tela de entrada).
-  if (isDirectRoom(rid, room)) return startDirect(rid, kind);
-  set({ phase: isInCall() ? get().phase : 'preflight', preflight: { mode: 'start', rid, kind } });
+  if (get().preflight || opening) return;
+  // Já nesta chamada (o botão ainda não mudou): só mostra a janela.
+  if (isInCall() && get().call?.rid === rid) return expandCall();
+  opening = true;
+  try {
+    const room = await getRoom(rid);
+    const direct = isDirectRoom(rid, room);
+    if (!(await leaveFirst({ kind: 'call', rid, room, direct }))) return;
+    // Conversa a dois: toca na hora, como sempre (sem tela de entrada).
+    if (direct) return await startDirect(rid, kind);
+    set({ phase: isInCall() ? get().phase : 'preflight', preflight: { mode: 'start', rid, kind } });
+  } finally {
+    opening = false;
+  }
 }
 
 export async function openJoin(callId: string, rid: string): Promise<void> {
@@ -955,7 +993,7 @@ async function startDirect(rid: string, kind: CallKind) {
 export async function acceptIncoming(callId: string, audioOnly = false): Promise<void> {
   const call = get().incoming.find((c) => c._id === callId);
   if (!call) return;
-  if (!(await leaveFirst())) return;
+  if (!(await leaveFirst({ kind: 'answer' }))) return;
   const leaveCurrent = leaveNext;
   leaveNext = false;
   set((s) => ({ incoming: s.incoming.filter((c) => c._id !== callId) }));
@@ -1015,6 +1053,11 @@ export async function leaveCall(): Promise<void> {
   }
   toast(`Você saiu da chamada · ${formatCallDuration(seconds)}`, 'info', { icon: 'call-hangup' });
   await api.post('calls.leave', { callId: call._id }).catch(() => {});
+}
+
+// Sair da conta no meio da chamada a dois: desliga antes de o socket cair (sem a sessão, não há volta para esperar).
+export async function leaveDirectCallOnLogout(): Promise<void> {
+  if (get().call?.scope === 'direct' && isInCall()) await leaveCall();
 }
 
 export async function endForAll(): Promise<void> {
@@ -1271,7 +1314,50 @@ function onDirectCall(call: Call) {
     teardown();
     set({ ...callIdle });
     // Fim de chamada não é um aviso genérico: o ícone é o do telefone.
-    toast(ENDED_TEXT[call.status] ?? 'Chamada encerrada.', 'info', { icon: call.status === 'missed' || call.status === 'busy' ? 'call-missed' : 'call-hangup' });
+    toast(directEndedText(call), 'info', { icon: call.status === 'missed' || call.status === 'busy' ? 'call-missed' : 'call-hangup' });
+  }
+}
+
+// Por que a chamada a dois terminou, do meu lado.
+function directEndedText(call: Call): string {
+  // Um administrador encerrou (Administração › Chamadas): o call.notice com o nome chega depois, quando a janela já fechou.
+  if (call.endedReason === 'moderator' && call.endedByUser) return `A chamada foi encerrada por ${callUserLabel(call.endedByUser)}.`;
+  if (call.endedReason === 'dropped') {
+    if (!call.endedBy) return 'A chamada caiu: a conexão entre vocês foi perdida.';
+    if (call.endedBy === meRef()?._id) return LOST_LINK;
+    const other = call.endedBy === call.caller._id ? call.caller : call.callee;
+    return `A chamada caiu: ${other ? callUserLabel(other) : 'a outra pessoa'} perdeu a conexão.`;
+  }
+  // Ninguém atendeu e a pessoa estava offline (só a notificação push, se ativada): diz isso, não só "Sem resposta.".
+  if (call.status === 'missed' && call.callee && call.caller._id === meRef()?._id && (useStore.getState().presence[call.callee.username]?.status ?? 'offline') === 'offline') {
+    return `Sem resposta. ${callUserLabel(call.callee)} estava offline.`;
+  }
+  return ENDED_TEXT[call.status] ?? 'Chamada encerrada.';
+}
+
+// A conexão em tempo real voltou (queda curta da rede, notebook que acordou, servidor reiniciado): a chamada a dois
+// passa a usar a conexão nova para a sinalização. Se ela acabou enquanto eu estava sem conexão, fecha aqui também, com
+// o motivo (nada de chamada fantasma).
+async function reattachDirect() {
+  const s = get();
+  const call = s.call;
+  if (!call || call.scope !== 'direct' || !isInCall(call._id) || !realtime.connectionId) return;
+  const g = gen;
+  try {
+    const r = (await api.post('calls.reattach', { callId: call._id, connectionId: realtime.connectionId })) as { call: Call };
+    if (g !== gen || get().call?._id !== call._id) return;
+    if (r.call.status === 'ongoing' || r.call.status === 'ringing') return void set({ call: { ...get().call!, ...r.call } });
+    teardown();
+    set({ ...callIdle });
+    // Eu não desliguei daqui: se o fim ficou no meu nome, foi a minha queda.
+    toast(r.call.endedBy === meRef()?._id ? LOST_LINK : directEndedText(r.call), 'info', { icon: 'call-hangup' });
+  } catch (e) {
+    // Sem rede, servidor ocupado ou a conexão nova já caiu de novo: tenta na próxima reconexão (e a varredura do
+    // servidor resolve o resto). A mídia segue entre os navegadores enquanto isso.
+    if (g !== gen || !(e instanceof ApiError) || !e.status || e.status >= 500 || e.status === 429 || e.errorType === 'error-call-connection') return;
+    teardown();
+    set({ ...callIdle });
+    toast(LOST_LINK, 'info', { icon: 'call-hangup' });
   }
 }
 
@@ -1383,13 +1469,32 @@ async function loadActive() {
     const r = (await api.get('calls.active')) as { calls: Call[] };
     const me = meRef()?._id;
     const s = get();
-    const here = liveHere();
+    let here = liveHere();
+    // Aba copiada de uma aba em chamada (Duplicar guia, window.open): a marca veio junto, mas a chamada é da outra aba.
+    if (here && s.tabCall?.callId === here) {
+      markLive(null);
+      here = null;
+    }
     let rejoin: Call | null = null;
     let other: Call | null = null;
     let awayLive = false;
+    // Esta aba estava numa chamada antes de recarregar e ela já acabou: avisa, em vez de não dizer nada.
+    if (here && !isInCall() && !r.calls.some((c) => c._id === here)) {
+      markLive(null);
+      toast('A chamada terminou enquanto a página recarregava.', 'info', { icon: 'call-hangup' });
+    }
     for (const c of r.calls) {
       const mine = c.mine;
       if (c.status !== 'ongoing' && c.status !== 'ringing') continue;
+      // Chamada a dois desta aba, antes de recarregar: a conexão direta com a outra pessoa não volta. Encerra já (o
+      // outro lado fica sabendo que caiu) em vez de deixar os dois esperando.
+      if (c.scope === 'direct' && here === c._id && !isInCall()) {
+        markLive(null);
+        void api.post('calls.end', { callId: c._id, dropped: true }).catch(() => {});
+        const o = c.caller._id === me ? c.callee : c.caller;
+        toast(`A chamada${o ? ` com ${callUserLabel(o)}` : ''} terminou porque a página foi recarregada.`, 'info', { icon: 'call-hangup' });
+        continue;
+      }
       if (c.scope === 'group' && mine?.state === 'ringing' && !s.incoming.some((x) => x._id === c._id) && !isInCall(c._id)) pushIncoming(c);
       if (c.scope === 'direct' && c.status === 'ringing' && c.callee?._id === me) onDirectCall(c);
       const present = (mine?.state === 'joined' || mine?.state === 'joining') && c.scope === 'group';
@@ -1414,6 +1519,7 @@ function onEvent(ev: ServerEvent) {
   switch (ev.type) {
     case 'connected':
       if (!started) return;
+      void reattachDirect();
       void loadActive();
       clearTimeout(configTimer);
       configTimer = window.setTimeout(() => void loadConfig(), 500);
@@ -1504,6 +1610,13 @@ export function startCallStore() {
   useCallStore.subscribe((s, prev) => {
     const video = s.me.camera || s.me.screen || Object.values(s.peers).some((p) => p.camera || p.screen);
     if (s.phase !== prev.phase || s.peers !== prev.peers || s.me !== prev.me) keepAwake((s.phase === 'in-call' || s.phase === 'reconnecting') && video);
+  });
+  // Fechar ou recarregar a aba no meio da chamada a dois desliga na hora: a outra pessoa não fica esperando uma volta
+  // que não vem (a mídia morre com a página). Aba guardada no cache do navegador (persisted) ainda pode voltar.
+  addEventListener('pagehide', (e) => {
+    const s = get();
+    if (e.persisted || s.elsewhere || s.call?.scope !== 'direct' || s.call.status !== 'ongoing' || !isInCall(s.call._id)) return;
+    postOnUnload('calls.end', { callId: s.call._id });
   });
   if (useStore.getState().me) {
     // As outras abas respondem ao "quem está em chamada?" antes de oferecer o "Voltar".

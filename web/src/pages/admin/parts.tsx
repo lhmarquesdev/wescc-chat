@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { deviceLabel as sharedDeviceLabel } from '@shared/devices';
 import { Icon } from '../../components/Icon';
-import { Menu, UserAvatar } from '../../components/ui';
+import { Menu, ThLabel, UserAvatar } from '../../components/ui';
 import { formatDateTime, roleLabel } from '../../lib/format';
 
 // Peças comuns das páginas de Administração e Minha conta.
@@ -182,6 +182,22 @@ export function RowMenu({ label = 'Mais ações', children }: { label?: string; 
         {children}
       </Menu>
     </span>
+  );
+}
+
+// Cabeçalho de coluna que ordena a lista: o primeiro clique ordena de A a Z (datas: do mais antigo), o seguinte
+// inverte. A coluna ativa tem aria-sort e a seta; as outras, a seta dupla esmaecida. No celular o cabeçalho some
+// (cartões): a página oferece a ordem num seletor.
+export type SortDir = 1 | -1;
+const sortText = (kind: 'text' | 'date', dir: SortDir) => (kind === 'date' ? (dir === 1 ? 'mais antigo primeiro' : 'mais recente primeiro') : dir === 1 ? 'A a Z' : 'Z a A');
+export function SortTh({ label, kind = 'text', dir, onSort, className }: { label: string; kind?: 'text' | 'date'; dir?: SortDir; onSort: (dir: SortDir) => void; className?: string }) {
+  return (
+    <th className={className} aria-sort={dir ? (dir === 1 ? 'ascending' : 'descending') : undefined}>
+      <button type="button" className="th-sort no-press" title={dir ? `${label}: ${sortText(kind, dir)}` : `Ordenar por ${label.toLowerCase()}`} onClick={() => onSort(dir === 1 ? -1 : 1)}>
+        <ThLabel>{label}</ThLabel>
+        <Icon name={dir === 1 ? 'move-up' : dir === -1 ? 'move-down' : 'sort'} size={12} className="th-sort-icon" />
+      </button>
+    </th>
   );
 }
 

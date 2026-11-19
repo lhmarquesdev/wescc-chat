@@ -6,8 +6,10 @@ import { newId } from '../lib/ids';
 import { audit } from '../services/audit';
 import { assertCanBringIn, directParentFor, directPolicyFor } from '../services/direct';
 import { mapRoom, mapTeam } from '../services/mappers';
+import { imageType } from '../importer/pending';
 import { cleanHistory, createDiscussion, listDiscussions } from '../services/messages';
 import { hasPermission } from '../services/permissions';
+import { getInvite, INVITE_MAX_DAYS, INVITE_MAX_USES, inviteNumber, inviteStatus, listInvites, oneJoinAtATime, type InviteStatus } from '../services/invites';
 import {
   addUserToRoom,
   adminListRooms,
@@ -59,9 +61,10 @@ import {
 import { spotlight } from '../services/spotlight';
 import { actorOf } from '../services/users';
 import { b, bool, paging, q, route, str, strArray } from './http';
-import { resolveUserParam } from './users';
+import { readAvatarUpload, resolveUserParam } from './users';
 
 const PREFIX_TYPE: Record<string, 'c' | 'p'> = { channels: 'c', groups: 'p' };
+
 
 export function roomsRoutes(app: FastifyInstance) {
   // ---------- Assinaturas e salas do usuário ----------
@@ -121,17 +124,17 @@ export function roomsRoutes(app: FastifyInstance) {
       const p = await getRoom(room.prid);
       if (p) out.parent = { _id: p.id, t: p.t, name: p.name, fname: p.fname };
     }
-    out.joinCodeRequired = !!room.join_code;
+    out.joinCodeRequired = !!room.join_code && !(await hasPermission(ctx.userId, 'join-without-join-code'));
     // Calculado para quem pergunta: a web desativa o compositor e as chamadas antes do clique.
     // A discussão criada numa DM segue a política da DM para quem participa dela.
     const direct = room.t === 'd' ? room : await directParentFor(ctx, room);
-    if (direct) out.direct = await directPolicyFor(ctx, direct);
+    if (direct) out.direct = await directPolicyFor(ctx, direct, direct === room);
     return { room: out };
   });
   route(app, 'GET', 'rooms.membersOrderedByRole', {}, async (req, _rep, ctx) => {
     const room = await loadRoomForUser(ctx, str(q(req).roomId, 'roomId'));
     if (room.broadcast && !(await hasPermission(ctx.userId, 'view-broadcast-member-list', room.id))) throw forbidden();
-    return listMembers(room.id, { ...paging(q(req)), filter: q(req).filter, orderByRole: true });
+    return listMembers(room.id, { ...paging(q(req)), filter: q(req).filter, status: strArray(q(req).status), orderByRole: true });
   });
   route(app, 'POST', 'rooms.saveRoomSettings', {}, async (req, _rep, ctx) => {
     const body = b(req);
@@ -186,18 +189,16 @@ export function roomsRoutes(app: FastifyInstance) {
     return {};
   });
   route(app, 'POST', 'rooms.setAvatar', {}, async (req, _rep, ctx) => {
-    let rid = '';
-    let data: Buffer | null = null;
-    let type = '';
-    for await (const part of req.parts()) {
-      if (part.type === 'file') {
-        data = await part.toBuffer();
-        type = part.mimetype;
-      } else if (part.fieldname === 'roomId') rid = String(part.value);
-    }
+    // Até 5 MB, e a permissão conferida antes de ler o arquivo quando o roomId vem antes dele (como na web).
+    // O tipo vem do conteúdo (imageType, abaixo), não do que o navegador declarou.
+    const { data, fields } = await readAvatarUpload(req, async (f) => {
+      if (f.roomId && !(await hasPermission(ctx.userId, 'edit-room-avatar', f.roomId))) throw forbidden();
+    });
+    const rid = fields.roomId ?? '';
     if (!rid || !data) throw badRequest('error-invalid-params', 'roomId e imagem são obrigatórios.');
     if (!(await hasPermission(ctx.userId, 'edit-room-avatar', rid))) throw forbidden();
-    if (!/^image\/(png|jpeg|gif|webp)$/.test(type)) throw badRequest('error-invalid-image', 'Formato não suportado.');
+    const type = imageType(data);
+    if (!type) throw badRequest('error-invalid-image', 'Formato não suportado. Use uma imagem PNG, JPEG, GIF ou WEBP.');
     await query(
       `INSERT INTO room_avatars (room_id, content_type, data) VALUES ($1,$2,$3) ON CONFLICT (room_id) DO UPDATE SET content_type = EXCLUDED.content_type, data = EXCLUDED.data, updated_at = now()`,
       [rid, type, data],
@@ -355,6 +356,8 @@ export function roomsRoutes(app: FastifyInstance) {
   // ---------- Discussões ----------
   route(app, 'POST', 'rooms.createDiscussion', {}, async (req, _rep, ctx) => {
     const body = b(req);
+    if (body.t_name === undefined || body.t_name === null || String(body.t_name).trim() === '') throw badRequest('error-invalid-params', 'Informe o nome da discussão.');
+    if (String(body.t_name).length > 200) throw badRequest('error-invalid-params', 'O nome da discussão pode ter no máximo 200 caracteres.');
     const room = await createDiscussion(ctx, {
       prid: str(body.prid, 'prid'),
       pmid: body.pmid,
@@ -383,13 +386,18 @@ export function roomsRoutes(app: FastifyInstance) {
   });
   route(app, 'GET', 'rooms.autocomplete.channelAndPrivate', {}, async (req, _rep, ctx) => {
     const term = String(q(req).term ?? '');
+    // As regras de canAccessRoom: canal de time privado só para quem é do time. Só o que o seletor mostra (nunca o
+    // tópico, o anúncio ou a última mensagem).
     const rows = await many(
-      `SELECT r.* FROM rooms r WHERE r.t IN ('c','p') AND r.prid IS NULL AND r.name ILIKE $1
-         AND (r.t = 'c' OR EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = r.id AND s.user_id = $2))
+      `SELECT r.id, r.t, r.name, r.fname, r.team_main, r.notice FROM rooms r LEFT JOIN teams t ON t.id = r.team_id
+       WHERE r.t IN ('c','p') AND r.prid IS NULL AND r.name ILIKE $1
+         AND (EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = r.id AND s.user_id = $2)
+              OR (r.t = 'c' AND (r.team_id IS NULL OR r.team_main OR t.type IS DISTINCT FROM 1
+                  OR EXISTS (SELECT 1 FROM team_members m WHERE m.team_id = r.team_id AND m.user_id = $2))))
        ORDER BY r.name LIMIT 15`,
       [`${term}%`, ctx.userId],
     );
-    return { items: rows.map(mapRoom) };
+    return { items: rows.map((r) => ({ _id: r.id, t: r.t, name: r.name, fname: r.fname, teamMain: r.team_main, notice: !!r.notice })) };
   });
   // Busca da barra lateral (Ctrl+K): pessoas e canais públicos que ainda não estão na lista de quem pergunta.
   route(app, 'GET', 'spotlight', {}, async (req, _rep, ctx) => spotlight(ctx, str(q(req).query, 'query', { optional: true, max: 200 }) ?? ''));
@@ -404,7 +412,9 @@ export function roomsRoutes(app: FastifyInstance) {
   route(app, 'GET', 'rooms.adminRooms.getRoom', { permissions: ['view-room-administration'] }, async (req) => {
     const room = await getRoom(str(q(req).rid, 'rid'));
     if (!room) throw notFound('error-room-not-found');
-    return mapRoom(room);
+    // owners: os donos da sala (Administração › Salas troca o dono sem precisar ser membro).
+    const owners = await many(`SELECT u.id AS _id, u.username, u.name FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.room_id = $1 AND 'owner' = ANY(s.roles) ORDER BY u.username`, [room.id]);
+    return { ...mapRoom(room), owners };
   });
   // Ver a administração de salas não basta para pôr gente nelas: canal pede add-user-to-any-c-room e grupo privado
   // add-user-to-any-p-room, como no resto do chat. A regra da Operação vale dentro de addUserToRoom (assertCanBringIn).
@@ -492,7 +502,8 @@ export function roomsRoutes(app: FastifyInstance) {
   route(app, 'POST', 'teams.createRoom', {}, async (req, _rep, ctx) => {
     const body = b(req);
     const room = await createTeamRoom(ctx, await requireTeam(body), {
-      name: str(body.name, 'name'),
+      // Vazio ou inválido: a regra de nome da sala explica (validateRoomName), em vez de "parâmetro obrigatório".
+      name: String(body.name ?? ''),
       type: body.type === 'p' ? 'p' : 'c',
       members: strArray(body.members),
       readOnly: !!bool(body.readOnly),
@@ -536,10 +547,17 @@ export function roomsRoutes(app: FastifyInstance) {
   route(app, 'POST', 'findOrCreateInvite', {}, async (req, _rep, ctx) => {
     const body = b(req);
     const rid = str(body.rid, 'rid');
+    const room = await getRoom(rid);
+    if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
     if (!(await hasPermission(ctx.userId, 'create-invite-links', rid))) throw forbidden();
-    if ((await getRoom(rid))?.t === 'd') throw badRequest('error-not-allowed', 'Não é possível adicionar pessoas a uma DM existente.');
-    const days = Number(body.days ?? 1);
-    const maxUses = Number(body.maxUses ?? 0);
+    if (room.t === 'd') throw badRequest('error-not-allowed', 'Não é possível adicionar pessoas a uma DM existente.');
+    // Como no Rocket.Chat, só quem participa da sala cria link para ela (e o link vale enquanto a pessoa estiver nela).
+    if (!(await getSubscriptionRow(rid, ctx.userId))) throw forbidden('Só quem participa da sala pode criar um link de convite para ela.');
+    if (room.archived) throw badRequest('error-room-archived', 'A sala está arquivada.');
+    const days = inviteNumber(body.days, 1, INVITE_MAX_DAYS);
+    if (days === null) throw badRequest('error-invalid-params', `Prazo do convite inválido: use um número inteiro de dias, de 0 (nunca expira) a ${INVITE_MAX_DAYS}.`);
+    const maxUses = inviteNumber(body.maxUses, 0, INVITE_MAX_USES);
+    if (maxUses === null) throw badRequest('error-invalid-params', `Limite de usos inválido: use um número inteiro, de 0 (ilimitado) a ${INVITE_MAX_USES}.`);
     let inv = await one(
       `SELECT * FROM invites WHERE room_id = $1 AND user_id = $2 AND days = $3 AND max_uses = $4 AND (expires_at IS NULL OR expires_at > now()) AND (max_uses = 0 OR uses < max_uses)`,
       [rid, ctx.userId, days, maxUses],
@@ -552,12 +570,15 @@ export function roomsRoutes(app: FastifyInstance) {
     }
     return { _id: inv.id, rid, days, maxUses, uses: inv.uses, expires: inv.expires_at, url: `/invite/${inv.id}` };
   });
-  route(app, 'GET', 'listInvites', {}, async (_req, _rep, ctx) => {
-    const rows = await many(
-      `SELECT i.*, r.name FROM invites i JOIN rooms r ON r.id = i.room_id WHERE i.user_id = $1 OR $2 ORDER BY i.created_at DESC LIMIT 200`,
-      [ctx.userId, await hasPermission(ctx.userId, 'view-room-administration')],
-    );
-    return { invites: rows.map((i) => ({ _id: i.id, rid: i.room_id, roomName: i.name, days: i.days, maxUses: i.max_uses, uses: i.uses, expires: i.expires_at, createdAt: i.created_at })) };
+  route(app, 'GET', 'listInvites', {}, async (req, _rep, ctx) => {
+    const rid = str(q(req).rid, 'rid', { optional: true });
+    if (rid) {
+      // Painel da sala: todos os links dela (de qualquer pessoa), para quem participa e pode criar links ali.
+      if (!(await getRoom(rid))) throw notFound('error-room-not-found', 'Sala não encontrada.');
+      if (!(await getSubscriptionRow(rid, ctx.userId)) || !(await hasPermission(ctx.userId, 'create-invite-links', rid))) throw forbidden();
+      return { invites: await listInvites(ctx.userId, { rid }) };
+    }
+    return { invites: await listInvites(ctx.userId, { all: await hasPermission(ctx.userId, 'view-room-administration') }) };
   });
   route(app, 'DELETE', 'removeInvite/:id', {}, async (req: any, _rep, ctx) => {
     const inv = await one('SELECT * FROM invites WHERE id = $1', [req.params.id]);
@@ -566,21 +587,64 @@ export function roomsRoutes(app: FastifyInstance) {
     await query('DELETE FROM invites WHERE id = $1', [inv.id]);
     return {};
   });
+  // Sem login responde só se vale (e por que não: expired, used-up, archived ou invalid). Com login, quem já participa da
+  // sala recebe alreadyMember para a tela levar direto para ela.
   route(app, 'POST', 'validateInviteToken', { auth: false }, async (req) => {
-    const inv = await one(`SELECT i.*, r.name, r.fname, r.t FROM invites i JOIN rooms r ON r.id = i.room_id WHERE i.id = $1`, [b(req).token]);
-    const valid = !!inv && (!inv.expires_at || new Date(inv.expires_at) > new Date()) && (inv.max_uses === 0 || inv.uses < inv.max_uses);
-    return { valid, room: valid ? { _id: inv.room_id, name: inv.name, fname: inv.fname, t: inv.t } : undefined };
+    const token = b(req).token;
+    const inv = typeof token === 'string' && token ? await getInvite(token) : null;
+    if (!inv) return { valid: false, reason: 'invalid' };
+    const status = inviteStatus(inv);
+    const room = { _id: inv.room_id, name: inv.name, fname: inv.fname, t: inv.t };
+    if (req.ctx && inv.t !== 'd' && (await getSubscriptionRow(inv.room_id, req.ctx.userId))) return { valid: status === 'active', alreadyMember: true, room };
+    if (status !== 'active') return { valid: false, reason: status };
+    return { valid: true, room };
   });
   route(app, 'POST', 'useInviteToken', {}, async (req, _rep, ctx) => {
-    const inv = await one('SELECT * FROM invites WHERE id = $1', [str(b(req).token, 'token')]);
-    if (!inv || (inv.expires_at && new Date(inv.expires_at) < new Date()) || (inv.max_uses > 0 && inv.uses >= inv.max_uses))
-      throw badRequest('invalid-invite-token', 'Convite inválido ou expirado.');
-    // Quem traz a pessoa é quem criou o link.
-    const target = await getRoom(inv.room_id);
-    if (target && inv.user_id) await assertCanBringIn(inv.user_id, target, [ctx.userId], { joinerId: ctx.userId });
-    await addUserToRoom(inv.room_id, ctx.userId);
-    await query('UPDATE invites SET uses = uses + 1 WHERE id = $1', [inv.id]);
-    const room = await getRoom(inv.room_id);
-    return { room: { rid: room.id, name: room.name, fname: room.fname, t: room.t } };
+    const token = str(b(req).token, 'token');
+    // Clique duplo ou pedidos repetidos da mesma pessoa com o mesmo link: um de cada vez, e o seguinte já a encontra na
+    // sala (não gasta outro uso).
+    return oneJoinAtATime(`${token}:${ctx.userId}`, async () => {
+      const inv = await getInvite(token);
+      if (!inv) throw inviteRefused('invalid');
+      if (inv.t === 'd') throw badRequest('error-not-allowed', 'Não é possível adicionar pessoas a uma DM existente.');
+      const out = { room: { rid: inv.room_id, name: inv.name, fname: inv.fname, t: inv.t } };
+      // Quem já participa só é levado para a sala, sem gastar um uso (o link de uso único segue valendo para o convidado).
+      const sub = await getSubscriptionRow(inv.room_id, ctx.userId);
+      if (sub) {
+        if (!sub.open) await updateSubscriptionFlags(ctx, inv.room_id, { open: true });
+        return out;
+      }
+      const status = inviteStatus(inv);
+      if (status !== 'active') throw inviteRefused(status);
+      // Quem traz a pessoa é quem criou o link.
+      await assertCanBringIn(inv.user_id, await getRoom(inv.room_id), [ctx.userId], { joinerId: ctx.userId });
+      // O uso é reservado antes da entrada, com o limite e o prazo conferidos no próprio UPDATE: pedidos ao mesmo tempo
+      // não passam do limite. Se a entrada falha, o uso volta.
+      const used = await one(
+        `UPDATE invites SET uses = uses + 1 WHERE id = $1 AND (max_uses = 0 OR uses < max_uses) AND (expires_at IS NULL OR expires_at > now()) RETURNING id`,
+        [inv.id],
+      );
+      if (!used) {
+        // Dois cliques: o primeiro pedido já gastou o último uso e pôs a pessoa na sala.
+        if (await getSubscriptionRow(inv.room_id, ctx.userId)) return out;
+        const now = await getInvite(inv.id);
+        throw inviteRefused(now ? inviteStatus(now) : 'invalid');
+      }
+      try {
+        await addUserToRoom(inv.room_id, ctx.userId);
+      } catch (e) {
+        await query('UPDATE invites SET uses = GREATEST(uses - 1, 0) WHERE id = $1', [inv.id]);
+        throw e;
+      }
+      return out;
+    });
   });
+}
+
+// Por que o link não serve, em português (a tela de convite mostra o mesmo motivo antes do clique).
+function inviteRefused(status: InviteStatus) {
+  if (status === 'archived') return badRequest('error-room-archived', 'A sala está arquivada.');
+  if (status === 'expired') return badRequest('invalid-invite-token', 'Este convite expirou. Peça um novo a quem convidou você.');
+  if (status === 'used-up') return badRequest('invalid-invite-token', 'Este convite já foi usado o número máximo de vezes. Peça um novo a quem convidou você.');
+  return badRequest('invalid-invite-token', 'Convite inválido ou expirado.');
 }

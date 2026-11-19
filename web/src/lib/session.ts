@@ -1,4 +1,4 @@
-import type { CustomUserStatus, Role, ServerEvent, UserStatus } from '@shared/index';
+import type { CustomUserStatus, LogoutReason, Role, ServerEvent, UserStatus } from '@shared/index';
 import { silencesNotifications } from '@shared/status';
 import { api, getCredentials, setCredentials, setSignedOutElsewhereHandler, setUnauthorizedHandler } from './api';
 import { setCustomEmoji } from './emoji';
@@ -12,7 +12,10 @@ import { clearEphemeral, pushEphemeral } from './ephemeral';
 import { loadIntegrationsMe, resetIntegrations } from './integrations';
 import { invalidateSlashCommands } from './commands';
 import { checkBuild } from './call/build';
+import { leaveDirectCallOnLogout } from './call/store';
+import { catchUpAfterReconnect } from './catchup';
 import { decryptNotification, forgetE2eRoom, handleE2eEvent, initE2e, resetE2e } from './e2e/client';
+import { rememberLogoutReason } from './logoutReason';
 
 export async function loadPublicSettings() {
   const r = await api.get('settings.public');
@@ -35,7 +38,10 @@ export async function loadPermissionMap() {
 
 export async function loadCustomEmoji() {
   const r = await api.get('emoji-custom.list').catch(() => null);
-  if (r) setCustomEmoji(r.emojis.update);
+  if (r) {
+    setCustomEmoji(r.emojis.update);
+    useStore.setState((s) => ({ emojiVersion: s.emojiVersion + 1 }));
+  }
 }
 
 let started = false;
@@ -90,6 +96,8 @@ export async function startSession() {
       // Ao reconectar, recarrega o que pode ter mudado. Eventos "user" podem ter se perdido: os papéis anunciados
       // deixam de valer por cima do que as telas buscam.
       useStore.setState({ userRoles: {} });
+      // Mensagens que chegaram durante a queda: as salas e tópicos na tela buscam de novo; o resto sai do cache.
+      catchUpAfterReconnect();
       void loadSubscriptions();
       void loadPresence();
       void loadUserStatuses();
@@ -190,6 +198,7 @@ export const loginWithOAuth = (credentialToken: string) => loginWithSso('oauth',
 
 export async function logout() {
   // Ao sair o servidor derruba o socket e o realtime iria para /login antes do endSession: a limpeza vem antes do pedido.
+  await leaveDirectCallOnLogout();
   realtime.stop();
   clearDrafts();
   resetStickers();
@@ -223,12 +232,26 @@ function clearDrafts() {
   }
 }
 
+// Tela de entrar depois de uma saída que a pessoa não pediu: entrando de novo, ela volta para onde estava.
+function goToLogin() {
+  if (location.pathname.startsWith('/login')) return;
+  location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+}
+
+// A API recusou a sessão (venceu ou foi encerrada com o aparelho desligado): a tela de entrar diz que ela terminou.
 setUnauthorizedHandler(() => {
   if (getCredentials()) {
-    void endSession().finally(() => {
-      if (!location.pathname.startsWith('/login')) location.href = '/login';
-    });
+    rememberLogoutReason('ended');
+    void endSession().finally(goToLogin);
   }
+});
+
+// Saída forçada pelo servidor (conta desativada, administrador, outro dispositivo): o token sai do navegador (antes
+// ficava guardado, já revogado) e a tela de entrar mostra o motivo. Sem motivo (o Sair em outra aba deste navegador),
+// só volta para a tela de entrar.
+realtime.setSessionEndedHandler((reason?: LogoutReason) => {
+  rememberLogoutReason(reason);
+  void endSession().finally(goToLogin);
 });
 
 // Saiu da conta em outra aba (num computador compartilhado, a pessoa acredita ter saído de todas): esta aba também sai.

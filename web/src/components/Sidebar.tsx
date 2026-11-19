@@ -3,9 +3,10 @@ import { useFilesTab } from '../lib/files';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { Subscription, UserStatus } from '@shared/index';
 import { parseSpotlightQuery } from '@shared/search';
-import { presenceLabel, shownCustomStatus, silencesNotifications, statusLine } from '@shared/status';
+import { presenceLabel, shownCustomStatus, silencesNotifications, statusLine, STATUS_TYPE_LABEL } from '@shared/status';
 import { api, errorMessage } from '../lib/api';
-import { badgeCount, MY_STATUS_LABEL, roomIconName, roomPath } from '../lib/format';
+import { badgeCount, MY_STATUS_LABEL, plural, roomIconName, roomPath } from '../lib/format';
+import { usePendingAcks } from '../lib/acks';
 import { matchesLocal, spotlightHint } from '../lib/spotlightRules';
 import { useInstallPrompt } from '../lib/install';
 import { logout } from '../lib/session';
@@ -15,9 +16,10 @@ import { ADMIN_MENU_PERMS } from '../pages/admin/sections';
 import { BrandMark } from './BrandIcons';
 import { CreateModal, type CreateKind } from './CreateModal';
 import { Icon, type IconName } from './Icon';
-import { isMentionBadge, useForYou, type ForYouItem } from './navState';
+import { isMentionBadge, shownUnread, useForYou, type ForYouItem } from './navState';
 // Chamadas em grupo: ponto da sala com chamada viva, "Em chamada" nas conversas a dois e o selo de perdidas.
 import { CallsNavBadge, InCallBadge, RoomLiveDot } from './call/LiveIndicators';
+import { UploadsNavBadge } from './files/UploadsNavBadge';
 import { useDirectPeer } from '../lib/roomcall';
 import { useIsPhone, type Placement } from './overlay';
 import { SpotlightResults, useSpotlight, useSpotlightRows } from './Spotlight';
@@ -57,22 +59,29 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 // ---------- Item de sala ----------
 
 // onPick: na busca, abrir uma conversa termina a busca (como o Enter e as linhas de Pessoas e Canais).
-function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPick?: () => void }) {
+// team: nome do time de um canal do time (aparece apagado ao lado do nome).
+function SidebarItem({ s, big, onPick, team }: { s: Subscription; big?: boolean; onPick?: () => void; team?: string }) {
   const typing = useStore((st) => Object.keys(st.typing[s.rid] ?? {}).length > 0);
   const dmUser = s.t === 'd' && !s.name.includes(',') ? s.name : null;
   const silenced = !!s.notifications?.disableNotifications;
   const mention = isMentionBadge(s);
   // Sala silenciada ou com o contador oculto: só o selo de menção aparece.
-  const count = s.unread > 0 && (mention || (!silenced && !s.notifications?.hideUnreadStatus)) ? s.unread : 0;
+  const count = shownUnread(s);
   const kind = mention ? 'mention' : s.groupMentions > 0 ? 'group' : '';
+  // Canal de avisos já aberto, com aviso esperando o "Ciente": o selo continua até a pessoa confirmar.
+  const pending = usePendingAcks(s.rid, s.notice);
+  const ackText = pending > 0 ? plural(pending, 'aviso aguardando seu “Ciente”', 'avisos aguardando seu “Ciente”') : '';
   // Chamadas em grupo: a outra pessoa da conversa a dois, para o "Em chamada".
   const otherId = useDirectPeer(s.rid, !!dmUser);
   // Conversa oculta (só aparece na busca): abrir volta a mostrá-la na lista.
   const hidden = !s.open;
+  const label = s.fname || s.name;
   return (
     <NavLink
       to={roomPath(s)}
-      className={({ isActive }) => ['side-item', isActive && 'active', (s.alert || s.unread) && 'unread', silenced && 'silenced'].filter(Boolean).join(' ')}
+      // Nome cortado pela largura: o nome inteiro (e o time) ao parar o mouse em cima.
+      title={team ? `${label} · time ${team}` : label}
+      className={({ isActive }) => ['side-item', isActive && 'active', (s.alert || s.unread || pending) && 'unread', silenced && 'silenced'].filter(Boolean).join(' ')}
       onClick={() => {
         if (hidden) void api.post('rooms.open', { roomId: s.rid }).catch(() => {});
         onPick?.();
@@ -87,8 +96,8 @@ function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPic
           <Icon name={roomIconName(s)} size={big ? 18 : 16} />
         </span>
       )}
-      <span className="side-name">{s.fname || s.name}</span>
-      {hidden && <span className="side-hint">Oculta</span>}
+      <span className="side-name">{label}</span>
+      {hidden ? <span className="side-hint">Oculta</span> : team && <span className="side-hint side-team">{team}</span>}
       {/* Chamadas em grupo: */}
       {dmUser ? <InCallBadge userId={otherId} /> : <RoomLiveDot rid={s.rid} />}
       {typing ? (
@@ -106,6 +115,11 @@ function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPic
             </span>
           )}
           {count > 0 && <span className={kind ? `badge ${kind}` : 'badge'}>{badgeCount(count)}</span>}
+          {count === 0 && pending > 0 && (
+            <span className="badge group" title={ackText} aria-label={ackText}>
+              {badgeCount(pending)}
+            </span>
+          )}
         </>
       )}
     </NavLink>
@@ -123,6 +137,7 @@ function SideGroup({
   onSort,
   add,
   onPick,
+  teams,
 }: {
   title: string;
   items: Subscription[];
@@ -132,6 +147,7 @@ function SideGroup({
   onSort: (s: SortMode) => void;
   add?: { label: string; onClick: () => void };
   onPick?: () => void;
+  teams: Record<string, string>;
 }) {
   const key = `side.collapsed.${title}`;
   const [collapsed, setCollapsed] = useState(() => local.get(key) === '1');
@@ -184,7 +200,7 @@ function SideGroup({
         </div>
       </div>
       {shown.map((s) => (
-        <SidebarItem key={s.rid} s={s} big={big} onPick={onPick} />
+        <SidebarItem key={s.rid} s={s} big={big} onPick={onPick} team={s.teamId && !s.teamMain ? teams[s.teamId] : undefined} />
       ))}
     </div>
   );
@@ -259,7 +275,8 @@ export function useMyStatus() {
   const text = (live ? live.statusText : me.statusText) || '';
   // O personalizado de quem está invisível só a própria pessoa sabe (a presença chega sem ele): vem de me.
   const custom = !!shownCustomStatus({ status, statusCustom: me.statusCustom }, list);
-  const label = presenceLabel({ status, statusCustom: me.statusCustom }, list);
+  // Invisível escolhido: para a própria pessoa é "Invisível" (os outros veem Offline).
+  const label = !custom && status === 'offline' && me.statusDefault === 'offline' ? STATUS_TYPE_LABEL.offline : presenceLabel({ status, statusCustom: me.statusCustom }, list);
   const silenced = silencesNotifications(me.statusDefault);
   return { status, text, label, custom, silenced, line: statusLine(label, custom, text) };
 }
@@ -705,6 +722,12 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [all, subs, filter, searching, onlyUnread, sorts, canChannel, canDm]);
   const localCount = groups.reduce((n, g) => n + g.items.length, 0);
+  // Nome de cada time da pessoa (pela sala principal): os canais do time mostram a que time pertencem.
+  const teams = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const s of Object.values(subs)) if (s.teamMain && s.teamId) out[s.teamId] = s.fname || s.name;
+    return out;
+  }, [subs]);
 
   // Pessoas e canais do servidor depois das conversas (não com "Somente não lidas": ali só contam as da lista).
   const spot = useSpotlight(filter, searching && !onlyUnread);
@@ -730,10 +753,11 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
     first.click();
     return true;
   };
-  // "Abrir diretório" leva o texto da busca (com @, na aba Pessoas) e termina a busca daqui.
-  const openDirectory = () => {
+  // "Abrir diretório" leva o texto da busca (com @, na aba Pessoas) e termina a busca daqui. "Ver mais" de um grupo
+  // cortado da busca escolhe a aba (users: Pessoas).
+  const openDirectory = (users = parseSpotlightQuery(filter).scope === 'users') => {
     const q = parseSpotlightQuery(filter);
-    navigate(`/directory${q.scope === 'users' ? '/users' : ''}${q.text ? `?q=${encodeURIComponent(q.text)}` : ''}`);
+    navigate(`/directory${users ? '/users' : ''}${q.text ? `?q=${encodeURIComponent(q.text)}` : ''}`);
     finishSearch();
     onNavigate?.();
   };
@@ -776,7 +800,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
             icon="search"
             title={`Nada encontrado para “${filter.trim()}”`}
             action={
-              <button type="button" className="btn small" onClick={openDirectory}>
+              <button type="button" className="btn small" onClick={() => openDirectory()}>
                 Abrir diretório
               </button>
             }
@@ -834,7 +858,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
           {callsEnabled && <NavRow to="/calls" icon="nav-calls" label="Chamadas" extra={<CallsNavBadge />} onNavigate={onNavigate} />}
           {calendarOn && <NavRow to="/calendar" icon="nav-calendar" label="Agenda" onNavigate={onNavigate} />}
           {remindersCount > 0 && <NavRow to="/reminders" icon="nav-reminders" label="Lembretes" badge={remindersFired} onNavigate={onNavigate} />}
-          {filesOn && <NavRow to="/files" icon="nav-files" label="Arquivos" onNavigate={onNavigate} />}
+          {filesOn && <NavRow to="/files" icon="nav-files" label="Arquivos" extra={<UploadsNavBadge />} onNavigate={onNavigate} />}
           <NavRow to="/directory" icon="nav-directory" label="Diretório" onNavigate={onNavigate} />
         </nav>
       )}
@@ -902,10 +926,18 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
             onSort={(m) => setSort(g.title, m)}
             add={g.add}
             onPick={searching ? finishSearch : undefined}
+            teams={teams}
           />
         ))}
         {searching && !onlyUnread && (
-          <SpotlightResults spot={spot} localCount={localCount} big={list} onDone={spotDone} hint={spotIdle ? spotlightHint(parseSpotlightQuery(filter)) : undefined} />
+          <SpotlightResults
+            spot={spot}
+            localCount={localCount}
+            big={list}
+            onDone={spotDone}
+            hint={spotIdle ? spotlightHint(parseSpotlightQuery(filter)) : undefined}
+            onMore={openDirectory}
+          />
         )}
         {empty}
       </nav>

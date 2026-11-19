@@ -132,6 +132,8 @@
   min-width: 3ch;
   overflow: hidden;
   text-overflow: ellipsis;
+  font: inherit;
+  letter-spacing: inherit;
 }
 .room-name .pill {
   flex-shrink: 0;
@@ -257,7 +259,10 @@
 .announcement:where(.open) > .icon {
   margin-top: 1px;
 }
+/* Aberto, um anúncio longo rola dentro da faixa: as mensagens e o campo de envio continuam na tela. */
 .announcement:where(.open) .announcement-text {
+  max-height: 40vh;
+  overflow-y: auto;
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -319,11 +324,12 @@
   background: linear-gradient(to top, hsl(var(--background)), transparent);
 }
 /* Enquanto alguém digita, o fim da lista e a pílula "ir para o fim" sobem a altura da faixa: no fim da lista ela
-   nunca cobre a última mensagem. */
-:where(.room-main:has(.typing-row)) .messages-list {
+   nunca cobre a última mensagem. O data-typing vem do TypingIndicator (RoomPage): com :has() na .room-main, cada
+   tecla digitada no compositor fazia o navegador recalcular a lista de mensagens inteira. */
+:where(.room-main[data-typing]) .messages-list {
   padding-bottom: calc(var(--space-3) + 22px);
 }
-:where(.room-main:has(.typing-row)) .jump-pill {
+:where(.room-main[data-typing]) .jump-pill {
   bottom: calc(var(--space-3) + 22px);
 }
 .typing-text {
@@ -556,6 +562,11 @@
   line-height: var(--lh-12);
   color: hsl(var(--muted-foreground));
 }
+/* Busca com mais resultados do que a página: o resto vem pelo botão no fim da lista. */
+.results-more {
+  width: 100%;
+  margin-top: var(--space-2);
+}
 ::highlight(search-hit) {
   background-color: hsl(var(--st-amber-solid) / 0.35);
   color: hsl(var(--foreground));
@@ -631,6 +642,13 @@
 
 /* Membros */
 .member-group + .member-group {
+  margin-top: var(--space-4);
+}
+/* "Mostrando 100 de 215" e "Mostrar mais", no fim da lista. */
+.members-more {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
   margin-top: var(--space-4);
 }
 .group-label {
@@ -990,6 +1008,14 @@
   padding: 0 10px;
 }
 .info-actions .icon {
+  color: hsl(var(--muted-foreground));
+}
+/* "Sala arquivada. Para desarquivar, peça a um administrador." no lugar do botão. */
+.info-hint {
+  margin: 0;
+  padding: var(--space-2) 10px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
   color: hsl(var(--muted-foreground));
 }
 .info-image {
@@ -1612,4 +1638,65 @@
   .room-header .room-topic {
     display: none;
   }
+}
+
+/* ---------- Link de convite: os links da sala ---------- */
+.invite-links {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid hsl(var(--border));
+}
+.invite-links-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: var(--fw-semibold);
+}
+.invite-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.invite-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
+}
+.invite-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+.invite-top > .spacer {
+  flex: 1;
+}
+.invite-top > .icon-btn,
+.invite-top > .btn {
+  margin-block: -4px;
+}
+.invite-uses {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: var(--fw-semibold);
+  color: hsl(var(--foreground));
+}
+.invite-meta {
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: hsl(var(--muted-foreground));
+  overflow-wrap: anywhere;
 }

@@ -111,6 +111,12 @@
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
+/* A faixa de Usuários e Papéis fica numa linha quando cabe; quando não cabe, as ações descem para a linha de baixo
+   em vez de ficarem fora da tela (Novo usuário, Novo papel). */
+.rbac-strip {
+  height: auto;
+  flex-wrap: wrap;
+}
 .page-head h1,
 .rbac-strip-title h1 {
   font-family: var(--font-display);
@@ -340,7 +346,7 @@
   border: 0;
   border-radius: 999px;
   background: hsl(var(--muted-foreground) / 0.12);
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--text-2)); /* número pequeno: o cinza de apoio ficava abaixo de 4,5:1 sobre o trilho */
   font-size: 10px;
   line-height: 1;
   font-weight: 600;
@@ -406,6 +412,40 @@
   height: 14px;
   flex: none;
   color: hsl(var(--muted-foreground) / 0.7);
+}
+/* Cabeçalho que ordena (SortTh): o rótulo vira botão, com a seta da ordem à direita (esmaecida até ser escolhida). */
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline: -6px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  text-transform: inherit;
+  white-space: nowrap;
+}
+.th-sort:hover,
+.table th[aria-sort] > .th-sort {
+  color: hsl(var(--foreground));
+}
+.th-sort:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+.th-sort > .th-sort-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  opacity: 0.45;
+}
+.th-sort:hover > .th-sort-icon {
+  opacity: 0.8;
+}
+.table th[aria-sort] > .th-sort > .th-sort-icon {
+  opacity: 1;
+  color: hsl(var(--brand-ink-2));
 }
 /* Datas e números: 12px tabulares e discretos. */
 .table td.num,
@@ -724,6 +764,10 @@
   max-width: none;
   margin-inline: calc(var(--space-8) * -1);
 }
+/* O rodapé ("1 convite ativo.") sangra como a tabela e devolve o recuo: o texto alinha com a primeira coluna. */
+.page-body > .table-wrap + .table-foot {
+  padding-inline: var(--space-8);
+}
 .page-body > .page-head + .table-wrap,
 .page-body > .page-head + .table {
   margin-top: calc(var(--space-6) * -1);
@@ -752,17 +796,74 @@
 :where(.card .table-wrap .table td:first-child) {
   background: hsl(var(--card));
 }
+/* A tabela sangra só o recuo que a página tem em cada largura (24px no tablet, 16px no celular): com os 32px do
+   desktop ela passava da borda da tela e cortava os cartões. */
+@media (max-width: 1199px) {
+  .page-body > .table-wrap,
+  .page-body > .pager,
+  .page-body > .table-wrap + .table-foot {
+    margin-inline: calc(var(--space-6) * -1);
+  }
+  .page-body > .table-wrap .table :where(th, td):first-child {
+    padding-left: var(--space-6);
+  }
+  .page-body > .table-wrap .table :where(th, td):last-child {
+    padding-right: var(--space-6);
+  }
+  .page-body > .table-wrap + .table-foot {
+    padding-inline: var(--space-6);
+  }
+}
+@media (max-width: 760px) {
+  .page-body > .table-wrap,
+  .page-body > .pager,
+  .page-body > .table-wrap + .table-foot {
+    margin-inline: calc(var(--space-4) * -1);
+  }
+  .page-body > .table-wrap .table :where(th, td):first-child {
+    padding-left: var(--space-4);
+  }
+  .page-body > .table-wrap .table :where(th, td):last-child {
+    padding-right: var(--space-4);
+  }
+  .page-body > .table-wrap + .table-foot {
+    padding-inline: var(--space-4);
+  }
+  /* Em cartões (.stack) o recuo é o da linha: a primeira célula alinha com os rótulos das outras. */
+  .page-body > .table-wrap .table.stack td:where(:first-child, :last-child) {
+    padding-inline: 0;
+  }
+}
 
-/* Papéis: a faixa nunca quebra; o contador some antes de apertar as peças. */
+/* Papéis: o contador some antes de apertar as peças; sem espaço, as ações descem inteiras para a linha de baixo
+   (à direita) e, se ainda não couberem, quebram entre si. No celular valem as regras de rbac.css. */
 @media (max-width: 1640px) {
   .rbac-strip .rbac-count {
     display: none;
   }
 }
-.rbac-strip-actions {
+@media (min-width: 761px) {
+  .rbac-strip-actions {
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    min-width: 0;
+    margin-left: auto;
+  }
+}
+/* A trilha de filtros não passa da largura da faixa: sem espaço, ela rola de lado. */
+.rbac-strip-actions > .rbac-chips {
+  flex-shrink: 1;
   flex-wrap: nowrap;
-  flex: none;
-  margin-left: auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+@supports (animation-timeline: scroll()) {
+  .rbac-strip-actions > .rbac-chips {
+    animation: table-fade linear both;
+    animation-timeline: scroll(self inline);
+  }
 }
 .rbac-strip-select {
   height: 36px;
@@ -886,7 +987,9 @@
 }
 .auth-main .btn.primary {
   border-radius: 12px;
-  color: hsl(var(--primary));
+  /* Tom de texto da marca (32%, o --brand-ink-2 do claro) fixo nos dois temas: o botão é sempre branco, e o ciano
+     cheio sobre o branco ficava em 2,5:1. */
+  color: hsl(var(--brand-h) var(--brand-s) 32%);
   font-size: 14px;
   font-weight: 600;
 }

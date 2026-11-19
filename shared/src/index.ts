@@ -46,10 +46,16 @@ export interface User {
   preferences?: UserPreferences;
   createdAt: string;
   lastLogin?: string | null;
+  requirePasswordChange?: boolean; // dados completos: troca de senha exigida no próximo login
+  pendingApproval?: boolean; // dados completos: cadastro pela tela de entrar aguardando a aprovação de um administrador
 }
 
-// Motivo de uma saída forçada que a tela de entrar explica (e2e-reset: um administrador redefiniu a criptografia).
-export type LogoutReason = 'e2e-reset';
+// Motivo de uma saída forçada que a tela de entrar explica. e2e-reset: um administrador redefiniu a criptografia;
+// deactivated: conta desativada (administrador, AD ou importação); admin-logout: um administrador encerrou as sessões;
+// password-changed: senha redefinida pelo link ou trocada pelo administrador; session-revoked: a própria pessoa
+// encerrou esta sessão em outro dispositivo; ended: só no navegador, a sessão deixou de valer (venceu ou foi encerrada
+// com o aparelho desligado).
+export type LogoutReason = 'e2e-reset' | 'deactivated' | 'admin-logout' | 'password-changed' | 'session-revoked' | 'ended';
 
 export interface UserPreferences {
   language?: string; // idioma da pessoa: destino das traduções de mensagens (ausente = padrão da empresa)
@@ -173,6 +179,7 @@ export interface Subscription {
 
 export interface Reaction {
   usernames: string[];
+  ts?: string; // primeira reação com este emoji: as reações aparecem nessa ordem (o jsonb não guarda a ordem das chaves)
 }
 
 export interface Attachment {
@@ -192,6 +199,7 @@ export interface Attachment {
   author_name?: string;
   author_alias?: string; // apelido do autor (integração, webhooks); só o servidor preenche
   ts?: string;
+  removed?: boolean; // a mensagem citada (ou fixada) foi apagada: o texto é só o aviso; só o servidor preenche
   // anexos de integrações e mensagens importadas do Slack
   pretext?: string;
   color?: string;
@@ -323,6 +331,8 @@ export interface Setting {
   description?: string;
   values?: { key: string; label: string }[];
   sorter?: number;
+  // Valor padrão (só na lista de Administração › Configurações; as senhas ficam sem).
+  packageValue?: unknown;
 }
 
 export interface DeviceSession {
@@ -453,13 +463,18 @@ export type ServerEvent =
   | { type: 'calendar.changed' }
   | { type: 'calendar.invite'; event: CalendarEvent; by: UserRef }
   | { type: 'calendar.reminder'; event: CalendarEvent }
+  // Agenda: o evento mudou de horário, foi cancelado ou a pessoa saiu da lista de convidados (aviso na tela)
+  | { type: 'calendar.updated'; event: CalendarEvent; by: UserRef; moved: boolean }
+  | { type: 'calendar.canceled'; event: CalendarEvent; by: UserRef }
+  | { type: 'calendar.removed'; event: CalendarEvent; by: UserRef }
   // Meus dados (LGPD): o pedido da pessoa mudou de estado (na fila, preparando, pronto, falhou, expirou)
   | { type: 'userdata.changed'; request: UserDataRequest }
   // Status personalizados criados, editados ou excluídos: a lista nova inteira (sem usersCount)
   | { type: 'userStatus.changed'; statuses: CustomUserStatus[] }
   // Mensagens: os próprios votos (outras abas), "Lembrar-me" e envios agendados (só para a pessoa)
   | { type: 'poll.myVotes'; rid: string; messageId: string; optionIds: string[] }
-  | { type: 'message.reminder'; action: 'upserted' | 'fired' | 'removed'; reminder: MessageReminder }
+  // reason: o lembrete saiu sozinho (a mensagem foi apagada ou a pessoa perdeu o acesso à conversa); sem ele, a pessoa tirou
+  | { type: 'message.reminder'; action: 'upserted' | 'fired' | 'removed'; reminder: MessageReminder; reason?: 'message-deleted' | 'no-access' }
   | { type: 'message.scheduled'; action: 'upserted' | 'removed'; scheduled: ScheduledMessage; messageId?: string; notify?: boolean }
   // Criptografia de ponta a ponta
   | { type: 'e2e.keyRequest'; rid: string; keyID: string } // alguém da sala precisa da chave atual
@@ -610,6 +625,7 @@ export interface Call {
   answeredAt: string | null;
   endedAt: string | null;
   endedBy: string | null;
+  endedByUser?: UserRef | null; // quem encerrou (nome para o aviso "Encerrada por …")
   endedReason: CallEndReason | null;
   duration: number | null; // segundos: atendimento → fim (a dois) ou início → fim (grupo)
   listenOnly: boolean; // transmissão
@@ -696,7 +712,13 @@ export interface RoomCallState {
   serverTime: string;
 }
 
-export type CallSignal = { sdp: { type: 'offer' | 'answer'; sdp: string } } | { candidate: Record<string, unknown> | null };
+// state: microfone, câmera e tela de quem manda (a dois): desligar só apaga a faixa, e o outro lado não teria como saber.
+export type CallSignal = { sdp: { type: 'offer' | 'answer'; sdp: string } } | { candidate: Record<string, unknown> | null } | { state: CallMediaState };
+export interface CallMediaState {
+  mic: boolean;
+  camera: boolean;
+  screen: boolean;
+}
 
 export type ClientEvent =
   | { type: 'auth'; token: string }

@@ -1,12 +1,22 @@
 // Arquivos: pastas compartilhadas com permissão por pasta. Início (pastas e recentes), pasta, busca e lixeira.
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { FOLDER_COLORS, driveLevelLabel, type DriveActivity, type DriveFile, type DriveFolder, type DriveFolderView, type DriveStorage } from '@shared/drive';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import {
+  DRIVE_FILE_NAME_MAX,
+  DRIVE_FOLDER_NAME_MAX,
+  FOLDER_COLORS,
+  driveLevelLabel,
+  type DriveActivity,
+  type DriveFile,
+  type DriveFolder,
+  type DriveFolderView,
+  type DriveStorage,
+} from '@shared/drive';
 import { errorMessage } from '../lib/api';
-import { cancelUpload, clearFinishedUploads, enqueueUploads, filesApi, useUploads } from '../lib/files';
-import { formatBytes, formatRelative, formatWhen, plural } from '../lib/format';
+import { cancelUpload, clearFinishedUploads, enqueueUploads, filesApi, useUploads, type UploadJob } from '../lib/files';
+import { formatBytes, formatRelative, formatWhen, nameList, plural } from '../lib/format';
 import { realtime } from '../lib/realtime';
-import { useSetting, useStore } from '../lib/store';
+import { usePermission, useSetting, useStore } from '../lib/store';
 import { fileKind } from '../components/MessageItem';
 import { Icon } from '../components/Icon';
 import type { IconName } from '../components/icons';
@@ -36,9 +46,37 @@ const toneOf = (f: { name: string; type: string }) => {
   return ext === 'txt' || ext === 'md' ? 'text' : kindOf(f);
 };
 const isText = (f: DriveFile) => /^text\//.test(f.type) || /\.(txt|md|csv|log|json|xml|ya?ml|ini|sql)$/i.test(f.name);
-const canPreview = (f: DriveFile) => /^(image|video|audio)\//.test(f.type) || f.type === 'application/pdf' || isText(f);
+const TEXT_PREVIEW_MAX = 512 * 1024;
+const isMedia = (f: DriveFile) => /^(video|audio)\//.test(f.type);
+// Vídeo e áudio que o navegador diz que não toca (AVI, WMV, FLV...) não ganham player. O .mov do celular costuma tocar
+// mesmo assim: tenta, e se falhar a prévia vira o aviso.
+const playable = (f: DriveFile) => {
+  if (f.type === 'video/quicktime') return true;
+  try {
+    return document.createElement(f.type.startsWith('audio/') ? 'audio' : 'video').canPlayType(f.type) !== '';
+  } catch {
+    return true;
+  }
+};
+const canPreview = (f: DriveFile) =>
+  /^image\//.test(f.type) || (isMedia(f) && playable(f)) || f.type === 'application/pdf' || (isText(f) && f.size <= TEXT_PREVIEW_MAX);
+// O navegador mostra na própria aba (o mesmo que inlineMimeType no servidor); o resto vai como download.
+const opensInTab = (f: DriveFile) => /^(image\/(png|jpeg|gif|webp|bmp|avif)|(audio|video)\/[a-z0-9.+-]+|application\/pdf)$/.test(f.type);
+// Prévias desta tela: ?preview não entra no histórico como download.
+const previewUrl = (f: DriveFile) => `${f.url}?preview`;
+// As mesmas regras do servidor (drive.ts): renomear a pasta principal pede gerenciar; subpasta, editar a de cima. Mover e
+// mandar para a lixeira: gerenciar, ou editar uma subpasta que herda o acesso e a de cima.
+const canRenameFolder = (f: DriveFolder) => f.level >= 3 || (!!f.parentId && f.level >= 2 && (f.parentLevel ?? 0) >= 2);
+const canRemoveFolder = (f: DriveFolder) => f.level >= 3 || (!!f.parentId && f.inherit && f.level >= 2 && (f.parentLevel ?? 0) >= 2);
 const LEVEL_ICON: Record<number, IconName> = { 1: 'files-view', 2: 'files-edit', 3: 'files-manage' };
 const COLOR_LABEL: Record<string, string> = { blue: 'Azul', green: 'Verde', amber: 'Âmbar', red: 'Vermelho', purple: 'Roxo', teal: 'Turquesa', gray: 'Cinza' };
+
+// Enter ou Espaço no próprio cartão ou linha (não nos botões de dentro dele) age como um clique.
+const onActivate = (fn: () => void) => (e: KeyboardEvent<HTMLElement>) => {
+  if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+  e.preventDefault();
+  fn();
+};
 
 function readView(): ViewMode {
   try {
@@ -55,16 +93,25 @@ export function FilesPage() {
   const phone = useIsPhone();
   const toast = useStore((s) => s.toast);
   const enabled = useSetting<boolean>('Drive_Enabled') !== false;
+  // Sem view-files (ex.: Convidado que abre /files pelo link): a tela explica, sem pedir nada ao servidor.
+  const allowed = usePermission(['view-files', 'manage-all-files']);
+  const usable = enabled && allowed;
   const trash = location.pathname === '/files/trash';
+  // Link de um arquivo (Copiar link do arquivo): /files/f/<pasta>?file=<arquivo> abre a pasta com ele selecionado.
+  const [params, setParams] = useSearchParams();
+  const fileParam = params.get('file');
   const [view, setViewState] = useState<ViewMode>(readView);
   const [search, setSearch] = useState('');
   const [home, setHome] = useState<Awaited<ReturnType<typeof filesApi.home>> | null>(null);
   const [data, setData] = useState<DriveFolderView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [homeError, setHomeError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ kind: 'file'; file: DriveFile } | { kind: 'folder'; folder: DriveFolder } | null>(null);
   const [dialog, setDialog] = useState<ReactNode>(null);
   const [dragOver, setDragOver] = useState(false);
   const [tick, setTick] = useState(0);
+  // Página estreita (tablet, janela pela metade): a navegação de pastas vira uma gaveta aberta pelo botão "Pastas".
+  const [navOpen, setNavOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const reload = useCallback(() => setTick((t) => t + 1), []);
 
@@ -78,18 +125,19 @@ export function FilesPage() {
   };
 
   useEffect(() => {
+    if (!usable) return;
     let alive = true;
     filesApi
       .home()
-      .then((h) => alive && setHome(h))
-      .catch((e) => alive && setError(errorMessage(e)));
+      .then((h) => alive && (setHome(h), setHomeError(null)))
+      .catch((e) => alive && setHomeError(errorMessage(e)));
     return () => {
       alive = false;
     };
-  }, [tick]);
+  }, [tick, usable]);
 
   useEffect(() => {
-    if (!folderId) {
+    if (!folderId || !usable) {
       setData(null);
       return;
     }
@@ -102,24 +150,40 @@ export function FilesPage() {
         setData(d);
         setSelected((s) => (s?.kind === 'file' ? (d.files.find((f) => f._id === s.file._id) ? { kind: 'file', file: d.files.find((f) => f._id === s.file._id)! } : null) : s));
       })
-      .catch((e) => alive && (setError(errorMessage(e)), setData(null)));
+      // Sem acesso (tirado agora há pouco, pasta apagada): o painel do arquivo fecha junto.
+      .catch((e) => alive && (setError(errorMessage(e)), setData(null), setSelected(null)));
     return () => {
       alive = false;
     };
-  }, [folderId, tick]);
+  }, [folderId, tick, usable]);
+
+  useEffect(() => {
+    if (!fileParam || !data || data.folder._id !== folderId) return;
+    const hit = data.files.find((f) => f._id === fileParam);
+    if (hit) setSelected({ kind: 'file', file: hit });
+    else toast('Esse arquivo não está mais nesta pasta: ele pode ter sido movido, mandado para a lixeira ou apagado.', 'warning');
+    setParams(
+      (p) => {
+        p.delete('file');
+        return p;
+      },
+      { replace: true },
+    );
+  }, [fileParam, data, folderId, setParams, toast]);
 
   useEffect(() => setSelected(null), [folderId, trash]);
+  useEffect(() => setNavOpen(false), [location.pathname]);
 
   // Outra pessoa mudou uma pasta que está na tela: pede de novo (o servidor confere o acesso).
   useEffect(() => {
     const off = realtime.on((ev) => {
       if (ev.type !== 'drive.changed') return;
-      if (!folderId || ev.folderIds.includes(folderId) || data?.folders.some((f) => ev.folderIds.includes(f._id))) reload();
+      if (!folderId || ev.folderIds.includes(folderId) || data?.folders.some((f) => ev.folderIds.includes(f._id)) || home?.folders.some((f) => ev.folderIds.includes(f._id))) reload();
     });
     return () => {
       off();
     };
-  }, [folderId, data, reload]);
+  }, [folderId, data, home, reload]);
 
   // Envio terminado nesta pasta: atualiza a lista.
   const uploads = useUploads();
@@ -159,11 +223,12 @@ export function FilesPage() {
         description={folder ? 'Ela começa com o mesmo acesso desta pasta.' : 'Só você terá acesso até compartilhar.'}
         confirm="Criar pasta"
         withColor
+        maxLength={DRIVE_FOLDER_NAME_MAX}
         onClose={() => setDialog(null)}
         onSave={async (name, color) => {
           const f = await filesApi.createFolder({ name, color, parentId: folder?._id ?? null });
           setDialog(null);
-          toast(`Pasta “${f.name}” criada.`, 'success');
+          toast(f.name === name ? `Pasta “${f.name}” criada.` : `Pasta criada como “${f.name}”.`, 'success');
           if (!folder) navigate(`/files/f/${f._id}`);
           else reload();
         }}
@@ -191,7 +256,8 @@ export function FilesPage() {
 
   let body: ReactNode;
   if (!enabled) body = <Empty icon="files-folder" title="A aba Arquivos está desligada">Um administrador pode ligá-la em Administração › Configurações › Arquivos.</Empty>;
-  else if (trash) body = <TrashView onChanged={reload} />;
+  else if (!allowed) body = <Empty icon="files-locked" title="Você não tem acesso à aba Arquivos">Peça a um administrador para liberar a aba Arquivos para você.</Empty>;
+  else if (trash) body = <TrashView tick={tick} onChanged={reload} />;
   else if (search.trim().length >= 2) body = <SearchResults text={search.trim()} view={view} onOpenFile={(f) => setSelected({ kind: 'file', file: f })} />;
   else if (folderId && error) body = <Empty icon="files-locked" title="Não deu para abrir esta pasta" tone="danger" action={<Link className="btn" to="/files">Voltar para Arquivos</Link>}>{error}</Empty>;
   else if (folderId)
@@ -212,7 +278,7 @@ export function FilesPage() {
     body = (
       <HomeView
         home={home}
-        error={error}
+        error={homeError}
         view={view}
         onOpenFolder={(f) => navigate(`/files/f/${f._id}`)}
         onSelectFile={(f) => setSelected({ kind: 'file', file: f })}
@@ -233,8 +299,13 @@ export function FilesPage() {
     <div className="page fl-page" onDragOver={(e) => canEdit && (e.preventDefault(), setDragOver(true))} onDragLeave={(e) => e.currentTarget === e.target && setDragOver(false)} onDrop={onDrop}>
       <header className="page-head fl-head">
         <h1 data-eyebrow="Pastas compartilhadas">Arquivos</h1>
-        {!phone && <SearchInput className="fl-search" value={search} onChange={setSearch} placeholder="Buscar em todas as pastas" />}
+        {!phone && usable && <SearchInput className="fl-search" value={search} onChange={setSearch} placeholder="Buscar em todas as pastas" />}
         <div className="fl-head-actions">
+          {!phone && usable && (
+            <button type="button" className="icon-btn fl-nav-toggle" aria-label="Pastas" title="Pastas" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}>
+              <Icon name="files-all" />
+            </button>
+          )}
           {(folder ? canEdit : canCreateRoot) && !trash && (
             <button type="button" className="btn" onClick={newFolder}>
               <Icon name="files-folder-new" />
@@ -249,15 +320,16 @@ export function FilesPage() {
           )}
         </div>
       </header>
-      {phone && (
+      {phone && usable && (
         <div className="fl-phone-search">
           <SearchInput value={search} onChange={setSearch} placeholder="Buscar em todas as pastas" />
         </div>
       )}
-      <div className={details && !phone ? 'fl-layout with-details' : 'fl-layout'}>
-        {!phone && <FilesNav home={home} currentId={folderId ?? null} path={data?.path ?? []} trash={trash} />}
-        <main className="fl-main" aria-label={title}>
-          {!trash && !search && folderId && <Breadcrumb data={data} />}
+      <div className={!usable ? 'fl-layout no-nav' : details && !phone ? 'fl-layout with-details' : 'fl-layout'}>
+        {!phone && usable && <FilesNav home={home} error={homeError} currentId={folderId ?? null} path={data?.path ?? []} trash={trash} tick={tick} open={navOpen} onClose={() => setNavOpen(false)} />}
+        {!phone && navOpen && <div className="fl-nav-backdrop" onClick={() => setNavOpen(false)} />}
+        <section className="fl-main" aria-label={title}>
+          {!trash && !search && folderId && usable && !error && <Breadcrumb data={data} />}
           {!trash && !(search.trim().length >= 2) && (folderId ? data : home) && (
             <div className="fl-toolbar">
               {folder ? (
@@ -319,7 +391,7 @@ export function FilesPage() {
             </div>
           )}
           {body}
-        </main>
+        </section>
         {details && !phone && <aside className="fl-details">{details}</aside>}
       </div>
       {details && phone && (
@@ -327,7 +399,7 @@ export function FilesPage() {
           {details}
         </Modal>
       )}
-      {phone && trash === false && !folderId && (
+      {phone && usable && trash === false && !folderId && (
         <Link to="/files/trash" className="fl-phone-trash">
           <Icon name="files-trash" size={16} />
           Lixeira
@@ -359,16 +431,36 @@ export function FilesPage() {
 
 // ---------- Navegação lateral ----------
 
-function FilesNav({ home, currentId, path, trash }: { home: Awaited<ReturnType<typeof filesApi.home>> | null; currentId: string | null; path: { _id: string; name: string }[]; trash: boolean }) {
+function FilesNav({
+  home,
+  error,
+  currentId,
+  path,
+  trash,
+  tick,
+  open,
+  onClose,
+}: {
+  home: Awaited<ReturnType<typeof filesApi.home>> | null;
+  error: string | null;
+  currentId: string | null;
+  path: { _id: string; name: string }[];
+  trash: boolean;
+  tick: number;
+  open: boolean;
+  onClose: () => void;
+}) {
   const onPath = new Set(path.map((p) => p._id));
   return (
-    <nav className="fl-nav" aria-label="Pastas">
+    <nav className={open ? 'fl-nav open' : 'fl-nav'} aria-label="Pastas" onKeyDown={(e) => e.key === 'Escape' && open && onClose()}>
       <Link to="/files" className={!currentId && !trash ? 'fl-nav-row active' : 'fl-nav-row'}>
         <Icon name="files-all" />
         Início
       </Link>
       <div className="fl-nav-label">Pastas</div>
-      {!home ? (
+      {!home && error ? (
+        <p className="muted fl-nav-empty">{error}</p>
+      ) : !home ? (
         <div className="fl-nav-skel">
           <Skeleton height={14} />
           <Skeleton height={14} width="70%" />
@@ -378,7 +470,7 @@ function FilesNav({ home, currentId, path, trash }: { home: Awaited<ReturnType<t
       ) : (
         <ul className="fl-tree" role="tree">
           {home.folders.map((f) => (
-            <TreeNode key={f._id} folder={f} depth={0} currentId={currentId} onPath={onPath} />
+            <TreeNode key={f._id} folder={f} depth={0} currentId={currentId} onPath={onPath} tick={tick} />
           ))}
         </ul>
       )}
@@ -393,15 +485,27 @@ function FilesNav({ home, currentId, path, trash }: { home: Awaited<ReturnType<t
   );
 }
 
-function TreeNode({ folder, depth, currentId, onPath }: { folder: DriveFolder; depth: number; currentId: string | null; onPath: Set<string> }) {
+// Os filhos são pedidos de novo ao trocar de pasta, quando a tela recarrega (tick: pasta criada, renomeada...) e quando
+// outra pessoa muda esta pasta (drive.changed).
+function TreeNode({ folder, depth, currentId, onPath, tick }: { folder: DriveFolder; depth: number; currentId: string | null; onPath: Set<string>; tick: number }) {
   const [open, setOpen] = useState(onPath.has(folder._id));
   const [children, setChildren] = useState<DriveFolder[] | null>(null);
-  const hasKids = (folder.items ?? 0) > 0;
+  const [changes, setChanges] = useState(0);
+  // Depois de pedir os filhos (aberta, ou fechada mas mudada por alguém), a seta segue o que veio.
+  const hasKids = children ? children.length > 0 : (folder.subfolders ?? folder.items ?? 0) > 0;
   useEffect(() => {
     if (onPath.has(folder._id)) setOpen(true);
   }, [onPath, folder._id]);
   useEffect(() => {
-    if (!open) return;
+    const off = realtime.on((ev) => {
+      if (ev.type === 'drive.changed' && ev.folderIds.includes(folder._id)) setChanges((n) => n + 1);
+    });
+    return () => {
+      off();
+    };
+  }, [folder._id]);
+  useEffect(() => {
+    if (!open && !changes) return;
     let alive = true;
     filesApi.folder(folder._id).then(
       (d) => alive && setChildren(d.folders),
@@ -410,12 +514,12 @@ function TreeNode({ folder, depth, currentId, onPath }: { folder: DriveFolder; d
     return () => {
       alive = false;
     };
-  }, [open, folder._id, currentId]);
+  }, [open, folder._id, currentId, tick, changes]);
   const active = currentId === folder._id;
   return (
     <li role="treeitem" aria-expanded={hasKids ? open : undefined} aria-selected={active}>
       <div className={active ? 'fl-tree-row active' : 'fl-tree-row'} style={{ paddingLeft: 8 + depth * 14 }}>
-        <button type="button" className={open ? 'fl-tree-toggle open' : 'fl-tree-toggle'} aria-label={open ? `Fechar ${folder.name}` : `Abrir ${folder.name}`} tabIndex={-1} onClick={() => setOpen(!open)} style={{ visibility: hasKids ? 'visible' : 'hidden' }}>
+        <button type="button" className={open ? 'fl-tree-toggle open' : 'fl-tree-toggle'} aria-label={open ? `Fechar ${folder.name}` : `Abrir ${folder.name}`} onClick={() => setOpen(!open)} style={{ visibility: hasKids ? 'visible' : 'hidden' }}>
           <Icon name="files-expand" size={14} />
         </button>
         <Link to={`/files/f/${folder._id}`} className="fl-tree-link">
@@ -427,7 +531,7 @@ function TreeNode({ folder, depth, currentId, onPath }: { folder: DriveFolder; d
       {open && children && children.length > 0 && (
         <ul role="group">
           {children.map((c) => (
-            <TreeNode key={c._id} folder={c} depth={depth + 1} currentId={currentId} onPath={onPath} />
+            <TreeNode key={c._id} folder={c} depth={depth + 1} currentId={currentId} onPath={onPath} tick={tick} />
           ))}
         </ul>
       )}
@@ -497,7 +601,7 @@ function Thumb({ file }: { file: DriveFile }) {
   if (file.type.startsWith('image/') && !failed)
     return (
       <span className="fl-thumb">
-        <img src={file.url} alt="" loading="lazy" onError={() => setFailed(true)} />
+        <img src={previewUrl(file)} alt="" loading="lazy" onError={() => setFailed(true)} />
       </span>
     );
   return (
@@ -552,7 +656,7 @@ function FolderCard({ f, selected, onOpen, onSelect, actions, view }: { f: Drive
   );
   if (view === 'list')
     return (
-      <div className={selected ? 'fl-row selected' : 'fl-row'} onClick={onOpen} role="row">
+      <div className={selected ? 'fl-row selected' : 'fl-row'} onClick={onOpen} onKeyDown={onActivate(onOpen)} role="button" tabIndex={0} aria-label={`Abrir ${f.name}`}>
         <span className="fl-row-name">
           <FolderGlyph color={f.color} />
           <span className="ellipsis">{f.name}</span>
@@ -566,7 +670,7 @@ function FolderCard({ f, selected, onOpen, onSelect, actions, view }: { f: Drive
       </div>
     );
   return (
-    <div className={selected ? `fl-folder-card c-${f.color ?? 'blue'} selected` : `fl-folder-card c-${f.color ?? 'blue'}`} onClick={onOpen} onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && onOpen()} role="button" tabIndex={0} aria-label={`Abrir ${f.name}`}>
+    <div className={selected ? `fl-folder-card c-${f.color ?? 'blue'} selected` : `fl-folder-card c-${f.color ?? 'blue'}`} onClick={onOpen} onKeyDown={onActivate(onOpen)} role="button" tabIndex={0} aria-label={`Abrir ${f.name}`}>
       <FolderGlyph color={f.color} size={32} />
       <span className="fl-card-text">
         <strong className="ellipsis" title={f.name}>
@@ -606,13 +710,21 @@ function FileItem({ f, level, selected, onSelect, actions, view, showPath }: { f
         </button>
       }
     >
-      {(close) => actions.fileItems(f, level, close)}
+      {(close) => (
+        <>
+          <button type="button" onClick={() => (close(), onSelect())}>
+            <Icon name="panel-info" />
+            Detalhes e prévia
+          </button>
+          {actions.fileItems(f, level, close)}
+        </>
+      )}
     </Menu>
     </StopCard>
   );
   if (view === 'list')
     return (
-      <div className={selected ? 'fl-row selected' : 'fl-row'} onClick={onSelect} onDoubleClick={() => actions.download(f)} role="row">
+      <div className={selected ? 'fl-row selected' : 'fl-row'} onClick={onSelect} onDoubleClick={() => actions.download(f)} onKeyDown={onActivate(onSelect)} role="button" tabIndex={0} aria-label={f.name}>
         <span className="fl-row-name">
           <FileGlyph file={f} />
           <span className="fl-row-title">
@@ -627,7 +739,7 @@ function FileItem({ f, level, selected, onSelect, actions, view, showPath }: { f
       </div>
     );
   return (
-    <div className={selected ? 'fl-file-card selected' : 'fl-file-card'} onClick={onSelect} onDoubleClick={() => actions.download(f)} onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && onSelect()} role="button" tabIndex={0} aria-label={f.name}>
+    <div className={selected ? 'fl-file-card selected' : 'fl-file-card'} onClick={onSelect} onDoubleClick={() => actions.download(f)} onKeyDown={onActivate(onSelect)} role="button" tabIndex={0} aria-label={f.name}>
       <Thumb file={f} />
       <span className="fl-card-text">
         <strong className="ellipsis" title={f.name}>
@@ -833,7 +945,7 @@ function SearchResults({ text, view, onOpenFile }: { text: string; view: ViewMod
           <h2 className="fl-section-h">Pastas</h2>
           <div className="fl-list">
             {r.folders.map((f) => (
-              <div key={f._id} className="fl-row" role="row" onClick={() => navigate(`/files/f/${f._id}`)}>
+              <div key={f._id} className="fl-row" role="button" tabIndex={0} aria-label={`Abrir ${f.name}`} onClick={() => navigate(`/files/f/${f._id}`)} onKeyDown={onActivate(() => navigate(`/files/f/${f._id}`))}>
                 <span className="fl-row-name">
                   <FolderGlyph color={f.color} />
                   <span className="fl-row-title">
@@ -865,23 +977,29 @@ function SearchResults({ text, view, onOpenFile }: { text: string; view: ViewMod
   );
 }
 
-function TrashView({ onChanged }: { onChanged: () => void }) {
+// tick: a tela recarrega quando qualquer pasta muda (drive.changed), também por outra pessoa: a lista fica em dia.
+function TrashView({ tick, onChanged }: { tick: number; onChanged: () => void }) {
   const toast = useStore((s) => s.toast);
   const [r, setR] = useState<Awaited<ReturnType<typeof filesApi.trashList>> | null>(null);
-  const [tick, setTick] = useState(0);
   useEffect(() => {
-    filesApi.trashList().then(setR, (e) => toast(errorMessage(e), 'error'));
+    let alive = true;
+    filesApi.trashList().then(
+      (x) => alive && setR(x),
+      (e) => alive && toast(errorMessage(e), 'error'),
+    );
+    return () => {
+      alive = false;
+    };
   }, [tick, toast]);
-  const run = async (p: Promise<unknown>, ok: string) => {
+  async function run<T>(p: Promise<T>, ok: string | ((r: T) => string)) {
     try {
-      await p;
-      toast(ok, 'success');
-      setTick((t) => t + 1);
+      const out = await p;
+      toast(typeof ok === 'string' ? ok : ok(out), 'success');
       onChanged();
     } catch (e) {
       toast(errorMessage(e), 'error');
     }
-  };
+  }
   if (!r) return <GridSkeleton />;
   const canPurgeAny = r.folders.some((f) => f.level >= 3) || r.files.some((f) => (f.level ?? 0) >= 3);
   const empty = !r.folders.length && !r.files.length;
@@ -926,7 +1044,7 @@ function TrashView({ onChanged }: { onChanged: () => void }) {
               who={f.trashedBy?.name || f.trashedBy?.username || '—'}
               when={f.trashedAt}
               canPurge={f.level >= 3}
-              onRestore={() => run(filesApi.restore({ folderIds: [f._id] }), `“${f.name}” restaurada.`)}
+              onRestore={() => run(filesApi.restore({ folderIds: [f._id] }), (x) => (x.renamed?.length ? `“${f.name}” restaurada como “${x.renamed[0].name}”.` : `“${f.name}” restaurada.`))}
               onPurge={() => run(filesApi.purge({ folderIds: [f._id] }), `“${f.name}” apagada de vez.`)}
             />
           ))}
@@ -939,7 +1057,11 @@ function TrashView({ onChanged }: { onChanged: () => void }) {
               who={f.trashedBy?.name || f.trashedBy?.username || '—'}
               when={f.trashedAt}
               canPurge={(f.level ?? 0) >= 3}
-              onRestore={() => run(filesApi.restore({ fileIds: [f._id] }), `“${f.name}” restaurado.`)}
+              onRestore={() =>
+                run(filesApi.restore({ fileIds: [f._id] }), (x) =>
+                  x.renamed?.length ? `“${f.name}” restaurado como “${x.renamed[0].name}”: já havia um arquivo com esse nome na pasta.` : `“${f.name}” restaurado.`,
+                )
+              }
               onPurge={() => run(filesApi.purge({ fileIds: [f._id] }), `“${f.name}” apagado de vez.`)}
             />
           ))}
@@ -954,7 +1076,12 @@ function TrashRow({ icon, name, where, who, when, canPurge, onRestore, onPurge }
     <div className="fl-row trash" role="row">
       <span className="fl-row-name">
         {icon}
-        <span className="ellipsis">{name}</span>
+        <span className="fl-row-title">
+          <span className="ellipsis">{name}</span>
+          <small className="muted ellipsis fl-trash-sub">
+            Estava em {where || 'Arquivos'} · por {who} · {formatRelative(when)}
+          </small>
+        </span>
       </span>
       <span className="muted ellipsis">{where}</span>
       <span className="muted ellipsis">{who}</span>
@@ -984,36 +1111,56 @@ function TrashRow({ icon, name, where, who, when, canPurge, onRestore, onPurge }
 
 // ---------- Detalhes ----------
 
-function FilePreview({ file }: { file: DriveFile }) {
+// onFail: a prévia não abriu (formato que o navegador não mostra, acesso tirado): quem usa esconde o "Ampliar".
+function FilePreview({ file, onFail }: { file: DriveFile; onFail?: () => void }) {
   const [text, setText] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const fail = useCallback(() => {
+    setFailed(true);
+    onFail?.();
+  }, [onFail]);
   useEffect(() => {
     setText(null);
-    if (!isText(file) || file.size > 512 * 1024) return;
+    setFailed(false);
+    if (!isText(file) || file.size > TEXT_PREVIEW_MAX) return;
     let alive = true;
-    fetch(file.url, { credentials: 'same-origin' })
-      .then((r) => r.text())
+    fetch(previewUrl(file), { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
       .then((t) => alive && setText(t))
-      .catch(() => alive && setText(''));
+      .catch(() => alive && fail());
     return () => {
       alive = false;
     };
-  }, [file]);
-  if (file.type.startsWith('image/')) return <img className="fl-preview-img" src={file.url} alt={file.name} />;
-  if (file.type.startsWith('video/')) return <video className="fl-preview-media" src={file.url} controls preload="metadata" />;
-  if (file.type.startsWith('audio/')) return <audio className="fl-preview-audio" src={file.url} controls preload="metadata" />;
-  if (file.type === 'application/pdf') return <iframe className="fl-preview-pdf" src={file.url} title={`Prévia de ${file.name}`} />;
-  if (isText(file) && file.size <= 512 * 1024) return text === null ? <Skeleton height={120} /> : <pre className="fl-preview-text">{text.slice(0, 20000)}</pre>;
-  return (
-    <div className="fl-preview-none">
-      <FileGlyph file={file} size={32} />
-      <span className="muted">Sem prévia para este tipo. Baixe para abrir.</span>
-    </div>
-  );
+  }, [file, fail]);
+  if (failed || !canPreview(file)) {
+    const why =
+      isText(file) && file.size > TEXT_PREVIEW_MAX && !failed
+        ? `Arquivo de texto grande demais para a prévia (mais de ${formatBytes(TEXT_PREVIEW_MAX)}). Baixe para abrir.`
+        : isMedia(file) || file.type.startsWith('image/')
+          ? 'Este formato não abre no navegador. Baixe para abrir.'
+          : failed
+            ? 'Não deu para carregar a prévia. Baixe para abrir.'
+            : 'Sem prévia para este tipo. Baixe para abrir.';
+    return (
+      <div className="fl-preview-none">
+        <FileGlyph file={file} size={32} />
+        <span className="muted">{why}</span>
+      </div>
+    );
+  }
+  if (file.type.startsWith('image/')) return <img className="fl-preview-img" src={previewUrl(file)} alt={file.name} onError={fail} />;
+  if (file.type.startsWith('video/')) return <video className="fl-preview-media" src={previewUrl(file)} controls preload="metadata" onError={fail} />;
+  if (file.type.startsWith('audio/')) return <audio className="fl-preview-audio" src={previewUrl(file)} controls preload="metadata" onError={fail} />;
+  if (file.type === 'application/pdf') return <iframe className="fl-preview-pdf" src={previewUrl(file)} title={`Prévia de ${file.name}`} />;
+  return text === null ? <Skeleton height={120} /> : <pre className="fl-preview-text">{text.slice(0, 20000)}</pre>;
 }
 
 function FileDetails({ file, level, actions, onClose }: { file: DriveFile; level: number; actions: ItemActions; onClose: () => void }) {
   const phone = useIsPhone();
   const [full, setFull] = useState(false);
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [file._id]);
+  const onFail = useCallback(() => setBroken(true), []);
   return (
     <div className="fl-detail">
       {!phone && (
@@ -1028,8 +1175,8 @@ function FileDetails({ file, level, actions, onClose }: { file: DriveFile; level
         </div>
       )}
       <div className="fl-preview">
-        <FilePreview file={file} />
-        {canPreview(file) && !phone && (
+        <FilePreview file={file} onFail={onFail} />
+        {canPreview(file) && !broken && !phone && (
           <button type="button" className="btn small fl-preview-open" onClick={() => setFull(true)}>
             <Icon name="expand" />
             Ampliar
@@ -1041,10 +1188,12 @@ function FileDetails({ file, level, actions, onClose }: { file: DriveFile; level
           <Icon name="download" />
           Baixar
         </button>
-        <a className="btn" href={file.url} target="_blank" rel="noreferrer">
-          <Icon name="open-external" />
-          Abrir
-        </a>
+        {opensInTab(file) && (
+          <a className="btn" href={file.url} target="_blank" rel="noreferrer">
+            <Icon name="open-external" />
+            Abrir
+          </a>
+        )}
         <Menu
           label="Mais ações do arquivo"
           trigger={
@@ -1106,7 +1255,7 @@ const ACTIVITY_TEXT: Record<string, (d: Record<string, any>) => string> = {
   'file.download': (d) => `baixou ${d.name}`,
   'file.rename': (d) => `renomeou ${d.from} para ${d.to}`,
   'file.move.in': (d) => `trouxe ${d.name}${d.from ? ` de ${d.from}` : ''}`,
-  'file.move.out': (d) => `levou ${d.name} para ${d.to}`,
+  'file.move.out': (d) => `levou ${d.name} para ${d.to ?? 'outra pasta'}`,
   'file.trash': (d) => `mandou ${d.name} para a lixeira`,
   'file.restore': (d) => `restaurou ${d.name}`,
   'file.purge': (d) => `apagou ${d.name} de vez`,
@@ -1118,12 +1267,35 @@ const ACTIVITY_TEXT: Record<string, (d: Record<string, any>) => string> = {
   'folder.restore': (d) => `restaurou a pasta ${d.name}`,
   'folder.purge': (d) => `apagou a pasta ${d.name} de vez`,
   'acl.update': (d) => {
-    const n = (d.added?.length ?? 0) + (d.removed?.length ?? 0) + (d.changed?.length ?? 0);
-    const parts = [d.added?.length && `${d.added.length} acesso(s) novo(s)`, d.removed?.length && `${d.removed.length} retirado(s)`, d.changed?.length && `${d.changed.length} alterado(s)`].filter(Boolean);
-    const inh = d.inherit === false ? ' e deixou a pasta restrita' : d.inherit === true ? ' e voltou a herdar o acesso' : '';
-    return n ? `mudou o compartilhamento (${parts.join(', ')})${inh}` : `mudou o compartilhamento${inh}`;
+    const list = (x: unknown): AclChange[] => (Array.isArray(x) ? x : []);
+    const added = list(d.added);
+    const removed = list(d.removed);
+    const changed = list(d.changed);
+    const inh = d.inherit === false ? 'deixou a pasta restrita' : d.inherit === true ? 'voltou a herdar o acesso da pasta de cima' : '';
+    // Eventos antigos guardavam só quem era (sem o nome): mostra quantos.
+    if ([...added, ...removed, ...changed].some((x) => typeof x === 'string')) {
+      const parts = [
+        added.length && plural(added.length, 'acesso novo', 'acessos novos'),
+        removed.length && plural(removed.length, 'retirado', 'retirados'),
+        changed.length && plural(changed.length, 'alterado', 'alterados'),
+      ].filter(Boolean);
+      return `mudou o compartilhamento${parts.length ? ` (${parts.join(', ')})` : ''}${inh ? ` e ${inh}` : ''}`;
+    }
+    const names = (xs: AclChange[], fmt: (x: AclEntryChange) => string) => nameList((xs as AclEntryChange[]).map(fmt), 3);
+    const parts = [
+      added.length && `deu acesso a ${names(added, (x) => `${aclWho(x)} (${driveLevelLabel(x.level)})`)}`,
+      changed.length && `mudou ${names(changed, (x) => `${aclWho(x)} para ${driveLevelLabel(x.level)}`)}`,
+      removed.length && `tirou o acesso de ${names(removed, aclWho)}`,
+      inh,
+    ].filter((x): x is string => !!x);
+    return parts.length ? parts.join('; ') : 'mudou o compartilhamento';
   },
 };
+
+// Compartilhamento no histórico: quem ganhou, perdeu ou mudou de nível, com o nome do momento.
+type AclEntryChange = { key: string; label: string; level: number; from?: number };
+type AclChange = string | AclEntryChange;
+const aclWho = (x: AclEntryChange) => (x.key.startsWith('role:') ? `quem tem o papel ${x.label}` : x.key.startsWith('room:') ? `membros de ${x.label}` : x.label);
 
 const ACTIVITY_ICON: Record<string, IconName> = {
   'file.upload': 'files-upload',
@@ -1136,32 +1308,63 @@ const ACTIVITY_ICON: Record<string, IconName> = {
 };
 
 function ActivityList({ folderId }: { folderId: string }) {
+  const toast = useStore((s) => s.toast);
   const [r, setR] = useState<DriveActivity[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
+    let alive = true;
+    setR(null);
+    setErr(null);
     filesApi.activity(folderId).then(
-      (x) => setR(x.events),
-      (e) => setErr(errorMessage(e)),
+      (x) => alive && (setR(x.events), setTotal(x.total)),
+      (e) => alive && setErr(errorMessage(e)),
     );
+    return () => {
+      alive = false;
+    };
   }, [folderId]);
+  // "Ver mais": a página seguinte, a partir do que já está na tela (sem repetir o que entrou no meio tempo).
+  const more = async () => {
+    if (!r) return;
+    setLoadingMore(true);
+    try {
+      const x = await filesApi.activity(folderId, r.length);
+      setR((cur) => [...(cur ?? []), ...x.events.filter((e) => !cur?.some((c) => c._id === e._id))]);
+      setTotal(x.total);
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
   if (err) return <p className="muted">{err}</p>;
   if (!r) return <Skeleton height={60} />;
   if (!r.length) return <p className="muted">Nada registrado ainda.</p>;
   return (
-    <ol className="fl-activity">
-      {r.map((e) => (
-        <li key={e._id}>
-          <span className="fl-act-icon">
-            <Icon name={ACTIVITY_ICON[e.action] ?? (e.action.startsWith('folder') ? 'files-folder' : 'file')} size={14} />
-          </span>
-          <span>
-            <strong>{e.actor.name || e.actor.username || 'Sistema'}</strong> {(ACTIVITY_TEXT[e.action] ?? (() => e.action))(e.data as Record<string, any>)}
-            {typeof e.data.folder === 'string' && <span className="muted"> em {e.data.folder}</span>}
-            <small className="muted">{formatWhen(e.ts)}</small>
-          </span>
-        </li>
-      ))}
-    </ol>
+    <>
+      <ol className="fl-activity">
+        {r.map((e) => (
+          <li key={e._id}>
+            <span className="fl-act-icon">
+              <Icon name={ACTIVITY_ICON[e.action] ?? (e.action.startsWith('folder') ? 'files-folder' : 'file')} size={14} />
+            </span>
+            <span>
+              <strong>{e.actor.name || e.actor.username || 'Sistema'}</strong> {(ACTIVITY_TEXT[e.action] ?? (() => e.action))(e.data as Record<string, any>)}
+              {typeof e.data.folder === 'string' && <span className="muted"> em {e.data.folder}</span>}
+              <small className="muted">{formatWhen(e.ts)}</small>
+            </span>
+          </li>
+        ))}
+      </ol>
+      {r.length < total && (
+        <button type="button" className="btn small fl-activity-more" onClick={() => void more()} disabled={loadingMore}>
+          {loadingMore && <Spinner size="sm" />}
+          Ver mais ({plural(total - r.length, 'evento', 'eventos')})
+        </button>
+      )}
+    </>
   );
 }
 
@@ -1212,11 +1415,11 @@ function FolderDetails({ folder, actions, onClose }: { folder: DriveFolder; acti
             Quem tem acesso
           </h3>
           <ul className="fl-acl compact">
-            {acl.map((e) => (
-              <li key={`${e.from?._id ?? ''}:${e.type}:${e.id}`}>
+            {acl.map((e, i) => (
+              <li key={`${i}:${e.type}:${e.id}`}>
                 <span className="fl-subject-text">
                   <strong className="ellipsis">{e.label}</strong>
-                  <small className="muted ellipsis">{e.from ? `de “${e.from.name}”` : (e.sublabel ?? '')}</small>
+                  <small className="muted ellipsis">{e.from ? (e.from.name ? `de “${e.from.name}”` : 'de uma pasta de cima') : (e.sublabel ?? '')}</small>
                 </span>
                 <span className={`fl-level l${e.level}`}>{driveLevelLabel(e.level)}</span>
               </li>
@@ -1263,10 +1466,10 @@ function useItemActions(opts: {
   const toast = opts.toast ?? storeToast;
   const { setDialog, reload, navigate, openShare, parent, onGone } = opts;
   const run = useCallback(
-    async (p: Promise<unknown>, ok: string) => {
+    async <T,>(p: Promise<T>, ok: string | ((r: T) => string)) => {
       try {
-        await p;
-        toast(ok, 'success');
+        const out = await p;
+        toast(typeof ok === 'string' ? ok : ok(out), 'success');
         reload?.();
       } catch (e) {
         toast(errorMessage(e), 'error');
@@ -1308,10 +1511,20 @@ function useItemActions(opts: {
             type="button"
             onClick={() => {
               close();
-              void navigator.clipboard?.writeText(`${location.origin}/files/f/${f.folderId}`).then(() => toast('Link da pasta copiado.', 'success'));
+              void navigator.clipboard?.writeText(`${location.origin}/files/f/${f.folderId}?file=${f._id}`).then(() => toast('Link do arquivo copiado. Quem tem acesso à pasta abre direto nele.', 'success'));
             }}
           >
             <Icon name="copy-link" />
+            Copiar link do arquivo
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              void navigator.clipboard?.writeText(`${location.origin}/files/f/${f.folderId}`).then(() => toast('Link da pasta copiado.', 'success'));
+            }}
+          >
+            <Icon name="files-folder" />
             Copiar link da pasta
           </button>
           {level >= 2 && setDialog && (
@@ -1326,6 +1539,7 @@ function useItemActions(opts: {
                       initial={f.name}
                       confirm="Renomear"
                       selectBase
+                      maxLength={DRIVE_FILE_NAME_MAX}
                       onClose={() => setDialog(null)}
                       onSave={async (name) => {
                         await filesApi.rename(f._id, name);
@@ -1340,7 +1554,17 @@ function useItemActions(opts: {
                 <Icon name="edit" />
                 Renomear
               </button>
-              <button type="button" onClick={() => (close(), move(`Mover “${f.name}”`, f.folderId, null, (t) => run(filesApi.move({ fileIds: [f._id], targetId: t._id }), `Movido para “${t.name}”.`)))}>
+              <button
+                type="button"
+                onClick={() =>
+                  (close(),
+                  move(`Mover “${f.name}”`, f.folderId, null, (t) =>
+                    run(filesApi.move({ fileIds: [f._id], targetId: t._id }), (x) =>
+                      x.renamed?.length ? `Movido para “${t.name}” como “${x.renamed[0].name}”: já havia um arquivo com esse nome lá.` : `Movido para “${t.name}”.`,
+                    ),
+                  ))
+                }
+              >
                 <Icon name="files-move" />
                 Mover para…
               </button>
@@ -1375,23 +1599,25 @@ function useItemActions(opts: {
               Compartilhar
             </button>
           )}
-          {(f.level >= 3 || (parent?.level ?? 0) >= 2) && setDialog && (
+          {f.level >= 2 && setDialog && (
             <button
               type="button"
               onClick={() => {
                 close();
                 setDialog(
                   <NameDialog
-                    title="Renomear pasta"
+                    title={canRenameFolder(f) ? 'Renomear pasta' : 'Cor da pasta'}
                     initial={f.name}
                     initialColor={f.color}
                     withColor
+                    nameLocked={canRenameFolder(f) ? undefined : 'Só quem gerencia a pasta muda o nome dela.'}
                     confirm="Salvar"
+                    maxLength={DRIVE_FOLDER_NAME_MAX}
                     onClose={() => setDialog(null)}
                     onSave={async (name, color) => {
-                      await filesApi.updateFolder(f._id, { name, color });
+                      const r = await filesApi.updateFolder(f._id, canRenameFolder(f) ? { name, color } : { color });
                       setDialog(null);
-                      toast('Pasta atualizada.', 'success');
+                      toast(canRenameFolder(f) && r.name && r.name !== name ? `Pasta salva como “${r.name}”.` : 'Pasta atualizada.', 'success');
                       reload?.();
                     }}
                   />,
@@ -1399,16 +1625,24 @@ function useItemActions(opts: {
               }}
             >
               <Icon name="edit" />
-              Renomear e cor
+              {canRenameFolder(f) ? 'Renomear e cor' : 'Mudar a cor'}
             </button>
           )}
-          {f.level >= 3 && setDialog && f.parentId && (
-            <button type="button" onClick={() => (close(), move(`Mover a pasta “${f.name}”`, f.parentId, f._id, (t) => run(filesApi.move({ folderIds: [f._id], targetId: t._id }), `Pasta movida para “${t.name}”.`)))}>
+          {canRemoveFolder(f) && setDialog && f.parentId && (
+            <button
+              type="button"
+              onClick={() =>
+                (close(),
+                move(`Mover a pasta “${f.name}”`, f.parentId, f._id, (t) =>
+                  run(filesApi.move({ folderIds: [f._id], targetId: t._id }), (x) => (x.renamed?.length ? `Pasta movida para “${t.name}” como “${x.renamed[0].name}”.` : `Pasta movida para “${t.name}”.`)),
+                ))
+              }
+            >
               <Icon name="files-move" />
               Mover para…
             </button>
           )}
-          {f.level >= 3 && (
+          {canRemoveFolder(f) && (
             <>
               <hr />
               <button
@@ -1447,6 +1681,8 @@ function NameDialog({
   initialColor = null,
   withColor,
   selectBase,
+  nameLocked,
+  maxLength = DRIVE_FILE_NAME_MAX,
   confirm,
   onClose,
   onSave,
@@ -1457,6 +1693,10 @@ function NameDialog({
   initialColor?: string | null;
   withColor?: boolean;
   selectBase?: boolean;
+  // O nome não pode mudar (o motivo aparece embaixo do campo): só a cor.
+  nameLocked?: string;
+  // O mesmo limite do servidor: pasta até 120 caracteres, arquivo até 200.
+  maxLength?: number;
   confirm: string;
   onClose: () => void;
   onSave: (name: string, color: string | null) => Promise<void>;
@@ -1468,7 +1708,7 @@ function NameDialog({
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || el.disabled) return;
     el.focus();
     const dot = initial.lastIndexOf('.');
     if (selectBase && dot > 0) el.setSelectionRange(0, dot);
@@ -1476,6 +1716,7 @@ function NameDialog({
   }, [initial, selectBase]);
   const submit = async () => {
     if (!name.trim()) return setErr('Dê um nome.');
+    if (/^\.+$/.test(name.trim())) return setErr('Nome inválido: use letras ou números.');
     setBusy(true);
     setErr(null);
     try {
@@ -1513,7 +1754,8 @@ function NameDialog({
       >
         <label className="field">
           <span className="field-label">Nome</span>
-          <input ref={ref} className="input" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} aria-invalid={!!err} />
+          <input ref={ref} className="input" value={name} maxLength={maxLength} onChange={(e) => setName(e.target.value)} aria-invalid={!!err} disabled={!!nameLocked} />
+          {nameLocked && <span className="field-hint">{nameLocked}</span>}
           {err && <span className="field-error">{err}</span>}
         </label>
         {withColor && (
@@ -1605,6 +1847,15 @@ function MoveDialog({ title, currentId, excludeId, onClose, onPick }: { title: s
 
 // ---------- Fila de envios ----------
 
+// Enviado com outro nome: "escala (2).csv" porque já havia um "escala.csv" na pasta, ou o nome foi encurtado/limpo.
+function doneText(j: UploadJob) {
+  const saved = j.result?.name;
+  if (!saved || saved === j.name) return `Em ${j.folderName}`;
+  const m = /^(.*) \(\d+\)(\.[^.]*)?$/.exec(saved);
+  const dup = !!m && `${m[1]}${m[2] ?? ''}`.toLowerCase() === j.name.trim().toLowerCase();
+  return dup ? `Salvo como “${saved}”: já havia um arquivo com esse nome em ${j.folderName}` : `Salvo como “${saved}” em ${j.folderName}`;
+}
+
 function UploadTray() {
   const jobs = useUploads();
   const [min, setMin] = useState(false);
@@ -1633,8 +1884,8 @@ function UploadTray() {
               <FileGlyph file={{ name: j.name, type: '' }} size={16} />
               <span className="fl-tray-text">
                 <span className="ellipsis">{j.name}</span>
-                <small className="muted ellipsis">
-                  {j.state === 'error' ? j.error : j.state === 'canceled' ? 'Cancelado' : j.state === 'done' ? `Em ${j.folderName}` : `${formatBytes(j.size)} · ${j.folderName}`}
+                <small className={j.state === 'done' && j.result && j.result.name !== j.name ? 'muted' : 'muted ellipsis'}>
+                  {j.state === 'error' ? j.error : j.state === 'canceled' ? 'Cancelado' : j.state === 'done' ? doneText(j) : `${formatBytes(j.size)} · ${j.folderName}`}
                 </small>
                 {j.state === 'sending' && (
                   <span className="fl-meter thin">

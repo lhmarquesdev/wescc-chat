@@ -4,7 +4,7 @@ import { query } from './db/pool';
 import { recoverInterrupted } from './importer/operations';
 import { bus } from './realtime/bus';
 import { loadPermissions, seedPermissions } from './services/permissions';
-import { ensureDefaultChannel } from './services/rooms';
+import { ensureDefaultChannel, syncDefaultChannelsOnBoot } from './services/rooms';
 import { loadSettings, setSettingCache } from './services/settings';
 import { ensureAdmin } from './services/users';
 
@@ -25,5 +25,6 @@ export async function boot(log: (m: string) => void = console.log) {
   await recoverInterrupted();
   // O canal padrão vem antes do admin para que ele já entre no canal ao ser criado.
   await ensureDefaultChannel();
+  await syncDefaultChannelsOnBoot().catch((e: any) => log(`canais padrão: ${e?.message ?? e}`));
   await ensureAdmin(config.adminUsername, config.adminPassword, config.adminEmail, log);
 }

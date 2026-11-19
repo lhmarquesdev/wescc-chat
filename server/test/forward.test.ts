@@ -176,6 +176,36 @@ describe('encaminhar', () => {
     expect(r2.results[0]).toMatchObject({ ok: false, errorType: 'error-direct-restricted' });
   });
 
+  it('chat.forwardTargets: o motivo de cada destino antes de enviar (silenciado, DM bloqueada, fora da sala)', async () => {
+    const muted = await channel(A, [bruno]);
+    await api('POST', 'rooms.muteUser', { roomId: muted, userId: bruno.userId }, A);
+    const ok = await channel(A, [bruno]);
+    const outside = await group(A, [ana]);
+    const arq = await channel(A, [bruno]);
+    await api('POST', 'channels.archive', { roomId: arq }, A);
+    // DM que já existia e passou a ser bloqueada pela política (a outra pessoa virou Operação).
+    const u1 = await newUser(A);
+    const u2 = await newUser(A);
+    const dm = (await api('POST', 'im.create', { username: u2.username }, u1)).room._id;
+    const r = await api('GET', 'chat.forwardTargets', { rids: [muted, ok, outside, arq, 'naoexiste12345'].join(',') }, bruno);
+    expect(r.status).toBe(200);
+    const by = Object.fromEntries(r.targets.map((t: any) => [t.rid, t.reason]));
+    expect(by[muted]).toBe('Você está silenciado nesta sala.');
+    expect(by[ok]).toBeUndefined();
+    expect(by[arq]).toBe('Esta sala está arquivada.');
+    // Fora da sala (ou sala que não existe): o mesmo texto, sem contar nada da sala.
+    expect(by[outside]).toBe('Você precisa entrar na sala para enviar mensagens.');
+    expect(by.naoexiste12345).toBe('Você precisa entrar na sala para enviar mensagens.');
+    expect((await api('GET', 'chat.forwardTargets', { rids: dm }, u1)).targets).toEqual([{ rid: dm }]);
+    for (const u of [u1, u2]) expect((await api('POST', 'users.update', { userId: u.userId, data: { roles: ['operacao'] } }, A)).success).toBe(true);
+    const blocked = (await api('GET', 'chat.forwardTargets', { rids: dm }, u1)).targets[0];
+    expect(blocked.rid).toBe(dm);
+    expect(blocked.reason).toContain('bloqueadas pela política da empresa');
+    // Limite de conversas por pedido.
+    const many = Array.from({ length: 51 }, (_, i) => `sala${String(i).padStart(10, '0')}`).join(',');
+    expect((await api('GET', 'chat.forwardTargets', { rids: many }, bruno)).status).toBe(400);
+  });
+
   it('sem create-d: o motivo vem em português', async () => {
     const before = await rolesOf('create-d');
     const src = await channel(ana, [bruno]);

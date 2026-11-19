@@ -1,46 +1,8 @@
 // Seletor de emoji: no computador, painel ancorado no botão que abriu (em portal); no celular, folha que sobe de baixo.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { customEmoji, EMOJI, EMOJI_CATEGORIES } from '../lib/emoji';
+import { customEmoji, EMOJI, EMOJI_CATEGORIES, resolveEmoji, searchEmoji } from '../lib/emoji';
 import { Icon, type IconName } from './Icon';
 import { Portal, Sheet, useAnchored, useEscape, useIsPhone, type Placement } from './overlay';
-
-// Os códigos são em inglês; estas palavras deixam a busca achar o emoji em português.
-const PT_WORDS: Record<string, string[]> = {
-  coracao: ['heart', 'orange_heart', 'yellow_heart', 'green_heart', 'blue_heart', 'purple_heart', 'heart_eyes', 'two_hearts', 'sparkling_heart'],
-  amor: ['heart', 'heart_eyes', 'kissing_heart', 'two_hearts'],
-  joinha: ['+1'],
-  positivo: ['+1', 'white_check_mark'],
-  negativo: ['-1'],
-  certo: ['white_check_mark', 'heavy_check_mark'],
-  feito: ['white_check_mark', 'heavy_check_mark'],
-  errado: ['x'],
-  rir: ['joy', 'rofl', 'laughing', 'smile'],
-  risada: ['joy', 'rofl', 'laughing'],
-  sorriso: ['smile', 'smiley', 'grinning', 'blush'],
-  triste: ['cry', 'sob', 'disappointed', 'pensive'],
-  chorar: ['cry', 'sob'],
-  festa: ['tada', 'confetti_ball', 'partying_face'],
-  parabens: ['tada', 'clap', 'trophy'],
-  palmas: ['clap'],
-  obrigado: ['pray'],
-  obrigada: ['pray'],
-  olhos: ['eyes'],
-  fogo: ['fire'],
-  estrela: ['star', 'star2'],
-  atencao: ['warning', 'exclamation'],
-  alerta: ['warning'],
-  pergunta: ['question'],
-  ideia: ['bulb'],
-  cafe: ['coffee'],
-  telefone: ['telephone', 'phone'],
-  relogio: ['alarm_clock', 'hourglass'],
-  dinheiro: ['moneybag', 'dollar'],
-  foguete: ['rocket'],
-  pensando: ['thinking'],
-  ola: ['wave'],
-  tchau: ['wave'],
-};
-const fold = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 const RECENT_KEY = 'wescc.recentEmoji';
 let recentCache: string[] | null = null;
@@ -79,7 +41,7 @@ const CAT_ICON: Record<string, IconName> = {
 };
 
 function Glyph({ code }: { code: string }) {
-  return EMOJI[code] ? <>{EMOJI[code]}</> : <img src={`/emoji-custom/${encodeURIComponent(code)}`} alt={code} />;
+  return EMOJI[code] ? <>{EMOJI[code]}</> : <img src={resolveEmoji(code)?.url ?? `/emoji-custom/${encodeURIComponent(code)}`} alt={code} />;
 }
 
 // Setas movem o foco pela grade, pela posição na tela (as seções não têm o mesmo número de itens).
@@ -143,14 +105,9 @@ export function EmojiPickerBody({ onPick, unicodeOnly, autoFocus = false }: { on
   );
   const [active, setActive] = useState(cats[0]?.name ?? '');
   const grid = useRef<HTMLDivElement>(null);
-  const t = fold(term.trim());
-  const found = useMemo(() => {
-    if (!t) return [];
-    const pt = Object.entries(PT_WORDS).flatMap(([w, codes]) => (w.startsWith(t) ? codes : []));
-    const byCode = Object.keys(EMOJI).filter((k) => k.includes(t));
-    const custom = unicodeOnly ? [] : customEmoji.filter((e) => e.name.includes(t)).map((e) => e.name);
-    return [...new Set([...pt.filter((c) => c in EMOJI), ...byCode, ...custom])];
-  }, [t, unicodeOnly]);
+  const t = term.trim();
+  // A mesma busca do atalho ":" do compositor (lib/emoji.ts): código em inglês ou palavra em português.
+  const found = useMemo(() => searchEmoji(t, Infinity, unicodeOnly), [t, unicodeOnly]);
   const pick = (code: string) => {
     pushRecent(code);
     onPick(code, EMOJI[code] ?? null);

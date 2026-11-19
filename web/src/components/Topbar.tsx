@@ -4,6 +4,7 @@ import { useStore } from '../lib/store';
 import { ADMIN_SECTIONS } from '../pages/admin/sections';
 import { Icon } from './Icon';
 import { UserMenu, setTheme, useMyStatus } from './Sidebar';
+import { StatusDot } from './ui';
 
 // Barra do topo (padrão Atendeti): recolher o menu, trilha "Wescchat › Área › Página", tema e a pessoa.
 
@@ -29,13 +30,20 @@ const ACCOUNT: Record<string, string> = {
   connected: 'Contas conectadas',
 };
 
-function useTrail(): { label: string; to?: string }[] {
+// Também dá o nome da tela para o título da aba (App.tsx): o último item é a tela atual.
+export function useTrail(): { label: string; to?: string }[] {
   const { pathname } = useLocation();
-  const subs = useStore((s) => s.subscriptions);
   const room = /^\/(channel|group|direct)\/([^/]+)/.exec(pathname);
+  // Só o nome da sala: as outras mudanças nas inscrições (não lidas, última mensagem) não redesenham quem usa a trilha.
+  const roomName = useStore((s) => {
+    if (!room) return undefined;
+    const sub = s.subscriptions[room[2]] ?? Object.values(s.subscriptions).find((x) => x.name === room[2]);
+    // Sem inscrição (prévia de um canal, sala excluída com a conversa aberta): o nome que se conhece da sala.
+    const known = room[1] !== 'direct' ? s.rooms[room[2]] : undefined;
+    return sub?.fname || sub?.name || known?.fname || known?.name;
+  });
   if (room) {
-    const sub = subs[room[2]] ?? Object.values(subs).find((s) => s.name === room[2]);
-    return [{ label: 'Conversas', to: '/home' }, { label: sub?.fname || sub?.name || 'Conversa' }];
+    return [{ label: 'Conversas', to: '/home' }, { label: roomName || 'Conversa' }];
   }
   const area = AREAS.find(([re]) => re.test(pathname));
   if (!area) return [{ label: 'Início' }];
@@ -57,15 +65,16 @@ export function ThemeToggle() {
 
 /** Duas letras para o avatar da marca (nome e sobrenome, ou as duas primeiras do usuário). */
 function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const two = parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : (parts[0] ?? '').slice(0, 2);
+  // Letras e algarismos de cada parte: um emoji no começo do nome não vira meio caractere ("�").
+  const parts = name.trim().split(/\s+/).map((p) => p.match(/[\p{L}\p{N}]/gu) ?? []).filter((p) => p.length);
+  const two = parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : parts.length ? parts[0].slice(0, 2).join('') : (Array.from(name.trim())[0] ?? '');
   return two.toUpperCase();
 }
 
 export function Topbar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const me = useStore((s) => s.me)!;
   const site = useStore((s) => (s.settings.Site_Name as string | undefined) || 'Wescchat');
-  const { line } = useMyStatus();
+  const { status, line, silenced } = useMyStatus();
   const trail = useTrail();
   const toggleLabel = collapsed ? 'Expandir menu' : 'Recolher menu';
   return (
@@ -98,12 +107,18 @@ export function Topbar({ collapsed, onToggle }: { collapsed: boolean; onToggle: 
           placement="bottom-end"
           trigger={
             <button type="button" className="me-btn" title={`${me.name} · ${line}`}>
-              <span className="me-avatar" aria-hidden="true">
-                {initials(me.name || me.username)}
+              {/* O próprio status sempre à vista (o ponto e a linha, com o sino cortado quando silencia): quem fica
+                  Ocupado ou Invisível não esquece. */}
+              <span className="avatar-wrap" aria-hidden="true">
+                <span className="me-avatar">{initials(me.name || me.username)}</span>
+                <StatusDot username={me.username} status={status} statusCustom={me.statusCustom} />
               </span>
               <span className="me-text">
                 <span className="me-name">{me.name}</span>
-                <span className="me-status">{me.email || `@${me.username}`}</span>
+                <span className="me-status">
+                  <span className="me-status-text">{line}</span>
+                  {silenced && <Icon name="notify-silenced" size={12} className="me-silenced" label="Notificações silenciadas" />}
+                </span>
               </span>
               <Icon name="chevron-down" className="me-chevron" />
             </button>

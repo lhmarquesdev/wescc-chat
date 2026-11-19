@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { blockedPair, bringInBlockMessage, checkDirect, directBlockMessage, isExempt, isRestricted, type DirectParty, type DirectRules } from '@shared/direct';
+import { blockedPair, bringInBlockMessage, checkDirect, directBlockMessage, isExempt, isRestricted, type BringInMode, type DirectParty, type DirectRules } from '@shared/direct';
 import type { RoomDirectPolicy, Subscription } from '@shared/index';
 import { roomPath } from './format';
 import { useStore } from './store';
@@ -15,8 +15,9 @@ export type DirectState =
 
 export interface DirectPolicy {
   state: (targets: DirectParty[]) => DirectState;
-  // Sala privada: o motivo de não poder trazer candidate (com quem já foi escolhido), ou undefined.
-  bringIn: (picked: DirectParty[], candidate: DirectParty) => string | undefined;
+  // Sala privada (ou convite da Agenda, com mode.calendar): o motivo de não poder trazer candidate (com quem já foi
+  // escolhido), ou undefined.
+  bringIn: (picked: DirectParty[], candidate: DirectParty, mode?: BringInMode) => string | undefined;
 }
 
 const NONE: string[] = [];
@@ -75,12 +76,12 @@ export function useDirect(): DirectPolicy {
     };
     // Quem tem papel restrito, sem a exceção, não traz outra pessoa restrita para uma sala privada (o servidor também
     // confere quem já está na sala; aqui, quem convida e quem entra junto).
-    const bringIn = (picked: DirectParty[], candidate: DirectParty) => {
+    const bringIn = (picked: DirectParty[], candidate: DirectParty, mode?: BringInMode) => {
       if (!isRestricted(me, rules) || isExempt(me, rules)) return undefined;
       const x = withLive(candidate);
       if (x._id === id || !isRestricted(x, rules)) return undefined;
       const y = [me, ...picked.map(withLive)].find((p) => p._id !== x._id && blockedPair([x, p], rules));
-      return y ? bringInBlockMessage(x, y, me) : undefined;
+      return y ? bringInBlockMessage(x, y, me, mode) : undefined;
     };
     return { state, bringIn };
   }, [restricted, exempt, scope, id, username, roles, dms, live]);

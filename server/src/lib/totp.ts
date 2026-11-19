@@ -50,13 +50,18 @@ export function totpCode(secret: string, time = Date.now(), step = 30): string {
   return code.toString().padStart(6, '0');
 }
 
-// Aceita uma janela de ±1 passo para tolerar diferença de relógio.
-export function verifyTotp(secret: string, code: string, time = Date.now()): boolean {
+// Aceita uma janela de ±1 passo para tolerar diferença de relógio. Devolve o passo de 30 s que bateu (quem confere
+// guarda o último aceito, para o mesmo código não valer duas vezes) ou null.
+export function totpStep(secret: string, code: string, time = Date.now()): number | null {
   const c = code.replace(/\s/g, '');
   for (const drift of [-1, 0, 1]) {
-    if (totpCode(secret, time + drift * 30_000) === c) return true;
+    if (totpCode(secret, time + drift * 30_000) === c) return Math.floor(time / 30_000) + drift;
   }
-  return false;
+  return null;
+}
+
+export function verifyTotp(secret: string, code: string, time = Date.now()): boolean {
+  return totpStep(secret, code, time) !== null;
 }
 
 export function otpauthUrl(secret: string, account: string, issuer: string) {

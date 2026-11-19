@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Fastify from 'fastify';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { parseTrustProxy, readSecret } from '../src/config';
+import { containerNetworks, parseTrustProxy, readSecret } from '../src/config';
 import { redactUrl, safeReq } from '../src/tls';
 import { runServer } from './run-server';
 
@@ -91,9 +91,11 @@ describe('segredos em arquivo, TRUST_PROXY e log das requisições', () => {
     await expect(freshConfig({ LIBRETRANSLATE_API_KEY_FILE: missing })).rejects.toThrow(`Não foi possível ler LIBRETRANSLATE_API_KEY_FILE: ${missing} (o arquivo não existe)`);
   });
 
-  it('TRUST_PROXY: padrão false com HTTPS próprio e true sem ele; lista de endereços aceita', async () => {
+  it('TRUST_PROXY: padrão false com HTTPS próprio e só o proxy local (ou da rede do container) sem ele; lista de endereços aceita', async () => {
     expect(parseTrustProxy(undefined, true)).toBe(false);
-    expect(parseTrustProxy(undefined, false)).toBe(true);
+    expect(parseTrustProxy(undefined, false, [])).toEqual(['loopback']);
+    expect(parseTrustProxy(undefined, false, ['172.18.0.0/16'])).toEqual(['loopback', '172.18.0.0/16']);
+    expect(parseTrustProxy(undefined, true, ['172.18.0.0/16'])).toBe(false);
     expect(parseTrustProxy('  ', true)).toBe(false);
     expect(parseTrustProxy('true', true)).toBe(true);
     expect(parseTrustProxy('FALSE', false)).toBe(false);
@@ -122,7 +124,9 @@ describe('segredos em arquivo, TRUST_PROXY e log das requisições', () => {
     expect((await freshConfig({ TLS_PFX_FILE: path.join(dir, 'chat.pfx') })).trustProxy).toBe(false);
     expect((await freshConfig({ TLS_CERT_FILE: path.join(dir, 'chat.crt'), TLS_KEY_FILE: path.join(dir, 'chat.key') })).trustProxy).toBe(false);
     expect((await freshConfig({ TLS_PFX_FILE: path.join(dir, 'chat.pfx'), TRUST_PROXY: '10.0.0.5' })).trustProxy).toEqual(['10.0.0.5']);
-    expect((await freshConfig({})).trustProxy).toBe(true);
+    expect((await freshConfig({})).trustProxy).toEqual(['loopback', ...containerNetworks()]);
+    expect((await freshConfig({})).trustProxyDefault).toBe(true);
+    expect((await freshConfig({ TRUST_PROXY: 'true' })).trustProxyDefault).toBe(false);
 
     // Com HTTPS próprio, qualquer um poderia mandar X-Forwarded-For: o IP real vale.
     const ipWith = async (trustProxy: boolean | string[], remoteAddress: string) => {
@@ -133,9 +137,38 @@ describe('segredos em arquivo, TRUST_PROXY e log das requisições', () => {
       return r.json().ip;
     };
     expect(await ipWith(parseTrustProxy(undefined, true), '10.1.2.3')).toBe('10.1.2.3');
-    expect(await ipWith(parseTrustProxy(undefined, false), '10.1.2.3')).toBe('203.0.113.9');
+    // Sem HTTPS próprio e sem TRUST_PROXY: quem acessa direto não escolhe o próprio IP; o proxy na mesma máquina, e
+    // num container o da rede dele, continuam valendo.
+    expect(await ipWith(parseTrustProxy(undefined, false, []), '10.1.2.3')).toBe('10.1.2.3');
+    expect(await ipWith(parseTrustProxy(undefined, false, []), '127.0.0.1')).toBe('203.0.113.9');
+    expect(await ipWith(parseTrustProxy(undefined, false, []), '::1')).toBe('203.0.113.9');
+    expect(await ipWith(parseTrustProxy(undefined, false, ['172.18.0.0/16']), '172.18.0.1')).toBe('203.0.113.9');
+    expect(await ipWith(parseTrustProxy(undefined, false, ['172.18.0.0/16']), '192.168.1.50')).toBe('192.168.1.50');
+    expect(await ipWith(parseTrustProxy('true', false), '10.1.2.3')).toBe('203.0.113.9');
     expect(await ipWith(parseTrustProxy('10.0.0.5', true), '10.0.0.5')).toBe('203.0.113.9');
     expect(await ipWith(parseTrustProxy('10.0.0.5', true), '10.1.2.3')).toBe('10.1.2.3');
+  });
+
+  it('rede do container: o proxy no host ou em outro container chega por ela, em CIDR', () => {
+    const exists = vi.spyOn(fs, 'existsSync').mockImplementation((p) => p === '/.dockerenv');
+    const ifs = vi.spyOn(os, 'networkInterfaces').mockReturnValue({
+      lo: [{ address: '127.0.0.1', netmask: '255.0.0.0', family: 'IPv4', mac: '00:00:00:00:00:00', internal: true, cidr: '127.0.0.1/8' }],
+      eth0: [
+        { address: '172.18.0.3', netmask: '255.255.0.0', family: 'IPv4', mac: '02:42:ac:12:00:03', internal: false, cidr: '172.18.0.3/16' },
+        { address: 'fe80::42:acff:fe12:3', netmask: 'ffff:ffff:ffff:ffff::', family: 'IPv6', mac: '02:42:ac:12:00:03', internal: false, cidr: 'fe80::42:acff:fe12:3/64', scopeid: 2 },
+      ],
+      eth1: [{ address: '10.20.30.40', netmask: '255.255.255.240', family: 'IPv4', mac: '02:42:0a:14:1e:28', internal: false, cidr: '10.20.30.40/28' }],
+    });
+    try {
+      expect(containerNetworks()).toEqual(['172.18.0.0/16', '10.20.30.32/28']);
+      exists.mockImplementation((p) => p === '/run/.containerenv');
+      expect(containerNetworks()).toEqual(['172.18.0.0/16', '10.20.30.32/28']);
+      exists.mockReturnValue(false);
+      expect(containerNetworks()).toEqual([]);
+    } finally {
+      exists.mockRestore();
+      ifs.mockRestore();
+    }
   });
 
   it('o log da requisição esconde access_token e join_request', async () => {

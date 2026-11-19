@@ -50,7 +50,7 @@ Para desenvolver o front com recarga automática, rode `npm run dev -w web` em o
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` / `TLS_CA_FILE` | — | HTTPS próprio com certificado e chave em PEM (com os dois, vale o PFX) |
 | `HTTP_REDIRECT_PORT` | — | Portas HTTP que redirecionam para o `SITE_URL`, separadas por vírgula (ex.: `80,3000`) |
 | `INTERNAL_PORT` | `3080` | Só com HTTPS próprio: porta em `127.0.0.1` para os webhooks do servidor de chamadas |
-| `TRUST_PROXY` | `false` com HTTPS próprio, `true` sem | Proxies cujo `X-Forwarded-For` vale: `true`, `false` ou endereços e faixas separados por vírgula |
+| `TRUST_PROXY` | `false` com HTTPS próprio; sem ele, só proxy na mesma máquina (ou na rede do container) | Proxies cujo `X-Forwarded-For` vale: `true`, `false` ou endereços e faixas separados por vírgula |
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET_FILE` | — | Servidor de chamadas em grupo (o instalador do LiveKit grava os valores) |
 | `SECRETS_KEY_FILE` / `SECRETS_KEY` | — | Chave de segredos das integrações (Jira): caminho completo de um arquivo com 32 bytes aleatórios em base64 (ou o valor) |
 | `SECRETS_KEY_PREVIOUS_FILE` / `SECRETS_KEY_PREVIOUS` | — | Chave anterior, só durante a troca da chave de segredos |
@@ -92,6 +92,11 @@ cd server && NODE_ENV=production node dist/index.js
 
 No Windows, o chat roda como serviço com o instalador de `scripts\windows` (veja a seção abaixo).
 
+O build do web grava, ao lado de cada JS, CSS e SVG, as cópias comprimidas (`.br` e `.gz`): o servidor entrega a que o
+navegador aceitar, e os arquivos de `web/dist/assets` (com o hash do conteúdo no nome) ficam no cache do navegador sem
+revalidar. As respostas JSON da API acima de 1 KB também saem comprimidas. A Administração, a Agenda, Arquivos,
+Chamadas, Lembretes e a página de reunião carregam só quando abertas. Nada disso pede configuração nem proxy na frente.
+
 ## HTTPS e serviço do Windows
 
 Fora de `localhost`, o navegador só libera câmera, microfone, push e o app instalável com o site em HTTPS. O chat
@@ -121,9 +126,13 @@ Sem nenhuma variável `TLS_*`, tudo fica como antes: HTTP na porta `PORT`.
   porta nunca é liberada no firewall e não pode ser a mesma de `PORT` nem de `HTTP_REDIRECT_PORT` (o chat não sobe).
   `PORT` ou `INTERNAL_PORT` vazios valem o padrão; um valor que não é porta (1 a 65535) impede o chat de subir.
 - **IP de quem acessa**: com HTTPS próprio, o `X-Forwarded-For` é ignorado (`TRUST_PROXY=false`) e vale o IP da
-  conexão (bloqueio de login, limites de requisições e auditoria). Atrás de um proxy reverso (sem `TLS_*`), o padrão
-  continua `true`; para aceitar só os seus proxies, liste-os: `TRUST_PROXY=127.0.0.1,10.0.0.0/8` (máscara em
-  pontos também vale, desde que contínua: `10.0.0.0/255.0.0.0`).
+  conexão (bloqueio de login, limites de requisições e auditoria). Sem `TLS_*`, o padrão aceita o `X-Forwarded-For`
+  só de um proxy reverso na mesma máquina (`127.0.0.1`/`::1`) e, com o chat num container (Docker, Podman), também da
+  rede do container (o proxy no host ou em outro container); de qualquer outro endereço vale o IP da conexão, para
+  ninguém escolher o próprio IP e escapar do bloqueio por IP. Proxy em outra máquina: liste-o,
+  `TRUST_PROXY=10.0.0.5` ou `TRUST_PROXY=127.0.0.1,10.0.0.0/8` (máscara em pontos também vale, desde que contínua:
+  `10.0.0.0/255.0.0.0`); sem isso, o log avisa uma vez "X-Forwarded-For de … ignorado" com o valor a definir.
+  `TRUST_PROXY=true` volta a aceitar o `X-Forwarded-For` de qualquer um.
 - Um erro de configuração ao subir (`TRUST_PROXY`, arquivo `*_FILE` que não existe ou sem permissão de leitura,
   porta inválida) sai só com a mensagem, em uma linha no `wescc-chat.err.log`.
 - Os logs de requisição escondem os parâmetros `access_token` e `join_request` (`***`).
@@ -243,18 +252,26 @@ vira um botão na tela de login.
 ## Esqueci minha senha
 
 A tela de login tem o link "Esqueci minha senha" (`Accounts_PasswordReset`). O chat envia por e-mail um link válido por
-1 hora, que só funciona uma vez; ao redefinir, todas as sessões da conta são encerradas e o 2FA continua sendo pedido.
-Para funcionar:
+1 hora, que só funciona uma vez; ao redefinir, todas as sessões da conta são encerradas, os tokens de acesso pessoal
+são revogados e o 2FA continua sendo pedido. Para funcionar:
 
-- configure o SMTP em Administração › Configurações › Email;
+- configure o SMTP em Administração › Configurações › Email (sem ele, a tela de login mostra "Esqueceu a senha? Fale
+  com o administrador." no lugar do link);
 - confira a URL do site em Configurações › Geral (ou a variável `SITE_URL`), que é usada no link.
 
-Contas LDAP e contas que só entram por SAML/OAuth seguem o provedor e não recebem o link.
+Contas LDAP e contas que só entram por SAML/OAuth seguem o provedor e não recebem o link (com o LDAP ligado, a tela
+"Esqueci minha senha" lembra que a senha de rede se troca pelo procedimento da TI). A tela de nova senha confere o
+link ao abrir (usado, vencido ou trocado por um mais novo: avisa antes de pedir a senha) e continua aberta se a página
+for recarregada.
 
 ## App instalável e notificações push
 
 O cliente web é um PWA: no Chrome ou no Edge use "Instalar app" na barra de endereço; no celular, "Adicionar à tela
 inicial" (no iPhone, as notificações só funcionam com o app adicionado à tela inicial).
+
+O app não fica guardado no navegador (precisa do servidor e nunca abre uma versão velha). Se o servidor não responder
+ao abrir o app ou recarregar a página, aparece a tela "Sem conexão com o servidor do chat", que tenta de novo a cada
+5 s e abre o chat sozinha quando o servidor volta.
 
 Com a permissão de notificações dada, o navegador se inscreve para push e recebe menções e DMs mesmo com o chat
 fechado. O push só é enviado para quem não está com o chat aberto em nenhum lugar, e cada pessoa pode desligá-lo por
@@ -270,10 +287,16 @@ dispositivo em Minha conta › Preferências.
 
 Em qualquer mensagem direta entre duas pessoas, os botões 📞 e 🎥 no topo da conversa ligam para a outra pessoa, que
 recebe o toque em todos os dispositivos com o chat aberto (e uma notificação push se estiver com o chat fechado). Dá
-para atender só com áudio, desligar o microfone ou a câmera, compartilhar a tela e ampliar a janela. Cada chamada fica
-registrada na conversa e no histórico em 📞 Chamadas, na barra lateral.
+para atender só com áudio, desligar o microfone ou a câmera, compartilhar a tela, ampliar a janela e trocar o
+microfone, a câmera ou a saída de áudio (⚙ Configurações de áudio e vídeo, na janela da chamada). Ligando para alguém
+offline ou Ocupado, a janela avisa quem liga enquanto toca (o toque para quem está Ocupado continua, de propósito). Cada
+chamada fica registrada na conversa e no histórico em 📞 Chamadas, na barra lateral.
 
 - O áudio e o vídeo vão direto entre os navegadores (WebRTC); o servidor só repassa a sinalização e guarda o histórico.
+- Uma queda curta da conexão com o servidor (rede instável, notebook que dormiu, servidor reiniciado) não derruba a
+  chamada: o navegador se reconecta sozinho e a chamada segue. Quem não volta em 30 s encerra a chamada como queda, com
+  a duração até a queda, e a outra pessoa é avisada do motivo. Fechar ou recarregar a página, ou sair da conta, no meio
+  da chamada encerra a chamada na hora, com o aviso nos dois lados.
 - Na mesma rede isso funciona sem configuração. Para chamadas entre redes diferentes (casa e escritório, 4G), configure
   um servidor TURN (por exemplo o coturn) em Administração › Configurações › Videoconferência.
 - Fora de `localhost`, o navegador só libera câmera e microfone com o site em HTTPS (veja HTTPS e serviço do
@@ -725,6 +748,38 @@ arquivos e pastas com nome fora do UTF-8 ficam de fora, com um aviso só.
 Os downloads (URL, arquivos e fotos pendentes) recusam endereços da rede interna. Para liberar um servidor interno,
 inclua `host:porta` em `IMPORT_ALLOWED_HOSTS`.
 
+## Administração de usuários
+
+Em Administração › Usuários:
+
+- **Novo usuário**: o e-mail é opcional. Com senha definida por você, "Exigir troca de senha no primeiro login" vem
+  ligado; com e-mail, "Enviar link para a pessoa criar a senha" manda o link de "Esqueci minha senha" (vale 3 dias) e
+  dispensa a senha (pede "Esqueci minha senha" ligado e o e-mail configurado). No editor, **Enviar link para definir
+  a senha** faz o mesmo para uma conta que já existe, e a pessoa recebe um aviso quando um administrador troca a
+  senha dela.
+- **Aguardando aprovação**: com "Aprovar novos usuários manualmente", quem se cadastra pela tela de entrar aparece
+  com esse status e um filtro próprio (separado dos desativados). Quem pode ativar contas recebe um aviso na hora, no
+  chat e por e-mail, com o link para o filtro. **Aprovar cadastro** ativa a conta e avisa a pessoa por e-mail;
+  **Recusar cadastro** exclui o cadastro.
+- **Nome e nome de usuário**: o nome é obrigatório (até 100 caracteres) e a bio vai até 500. `all`, `here` e `system`
+  são nomes de usuário reservados (@all e @here avisam a sala inteira).
+- **Editor de usuário**: Redefinir 2FA e Remover avatar pedem confirmação; trocar o e-mail desmarca "E-mail
+  verificado" (a revisão mostra, e dá para manter marcado na aba Segurança); a sua própria senha você troca em Minha
+  conta › Segurança, com a senha atual. Sair com alterações não salvas, inclusive pelo Voltar do navegador ou do
+  celular, pergunta antes de descartar.
+- **Dispositivos**: a sua sessão aparece como "Esta sessão" (encerrá-la tira você da conta), e as sessões de quem tem
+  papel acima do seu ficam com cadeado.
+- **Desativar** impede o acesso e guarda tudo; ninguém desativa a própria conta, e o último administrador ativo não
+  é desativado.
+- **Excluir conta** não dá para desfazer: as mensagens da pessoa continuam nas salas e nas conversas em grupo (só ela
+  sai delas); cada conversa a dois fica arquivada, só para leitura da outra pessoa, com o nome "Fulano (conta
+  excluída)"; eventos e reuniões com convidados que ela organizava passam para um dos convidados.
+- **Ordenar**: clique em Nome, E-mail ou Último acesso para ordenar a lista (clicar de novo inverte). Em Último
+  acesso, do mais antigo, quem nunca entrou aparece primeiro. No celular a ordem fica num seletor ao lado do filtro de
+  papel. As pessoas vêm antes dos bots em qualquer ordem, e a exportação CSV segue a ordem da tela.
+- **Exportar CSV** neutraliza textos que começam com `=`, `+`, `-` ou `@` (a planilha não executa fórmulas vindas de
+  nomes).
+
 ## Papéis e permissões
 
 Em Administração › Papéis e permissões, três visões na mesma faixa:
@@ -752,6 +807,9 @@ Em Administração › Papéis e permissões, três visões na mesma faixa:
   agora se confunde com o de outro papel, a prévia avisa e pede outro nome para reverter.
 - Ninguém dá o que não tem: só as permissões e os papéis que cabem no que a pessoa tem (ou que o administrador
   delegou ao papel dela). Dar o papel Administrador pede `assign-admin-role`.
+- "Exigir 2FA" e "Restrito em conversas diretas" valem para todos que têm o papel: quem não é administrador só muda
+  essas opções num papel em que todas as pessoas são gerenciáveis por ele (o papel Usuário, que os administradores
+  também têm, fica travado com o motivo).
 - **Papéis em lote**, em Administração › Usuários: selecione as pessoas (até 500 por vez), escolha dar ou tirar papéis
   e veja a prévia (quem muda, quem já está assim e quem fica de fora, com o motivo) antes de aplicar. Quem está
   travado fica como estava.
@@ -802,6 +860,8 @@ Num **canal de avisos** (📢) só algumas pessoas publicam e todos os membros l
 - **Pedir “Ciente”**: cada aviso pode pedir confirmação de leitura (o botão fica ligado no campo de mensagem de quem
   publica). Os membros clicam em “✔ Ciente”, o topo do canal mostra quantos avisos esperam a confirmação de cada um, e
   quem publica vê quem confirmou e quem falta. Funciona com a confirmação de leitura do chat ligada ou desligada.
+  Enquanto houver aviso esperando o “Ciente” da pessoa, o canal continua em Início › Não lidas (“N avisos aguardando
+  seu Ciente”) e com o selo na barra lateral, mesmo depois de aberto.
   O aviso que pede “Ciente” notifica os membros como uma menção (notificação do sistema, push e e-mail), também com a
   preferência “só menções”; quem desligou as notificações da sala ou está Ocupado não recebe.
 - **Ocultar a lista de membros**: só donos e moderadores veem quem está no canal (inclusive pela lista do time e pelas
@@ -837,7 +897,8 @@ empresa e nenhum serviço da internet (Google, DeepL, Microsoft…) é usado.
 - Fora do ar, lento ou recusando: a mensagem fica no original (marcada “sem tradução”) e o chat tenta de novo sozinho
   depois de 30 segundos; a lista de idiomas também volta sozinha.
 - Nunca são traduzidas: salas criptografadas e mensagens cifradas, mensagens de sistema, figurinhas, enquetes e
-  encaminhadas. Trechos de código, links, menções, canais e emojis não vão para o tradutor e ficam iguais.
+  encaminhadas. Trechos de código, links, endereços de e-mail, menções, canais e emojis não vão para o tradutor e
+  ficam iguais.
 - Notificações, e-mails, busca, prévia na barra lateral, citações e a auditoria continuam mostrando o original.
   Nenhum texto de mensagem vai para o log.
 
@@ -855,7 +916,8 @@ Desligar depois só impede ligar de novo: as conversas já criptografadas contin
   escolhida (12 ou mais). Cada navegador pede uma vez; ao sair da conta, ele esquece. **O chat não guarda nem recupera
   essa senha.** Quem a esqueceu redefine a própria criptografia, ou um administrador redefine em Administração ›
   Usuários (`edit-other-user-e2ee`, que também encerra as sessões da pessoa): nos dois casos, as mensagens
-  criptografadas antigas ficam ilegíveis para ela.
+  criptografadas antigas ficam ilegíveis para ela (até ela criar a senha nova, cada uma avisa que é de antes da
+  redefinição).
 - **Quem entra** na conversa recebe a chave atual pelo navegador de quem já participa (com o chat aberto) e lê o
   histórico cifrado com essa chave, como no Rocket.Chat. **Gerar chave nova** (menu Mais, para quem pode ligar a
   criptografia) corta o histórico para quem entrar dali em diante.
@@ -882,8 +944,9 @@ Desligar depois só impede ligar de novo: as conversas já criptografadas contin
   entregou. Quem saiu sem deixar nada disso (removido sem mensagem, como nas outras salas do time ou pelo LDAP, e sem
   nunca ter escrito ou lido ali) volta como alguém novo.
 - Numa conversa criptografada **não funcionam**: busca no servidor (a busca da sala procura só nas mensagens já
-  carregadas), tradução, enquetes, envio agendado, mensagem de vídeo, figurinhas, encaminhar de ou para ela, prévias
-  do Jira, bots e integrações. Exportar mensagens e Meus dados trazem “Mensagem criptografada” no lugar do texto, e o
+  carregadas), tradução, enquetes, envio agendado (as mensagens que já estavam agendadas ali ficam como não enviadas),
+  mensagem de vídeo, figurinhas, encaminhar de ou para ela, prévias do Jira, bots e integrações. A confirmação de ligar
+  a criptografia lista tudo isso. Exportar mensagens e Meus dados trazem “Mensagem criptografada” no lugar do texto, e o
   push e o e-mail também (com o chat aberto, a notificação decifra no navegador). O rascunho não fica salvo no
   navegador.
 - **Chamadas de voz e vídeo não são cifradas de ponta a ponta**, mesmo numa conversa criptografada.
@@ -897,31 +960,59 @@ texto. Por isso a proteção depende de o servidor do chat ser o original e de o
 
 - **Busca da barra lateral** (Ctrl+K, ⌘K no Mac): primeiro as conversas da lista; a partir de 2 letras, também pessoas
   para conversar e canais públicos em que a pessoa ainda não está. `@ana` procura só pessoas, `#sup` só salas;
-  maiúsculas e acentos não importam.
+  maiúsculas e acentos não importam. Cada grupo mostra até 8; quando há mais, "Ver mais pessoas (ou canais) no
+  diretório" abre o diretório com a mesma busca.
+- **Busca de mensagens** (lupa no topo da sala): acentos e maiúsculas não importam ("reuniao" acha "reunião"), e ela
+  procura também no nome e na legenda dos arquivos. Mostra o total e traz 50 resultados por vez ("Carregar mais
+  resultados"). Filtros: `from:@usuario`, `has:file`, `has:link`, `is:pinned`, `in:#canal` e as datas `before:`,
+  `after:` e `on:` com AAAA-MM-DD ou DD/MM/AAAA, no fuso do navegador de quem busca (data que não existe é recusada
+  com o formato certo). Resposta de tópico encontrada abre o tópico. `%` e `_` valem como letras, e um símbolo sozinho
+  ou uma palavra que só existe com os símbolos (`%`, `!`, `C++`, `C#`) acha só as mensagens que os têm.
 - **Status personalizados**: em Administração › Status do usuário (`manage-user-status`), até 30, cada um com um tipo
   (Disponível, Ausente, Ocupado ou Invisível) que decide o comportamento; as pessoas escolhem no menu da própria foto.
   **Ocupado** (ou um personalizado do tipo Ocupado) silencia notificações, som, push e e-mail, inclusive de menções e
-  DMs; os contadores continuam subindo e as chamadas continuam tocando. Invisível aparece offline.
+  DMs; os contadores continuam subindo e as chamadas continuam tocando. Invisível aparece offline. O nome precisa de
+  uma letra ou um número (caracteres invisíveis não contam).
 - **Palavras destacadas** (Minha conta › Preferências): até 20 palavras ou expressões (2 a 40 caracteres) por pessoa.
   A mensagem com uma delas, inteira, fica marcada e avisa como uma menção; maiúsculas e acentos não importam.
+- **Conta desativada**: ninguém começa conversa direta nova nem liga para ela; a conversa que já existe abre só para
+  ler o histórico (o cartão da pessoa mostra "Conta desativada" e "Ver conversa").
 - **Encaminhar** (menu da mensagem, `forward-message`: Administrador, Usuário e Operação): para até 10 conversas por
   vez, com comentário opcional e os arquivos junto; a mensagem mostra de onde veio, sem revelar um grupo privado ou
   uma conversa direta a quem não participa dela. Valem as regras de envio de cada destino (somente leitura, canal de
-  avisos, arquivada, Operação); os destinos que não aceitam já aparecem desativados.
+  avisos, arquivada, silenciado, Operação); os destinos que não aceitam já aparecem desativados, com o motivo.
+- **Comandos de barra**: `/help` abre a lista dos comandos com o que cada um faz; um comando que não existe (por
+  exemplo `/leav`) não vira mensagem: o chat avisa, sugere o mais parecido e oferece “Enviar como texto”. Reações só
+  com emojis da lista (os padrão e os personalizados da Administração), na ordem em que apareceram, e só de quem está
+  na sala: quem só visualiza um canal público entra nele para reagir, citar ou responder. A descrição de um arquivo é o
+  texto da mensagem: aceita menções e formatação, e “Editar” muda essa descrição.
 - **Enquetes** (botão + › Criar enquete, `create-poll`: Administrador, Usuário, Dono, Moderador e Publicador): 2 a 10
   opções, com escolha múltipla, voto anônimo (ninguém vê quem votou, nem quem criou) e prazo opcional (de 5 minutos a
   90 dias). Votar não depende da permissão; encerrar antes do prazo, só quem criou ou um moderador da sala.
 - **Mensagens de vídeo** (botão + › Gravar vídeo): até 2 minutos, pela câmera do aparelho. Seguem as regras de upload
-  (Configurações › Upload de arquivos; o tipo `video/webm` ou `video/mp4` precisa ser aceito) e pedem HTTPS.
+  (Configurações › Upload de arquivos; o tipo `video/webm` ou `video/mp4` precisa ser aceito) e pedem HTTPS. As
+  mensagens de voz (o microfone no lugar de Enviar) também: com o tipo do áudio recusado, o microfone aparece
+  desativado, com o motivo. Sair da conversa no meio de uma gravação travada de 3 segundos ou mais pergunta antes de
+  descartar.
 - **Lembrar-me** (menu da mensagem): a pessoa escolhe quando quer ser lembrada (até 200 lembretes); na hora chegam o
-  aviso no chat e o push, e o lembrete fica em **Lembretes**, na barra lateral, até ela concluir ou adiar. Só a
-  própria pessoa vê os seus.
+  aviso no chat e o push, e o lembrete fica em **Lembretes**, na barra lateral, até ela concluir ou adiar. Nos
+  próximos, **Mudar horário** (atalhos ou data e hora à escolha); Remover tem Desfazer. Se a mensagem for apagada (ou a
+  pessoa perder o acesso à conversa), o lembrete sai e ela é avisada. Só a própria pessoa vê os seus.
 - **Agendar envio** (seta ao lado de Enviar, `schedule-message`: Administrador, Usuário, Dono, Moderador e Publicador):
   só texto, com tópico e “Ciente”, de 1 minuto a 1 ano à frente (até 100 por pessoa). Sai em nome da pessoa se ela
   ainda puder escrever na sala. A que não sai (por exemplo, a pessoa não pode mais escrever ali, ou o servidor ficou
   parado mais de 1 hora depois do horário) avisa por push e fica em vermelho acima do campo de mensagem, também num
-  canal de avisos, até ser reagendada, enviada ou excluída no painel Mensagens agendadas da sala. Só a própria pessoa
-  vê as suas.
+  canal de avisos, até ser reagendada, enviada ou excluída no painel Mensagens agendadas da sala; editar uma cujo
+  horário passou começa daqui a 1 hora. Uma resposta cujo tópico foi apagado sai na conversa (**Enviar na conversa**,
+  ou Editar). Só a própria pessoa vê as suas.
+- **Links de convite** (painel Link de convite da sala, `create-invite-links`: Administrador, Dono e Moderador): prazo
+  de 1 a 30 dias ou sem prazo, e limite de usos opcional (pela API, de 0 a 365 dias e de 0 a 1000 usos; 0 é sem prazo
+  ou sem limite). Só quem participa da sala cria um link, e ele só vale enquanto quem o criou continua na sala, com a
+  conta ativa e com a permissão ali; sala arquivada não recebe ninguém pelo link. Quem já participa e abre o link só é
+  levado para a sala, sem gastar um uso, e o limite vale mesmo com várias pessoas entrando ao mesmo tempo. O painel
+  lista todos os links da sala com a situação (Ativo, Esgotado, Expirado, Sala arquivada ou Sem efeito), e quem pode
+  criar links ali revoga os de qualquer pessoa. Administração › Convites (`view-room-administration`) mostra todos os
+  links do chat; Revogar aparece só para quem criou o link ou tem `create-invite-links` na sala.
 - **Exportar mensagens da sala** (painel Exportar mensagens, `export-room-messages`: Administrador e Dono da sala;
   numa DM, só por um papel global): as mensagens de um período em HTML, CSV ou JSON, com ou sem os arquivos (num
   .zip, até `DataExport_Max_Files_MB`, padrão 2048 MB, em Configurações › Mensagens › Exportação). Cada exportação
@@ -1086,22 +1177,69 @@ como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os teste
   resolvida, a API só aceita as rotas para resolvê-la e o WebSocket fecha com o código 4005. Quem liga o 2FA
   obrigatório também precisa configurar o próprio 2FA.
 - Tentativas de login falhas (inclusive código 2FA errado) bloqueiam a conta e o IP por alguns minutos, em todas as
-  instâncias: Configurações › Contas › Sessão.
+  instâncias: Configurações › Contas › Sessão. O navegador em que a pessoa já entrou na conta (cookie `wescc_device`)
+  conta as próprias falhas e não é barrado pelo bloqueio da conta nem do IP: quem erra a senha de um colega de outra
+  máquina não o tira do chat (os aparelhos em que a conta nunca entrou ficam bloqueados e a tela diz para entrar por
+  um conhecido). Com o AD fora do ar e sem senha local para conferir (`LDAP_Login_Fallback` desligado, ou conta do AD
+  sem senha no chat), o login responde "O servidor de rede (AD) não respondeu" e não conta tentativa.
+- Trocar o próprio e-mail em Minha conta pede a senha atual, respeita os domínios permitidos e manda um aviso para o
+  endereço antigo. Contas LDAP e contas que só entram por SAML/OAuth não trocam a senha nem o e-mail por ali (nas LDAP,
+  nome e nome de usuário também vêm do diretório); para excluir a própria conta sem senha, a pessoa digita o nome de
+  usuário. `all`, `here` e `system` são nomes de usuário reservados.
+- Na troca de senha em Minha conta › Segurança, as regras aparecem embaixo de "Nova senha", senha só de espaços é
+  recusada e "Encerrar as outras sessões" (marcado por padrão; some com `Device_Management_Allow_Logout_All`
+  desligado) tira os outros aparelhos da conta na hora. A foto de perfil é conferida pelo conteúdo (PNG, JPEG, GIF ou
+  WebP, até 5 MB): outro arquivo com nome de imagem é recusado.
+- Cada código do aplicativo autenticador vale uma vez só. Os códigos de backup têm 10 letras e números sem os que se
+  confundem (`XXXXX-XXXXX`), sem diferença de maiúsculas, espaços ou hífen. Desativar o 2FA pede a senha (contas com
+  senha do chat) e um código; senha ou código errados contam para um bloqueio de alguns minutos, como no login.
+- Tokens de acesso pessoal: criar um pede a senha (contas com senha do chat) e o código do 2FA, quando ligado.
+  Redefinir a senha, a troca de senha pelo administrador e o "Encerrar sessões" do administrador revogam os tokens da
+  pessoa; desativar a conta fecha as conexões abertas com eles.
+- Saída forçada (conta desativada, sessões encerradas pelo administrador ou em outro dispositivo, senha redefinida ou
+  trocada pelo administrador, sessão vencida): o token sai do navegador, a tela de entrar diz o motivo e, ao entrar de
+  novo, a pessoa volta para a tela em que estava.
+- Cadastro (`Accounts_RegistrationForm`): instalações novas começam com o cadastro desativado; as que já existiam
+  mantêm a opção de antes (migração 046). Com o cadastro público e sem aprovação manual, Configurações › Contas avisa.
 - A API só aceita chamadas de outros sites com CORS ligado (Configurações › Segurança › CORS). O cookie de sessão vale
   apenas para leituras (imagens e downloads) e para o WebSocket da própria página.
 - Avatares exigem login por padrão (`Accounts_AvatarBlockUnauthenticatedAccess`); avatares de salas privadas só para
   quem tem acesso.
 - O LDAP só vincula uma conta local com o mesmo nome de usuário com `LDAP_Merge_Existing_Users` ligado.
+- A página do chat sai com Content-Security-Policy (só os scripts do próprio chat) e não abre dentro de outro site
+  (`X-Frame-Options` e `frame-ancestors`); todas as respostas levam `X-Content-Type-Options: nosniff` e
+  `Referrer-Policy`. Um proxy reverso na frente não deve trocar esses cabeçalhos.
+- Discussão é tão privada quanto a sala de origem: num grupo privado, numa conversa direta ou num canal de time
+  privado, ela nasce grupo privado. Canal de time privado que sai do time (tirado do time, time excluído ou convertido
+  em sala) vira grupo privado com os mesmos membros. Quem não participa não recebe nada dessas salas em tempo real
+  (nem nome, nem prévia de mensagem), e quem é removido ou perde o acesso para de receber na hora.
+- Anexos enviados por pessoas (pela API) só mostram imagem, áudio ou vídeo do próprio chat: um endereço de fora
+  contaria a outro site quem abriu a conversa. Endereços de fora só por integração (webhook de entrada ou conta com o
+  papel bot).
 
 ## Agenda e reuniões
 
 Em **Agenda** cada pessoa vê os próprios eventos (mês, semana ou lista), cria eventos e reuniões e responde aos
 convites (vou, talvez, não vou). Uma **reunião com link** cria uma sala privada com os convidados (chat e chamada de
 vídeo em grupo) e um link `https://<site>/meet/<código>`. Em "Quem entra pelo link", "Só convidados" barra quem não
-foi convidado; "Qualquer pessoa do chat" deixa entrar quem tiver o link (e a pessoa passa a ser convidada). As regras
+foi convidado (a página do link diz quem organizou, para a pessoa pedir o convite); "Qualquer pessoa do chat" deixa
+entrar quem tiver o link (e a pessoa passa a ser convidada). As regras
 da Operação valem também aqui: quem não pode chamar alguém numa conversa direta também não o convida. Criar reuniões
 com link pede a permissão `create-calendar-meeting` (papéis `admin` e `user`). Os lembretes chegam no chat e por push
-(padrão 10 minutos antes). A chamada da reunião usa o servidor das chamadas em grupo (veja **Chamadas em grupo**).
+(padrão 10 minutos antes). A chamada da reunião usa o servidor das chamadas em grupo (veja **Chamadas em grupo**);
+sem ele, a página da reunião oferece só "Abrir o chat da reunião" e avisa que a chamada de vídeo ainda não está
+disponível.
+
+Os convidados recebem um aviso na tela (e push) no convite, quando o horário muda, quando o evento é cancelado e quando
+saem da lista de convidados. Quem é tirado da sala de uma reunião por outra pessoa deixa de ser convidado e não volta
+pelo link "Só convidados" até ser convidado de novo (quem sai por conta própria continua convidado). O lembrete de um
+evento de dia inteiro conta a partir de 00:00 no fuso da empresa (variável `TZ` do servidor, padrão
+`America/Sao_Paulo`), e os horários escritos pelo servidor (nota na sala da reunião, push) dizem o fuso, por exemplo
+"15:00 (horário de Brasília)". A data de início de um evento vai de um ano atrás até cinco anos à frente.
+
+Cancelar uma reunião arquiva a sala dela, com o tópico "Reunião cancelada": o histórico continua disponível, mas
+ninguém escreve nem liga mais por ali. O cartão **Convites sem resposta** reúne todos os convites ainda sem resposta,
+de agora até um ano à frente, em qualquer visão (no celular ele fica acima da agenda e abre com um toque).
 
 ### Só agenda interna
 
@@ -1121,9 +1259,16 @@ A aba **Arquivos** guarda documentos da empresa em pastas, com permissão por pa
 | Pode editar | Também enviar, renomear, mover, criar subpastas e mandar para a lixeira |
 | Gerencia | Também compartilhar, mudar permissões e apagar de vez da lixeira |
 
+Quem edita renomeia, move e manda para a lixeira as subpastas que herdam o acesso (editando também a pasta de cima).
+Pasta principal e subpasta restrita são de quem gerencia: só quem gerencia muda o nome de uma pasta principal e move
+ou manda para a lixeira uma pasta principal ou restrita (quem edita só muda a cor).
+
 Subpastas herdam o acesso da pasta de cima. Em **Compartilhar**, "Herdar o acesso da pasta de cima" desligado deixa a
 subpasta **restrita**: só quem está na lista dela entra (ex.: "Folha e salários" dentro de "Financeiro"). Quem tem
-acesso só a uma subpasta a vê como pasta principal, sem ver o nome das de cima.
+acesso só a uma subpasta a vê como pasta principal, sem ver o nome das de cima. Uma pasta com uma subpasta restrita
+que você não gerencia não vai para a lixeira nem é apagada de vez por você (peça a quem gerencia a subpasta para
+tirá-la de lá antes); se um administrador mandar a pasta de cima para a lixeira, quem gerencia a subpasta restrita a
+encontra na própria Lixeira.
 
 Permissões do RBAC (Papéis e permissões › Arquivos):
 
@@ -1131,9 +1276,15 @@ Permissões do RBAC (Papéis e permissões › Arquivos):
 - `create-files-folder`: criar pastas principais (só Administrador). Quem cria a pasta passa a gerenciá-la.
 - `manage-all-files`: ver e mudar qualquer pasta, mesmo fora do compartilhamento (só Administrador).
 
-Cada pasta tem o histórico (envios, downloads, renomeações, compartilhamento, lixeira) para quem a gerencia, e toda
-mudança de compartilhamento entra também no registro de auditoria (`drive.acl.update`). O que vai para a lixeira fica
-`Drive_Trash_Days` dias (padrão 30) e depois é apagado de vez às 4h.
+Cada pasta tem o histórico (envios, downloads, renomeações, compartilhamento com quem ganhou ou perdeu acesso,
+lixeira) para quem a gerencia, com "Ver mais" para os eventos antigos, e toda mudança de compartilhamento entra também
+no registro de auditoria (`drive.acl.update`). O que vai para a lixeira fica `Drive_Trash_Days` dias (padrão 30) e
+depois é apagado de vez às 4h.
+
+Nome repetido não apaga nada: enviar, mover ou restaurar um arquivo com o nome de outro que já está na pasta guarda
+como "nome (2)", e a tela avisa o nome final. Nomes longos são cortados em 120 caracteres (pasta) ou 200 (arquivo),
+mantendo a extensão. No menu "…" de um arquivo, **Copiar link do arquivo** gera um link que abre a pasta já com o
+arquivo selecionado; quem não tem acesso à pasta vê o aviso de sem acesso.
 
 Espaço (Administração › Configurações › Arquivos):
 

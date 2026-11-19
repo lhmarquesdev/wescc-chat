@@ -4,8 +4,9 @@ import type { Room } from '@shared/index';
 import { api, ApiError, errorMessage } from '../lib/api';
 import { partyOf, useDirect, type DirectState } from '../lib/direct';
 import { roomPath } from '../lib/format';
+import { ROOM_NAME_MAX, roomNameProblem, roomTextProblem } from '@shared/roomName';
 import { usePermission, useSetting, useStore } from '../lib/store';
-import { sendEncrypted } from '../lib/e2e/client';
+import { E2E_UI, sendEncrypted } from '../lib/e2e/client';
 import { requireE2eReady } from './e2e/E2eDialogs';
 import { Icon } from './Icon';
 import { RoomPicker, UserPicker, type PickedRoom, type PickedUser } from './Pickers';
@@ -109,7 +110,10 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
     }
   };
 
-  const nameValid = kind === 'dm' ? members.length > 0 : kind === 'discussion' ? name.trim().length > 0 && !!parentRoom : /^[0-9a-zA-ZÀ-ſ._-]{1,64}$/.test(name);
+  // Canal e time: a mesma regra do servidor, com o motivo embaixo do campo assim que algo foi digitado.
+  const nameProblem = kind === 'channel' || kind === 'team' ? roomNameProblem(name) : null;
+  const topicProblem = kind === 'channel' || kind === 'team' ? roomTextProblem('topic', topic) : null;
+  const nameValid = kind === 'dm' ? members.length > 0 : kind === 'discussion' ? name.trim().length > 0 && !!parentRoom : !nameProblem && !topicProblem;
 
   return (
     <Modal
@@ -134,10 +138,16 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
           </Field>
         )}
         {kind !== 'dm' && (
-          <Field label="Nome" required hint={kind === 'discussion' ? undefined : 'Sem espaços. Use letras, números, ponto, hífen ou sublinhado.'}>
+          <Field
+            label="Nome"
+            required
+            hint={kind === 'discussion' ? 'Até 200 caracteres.' : `Sem espaços, até ${ROOM_NAME_MAX} caracteres. Use letras, números, ponto, hífen ou sublinhado.`}
+            error={name && nameProblem ? nameProblem : undefined}
+          >
             <input
               autoFocus
               value={name}
+              maxLength={kind === 'discussion' ? 200 : ROOM_NAME_MAX}
               placeholder={kind === 'discussion' ? 'Ex.: Escala de dezembro' : kind === 'team' ? 'Ex.: time-retencao' : 'Ex.: operacao-sac'}
               onChange={(e) => setName(kind === 'discussion' ? e.target.value : e.target.value.replace(/\s/g, '-'))}
             />
@@ -145,7 +155,7 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
         )}
         {(kind === 'channel' || kind === 'team') && (
           <>
-            <Field label="Tópico" hint="Opcional. Aparece no cabeçalho, embaixo do nome.">
+            <Field label="Tópico" hint="Opcional. Aparece no cabeçalho, embaixo do nome." error={topicProblem ?? undefined}>
               <input value={topic} onChange={(e) => setTopic(e.target.value)} />
             </Field>
             {/* div, não label: um <label> em volta dos botões passaria o clique do título para o primeiro deles. */}
@@ -168,7 +178,7 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
                 checked={encrypted}
                 onChange={setEncrypted}
                 label="Criptografar de ponta a ponta"
-                description="Só quem participa lê. Busca, figurinhas, bots e integrações deixam de funcionar."
+                description={E2E_UI.turnOnShort}
               />
             )}
           </>
@@ -205,7 +215,7 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
             onChange={setMembers}
             itemDisabled={
               kind === 'dm'
-                ? (u) => blockedText(direct.state([...members, u].map(partyOf)))
+                ? (u) => (members.length >= 8 ? 'Máximo de 8 pessoas além de você.' : blockedText(direct.state([...members, u].map(partyOf))))
                 : privateRoom
                   ? (u) => direct.bringIn(members.map(partyOf), partyOf(u))
                   : undefined

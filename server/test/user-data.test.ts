@@ -344,7 +344,7 @@ describe('meus dados', () => {
     // As reações da conta excluída saem com ela; as dos outros ficam.
     const reactionsOf = async (id: string) => (await pool.query('SELECT reactions FROM messages WHERE id = $1', [id])).rows[0].reactions;
     expect(await reactionsOf(inGroup._id)).toEqual({});
-    expect(await reactionsOf(inPublic._id)).toEqual({ ':tada:': { usernames: [dir.username] } });
+    expect(await reactionsOf(inPublic._id)).toEqual({ ':tada:': { usernames: [dir.username], ts: expect.any(String) } });
 
     // Outra pessoa ganha o mesmo @usuário (comum no AD) e pede os dados.
     expect((await api('POST', 'users.create', { username: old.username, name: 'Pessoa Nova', email: `nova-${old.username}@test.local`, password: 'senha-forte-1' }, A)).success).toBe(true);
@@ -389,7 +389,7 @@ describe('meus dados', () => {
     expect((await api('POST', 'users.update', { userId: rui.userId, data: { username: renamed } }, A)).success).toBe(true);
     const r = (await pool.query('SELECT reactions FROM messages WHERE id = $1', [m._id])).rows[0].reactions;
     // A ordem de quem reagiu fica.
-    expect(r).toEqual({ ':thumbsup:': { usernames: [dir.username, renamed] }, ':tada:': { usernames: [renamed] } });
+    expect(r).toEqual({ ':thumbsup:': { usernames: [dir.username, renamed], ts: expect.any(String) }, ':tada:': { usernames: [renamed], ts: expect.any(String) } });
     const { json } = await readyZip({ ...rui, username: renamed });
     expect(json('reacoes.json').map((x: any) => x.emoji).sort()).toEqual([':tada:', ':thumbsup:']);
   });

@@ -71,6 +71,13 @@ export function useMissedCalls() {
 // O selo vermelho: DMs e salas que mencionam você, pela contagem de não lidas (o mesmo da barra lateral).
 export const isMentionBadge = (s: Subscription) => s.userMentions > 0 || s.t === 'd';
 
+// Sala silenciada ou com o contador oculto: o número de não lidas só aparece com menção. A mesma regra vale para a barra
+// lateral, o Início e o título da aba.
+const quiet = (s: Subscription) => !!s.notifications?.disableNotifications || !!s.notifications?.hideUnreadStatus;
+export const shownUnread = (s: Subscription) => (s.unread > 0 && (isMentionBadge(s) || !quiet(s)) ? s.unread : 0);
+// Título da aba: as conversas com um número ou um selo de tópico na barra lateral.
+export const countsInTitle = (s: Subscription) => shownUnread(s) > 0 || s.tunread.length > 0 || (s.alert && !quiet(s));
+
 export function useMentionTotal() {
   return useStore((st) => Object.values(st.subscriptions).reduce((n, s) => n + (isMentionBadge(s) ? s.unread : 0), 0));
 }

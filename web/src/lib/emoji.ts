@@ -45,6 +45,7 @@ export interface CustomEmoji {
   name: string;
   aliases: string[];
   extension: string;
+  _updatedAt?: string;
 }
 
 export let customEmoji: CustomEmoji[] = [];
@@ -53,24 +54,72 @@ const customByName = new Map<string, CustomEmoji>();
 export function setCustomEmoji(list: CustomEmoji[]) {
   customEmoji = list;
   customByName.clear();
-  for (const e of list) {
-    customByName.set(e.name, e);
-    for (const a of e.aliases) customByName.set(a, e);
-  }
+  // Primeiro os nomes, depois os apelidos: um apelido nunca toma o lugar do nome de outro emoji.
+  for (const e of list) customByName.set(e.name, e);
+  for (const e of list) for (const a of e.aliases) if (!customByName.has(a)) customByName.set(a, e);
+}
+
+// Endereço com a versão (a data de criação): trocar a imagem de um emoji muda o endereço, sem a antiga no cache.
+export function customEmojiUrl(e: Pick<CustomEmoji, 'name' | '_updatedAt'>) {
+  const v = e._updatedAt ? new Date(e._updatedAt).getTime() : 0;
+  return `/emoji-custom/${encodeURIComponent(e.name)}${v ? `?v=${v}` : ''}`;
 }
 
 export function resolveEmoji(code: string): { unicode?: string; url?: string } | null {
   const name = code.replace(/^:|:$/g, '');
   if (EMOJI[name]) return { unicode: EMOJI[name] };
-  const c = customByName.get(name);
-  if (c) return { url: `/emoji-custom/${encodeURIComponent(c.name)}` };
+  const c = customByName.get(name) ?? customByName.get(name.toLowerCase());
+  if (c) return { url: customEmojiUrl(c) };
   return null;
 }
 
-export function searchEmoji(term: string, limit = 10) {
-  const t = term.toLowerCase();
-  const out: string[] = [];
-  for (const k of Object.keys(EMOJI)) if (k.includes(t)) out.push(k);
-  for (const c of customEmoji) if (c.name.includes(t)) out.push(c.name);
-  return out.slice(0, limit);
+// Os códigos são em inglês; estas palavras deixam a busca achar o emoji em português.
+const PT_WORDS: Record<string, string[]> = {
+  coracao: ['heart', 'orange_heart', 'yellow_heart', 'green_heart', 'blue_heart', 'purple_heart', 'heart_eyes', 'two_hearts', 'sparkling_heart'],
+  amor: ['heart', 'heart_eyes', 'kissing_heart', 'two_hearts'],
+  joinha: ['+1'],
+  joia: ['+1'],
+  positivo: ['+1', 'white_check_mark'],
+  negativo: ['-1'],
+  certo: ['white_check_mark', 'heavy_check_mark'],
+  feito: ['white_check_mark', 'heavy_check_mark'],
+  errado: ['x'],
+  rir: ['joy', 'rofl', 'laughing', 'smile'],
+  risada: ['joy', 'rofl', 'laughing'],
+  sorriso: ['smile', 'smiley', 'grinning', 'blush'],
+  feliz: ['smile', 'smiley', 'grinning', 'blush'],
+  triste: ['cry', 'sob', 'disappointed', 'pensive'],
+  chorar: ['cry', 'sob'],
+  festa: ['tada', 'confetti_ball', 'partying_face'],
+  parabens: ['tada', 'clap', 'trophy'],
+  palmas: ['clap'],
+  obrigado: ['pray'],
+  obrigada: ['pray'],
+  olhos: ['eyes'],
+  fogo: ['fire'],
+  estrela: ['star', 'star2'],
+  atencao: ['warning', 'exclamation'],
+  alerta: ['warning'],
+  pergunta: ['question'],
+  ideia: ['bulb'],
+  cafe: ['coffee'],
+  telefone: ['telephone', 'phone'],
+  relogio: ['alarm_clock', 'hourglass'],
+  dinheiro: ['moneybag', 'dollar'],
+  foguete: ['rocket'],
+  pensando: ['thinking'],
+  ola: ['wave'],
+  tchau: ['wave'],
+};
+const fold = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+// Busca do seletor de emoji e do atalho ":" do compositor: palavra em português (sem acento: "coração" = "coracao")
+// e depois o código em inglês. unicodeOnly deixa de fora os emojis personalizados.
+export function searchEmoji(term: string, limit = 10, unicodeOnly = false) {
+  const t = fold(term.trim());
+  if (!t) return [];
+  const pt = Object.entries(PT_WORDS).flatMap(([w, codes]) => (w.startsWith(t) ? codes : []));
+  const byCode = Object.keys(EMOJI).filter((k) => k.includes(t));
+  const custom = unicodeOnly ? [] : customEmoji.filter((c) => c.name.includes(t)).map((c) => c.name);
+  return [...new Set([...pt.filter((c) => c in EMOJI), ...byCode, ...custom])].slice(0, limit);
 }

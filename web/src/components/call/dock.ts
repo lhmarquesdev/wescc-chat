@@ -32,6 +32,7 @@ export interface Dock {
   panelLeft: number | null;
   composerTop: number | null;
   bannerBottom: number | null;
+  headerBottom: number | null;
 }
 
 export function measureDock(): Dock {
@@ -41,6 +42,8 @@ export function measureDock(): Dock {
   const pr = main?.querySelector('.panel')?.getBoundingClientRect();
   const cr = main?.querySelector('.room-main .composer')?.getBoundingClientRect();
   const br = main?.querySelector('.call-room-banner')?.getBoundingClientRect();
+  // Cabeçalho da sala ou da página (Informações, Buscar, Tópicos, Mais e os botões de ligar ficam nele).
+  const hr = main?.querySelector('.room-header, .page-head')?.getBoundingClientRect();
   return {
     vw: innerWidth,
     vh: innerHeight,
@@ -52,6 +55,7 @@ export function measureDock(): Dock {
     panelLeft: pr && pr.width && pr.left - box.left > 420 ? Math.round(pr.left) : null,
     composerTop: cr && cr.height ? Math.round(cr.top) : null,
     bannerBottom: br && br.height ? Math.round(br.bottom) : null,
+    headerBottom: hr && hr.height ? Math.round(hr.bottom) : null,
   };
 }
 
@@ -90,14 +94,14 @@ export function useDock(active: boolean) {
   return dock;
 }
 
-// Abaixo do cabeçalho (56 + 16) no alto, e da faixa da chamada da sala quando há (o "Entrar" fica à vista); acima do
-// compositor embaixo, para nunca cobrir o "Enviar".
+// Abaixo da barra do alto (56 + 16) e do cabeçalho da sala ou da página (os botões dele ficam à vista), e da faixa da
+// chamada da sala quando há (o "Entrar" fica à vista); acima do compositor embaixo, para nunca cobrir o "Enviar".
 export function cornerStyle(d: Dock | null, corner: Corner): CSSProperties {
   if (!d) return {};
   const top = corner[0] === 't';
   const left = corner[1] === 'l';
   return {
-    top: top ? Math.max(d.top + 72, d.bannerBottom == null ? 0 : d.bannerBottom + 16) : 'auto',
+    top: top ? Math.max(d.top + 72, d.headerBottom == null ? 0 : d.headerBottom + 16, d.bannerBottom == null ? 0 : d.bannerBottom + 16) : 'auto',
     bottom: top ? 'auto' : d.vh - (d.composerTop ?? d.bottom) + 16,
     left: left ? d.left + 16 : 'auto',
     right: left ? 'auto' : d.vw - (d.panelLeft ?? d.right) + 16,

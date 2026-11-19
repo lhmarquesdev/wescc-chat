@@ -140,6 +140,7 @@ describe('lembretes', () => {
       await fireDueReminders();
       const ev = await ws.waitFor((e) => e.type === 'message.reminder' && e.reminder._id === r._id);
       expect(ev.action).toBe('removed');
+      expect(ev.reason).toBe('no-access'); // a web avisa sem dizer nada da mensagem
       expect(ev.reminder.message).toBeNull();
       expect(ev.reminder.roomName).toBeUndefined();
       expect(JSON.stringify(ws.events)).not.toContain('conteúdo secreto');
@@ -167,7 +168,14 @@ describe('lembretes', () => {
       await api('POST', 'chat.delete', { msgId: m2._id, roomId: geral }, bruno);
       const ev = await ws.waitFor((e) => e.type === 'message.reminder' && e.action === 'removed' && e.reminder._id === r2._id);
       expect(ev.reminder.messageId).toBe(m2._id);
+      expect(ev.reason).toBe('message-deleted'); // a web avisa que o lembrete saiu
       expect((await pool.query('SELECT 1 FROM message_reminders WHERE id = $1', [r2._id])).rowCount).toBe(0);
+      // Removido pela própria pessoa: sem motivo (nada a avisar).
+      const m3 = (await send(bruno, geral, 'concluir depois')).message;
+      const r3 = (await set(ana, m3._id, inMinutes(5))).reminder;
+      await api('POST', 'reminders.delete', { reminderId: r3._id }, ana);
+      const ev3 = await ws.waitFor((e) => e.type === 'message.reminder' && e.action === 'removed' && e.reminder._id === r3._id);
+      expect(ev3.reason).toBeUndefined();
     } finally {
       ws.close();
     }

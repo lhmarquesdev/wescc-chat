@@ -6,9 +6,10 @@ import { EMOJI, emojiText } from '@shared/emoji';
 import { roleDisplayName, systemText as sharedSystemText } from '@shared/messageText';
 import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 import { listSettings } from '../src/services/settings';
-import { EMOJI as WEB_EMOJI } from '../../web/src/lib/emoji';
+import { EMOJI as WEB_EMOJI, searchEmoji } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
-import { authorName, continuesGroup, editableKind, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageLink, pollMeta, pollShares } from '../../web/src/lib/messageRules';
+import { authorName, continuesGroup, reactionEntries, reactionTitle, editableKind, editTextOf, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageHref, messageLink, pastTimeLimit, pollMeta, pollShares, unknownSlashCommand } from '../../web/src/lib/messageRules';
+import { EMAIL_SRC, ITALIC_SRC, URL_SRC } from '@shared/markdownTokens';
 import { fromLocalInput, reminderPresets, schedulePresets, toLocalInput, whenText } from '../../web/src/lib/messageTimes';
 import { AHEAD_ERROR, aheadError, POLL_ERRORS, pollInputError, type MessageForward, type MessagePoll } from '@shared/messages';
 import { messagePreviewText } from '@shared/stickers';
@@ -72,6 +73,110 @@ describe('seta para cima no compositor (lastOwnEditable)', () => {
     const list = [text, msg({ t: 'rm' }), msg({ t: 'uj' }), msg({ u: BOT, alias: 'Bruno Lima (Webhook)' })];
     expect(lastOwnEditable(list, ME._id, true)?._id).toBe(text._id);
     expect(lastOwnEditable(list, ME._id, false)).toBeUndefined();
+  });
+
+  it('passado o prazo de edição, não abre a edição (o servidor recusaria)', () => {
+    const now = new Date(2026, 9, 15, 10, 30).getTime();
+    const old = msg({ ts: at(10, 0) });
+    expect(lastOwnEditable([old], ME._id, true, 5, now)).toBeUndefined();
+    expect(lastOwnEditable([old], ME._id, true, 60, now)?._id).toBe(old._id);
+    expect(lastOwnEditable([old], ME._id, true, 0, now)?._id).toBe(old._id);
+    expect(pastTimeLimit(at(10, 0), 5, now)).toBe(true);
+    expect(pastTimeLimit(at(10, 26), 5, now)).toBe(false);
+    expect(pastTimeLimit(at(9, 0), 0, now)).toBe(false);
+  });
+});
+
+describe('editar a legenda de um arquivo (editTextOf)', () => {
+  it('abre com o texto; num arquivo antigo, com a legenda que ficava no anexo', () => {
+    expect(editTextOf(msg({ msg: 'olá' }))).toBe('olá');
+    const legacy = msg({ msg: '', attachments: [{ type: 'file', title: 'a.png', description: 'Gráfico de setembro' }] as any });
+    expect(editTextOf(legacy)).toBe('Gráfico de setembro');
+    expect(editTextOf(msg({ msg: '' }))).toBe('');
+  });
+});
+
+describe('comando que não existe (unknownSlashCommand)', () => {
+  const known = ['leave', 'part', 'kick', 'invite', 'me', 'msg', 'status', 'help', 'shrug'];
+  it('erro de digitação sugere o mais parecido; comando certo, caminho e // passam', () => {
+    expect(unknownSlashCommand('/leav', known)).toEqual({ name: 'leav', suggestion: 'leave' });
+    expect(unknownSlashCommand('/Kik @bruno', known)).toEqual({ name: 'kik', suggestion: 'kick' });
+    expect(unknownSlashCommand('/xyzabc', known)).toEqual({ name: 'xyzabc', suggestion: undefined });
+    expect(unknownSlashCommand('/leave', known)).toBeNull();
+    expect(unknownSlashCommand('/status Em reunião', known)).toBeNull();
+    expect(unknownSlashCommand('/home/user/arquivo.txt', known)).toBeNull();
+    expect(unknownSlashCommand('//leav', known)).toBeNull();
+    expect(unknownSlashCommand('/ leav', known)).toBeNull();
+    expect(unknownSlashCommand('olá /leav', known)).toBeNull();
+    // A lista não carregou: quem decide é o servidor.
+    expect(unknownSlashCommand('/leav', [])).toBeNull();
+  });
+});
+
+describe('itálico do markdown', () => {
+  const italics = (t: string) => [...t.matchAll(new RegExp(ITALIC_SRC, 'g'))].map((m) => m[0]);
+  it('não abre logo depois de uma barra: o /shrug aparece como é', () => {
+    expect(italics('¯\\_(ツ)_/¯')).toEqual([]);
+    expect(italics('isso é _importante_ hoje')).toEqual(['_importante_']);
+    expect(italics('__muito__')).toEqual(['__muito__']);
+  });
+});
+
+describe('busca de emoji (seletor e atalho ":" do compositor)', () => {
+  it('acha pela palavra em português, com ou sem acento, e pelo código em inglês', () => {
+    expect(searchEmoji('coracao')).toContain('heart');
+    expect(searchEmoji('Coração')).toEqual(searchEmoji('coracao'));
+    expect(searchEmoji('feliz')).toContain('smile');
+    expect(searchEmoji('joinha')).toEqual(['+1']);
+    expect(searchEmoji('heart').length).toBe(10);
+    expect(searchEmoji('heart', Infinity).length).toBeGreaterThan(10);
+    expect(searchEmoji('  ')).toEqual([]);
+  });
+});
+
+describe('reações (ordem e dica)', () => {
+  it('na ordem da primeira de cada emoji; as antigas, sem hora, antes e como vieram', () => {
+    const r = { ':+1:': { usernames: ['a'], ts: '2026-11-19T10:00:03Z' }, ':old2:': { usernames: ['a'] }, ':tada:': { usernames: ['a'], ts: '2026-11-19T10:00:01Z' }, ':old1:': { usernames: ['b'] } };
+    expect(reactionEntries(r).map(([k]) => k)).toEqual([':old2:', ':old1:', ':tada:', ':+1:']);
+    expect(reactionEntries(undefined)).toEqual([]);
+  });
+  it('dica com o nome de exibição e o emoji; só pede os nomes que aparecem', () => {
+    const asked: string[] = [];
+    const nameOf = (u: string) => (asked.push(u), ({ 'alice.souza': 'Alice Souza', 'bruno.lima': 'Bruno Lima' })[u] ?? u);
+    expect(reactionTitle(':+1:', ['alice.souza', 'bruno.lima'], nameOf)).toBe('Alice Souza e Bruno Lima reagiram com 👍');
+    expect(reactionTitle(':tada:', ['alice.souza'], nameOf)).toBe('Alice Souza reagiu com 🎉');
+    expect(reactionTitle(':logo_empresa:', ['x'])).toBe('x reagiu com :logo_empresa:');
+    asked.length = 0;
+    expect(reactionTitle(':+1:', ['alice.souza', 'bruno.lima', 'c', 'd', 'e'], nameOf)).toBe('Alice Souza, Bruno Lima e mais 3 reagiram com 👍');
+    expect(asked).toEqual(['alice.souza', 'bruno.lima']);
+  });
+});
+
+describe('links e e-mails do markdown', () => {
+  const urls = (t: string) => [...t.matchAll(new RegExp(URL_SRC, 'g'))].map((m) => m[0]);
+  const emails = (t: string) => [...t.matchAll(new RegExp(EMAIL_SRC, 'g'))].map((m) => m[0]);
+  it('o ")" de um par no endereço fica no link; o ")" e a pontuação da frase, não', () => {
+    expect(urls('veja https://pt.wikipedia.org/wiki/Brasil_(desambiguação)')).toEqual(['https://pt.wikipedia.org/wiki/Brasil_(desambiguação)']);
+    expect(urls('(veja https://x.example/a).')).toEqual(['https://x.example/a']);
+    expect(urls('(veja https://x.example/a_(b)) também')).toEqual(['https://x.example/a_(b)']);
+    expect(urls('https://x.example/a)b e https://x.example/(abc fim')).toEqual(['https://x.example/a)b', 'https://x.example/(abc']);
+    expect(urls('link: https://x.example/p?q=1&r=2. www.exemplo.com/x?y=1, e "https://x.example/a"')).toEqual(['https://x.example/p?q=1&r=2', 'www.exemplo.com/x?y=1', 'https://x.example/a']);
+    expect(urls('https://x.example/a?ids[]=1')).toEqual(['https://x.example/a?ids[]=1']);
+  });
+  it('e-mail vira link sem o ponto final; @menção e endereço sem domínio, não', () => {
+    expect(emails('escreva para suporte@empresa.com.br.')).toEqual(['suporte@empresa.com.br']);
+    expect(emails('(rh@empresa.com) ou a.b+c@x.co')).toEqual(['rh@empresa.com', 'a.b+c@x.co']);
+    expect(emails('@ana, ana@localhost, x@@y.com')).toEqual([]);
+  });
+  it('texto longo de parênteses, pontos e arrobas: linear', () => {
+    const t = performance.now();
+    for (const f of ['(', ')', '(a', 'a)', '((a)', 'www.', '@a.', 'a@', 'a.']) {
+      const s = f.repeat(Math.ceil(20000 / f.length));
+      urls(`https://x${s}`);
+      urls(s);
+      emails(s);
+    }
+    expect(performance.now() - t).toBeLessThan(150);
   });
 });
 
@@ -578,7 +683,9 @@ describe('link de uma mensagem (messageLink)', () => {
     expect(messageLink({ rid: 'r1', t: 'c', mid: 'm1' })).toBe('/channel/r1?msg=m1');
     expect(messageLink({ rid: 'r2', t: 'p', mid: 'm2' })).toBe('/group/r2?msg=m2');
     expect(messageLink({ rid: 'r3', t: 'd', mid: 'm3', tmid: null })).toBe('/direct/r3?msg=m3');
-    expect(messageLink({ rid: 'r1', t: 'c', mid: 'm4', tmid: 'm1' })).toBe('/channel/r1/thread/m1');
+    expect(messageLink({ rid: 'r1', t: 'c', mid: 'm4', tmid: 'm1' })).toBe('/channel/r1/thread/m1?msg=m4');
+    expect(messageHref('/group/r2', { _id: 'm5', tmid: 'm2' })).toBe('/group/r2/thread/m2?msg=m5');
+    expect(messageHref('/group/r2', { _id: 'm2' })).toBe('/group/r2?msg=m2');
   });
 });
 
@@ -607,8 +714,8 @@ describe('origem da encaminhada (forwardOrigin)', () => {
   it('encaminhada de novo: "várias vezes"', () => {
     expect(forwardOrigin(f({ roomName: 'geral', hops: 2 }), {}).text).toBe('Encaminhada várias vezes de #geral');
   });
-  it('resposta de tópico: o link abre o tópico', () => {
-    expect(forwardOrigin(f({ roomName: 'geral', tmid: 'root' }), {}).link).toBe('/channel/r1/thread/root');
+  it('resposta de tópico: o link abre o tópico com ela destacada', () => {
+    expect(forwardOrigin(f({ roomName: 'geral', tmid: 'root' }), {}).link).toBe('/channel/r1/thread/root?msg=m1');
   });
 });
 

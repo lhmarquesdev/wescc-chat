@@ -10,11 +10,12 @@ import { getSetting, isKnownSetting, isSecretSetting, listSettings, updateSettin
 import { engagementChannels, engagementMessages, engagementUsers, workspaceStatistics } from '../services/stats';
 import { mailStatus, sendMail } from '../services/mailer';
 import { runRetention } from '../services/retention';
-import { getRoom, setRoomRole } from '../services/rooms';
+import { applyDefaultChannels, getRoom, setRoomRole } from '../services/rooms';
 import { mapUser } from '../services/mappers';
 import { actorOf } from '../services/users';
 import { bus } from '../realtime/bus';
-import { b, bool, paging, q, route, str, strArray } from './http';
+import { escapeLike } from '@shared/search';
+import { assertDateOrder, b, bool, filterDateParam, paging, q, route, str, strArray } from './http';
 import { resolveUserParam } from './users';
 
 // A web recarrega "me" (e as permissões) ao ver os papéis mudarem; as outras telas atualizam a política de DM.
@@ -36,6 +37,8 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'GET', 'info', { auth: false }, async () => ({ info: { version: '0.1.0', product: 'Wescc Chat' } }));
   route(app, 'GET', 'settings.public', { auth: false }, async () => {
     const settings = listSettings({ publicOnly: true }).map((s) => ({ _id: s._id, value: s.value }));
+    // Calculado (não é configuração): "Esqueci minha senha" só funciona com o envio de e-mails configurado.
+    settings.push({ _id: 'Accounts_PasswordReset_Available', value: !!getSetting('Accounts_PasswordReset') && !!getSetting('SMTP_Host') });
     return { settings, count: settings.length, offset: 0, total: settings.length };
   });
 
@@ -55,6 +58,7 @@ export function adminRoutes(app: FastifyInstance) {
     const changed = await updateSettings(values).catch((e) => {
       throw badRequest('error-invalid-setting-value', String(e.message));
     });
+    if (changed.some((c) => c._id === 'Default_Channels')) await applyDefaultChannels();
     await audit(actorOf(ctx), 'settings.changed', {}, { settings: changed.map((c) => ({ _id: c._id, value: isSecretSetting(c._id) ? '***' : c.value })) });
     return { changed: changed.map((c) => c._id) };
   });
@@ -166,11 +170,19 @@ export function adminRoutes(app: FastifyInstance) {
 
   // ---------- Estatísticas e dashboard de engajamento ----------
   route(app, 'GET', 'statistics', { permissions: ['view-statistics'] }, async () => workspaceStatistics());
-  route(app, 'GET', 'engagement-dashboard/users', { permissions: ['view-engagement-dashboard'] }, async (req) => engagementUsers(q(req).start, q(req).end));
-  route(app, 'GET', 'engagement-dashboard/messages', { permissions: ['view-engagement-dashboard'] }, async (req) => engagementMessages(q(req).start, q(req).end));
+  // Período do engajamento: datas válidas, início antes do fim e até um ano (cada dia é uma linha calculada).
+  const period = (req: any): [string | undefined, string | undefined] => {
+    const start = filterDateParam(q(req).start, 'start', { optional: true });
+    const end = filterDateParam(q(req).end, 'end', { optional: true });
+    assertDateOrder(start, end);
+    if (start && new Date(end ?? Date.now()).getTime() - new Date(start).getTime() > 366 * 86400_000) throw badRequest('error-invalid-date', 'Escolha um período de até um ano.');
+    return [start, end];
+  };
+  route(app, 'GET', 'engagement-dashboard/users', { permissions: ['view-engagement-dashboard'] }, async (req) => engagementUsers(...period(req)));
+  route(app, 'GET', 'engagement-dashboard/messages', { permissions: ['view-engagement-dashboard'] }, async (req) => engagementMessages(...period(req)));
   route(app, 'GET', 'engagement-dashboard/channels', { permissions: ['view-engagement-dashboard'] }, async (req) => {
     const p = paging(q(req));
-    return engagementChannels(q(req).start, q(req).end, p.offset, p.count);
+    return engagementChannels(...period(req), p.offset, p.count);
   });
 
   // ---------- Auditoria ----------
@@ -178,18 +190,23 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'POST', 'audit.messages', { permissions: ['can-audit'] }, async (req, _rep, ctx) => {
     const body = b(req);
     const type = String(body.type ?? 'room');
-    const start = str(body.startDate, 'startDate');
-    const end = str(body.endDate, 'endDate');
+    const start = filterDateParam(body.startDate, 'startDate')!;
+    const end = filterDateParam(body.endDate, 'endDate')!;
+    assertDateOrder(start, end);
     const params: unknown[] = [start, end];
     const w = ['m.created_at BETWEEN $1 AND $2'];
-    if (body.msg) w.push(`m.msg ILIKE $${params.push(`%${body.msg}%`)}`);
+    // O texto é procurado como foi digitado: % e _ não viram curinga.
+    if (body.msg) w.push(`m.msg ILIKE $${params.push(`%${escapeLike(String(body.msg))}%`)}`);
     if (type === 'room') {
       w.push(`m.room_id = $${params.push(str(body.rid, 'rid'))}`);
     } else if (type === 'u') {
-      const users = strArray(body.users);
+      const users = [...new Set(strArray(body.users).map((u) => u.trim().replace(/^@/, '')).filter(Boolean))];
       if (users.length < 2) throw badRequest('error-invalid-params', 'Informe ao menos dois usuários.');
-      const ids = (await many('SELECT id FROM users WHERE username = ANY($1)', [users])).map((r) => r.id);
-      w.push(`m.room_id IN (SELECT id FROM rooms WHERE t = 'd' AND uids @> $${params.push(ids)})`);
+      const found = await many<{ id: string; username: string }>('SELECT id, username FROM users WHERE lower(username) = ANY($1)', [users.map((u) => u.toLowerCase())]);
+      // Nome que não existe não some da busca (sem ele, a busca mostrava todas as conversas da outra pessoa).
+      const missing = users.filter((u) => !found.some((f) => f.username.toLowerCase() === u.toLowerCase()));
+      if (missing.length) throw notFound('error-user-not-found', `Usuário não encontrado: ${missing.join(', ')}.`);
+      w.push(`m.room_id IN (SELECT id FROM rooms WHERE t = 'd' AND uids @> $${params.push(found.map((f) => f.id))})`);
     } else if (type === 'user') {
       const u = await resolveUserParam({ username: body.username, userId: body.userId });
       w.push(`m.user_id = $${params.push(u.id)}`);
@@ -207,22 +224,32 @@ export function adminRoutes(app: FastifyInstance) {
     await audit(actorOf(ctx), 'audit.messages.query', { type, rid: body.rid, users: body.users, username: body.username }, { startDate: start, endDate: end, msg: body.msg, results: rows.length });
     return { messages: rows.map((r) => ({ ...withExtra(r), roomName: r.room_name, roomType: r.room_t })) };
   });
+  // Período do registro de ações: datas inválidas viram 400 (antes, erro do banco e 500).
+  const logPeriod = (startRaw: unknown, endRaw: unknown, names: [string, string]) => {
+    const start = filterDateParam(startRaw, names[0], { optional: true });
+    const end = filterDateParam(endRaw, names[1], { optional: true });
+    assertDateOrder(start, end);
+    return { start, end };
+  };
   route(app, 'GET', 'audit.auditions', { permissions: ['can-audit-log'] }, async (req) => {
     const p = paging(q(req));
-    return listAuditLog({ start: q(req).startDate, end: q(req).endDate, action: 'audit.%', ...p });
+    return listAuditLog({ ...logPeriod(q(req).startDate, q(req).endDate, ['startDate', 'endDate']), action: 'audit.*', ...p });
   });
   route(app, 'GET', 'audit.log', { permissions: ['can-audit-log'] }, async (req) => {
     const query2 = q(req);
     const p = paging(query2);
-    return listAuditLog({ start: query2.start, end: query2.end, action: query2.action, actor: query2.actor, ...p });
+    // ?action=a&action=b chega como lista: texto ou 400 (antes, erro interno).
+    return listAuditLog({ ...logPeriod(query2.start ?? query2.startDate, query2.end ?? query2.endDate, ['start', 'end']), action: str(query2.action, 'action', { optional: true }), actor: str(query2.actor, 'actor', { optional: true }), ...p });
   });
   route(app, 'GET', 'audit.settings', { permissions: ['can-audit-log'] }, async (req) => {
     const p = paging(q(req));
-    return listAuditLog({ start: q(req).start, end: q(req).end, action: 'settings.%', ...p });
+    return listAuditLog({ ...logPeriod(q(req).start, q(req).end, ['start', 'end']), action: 'settings.*', ...p });
   });
 
   // ---------- Retenção ----------
   route(app, 'POST', 'retention.run', { permissions: ['manage-retention-policy'] }, async (_req, _rep, ctx) => {
+    // Política desligada: antes respondia "0 itens removidos em 0 salas", como se tivesse rodado sem achar nada.
+    if (!getSetting('RetentionPolicy_Enabled')) throw badRequest('error-retention-disabled', 'A política de retenção está desligada. Ligue-a e salve antes de executar a limpeza.');
     const r = await runRetention();
     await audit(actorOf(ctx), 'retention.run.manual', {}, r);
     return r;
@@ -284,31 +311,58 @@ export function adminRoutes(app: FastifyInstance) {
   });
   route(app, 'GET', 'moderation.userReports', { permissions: ['view-moderation-console'] }, async (req) => {
     const rows = await many(
-      `SELECT r.*, m.msg, m.e2e IS NOT NULL AS e2e, m.extra->'sticker' AS sticker, m.created_at AS msg_ts, rep.username AS reporter, ro.name AS room_name FROM moderation_reports r
+      `SELECT r.*, m.msg, m.e2e IS NOT NULL AS e2e, m.extra->'sticker' AS sticker, m.created_at AS msg_ts, m.tmid, (m.id IS NULL OR m.t = 'rm') AS msg_removed,
+         rep.username AS reporter, ro.name AS room_name, ro.t AS room_t FROM moderation_reports r
        LEFT JOIN messages m ON m.id = r.message_id LEFT JOIN users rep ON rep.id = r.reporter_id LEFT JOIN rooms ro ON ro.id = r.room_id
        WHERE r.reported_user_id = $1 AND NOT r.resolved ORDER BY r.created_at DESC`,
       [str(q(req).userId, 'userId')],
     );
     return {
       // e2e: mensagem cifrada (a moderação não vê o texto).
-      reports: rows.map((r) => ({ _id: r.id, messageId: r.message_id, msg: r.msg, e2e: !!r.e2e, sticker: r.sticker ?? null, roomName: r.room_name, reporter: r.reporter, description: r.description, ts: r.created_at })),
+      // rid, roomType e tmid: "Abrir na conversa"; messageRemoved: a mensagem já foi apagada.
+      reports: rows.map((r) => ({
+        _id: r.id,
+        messageId: r.message_id,
+        msg: r.msg,
+        e2e: !!r.e2e,
+        sticker: r.sticker ?? null,
+        roomName: r.room_name,
+        rid: r.room_id,
+        roomType: r.room_t,
+        tmid: r.tmid ?? null,
+        messageRemoved: !!r.message_id && !!r.msg_removed,
+        reporter: r.reporter,
+        description: r.description,
+        ts: r.created_at,
+      })),
     };
   });
   route(app, 'POST', 'moderation.dismissReports', { permissions: ['manage-moderation-actions'] }, async (req, _rep, ctx) => {
     const body = b(req);
-    if (body.userId) await query('UPDATE moderation_reports SET resolved = true WHERE reported_user_id = $1', [body.userId]);
-    if (body.msgId) await query('UPDATE moderation_reports SET resolved = true WHERE message_id = $1', [body.msgId]);
-    await audit(actorOf(ctx), 'moderation.dismissed', { userId: body.userId, msgId: body.msgId });
+    // userId: todas as denúncias contra a pessoa; msgId: as de uma mensagem; reportId: uma denúncia (a de usuário, sem mensagem).
+    if (!body.userId && !body.msgId && !body.reportId) throw badRequest('error-invalid-params', 'Informe a pessoa, a mensagem ou a denúncia.');
+    if (body.userId) await query('UPDATE moderation_reports SET resolved = true WHERE reported_user_id = $1', [String(body.userId)]);
+    if (body.msgId) await query('UPDATE moderation_reports SET resolved = true WHERE message_id = $1', [String(body.msgId)]);
+    if (body.reportId) await query('UPDATE moderation_reports SET resolved = true WHERE id = $1', [String(body.reportId)]);
+    await audit(actorOf(ctx), 'moderation.dismissed', { userId: body.userId, msgId: body.msgId, reportId: body.reportId });
     return {};
   });
   route(app, 'POST', 'moderation.user.deleteReportedMessages', { permissions: ['manage-moderation-actions'] }, async (req, _rep, ctx) => {
-    const userId = str(b(req).userId, 'userId');
-    const msgs = await many('SELECT m.* FROM messages m WHERE m.id IN (SELECT message_id FROM moderation_reports WHERE reported_user_id = $1 AND NOT resolved)', [userId]);
+    const body = b(req);
+    const userId = str(body.userId, 'userId');
+    // msgId: só aquela mensagem denunciada (a ação por linha da Moderação); sem ele, todas as denunciadas da pessoa.
+    const msgId = str(body.msgId, 'msgId', { optional: true }) ?? null;
+    const msgs = await many(
+      `SELECT m.* FROM messages m WHERE m.t IS DISTINCT FROM 'rm' AND m.id IN (
+         SELECT message_id FROM moderation_reports WHERE reported_user_id = $1 AND NOT resolved AND ($2::text IS NULL OR message_id = $2))`,
+      [userId, msgId],
+    );
     const { removeMessageRow } = await import('../services/messages');
     for (const m of msgs) await removeMessageRow(m);
-    await query('UPDATE moderation_reports SET resolved = true WHERE reported_user_id = $1', [userId]);
-    await audit(actorOf(ctx), 'moderation.messages.deleted', { userId }, { count: msgs.length });
-    return {};
+    if (msgId) await query('UPDATE moderation_reports SET resolved = true WHERE message_id = $1', [msgId]);
+    else await query('UPDATE moderation_reports SET resolved = true WHERE reported_user_id = $1', [userId]);
+    await audit(actorOf(ctx), 'moderation.messages.deleted', { userId, msgId: msgId ?? undefined }, { count: msgs.length });
+    return { count: msgs.length };
   });
 
   // ---------- Instâncias ----------

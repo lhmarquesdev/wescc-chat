@@ -140,6 +140,50 @@ describe('integrações', () => {
     expect(bad.errorType).toBe('error-invalid-script');
   });
 
+  it('destino inexistente e tentativas fora da faixa são recusados ao salvar', async () => {
+    const base = { type: 'webhook-incoming', name: 'Destino', username: 'admin' };
+    expect(await api('POST', 'integrations.create', { ...base, channel: '#naoexiste' }, A)).toMatchObject({ status: 400, errorType: 'error-invalid-channel', error: 'Canal não encontrado: #naoexiste' });
+    expect(await api('POST', 'integrations.create', { ...base, channel: '@ninguem.aqui' }, A)).toMatchObject({ status: 400, error: 'Usuário não encontrado: @ninguem.aqui' });
+    expect((await api('POST', 'integrations.create', { ...base, channel: 'all_public_channels' }, A)).errorType).toBe('error-invalid-channel');
+    // Grupo privado de que o usuário da integração não participa: toda chamada falharia depois.
+    const u = await newUser(A);
+    const grupo = await api('POST', 'groups.create', { name: `grupo-${Date.now()}` }, A);
+    expect(await api('POST', 'integrations.create', { ...base, username: u.username, channel: `#${grupo.group.name}` }, A)).toMatchObject({ status: 400, errorType: 'error-not-member' });
+    const out = { type: 'webhook-outgoing', name: 'Saída', username: 'admin', event: 'sendMessage', urls: [hookUrl] };
+    expect((await api('POST', 'integrations.create', { ...out, channel: '#naoexiste' }, A)).error).toBe('Canal não encontrado: #naoexiste');
+    expect((await api('POST', 'integrations.create', { ...out, targetRoom: '#naoexiste' }, A)).error).toBe('Canal não encontrado: #naoexiste');
+    expect(await api('POST', 'integrations.create', { ...out, retryCount: 99 }, A)).toMatchObject({ status: 400, errorType: 'error-invalid-retry-count', error: 'Tentativas: use um número inteiro de 0 a 10.' });
+    expect((await api('POST', 'integrations.create', { ...out, retryCount: -1 }, A)).status).toBe(400);
+    // Sem tentar de novo, o número não importa.
+    expect((await api('POST', 'integrations.create', { ...out, retryFailedCalls: false, retryCount: 99 }, A)).success).toBe(true);
+    const ok = await api('POST', 'integrations.create', { ...out, channel: ['#geral', 'all_private_groups'], targetRoom: '#geral', retryCount: 10 }, A);
+    expect(ok.integration.retryCount).toBe(10);
+  });
+
+  it('webhook de entrada guarda cada chamada no histórico e explica JSON inválido em português', async () => {
+    const r = await api('POST', 'integrations.create', { type: 'webhook-incoming', name: 'Monitor', username: 'admin', channel: '#geral' }, A);
+    const url = urlOf(`/hooks/${r.integration._id}/${r.integration.token}`);
+    const post = (body: string) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    expect((await post('{"text":"tudo certo"}')).status).toBe(200);
+    const bad = await post('{ruim');
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ success: false, error: 'O corpo da requisição não é um JSON válido.' });
+    expect((await post('{}')).status).toBe(400);
+    const h = await api('GET', 'integrations.history', { id: r.integration._id }, A);
+    // O JSON inválido não chega à integração (o Fastify recusa antes); a mensagem vazia e a que deu certo, sim.
+    expect(h.history.map((x: any) => [x.event, x.step, x.httpStatus])).toEqual([
+      ['incoming', 'failed', 400],
+      ['incoming', 'received', 200],
+    ]);
+    expect(h.history[0].error).toBe('Mensagem vazia.');
+    expect(h.history[1].data).toEqual({ text: 'tudo certo' });
+    // Corpo grande fica cortado no histórico.
+    await post(JSON.stringify({ text: 'a'.repeat(6000) }));
+    const big = await api('GET', 'integrations.history', { id: r.integration._id, count: 1 }, A);
+    expect(typeof big.history[0].data).toBe('string');
+    expect(big.history[0].data.length).toBeLessThanOrEqual(4001);
+  });
+
   it('usuário comum não gerencia integrações', async () => {
     const u = await newUser(A);
     expect((await api('GET', 'integrations.list', undefined, u)).status).toBe(403);

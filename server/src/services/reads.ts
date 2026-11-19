@@ -9,8 +9,41 @@ import type { Ctx } from './users';
 // Cada usuário que lê grava as leituras individuais; quando todos os membros
 // já leram, a mensagem deixa de estar "não lida" e a sala recebe o evento "reads".
 
+// A própria leitura de quem envia na conversa principal. Se havia não lidas ou menções, as outras sessões da pessoa (o
+// celular, outra aba) recebem a inscrição nova e o selo some em todas.
 export async function markReadInternal(userId: string, rid: string) {
-  await query('UPDATE subscriptions SET ls = now(), unread = 0, alert = false, user_mentions = 0, group_mentions = 0 WHERE room_id = $1 AND user_id = $2', [rid, userId]);
+  const row = await one(
+    `WITH old AS (
+       SELECT id, (unread > 0 OR alert OR user_mentions > 0 OR group_mentions > 0) AS dirty FROM subscriptions WHERE room_id = $1 AND user_id = $2
+     )
+     UPDATE subscriptions s SET ls = now(), unread = 0, alert = false, user_mentions = 0, group_mentions = 0,
+       updated_at = CASE WHEN old.dirty THEN now() ELSE s.updated_at END
+     FROM old WHERE s.id = old.id RETURNING s.*, old.dirty`,
+    [rid, userId],
+  );
+  if (row?.dirty) {
+    const { notifySubscription } = await import('./rooms');
+    await notifySubscription(userId, rid, 'updated', row);
+  }
+  await settleRoomReads(rid);
+}
+
+// Resposta só na thread: lê aquela thread (sai das não lidas de thread), e a conversa principal fica como estava. Sem
+// nada novo na conversa principal, a leitura dela avança junto: a própria resposta conta como lida por quem a enviou na
+// confirmação de leitura, sem marcar como lida nenhuma mensagem que a pessoa não viu.
+export async function markThreadReadInternal(userId: string, rid: string, tmid: string) {
+  const row = await one(
+    `WITH old AS (SELECT id, $3 = ANY(tunread) AS had FROM subscriptions WHERE room_id = $1 AND user_id = $2)
+     UPDATE subscriptions s SET tunread = array_remove(s.tunread, $3),
+       ls = CASE WHEN s.unread = 0 AND s.user_mentions = 0 AND s.group_mentions = 0 THEN now() ELSE s.ls END,
+       updated_at = CASE WHEN old.had THEN now() ELSE s.updated_at END
+     FROM old WHERE s.id = old.id RETURNING s.*, old.had`,
+    [rid, userId, tmid],
+  );
+  if (row?.had) {
+    const { notifySubscription } = await import('./rooms');
+    await notifySubscription(userId, rid, 'updated', row);
+  }
   await settleRoomReads(rid);
 }
 

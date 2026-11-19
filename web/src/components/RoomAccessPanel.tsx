@@ -325,7 +325,7 @@ function PersonDetail({ a, m, onDone }: { a: Access; m: Member; onDone: () => vo
           </button>
         </div>
       )}
-      {a.can.mute && m._id !== me && (
+      {a.can.mute && m._id !== me && (!m.roomRoles.includes('owner') || a.roles.find((r) => r._id === 'owner')?.lock !== 'perm') && (
         <Toggle checked={m.muted} onChange={mute} label="Silenciado" description="Não envia mensagens neste canal, mesmo que tenha um papel que envia." />
       )}
       <span className="access-label">O que pode neste canal</span>

@@ -26,4 +26,9 @@ describe('catálogo de configurações', () => {
     expect(ids.length).toBeGreaterThan(100);
     expect(ids.filter((id) => !code.includes(id))).toEqual([]);
   });
+
+  it('rótulos em português, sem "workspace" (o grupo já se chama Espaço de trabalho)', () => {
+    expect(listSettings().filter((s) => /workspace/i.test(String(s.label))).map((s) => s._id)).toEqual([]);
+    expect(listSettings().find((s) => s._id === 'Site_Name')?.label).toMatch(/^Nome do chat/);
+  });
 });

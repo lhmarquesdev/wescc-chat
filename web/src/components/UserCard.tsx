@@ -109,6 +109,8 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
 
   const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
   const direct = useDirect();
+  // A conversa a dois com a pessoa, se já existe (o nome de uma DM é o usuário do outro lado).
+  const oldDm = useStore((s) => Object.values(s.subscriptions).find((x) => x.t === 'd' && x.name === username)?.rid);
   // Rótulo da presença com o status personalizado ("Em reunião"); a presença ao vivo vale por cima da busca.
   const pres = useUserPresence(username, { status: data?.u.status, statusCustom: data?.u.statusCustom });
 
@@ -160,16 +162,23 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
       .catch(fail);
   const kick = async () => {
     const ok = await confirmDialog({ title: `Remover @${username} da sala?`, body: 'A pessoa deixa de ver as mensagens novas desta sala.', confirmLabel: 'Remover da sala', danger: true });
-    if (ok) api.post(`${path}.kick`, { roomId: rid, userId: data.u._id }).then(onClose).catch(fail);
+    if (ok)
+      api
+        .post(`${path}.kick`, { roomId: rid, userId: data.u._id })
+        .then(() => (useStore.getState().toast(`@${username} não está mais na sala.`, 'success'), onClose()))
+        .catch(fail);
   };
 
   const self = data.u._id === me._id;
   // Abrir, só ver o histórico (bloqueada) ou nada (não dá para começar).
-  const dmState = !self ? direct.state([partyOf(data.u)]) : null;
+  const gone = data.u.active === false;
+  const dmState = self ? null : gone ? goneState(oldDm) : direct.state([partyOf(data.u)]);
   const status = pres.status;
   const statusText = presence?.statusText ?? data.u.statusText;
   const has = (r: string) => data.roles.includes(r);
   const moderate = !!rid && data.inRoom && !self;
+  // Dono só é silenciado ou removido por quem define donos (outro dono ou administrador), como no servidor.
+  const overOwner = !has('owner') || can('set-owner');
   const toggles = moderate
     ? [
         can('set-owner') && { key: 'owner', icon: 'role-owner' as const, label: has('owner') ? 'Remover dono' : 'Tornar dono', run: () => roleAction('Owner', !has('owner')) },
@@ -182,16 +191,17 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
             label: has('publisher') ? 'Remover publicador' : 'Tornar publicador',
             run: () => roleAction('Publisher', !has('publisher')),
           },
-        can('mute-user') && {
-          key: 'mute',
-          icon: data.muted ? ('unmute-user' as const) : ('mute-user' as const),
-          label: data.muted ? 'Remover silêncio' : 'Silenciar',
-          run: () => api.post(data.muted ? 'rooms.unmuteUser' : 'rooms.muteUser', { roomId: rid, userId: data.u._id }).then(reload).catch(fail),
-        },
+        can('mute-user') &&
+          overOwner && {
+            key: 'mute',
+            icon: data.muted ? ('unmute-user' as const) : ('mute-user' as const),
+            label: data.muted ? 'Remover silêncio' : 'Silenciar',
+            run: () => api.post(data.muted ? 'rooms.unmuteUser' : 'rooms.muteUser', { roomId: rid, userId: data.u._id }).then(reload).catch(fail),
+          },
       ].filter((x): x is Exclude<typeof x, false> => !!x)
     : [];
   const admin = me.permissions.includes('view-user-administration');
-  const canKick = moderate && can('remove-user');
+  const canKick = moderate && can('remove-user') && overOwner;
   const hasMenu = toggles.length > 0 || admin || canKick;
   const globalRoles = (data.u.roles as string[]).filter((r) => r !== 'user');
 
@@ -203,8 +213,8 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
           <h2>{data.u.name || data.u.username}</h2>
           <div className="user-card-handle">@{data.u.username}</div>
           <div className="user-card-status">
-            {pres.label}
-            {statusText && <span> · {statusText}</span>}
+            {gone ? 'Conta desativada' : pres.label}
+            {statusText && !gone && <span> · {statusText}</span>}
             {/* Chamadas em grupo: "Em chamada" ao lado da presença, escrito. */}
             <InCallBadge userId={data.u._id} label />
           </div>
@@ -252,7 +262,7 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
       {(dmState || hasMenu) && (
         <div className="row-actions">
           {dmState && <DirectButton st={dmState} onOpen={dm} onView={(p) => (navigate(p), onClose())} />}
-          {dmState && callsOn && (
+          {dmState && callsOn && !gone && (
             <button type="button" className="btn" onClick={call} disabled={dmState.kind !== 'open'} title={dmState.kind !== 'open' ? dmState.text : undefined}>
               <Icon name="call-audio" />
               Ligar
@@ -304,6 +314,12 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
       )}
     </div>
   );
+}
+
+// Conta desativada: nada de conversa nova nem ligação; a que já existe abre só para ler o histórico.
+function goneState(rid?: string): DirectState {
+  if (rid) return { kind: 'view', text: 'Esta conta está desativada: a conversa fica só para leitura.', path: roomPath({ rid, t: 'd' }) };
+  return { kind: 'none', text: 'Esta conta está desativada: não dá para começar uma conversa.' };
 }
 
 function DirectButton({ st, onOpen, onView }: { st: DirectState; onOpen: () => void; onView: (path: string) => void }) {

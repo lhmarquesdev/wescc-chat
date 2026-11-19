@@ -374,7 +374,7 @@ function MoreMenu({ docked, open }: { docked: boolean; open: (d: Dialog) => void
   );
 }
 
-function DeviceSettings({ onClose }: { onClose: () => void }) {
+export function DeviceSettings({ onClose }: { onClose: () => void }) {
   return (
     <Modal
       title="Configurações de áudio e vídeo"

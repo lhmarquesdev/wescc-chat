@@ -4,13 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import { formatVoiceDuration } from '@shared/stickers';
 import { useStore } from '../lib/store';
 import { startVoiceRecording, voiceSupport, type VoiceRecorder, type VoiceResult } from '../lib/voice';
+import { useLeaveGuard } from '../pages/admin/rbac/leaveGuard';
 import { Icon } from './Icon';
+import { confirmDialog } from './ui';
 
 type Phase = 'idle' | 'starting' | 'holding' | 'locked';
 
 const CANCEL_DX = 110; // px para a esquerda
 const LOCK_DY = 70; // px para cima
 const TAP_MS = 350; // soltar antes disso é um toque: grava travado
+const GUARD_SECONDS = 3; // gravação travada a partir disso: sair da conversa pergunta antes de descartar
 
 const denied = (e: unknown) => {
   const name = (e as any)?.name;
@@ -20,7 +23,9 @@ const denied = (e: unknown) => {
   return 'Não foi possível usar o microfone.';
 };
 
-export function useVoiceRecorder(opts: { onSend: (r: VoiceResult) => void; onActivity: (recording: boolean) => void }) {
+// scope: a conversa (e o tópico) do compositor. O compositor continua o mesmo ao trocar de conversa: trocar descarta a
+// gravação aberta.
+export function useVoiceRecorder(opts: { scope: string; onSend: (r: VoiceResult) => void; onActivity: (recording: boolean) => void }) {
   const [phase, setPhaseState] = useState<Phase>('idle');
   const [, tick] = useState(0);
   const [drag, setDrag] = useState({ dx: 0, dy: 0 });
@@ -29,13 +34,16 @@ export function useVoiceRecorder(opts: { onSend: (r: VoiceResult) => void; onAct
   const press = useRef({ x: 0, y: 0, at: 0, released: false, id: -1 });
   const optsRef = useRef(opts);
   optsRef.current = opts;
+  // "Gravando áudio…" vai para a conversa em que a gravação começou, mesmo depois de o compositor trocar de conversa.
+  const activity = useRef(opts.onActivity);
+  const asking = useRef(false); // a pergunta de sair está aberta: Esc e Enter são dela
   const setPhase = (p: Phase) => ((phaseRef.current = p), setPhaseState(p));
 
   const reset = () => {
     rec.current = null;
     setDrag({ dx: 0, dy: 0 });
     setPhase('idle');
-    optsRef.current.onActivity(false);
+    activity.current(false);
   };
   const cancel = () => {
     rec.current?.cancel();
@@ -71,7 +79,8 @@ export function useVoiceRecorder(opts: { onSend: (r: VoiceResult) => void; onAct
       );
       if ((phaseRef.current as Phase) !== 'starting') return r.cancel();
       rec.current = r;
-      optsRef.current.onActivity(true);
+      activity.current = optsRef.current.onActivity;
+      activity.current(true);
       setPhase(mode === 'locked' || press.current.released ? 'locked' : 'holding');
     } catch (e) {
       setPhase('idle');
@@ -115,13 +124,14 @@ export function useVoiceRecorder(opts: { onSend: (r: VoiceResult) => void; onAct
   // Quem está na sala vê "gravando áudio…" enquanto a gravação dura.
   useEffect(() => {
     if (phase !== 'holding' && phase !== 'locked') return;
-    const t = setInterval(() => optsRef.current.onActivity(true), 3000);
+    const t = setInterval(() => activity.current(true), 3000);
     return () => clearInterval(t);
   }, [phase]);
 
   useEffect(() => {
     if (phase === 'idle') return;
     const key = (e: KeyboardEvent) => {
+      if (asking.current || e.defaultPrevented) return;
       if (e.key === 'Escape') (e.preventDefault(), cancel());
       else if (e.key === 'Enter' && phaseRef.current === 'locked' && !(e.target instanceof HTMLTextAreaElement)) (e.preventDefault(), void sendRef.current());
     };
@@ -129,8 +139,31 @@ export function useVoiceRecorder(opts: { onSend: (r: VoiceResult) => void; onAct
     return () => window.removeEventListener('keydown', key);
   }, [phase]);
 
-  // Saiu da sala no meio da gravação: descarta.
-  useEffect(() => () => rec.current?.cancel(), []);
+  // Saiu da sala (ou trocou de conversa no mesmo compositor) no meio da gravação: descarta, e quem está na conversa
+  // deixa de ver "gravando áudio…" na hora. O microfone que ainda abria é descartado pelo start (a fase volta a idle).
+  useEffect(
+    () => () => {
+      if (phaseRef.current !== 'idle') cancel();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [opts.scope],
+  );
+
+  // Gravação travada com alguns segundos: um link para outra tela (ou fechar a aba) pergunta antes de descartar.
+  useLeaveGuard(phase === 'locked' && (rec.current?.elapsed() ?? 0) >= GUARD_SECONDS, async () => {
+    asking.current = true;
+    try {
+      return await confirmDialog({
+        title: 'Descartar o áudio gravado?',
+        body: 'O áudio ainda não foi enviado e será perdido.',
+        confirmLabel: 'Descartar',
+        cancelLabel: 'Continuar gravando',
+        danger: true,
+      });
+    } finally {
+      asking.current = false;
+    }
+  });
 
   const micProps = {
     onPointerDown: (e: React.PointerEvent) => {

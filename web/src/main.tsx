@@ -23,10 +23,12 @@ import { App } from './App';
 import { getCredentials } from './lib/api';
 import { reloadOnStaleChunks } from './lib/call/build';
 import { captureInstallPrompt } from './lib/install';
+import { trackMessageFocus } from './lib/messageFocus';
 import { registerServiceWorker } from './lib/push';
 
 registerServiceWorker();
 captureInstallPrompt();
+trackMessageFocus();
 // Aba aberta durante uma atualização: a tela carregada sob demanda do build anterior não existe mais.
 reloadOnStaleChunks();
 

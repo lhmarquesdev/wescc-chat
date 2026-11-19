@@ -3,9 +3,23 @@
 // (server/test/web-rules.test.ts).
 import type { Message } from '@shared/index';
 import type { MessageForward, MessagePoll } from '@shared/messages';
-import { encryptedContent, messageLink } from '@shared/messages';
+import { encryptedContent, messageHref, messageLink } from '@shared/messages';
+import { EMOJI } from '@shared/emoji';
 import { nameList } from './format';
 import { whenText } from './messageTimes';
+
+// Reações na ordem em que apareceram (ts da primeira de cada emoji; as antigas, sem ts, ficam antes, como vieram).
+export function reactionEntries(reactions: Message['reactions'] | undefined) {
+  return Object.entries(reactions ?? {}).sort(([, a], [, b]) => (a.ts ?? '').localeCompare(b.ts ?? ''));
+}
+
+// Dica de uma reação: "Alice Souza e Bruno Lima reagiram com 👍" (nomes de exibição, o emoji em vez do código). Só os
+// nomes que aparecem são pedidos (nameList mostra até três).
+export function reactionTitle(code: string, usernames: readonly string[], nameOf: (username: string) => string = (u) => u) {
+  const shown = usernames.length <= 3 ? usernames.length : 2;
+  const names = usernames.map((u, i) => (i < shown ? nameOf(u) : u));
+  return `${nameList(names)} ${usernames.length === 1 ? 'reagiu' : 'reagiram'} com ${EMOJI[code.replace(/^:|:$/g, '')] ?? code}`;
+}
 
 // O tipo aceita edição: nem mensagem de sistema, nem figurinha, nem enquete, nem encaminhada (o servidor recusa no chat.update).
 export const editableKind = (m: Message) => !m.t && !m.sticker && !m.poll && !m.forward;
@@ -14,8 +28,9 @@ export const editableKind = (m: Message) => !m.t && !m.sticker && !m.poll && !m.
 // também confere a sala; encryptedContent é o lugar único que o E2E ajusta).
 export const forwardableKind = (m: Message) => !m.t && !m.poll && !m.sticker?.removed && !encryptedContent(null, m);
 
-// /channel/<rid>?msg=<id>; resposta de tópico abre o tópico: /channel/<rid>/thread/<tmid>. O mesmo do push do lembrete.
-export { messageLink };
+// /channel/<rid>?msg=<id>; resposta de tópico abre o tópico com ela destacada: /channel/<rid>/thread/<tmid>?msg=<id>. O
+// mesmo do push do lembrete.
+export { messageHref, messageLink };
 
 // Rótulo e link da origem de uma encaminhada para quem vê. Nunca mostra o nome de um grupo privado nem quem está numa
 // DM a quem não participa dela.
@@ -58,11 +73,56 @@ export function pollMeta(p: MessagePoll, now: Date): string {
   return parts.join(' · ');
 }
 
-// Seta para cima no compositor vazio: a última mensagem da pessoa que o "Editar" do menu também ofereceria.
-export function lastOwnEditable(list: readonly Message[], meId: string, allowEdit: boolean): Message | undefined {
+// Prazo para editar ou apagar a própria mensagem (Message_AllowEditing_BlockEditInMinutes,
+// Message_AllowDeleting_BlockDeleteInMinutes; 0 = sem prazo): já passou? Quem modera e quem tem
+// bypass-time-limit-edit-and-delete não tem prazo (quem chama passa 0).
+export function pastTimeLimit(ts: string, blockMinutes: number | undefined, now = Date.now()) {
+  return !!blockMinutes && blockMinutes > 0 && (now - new Date(ts).getTime()) / 60000 > blockMinutes;
+}
+
+// Seta para cima no compositor vazio: a última mensagem da pessoa que o "Editar" do menu também ofereceria. Passado o
+// prazo de edição, nada (as anteriores são ainda mais velhas): antes a pessoa reescrevia tudo e só então via o erro.
+export function lastOwnEditable(list: readonly Message[], meId: string, allowEdit: boolean, blockMinutes = 0, now = Date.now()): Message | undefined {
   if (!allowEdit) return undefined;
-  for (let i = list.length - 1; i >= 0; i--) if (list[i].u._id === meId && editableKind(list[i])) return list[i];
+  for (let i = list.length - 1; i >= 0; i--) if (list[i].u._id === meId && editableKind(list[i])) return pastTimeLimit(list[i].ts, blockMinutes, now) ? undefined : list[i];
   return undefined;
+}
+
+// Texto que a edição abre: o da mensagem; num arquivo antigo, a legenda que ficava no anexo (o servidor passa o texto
+// salvo para a mensagem).
+export function editTextOf(m: Message): string {
+  if (m.msg || m.e2e) return m.msg;
+  return m.attachments?.find((a) => a.type === 'file' && a.description)?.description ?? '';
+}
+
+// Texto que começa com /nome e não é um comando desta pessoa: o nome e o comando mais parecido, para "Você quis dizer".
+// Fora: "//texto", "/ texto", caminhos ("/home/x") e lista vazia (não carregou; o servidor decide).
+export function unknownSlashCommand(text: string, known: readonly string[]): { name: string; suggestion?: string } | null {
+  const m = /^\/([a-z0-9-]+)(?:\s|$)/i.exec(text);
+  if (!m || !known.length) return null;
+  const name = m[1].toLowerCase();
+  if (known.includes(name)) return null;
+  const limit = name.length <= 3 ? 1 : 2;
+  let suggestion: string | undefined;
+  let best = limit + 1;
+  for (const k of known) {
+    const d = editDistance(name, k);
+    if (d < best || (d === best && suggestion && k.length < suggestion.length)) {
+      best = d;
+      suggestion = k;
+    }
+  }
+  return { name, suggestion: best <= limit ? suggestion : undefined };
+}
+
+function editDistance(a: string, b: string) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
 }
 
 // Nome de quem escreveu, como no cabeçalho da mensagem: o alias (webhooks) vem antes do usuário.

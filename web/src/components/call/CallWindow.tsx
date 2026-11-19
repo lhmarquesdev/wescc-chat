@@ -10,7 +10,7 @@ import { useStore } from '../../lib/store';
 import { Icon } from '../Icon';
 import { useIsPhone } from '../overlay';
 import { Avatar, GroupAvatar } from '../ui';
-import { CallButton, canShareScreen, GroupControls, PeopleChip, ToolButton } from './ControlBar';
+import { CallButton, canShareScreen, DeviceSettings, GroupControls, PeopleChip, ToolButton } from './ControlBar';
 import { cornerStyle, loadCorner, mainStyle, measureDock, saveCorner, useDock, type Corner, type Dock } from './dock';
 import { CallBanners } from './GuardBanner';
 import { PeoplePanel } from './PeoplePanel';
@@ -212,6 +212,8 @@ function DirectWindow({ call, me }: { call: Call; me: UserRef }) {
   const [remoteSize, setRemoteSize] = useState<{ w: number; h: number } | null>(null);
   const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
   const onRemoteSize = useCallback((w: number, h: number) => setRemoteSize((s) => (s?.w === w && s.h === h ? s : { w, h })), []);
+  // Microfone, câmera e saída de áudio (fone, caixa de som), como na chamada em grupo.
+  const [devices, setDevices] = useState(false);
   usePillOnNavigate(phone);
   const { corner, handlers } = useDrag(ref, !phone && !big, dock);
 
@@ -222,7 +224,16 @@ function DirectWindow({ call, me }: { call: Call; me: UserRef }) {
   const hasLocalVideo = local.camera || sharing;
   const muted = !local.mic;
   const cameraOff = !local.camera;
-  const status = ringing ? 'Chamando…' : !connected ? 'Conectando…' : elapsed;
+  // Ligando para quem está offline (recebe só a notificação push, se tiver ativado) ou Ocupado (o toque continua,
+  // de propósito): quem liga fica sabendo enquanto espera. Quem está offline não vem no mapa de presença.
+  const otherStatus = useStore((s) => s.presence[other.username]?.status ?? 'offline');
+  const away = ringing && call.caller._id === me._id ? (otherStatus === 'offline' ? 'offline' : otherStatus === 'busy' ? 'Ocupado' : null) : null;
+  const ringNote = away === 'offline' ? `${name} está offline e recebe a chamada como notificação, se tiver ativado.` : away ? `${name} está Ocupado e pode não atender agora.` : null;
+  const status = ringing ? (away ? `Chamando… (${away})` : 'Chamando…') : phase === 'reconnecting' ? 'Reconectando…' : !connected ? 'Conectando…' : elapsed;
+  // O outro lado desligou o microfone ou a câmera (ele avisa pela sinalização): marca, como nos quadros em grupo.
+  const remoteMuted = connected && !!remote && !remote.mic;
+  const mutedMark = remoteMuted ? <Icon name="mic-off" size={14} label="Microfone desligado" className="call-muted" /> : null;
+  const camOffNote = connected && call.kind === 'video' && !hasRemoteVideo ? 'Câmera desligada' : null;
   const canShare = connected && canShareScreen();
   const idle = useIdle(ref, big && connected && (hasRemoteVideo || hasLocalVideo));
 
@@ -254,8 +265,13 @@ function DirectWindow({ call, me }: { call: Call; me: UserRef }) {
       </span>
       {big && (
         <>
-          <strong className="call-name">{name}</strong>
+          <strong className="call-name">
+            {mutedMark}
+            {name}
+          </strong>
           <span className="call-status">{status}</span>
+          {camOffNote && <span className="call-status">{camOffNote}</span>}
+          {ringNote && <span className="call-status call-ring-note">{ringNote}</span>}
         </>
       )}
     </div>
@@ -280,10 +296,14 @@ function DirectWindow({ call, me }: { call: Call; me: UserRef }) {
       <div className="call-bar">
         <div className="call-bar-head">
           <div className={big ? (hasRemoteVideo ? 'call-who call-chip' : 'call-who visually-hidden') : 'call-who'}>
-            <strong>{name}</strong>
+            <strong>
+              {mutedMark}
+              {name}
+            </strong>
             <span className="call-status">{status}</span>
           </div>
           <div className="call-tools">
+            <ToolButton icon="call-settings" title="Configurações de áudio e vídeo" onClick={() => setDevices(true)} />
             {!phone && big && <ToolButton icon={fullscreen ? 'call-exit-fullscreen' : 'call-fullscreen'} title={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} onClick={toggle} />}
             {!phone && <ToolButton icon={big ? 'shrink' : 'enlarge'} title={big ? 'Diminuir' : 'Ampliar'} onClick={() => setWindow(big ? 'docked' : 'big')} />}
             <ToolButton icon="call-minimize" title="Minimizar" onClick={() => setWindow('pill')} />
@@ -306,6 +326,7 @@ function DirectWindow({ call, me }: { call: Call; me: UserRef }) {
           {hangBtn}
         </div>
       </div>
+      {devices && <DeviceSettings onClose={() => setDevices(false)} />}
     </div>
   );
 }

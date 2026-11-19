@@ -823,7 +823,6 @@
 .rbac-chip-count {
   font-size: var(--fs-12);
   font-variant-numeric: tabular-nums;
-  opacity: 0.75;
 }
 .rbac-list-body {
   flex: 1;
@@ -831,6 +830,9 @@
 }
 .rbac-list-body.flush {
   padding: 0 0 var(--space-16);
+  /* A tabela fica direto no corpo (sem .table-wrap): ele também responde pelas colunas opcionais (.col-xl, .col-lg,
+     .col-md de admin.css), e a coluna Nome não some em notebook e tablet. */
+  container-name: rbac-list admin-table;
 }
 .rbac-list-body.flush > .table {
   border-radius: 0;
@@ -850,7 +852,7 @@
   margin: var(--space-8);
 }
 .rbac-list-body.flush > .table th {
-  top: 72px;
+  top: var(--rbac-strip-h, 72px);
 }
 .rbac-id {
   white-space: nowrap;
@@ -1462,6 +1464,18 @@
 .rbac-people-row > svg {
   color: hsl(var(--muted-foreground));
 }
+/* Papel com muitas pessoas: quantas aparecem, "Carregar mais" e o atalho para a lista de usuários com o filtro. */
+.rbac-people-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid hsl(var(--line-1));
+}
+.rbac-people-more > span {
+  margin-right: auto;
+}
 .rbac-history.embedded > .filters {
   margin-bottom: var(--space-4);
 }
@@ -1655,6 +1669,10 @@
   .rbac-strip-select {
     flex: 1 1 140px;
   }
+  /* A ordem (só no celular) desce para a linha do Novo usuário, com espaço para o texto. */
+  .rbac-strip-select.rbac-sort-select {
+    flex-basis: 200px;
+  }
   .rbac-bulk {
     left: var(--space-3);
     right: var(--space-3);
@@ -1706,6 +1724,7 @@
 }
 .rbac-views .seg-nav {
   flex-wrap: nowrap;
+  margin-bottom: 0;
 }
 .rbac-views .seg-nav button {
   white-space: nowrap;

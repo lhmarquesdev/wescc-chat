@@ -59,7 +59,7 @@
   --secondary: 218 18% 93%;
   --secondary-foreground: 215 25% 15%;
   --muted: 218 18% 93%;
-  --muted-foreground: 215 16% 47%;
+  --muted-foreground: 215 16% 43%; /* 4,5:1 ou mais nos fundos claros (horário, e-mail no topo, legendas) */
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
   --border: 210 18% 90%;
@@ -97,7 +97,7 @@
   /* ---- Texto ----------------------------------------------------------- */
   --text-1: 215 25% 15%;         /* título, valor */
   --text-2: 220 14% 30%;         /* corpo */
-  --text-3: 215 16% 47%;         /* apoio (= muted-foreground) */
+  --text-3: 215 16% 43%;         /* apoio (= muted-foreground) */
   --text-4: 220 9% 60%;          /* placeholder, legenda */
   --text-5: 220 13% 78%;         /* ícone desativado */
 
@@ -325,7 +325,7 @@
   --st-pink-line: 330 38% 33%;
 
   --st-red: 0 90% 74%;
-  --st-red-solid: 0 72% 55%;
+  --st-red-solid: 0 72% 53%; /* número branco do contador de menções com 4,5:1 */
   --st-red-soft: 0 45% 17%;
   --st-red-line: 0 42% 32%;
 
@@ -570,10 +570,11 @@
     0 20px 50px -16px hsl(var(--shadow-color) / calc(0.22 * var(--shadow-k)));
   --highlight-top: inset 0 1px 0 hsl(var(--highlight) / calc(0.9 * var(--highlight-k)));
 
-  /* Foco: anel de 3–4 px da cor da marca a 12–20%. */
+  /* Foco: anel de 3–4 px da cor da marca a 12–20%. O do teclado é opaco (2 px de folga e 2 px da marca cheia), para
+     ter 3:1 ou mais em qualquer fundo, claro ou escuro. */
   --ring-offset: hsl(var(--background));
   --ring-surface: hsl(var(--card));
-  --focus-ring: 0 0 0 3px hsl(var(--brand-mid) / 0.3);
+  --focus-ring: 0 0 0 2px var(--ring-offset), 0 0 0 4px hsl(var(--brand-fill));
   --focus-ring-input: 0 0 0 3px hsl(var(--brand-mid) / 0.14);
   --focus-ring-pill: 0 0 0 4px hsl(var(--brand-fill) / 0.12), 0 1px 2px hsl(var(--brand-fill) / 0.06);
 }

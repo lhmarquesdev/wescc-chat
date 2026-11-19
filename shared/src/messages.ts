@@ -14,6 +14,8 @@ export const POLL_DEADLINE_MAX_DAYS = 90;
 export const REMINDERS_MAX = 200; // por pessoa
 export const SCHEDULED_MAX = 100; // por pessoa (pendentes e que falharam)
 export const SCHEDULE_LATE_MINUTES = 60; // servidor parado: atraso maior que isso não envia, avisa quem agendou
+// Resposta agendada cujo tópico foi apagado: o painel oferece "Enviar na conversa" (fora do tópico).
+export const SCHEDULE_THREAD_GONE = 'O tópico desta mensagem foi apagado.';
 export const AHEAD_MIN_MS = 60_000; // lembrete e agendamento: pelo menos 1 minuto à frente
 export const AHEAD_MAX_DAYS = 365;
 
@@ -146,9 +148,13 @@ export function aheadError(iso: unknown, now: Date): string | null {
 
 // ---------- Links ----------
 
-// /channel/<rid>?msg=<id>; resposta de tópico abre o tópico: /channel/<rid>/thread/<tmid>. O mesmo caminho vai no push
-// do lembrete e no "Abrir" da web.
+// /channel/<rid>?msg=<id>; resposta de tópico abre o tópico com ela destacada: /channel/<rid>/thread/<tmid>?msg=<id>. O
+// mesmo caminho vai no push do lembrete e no "Abrir" da web.
 export function messageLink(p: { rid: string; t: string; mid: string; tmid?: string | null }): string {
-  const base = `/${p.t === 'd' ? 'direct' : p.t === 'p' ? 'group' : 'channel'}/${p.rid}`;
-  return p.tmid ? `${base}/thread/${p.tmid}` : `${base}?msg=${p.mid}`;
+  return messageHref(`/${p.t === 'd' ? 'direct' : p.t === 'p' ? 'group' : 'channel'}/${p.rid}`, { _id: p.mid, tmid: p.tmid });
+}
+
+// O mesmo a partir do caminho da sala (base), como a web monta a partir da sala aberta.
+export function messageHref(base: string, m: { _id: string; tmid?: string | null }): string {
+  return m.tmid ? `${base}/thread/${m.tmid}?msg=${m._id}` : `${base}?msg=${m._id}`;
 }

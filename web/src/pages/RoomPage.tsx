@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
 import { encryptedContent } from '@shared/messages';
 import { e2eToggleVerdict } from '@shared/e2e';
-import { api, ApiError, errorMessage } from '../lib/api';
+import { api, ApiError, errorMessage, noConnection } from '../lib/api';
 import { nameList, roomDisplayName, roomIconName, roomPath } from '../lib/format';
 import { useUserPresence } from '../lib/presence';
 import { namesIn } from '../lib/names';
@@ -12,6 +12,7 @@ import { renderMarkdown } from '../lib/markdown';
 import { sendText } from '../lib/direct';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { lastOwnEditable } from '../lib/messageRules';
+import { markUnread } from '../lib/markUnread';
 import { useTranslateAllowed } from '../lib/translate';
 import { Composer } from '../components/Composer';
 import { Icon, type IconName } from '../components/Icon';
@@ -24,13 +25,14 @@ import { MessageList } from '../components/MessageList';
 import { NoticeBar } from '../components/NoticeBar';
 import { RoomPanel, type PanelId } from '../components/RoomPanels';
 import { ThreadPanel } from '../components/ThreadPanel';
+import { JoinCodeDialog } from '../components/JoinCodeDialog';
 import { UserCard } from '../components/UserCard';
 import { useIsPhone } from '../components/overlay';
 import { Empty, GroupAvatar, Menu, Skeleton, SkeletonMessages, UserAvatar, confirmDialog, useDelay } from '../components/ui';
 // Integrações (Jira)
 import { IntegrationModals } from '../components/integrations/IntegrationModals';
 // Criptografia de ponta a ponta
-import { contentOf, ensureRoom, rotateNow, useE2e } from '../lib/e2e/client';
+import { contentOf, E2E_UI, ensureRoom, rotateNow, useE2e } from '../lib/e2e/client';
 import { E2eBanner, useE2eBlock } from '../components/e2e/E2eBanner';
 import { openE2eDialog, requireE2eReady } from '../components/e2e/E2eDialogs';
 
@@ -133,9 +135,18 @@ function TypingIndicator({ id }: { id: string }) {
   // Todos gravando vídeo: "gravando vídeo…"; todos gravando (algum áudio): "gravando áudio…"; se alguém digita, vale o "digitando…".
   const allRecording = active.length > 0 && active.every(([u]) => recording?.[u]);
   const verb = !allRecording ? 'digitando' : active.every(([u]) => recording?.[u] === 'video') ? 'gravando vídeo' : 'gravando áudio';
+  // Com a linha à vista, a .room-main ganha data-typing e o fim da lista sobe a altura dela (panels.css).
+  const box = useRef<HTMLDivElement>(null);
+  const on = names.length > 0;
+  useLayoutEffect(() => {
+    const host = box.current?.parentElement;
+    if (!on || !host) return;
+    host.setAttribute('data-typing', '');
+    return () => host.removeAttribute('data-typing');
+  }, [on]);
   // A linha fica sobre o fim da lista: não ocupa espaço quando ninguém digita.
   return (
-    <div className="typing" aria-live="polite">
+    <div className="typing" ref={box} aria-live="polite">
       {names.length > 0 && (
         <div className="typing-row">
           <span className="dots" aria-hidden="true">
@@ -191,10 +202,11 @@ function Announcement({ text }: { text: string }) {
   );
 }
 
-const BackButton = ({ onClick }: { onClick: () => void }) => (
-  <button type="button" className="icon-btn mobile-only room-back" title="Voltar" aria-label="Voltar" onClick={onClick}>
+// Um link (não um botão): com uma gravação de áudio travada, sair pergunta antes de descartar (VoiceRecorder).
+const BackButton = () => (
+  <Link to="/home" className="icon-btn mobile-only room-back" title="Voltar" aria-label="Voltar">
     <Icon name="back" size={20} />
-  </button>
+  </Link>
 );
 
 function RoomLoading() {
@@ -228,11 +240,12 @@ export function RoomPage() {
   const roomLive = useStore((s) => s.rooms[rid]);
   const me = useStore((s) => s.me)!;
   const [room, setRoom] = useState<(Room & { muted?: string[]; team?: any; parent?: any; joinCodeRequired?: boolean }) | null>(null);
-  const [error, setError] = useState<{ text: string; missing: boolean } | null>(null);
+  const [error, setError] = useState<{ text: string; missing: boolean; deleted?: boolean; offline?: boolean } | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [quoting, setQuoting] = useState<Message | null>(null);
   const [discussionFrom, setDiscussionFrom] = useState<Message | null>(null);
   const [userCard, setUserCard] = useState<{ username: string; anchor: HTMLElement | null } | null>(null);
+  const [askCode, setAskCode] = useState(false);
   const [roomRoles, setRoomRoles] = useState<string[]>([]);
   const panel = params.get('tab') as PanelId | null;
   const presence = useStore((s) => (room?.t === 'd' && sub && !sub.name.includes(',') ? s.presence[sub.name] : undefined));
@@ -284,9 +297,16 @@ export function RoomPage() {
       useStore.getState().upsertRoom(r.room);
       setError(null);
     } catch (e) {
-      setError({ text: errorMessage(e), missing: e instanceof ApiError && e.status < 500 });
+      setError({ text: errorMessage(e), missing: e instanceof ApiError && e.status > 0 && e.status < 500, offline: noConnection(e) });
     }
   }, [rid]);
+
+  // Aberta sem conexão: a conversa carrega sozinha quando o tempo real volta (sem precisar recarregar a página).
+  const connected = useStore((s) => s.connected);
+  const offline = !!error?.offline;
+  useEffect(() => {
+    if (connected && offline) void loadRoom();
+  }, [connected, offline, loadRoom]);
 
   useEffect(() => {
     setRoom(null);
@@ -307,6 +327,8 @@ export function RoomPage() {
       if (ev.type === 'permissions.changed' || (ev.type === 'user' && ev.user.roles && (fromDirect || dmUids.split(',').includes(ev.user._id)))) void loadRoom();
       else if ((dmUids || fromDirect) && ev.type === 'settings.changed' && ev.settings.some((s) => s._id === 'Direct_Restriction_Scope')) void loadRoom();
       else if (ev.type === 'message' && ev.message.rid === rid && (ev.message.t === 'user-muted' || ev.message.t === 'user-unmuted') && ev.message.msg === me.username) void loadRoom();
+      // Excluída com a conversa aberta: sai o histórico e a barra de entrar; fica o aviso com "Voltar às conversas".
+      else if (ev.type === 'room' && ev.action === 'removed' && ev.room._id === rid) setError({ text: 'Esta sala foi excluída.', missing: true, deleted: true });
     });
     return () => {
       off();
@@ -372,8 +394,9 @@ export function RoomPage() {
             : // Criptografia: sem a senha ou sem a chave da conversa não dá para escrever.
               e2eBlock?.text;
   // As mesmas recusas do servidor: reagir não exige poder escrever (canal de avisos com reações), mas sala arquivada,
-  // silêncio e DM bloqueada também barram a reação. Discussão e edição seguem as regras de envio.
-  const canReact = !!room && !room.archived && !muted && room.direct?.canSend !== false && (!room.ro || room.reactWhenReadOnly || canPostRO);
+  // silêncio e DM bloqueada também barram a reação. Discussão e edição seguem as regras de envio. Quem só visualiza o
+  // canal (sem entrar) não reage, não cita e não responde: o servidor recusa, e o convite para entrar fica no compositor.
+  const canReact = !!room && !!sub && !room.archived && !muted && room.direct?.canSend !== false && (!room.ro || room.reactWhenReadOnly || canPostRO);
   // Discussão dentro de discussão o servidor também recusa.
   const canDiscuss = !disabledReason && !room?.prid && (canWithRoles('start-discussion', roles) || canWithRoles('start-discussion-other-user', roles));
   // "Ocultar a lista de membros": o servidor recusa a lista para quem não tem view-broadcast-member-list.
@@ -398,16 +421,26 @@ export function RoomPage() {
           ? 'Você está silenciado nesta sala.'
           : directBlocked || '';
   const canClosePolls = canWithRoles('delete-message', roles);
+  // Editar a mensagem de outra pessoa: a permissão com os papéis da sala (dono, moderador), como o servidor confere.
+  const canEditOthers = canWithRoles('edit-message', roles);
+  // Prazo para editar e apagar as próprias mensagens (minutos; 0 = sem prazo). Quem modera (edit-message, delete-message)
+  // e quem tem bypass-time-limit-edit-and-delete não tem prazo, como no servidor.
+  const bypassTime = canWithRoles('bypass-time-limit-edit-and-delete', roles);
+  const editBlock = useSetting<number>('Message_AllowEditing_BlockEditInMinutes') ?? 0;
+  const deleteBlock = useSetting<number>('Message_AllowDeleting_BlockDeleteInMinutes') ?? 0;
+  const editLimit = canEditOthers || bypassTime ? 0 : editBlock;
+  const deleteLimit = canWithRoles('delete-message', roles) || canWithRoles('force-delete-message', roles) || bypassTime ? 0 : deleteBlock;
   // Quem votou: num canal de avisos (ou com a lista oculta) só quem publica ou vê a lista.
   const canSeePollVoters = !(room?.notice || room?.broadcast) || canPostRO || (!!room?.broadcast && !membersHidden);
   const gate = useMemo(
-    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters }),
-    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters],
+    () => ({ canReact, canReply: !disabledReason && !!sub, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers, editLimit, deleteLimit }),
+    [canReact, disabledReason, sub, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers, editLimit, deleteLimit],
   );
 
   const actions = useMemo(
     () => ({
-      onReplyThread: (m: Message) => threadsOn && navigate(`${roomPath({ _id: rid, t: room?.t ?? 'c' })}/thread/${m._id}`),
+      // Resposta que também aparece na sala (tshow): o tópico é o da raiz dela.
+      onReplyThread: (m: Message) => threadsOn && navigate(`${roomPath({ _id: rid, t: room?.t ?? 'c' })}/thread/${m.tmid ?? m._id}`),
       onEdit: (m: Message) => setEditing(m),
       onQuote: (m: Message) => setQuoting(m),
       onDiscussion: (m: Message) => setDiscussionFrom(m),
@@ -420,7 +453,7 @@ export function RoomPage() {
   // Seta para cima no compositor vazio: a mesma regra do "Editar" do menu (sem figurinhas nem mensagens de sistema).
   const editLast = () => {
     const { messages, settings } = useStore.getState();
-    const mine = lastOwnEditable(messages[rid]?.list ?? [], me._id, !!settings.Message_AllowEditing);
+    const mine = lastOwnEditable(messages[rid]?.list ?? [], me._id, !!settings.Message_AllowEditing, editLimit);
     // Mensagem cifrada: edita o texto decifrado (sem ele, nada a editar).
     if (mine && mine.e2e) {
       const c = contentOf(mine);
@@ -440,7 +473,7 @@ export function RoomPage() {
             </button>
             <div className="room-title">
               <div className="room-name">
-                <span className="room-name-text">{knownName || 'Sala indisponível'}</span>
+                <h1 className="room-name-text">{knownName || 'Sala indisponível'}</h1>
               </div>
             </div>
           </header>
@@ -456,7 +489,25 @@ export function RoomPage() {
                   </button>
                 }
               >
-                Ela pode ter sido apagada ou você não tem acesso.
+                {error.deleted ? 'Esta sala foi excluída.' : 'Ela pode ter sido apagada ou você não tem acesso.'}
+              </Empty>
+            ) : error.offline ? (
+              <Empty
+                icon="error"
+                tone="danger"
+                title="Sem conexão com o servidor"
+                action={
+                  <>
+                    <button type="button" className="btn primary" onClick={() => void loadRoom()}>
+                      Tentar de novo
+                    </button>
+                    <button type="button" className="btn" onClick={() => navigate('/home')}>
+                      Voltar às conversas
+                    </button>
+                  </>
+                }
+              >
+                A conversa abre sozinha quando a conexão voltar.
               </Empty>
             ) : (
               <Empty
@@ -485,9 +536,9 @@ export function RoomPage() {
 
   const name = roomDisplayName(sub, room);
   const join = async () => {
+    if (room.joinCodeRequired) return setAskCode(true);
     try {
-      const code = room.joinCodeRequired ? prompt('Esta sala exige um código de acesso:') ?? undefined : undefined;
-      await api.post('channels.join', { roomId: rid, joinCode: code });
+      await api.post('channels.join', { roomId: rid });
     } catch (e) {
       useStore.getState().toast(errorMessage(e), 'error');
     }
@@ -498,6 +549,8 @@ export function RoomPage() {
       (!p.when || p.when(room)) &&
       (!p.perm || [p.perm].flat().some((x) => canWithRoles(x, roles))) &&
       !(p.id === 'members' && membersHidden) &&
+      // Link de convite: só quem participa da sala cria (o servidor exige), e não numa sala arquivada.
+      !(p.id === 'invite' && (!sub || room.archived)) &&
       !(p.id === 'scheduled' && !scheduledHere && panel !== 'scheduled') &&
       !(p.id === 'translate' && !translateOn),
   );
@@ -550,7 +603,7 @@ export function RoomPage() {
     const ok = on
       ? await confirmDialog({
           title: 'Ligar a criptografia de ponta a ponta?',
-          body: 'As próximas mensagens e arquivos ficam cifrados: só quem participa consegue ler. Busca, prévias do Jira, figurinhas, bots e integrações deixam de funcionar aqui. As mensagens antigas continuam como estão.',
+          body: E2E_UI.turnOn,
           confirmLabel: 'Ligar criptografia',
         })
       : await confirmDialog({
@@ -592,7 +645,7 @@ export function RoomPage() {
       <div className={`room ${openPanel || tmid ? 'with-panel' : ''}`}>
         <div className="room-main">
           <header className="room-header" ref={setHeader}>
-            <BackButton onClick={() => navigate('/home')} />
+            <BackButton />
             {dmUser ? (
               <UserAvatar username={dmUser} size={32} />
             ) : groupDm ? (
@@ -604,7 +657,8 @@ export function RoomPage() {
             )}
             <div className="room-title" data-eyebrow={room.t === 'd' ? 'Conversa direta' : room.prid ? 'Discussão' : room.teamMain ? 'Time' : room.notice ? 'Canal de avisos' : room.t === 'p' ? 'Canal privado' : 'Canal'}>
               <div className="room-name">
-                <span className="room-name-text">{name}</span>
+                {/* Título da página para o leitor de tela (o tamanho continua o do cabeçalho). */}
+                <h1 className="room-name-text">{name}</h1>
                 {sub?.f && (
                   <button type="button" className="room-fav" title="Remover dos favoritos" aria-label="Remover dos favoritos" onClick={favorite}>
                     <Icon name="favorite" size={14} fill />
@@ -722,7 +776,7 @@ export function RoomPage() {
                           <Icon name={sub.f ? 'unfavorite' : 'favorite'} />
                           {sub.f ? 'Remover dos favoritos' : 'Favoritar'}
                         </button>
-                        <button onClick={() => (api.post('subscriptions.unread', { roomId: rid }), close())}>
+                        <button onClick={() => (close(), void markUnread(rid, () => navigate('/home')))}>
                           <Icon name="mark-unread" />
                           Marcar como não lida
                         </button>
@@ -752,7 +806,15 @@ export function RoomPage() {
           {/* Chamadas em grupo: a faixa da chamada viva, depois da faixa de avisos e antes do anúncio. */}
           <CallBanner room={room} />
           {room.announcement && <Announcement text={room.announcement} />}
-          <MessageList key={rid} rid={rid} sub={sub} actions={actions} canModerate={canModerate} notice={room.notice ? { ack: room.noticeAck, canPost: canPostRO } : undefined} />
+          <MessageList
+            key={rid}
+            rid={rid}
+            sub={sub}
+            actions={actions}
+            canModerate={canModerate}
+            notice={room.notice ? { ack: room.noticeAck, canPost: canPostRO } : undefined}
+            threadOpen={!!tmid}
+          />
           <TypingIndicator id={rid} />
           {sub ? (
             <Composer
@@ -770,12 +832,15 @@ export function RoomPage() {
             />
           ) : (
             <div className="join-bar">
-              {room.t === 'c' ? (
+              {room.t === 'c' && room.archived ? (
+                <span>{hashName} está arquivado: dá para ler o histórico, mas não para entrar.</span>
+              ) : room.t === 'c' ? (
                 <>
                   <span>Você está vendo uma prévia de {hashName}</span>
                   <button className="btn primary" onClick={join}>
                     Entrar no canal
                   </button>
+                  {askCode && <JoinCodeDialog rid={rid} name={room.fname || room.name || ''} onClose={() => setAskCode(false)} onJoined={() => setAskCode(false)} />}
                 </>
               ) : (
                 <span>Você não participa desta sala.</span>

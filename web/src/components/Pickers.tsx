@@ -253,6 +253,11 @@ export function RoomPicker({ value, onChange, placeholder = 'Buscar sala' }: { v
   }, [term]);
   const shown = listOpen ? items : [];
   const keys = useListKeys(shown.length, (i) => onChange(shown[i]), () => setListOpen(false));
+  // Fora de um <label> (como em Canais padrão), o texto de exemplo dá o nome do campo para o leitor de tela.
+  const [labeled, setLabeled] = useState(true);
+  useLayoutEffect(() => {
+    if (inputRef.current) setLabeled(!!inputRef.current.labels?.length);
+  }, [value]);
   if (value)
     return (
       <div className="chips">
@@ -274,6 +279,7 @@ export function RoomPicker({ value, onChange, placeholder = 'Buscar sala' }: { v
         onBlur={() => closeAfterPointer(() => setListOpen(false))}
         onKeyDown={keys.onKeyDown}
         placeholder={placeholder}
+        aria-label={labeled ? undefined : placeholder}
         role="combobox"
         aria-expanded={shown.length > 0}
         aria-autocomplete="list"

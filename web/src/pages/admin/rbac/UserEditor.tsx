@@ -53,6 +53,8 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
   const [initial, setInitial] = useState<Form | null>(null);
   const [review, setReview] = useState(false);
   const [saving, setSaving] = useState(false);
+  // "E-mail verificado" mexido à mão depois de trocar o e-mail: vale o que a administração escolheu.
+  const [verifiedTouched, setVerifiedTouched] = useState(false);
   const [version, setVersion] = useState(0);
   const roles = useAsync(() => api.get('roles.list').then((r) => (r.roles as any[]).filter((x) => x.scope === 'Users')), []);
   const grant = useAsync(loadGrant, []);
@@ -74,7 +76,7 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
       .get('users.info', { userId: id })
       .then((r) => {
         const u = r.user;
-        const form: Form = { name: u.name ?? '', username: u.username, email: u.email ?? '', bio: u.bio ?? '', password: '', roles: u.roles ?? [], active: u.active, verified: !!u.emailVerified, requirePasswordChange: false };
+        const form: Form = { name: u.name ?? '', username: u.username, email: u.email ?? '', bio: u.bio ?? '', password: '', roles: u.roles ?? [], active: u.active, verified: !!u.emailVerified, requirePasswordChange: !!u.requirePasswordChange };
         setUser(u);
         setF(form);
         setInitial(form);
@@ -109,6 +111,13 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
   const targetLock = !g.root ? initial.roles.map((r) => g.roleLocks[r]).find(Boolean) ?? null : null;
   const readOnly = !!targetLock;
   const set = (patch: Partial<Form>) => setF({ ...f, ...patch });
+  // Trocar o e-mail desmarca "E-mail verificado" ao salvar (o servidor faz isso): o formulário já mostra assim, a
+  // revisão lista a mudança e a aba Segurança deixa marcar de novo quando o novo e-mail já foi conferido.
+  const setEmail = (email: string) => set({ email, ...(verifiedTouched ? {} : { verified: email.trim() === initial.email.trim() ? initial.verified : false }) });
+  const setVerified = (verified: boolean) => (setVerifiedTouched(true), set({ verified }));
+  const revert = () => (setF(initial), setVerifiedTouched(false));
+  // Nome em branco não salva (o servidor também recusa): o motivo fica no campo e no botão Salvar.
+  const nameProblem = changed.includes('name') && !f.name.trim() ? 'Informe um nome.' : null;
   const toggleRole = (r: string) => set({ roles: f.roles.includes(r) ? f.roles.filter((x) => x !== r) : [...f.roles, r] });
   const restrictedWithUser = f.roles.includes('user') && roles.data.some((r) => r.restrictDirect && f.roles.includes(r._id));
   const askLeave = async () => !dirty || confirmDialog({ title: 'Descartar as alterações?', body: `O que você mudou em @${initial.username} ainda não foi salvo.`, confirmLabel: 'Descartar', danger: true });
@@ -119,6 +128,8 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
       // Só o que mudou: quem só dá papéis salva sem esbarrar nos dados, e vice-versa.
       const data: Record<string, unknown> = {};
       for (const k of changed) if (k !== 'roles' && k !== 'password' && k !== 'active') data[k] = f[k as keyof Form];
+      // Com o e-mail trocado, "verificado" vai sempre junto: marcado, o novo e-mail continua verificado.
+      if (changed.includes('email') && !hidden) data.verified = f.verified;
       if (changed.includes('roles')) data.roles = f.roles;
       if (f.password) data.password = f.password;
       // Ativar e desativar têm chave própria: sem a de dados, vai por users.setActiveStatus.
@@ -130,6 +141,7 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
       const next = { ...f, password: '' };
       setF(next);
       setInitial(next);
+      setVerifiedTouched(false);
       setReview(false);
       setVersion((v) => v + 1);
       onSaved?.();
@@ -140,7 +152,12 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
     }
   };
   const remove = async () => {
-    const yes = await confirmDialog({ title: `Excluir @${initial.username}?`, body: 'A conta é apagada. As mensagens dela permanecem nas conversas.', confirmLabel: 'Excluir', danger: true });
+    const yes = await confirmDialog({
+      title: `Excluir @${initial.username}?`,
+      body: 'A conta é apagada e não dá para desfazer. As mensagens dela continuam nas salas e nas conversas em grupo; cada conversa a dois fica arquivada, só para leitura da outra pessoa. Eventos e reuniões com convidados que ela organizava passam para um dos convidados. Para só impedir o acesso, desligue Ativo na aba Segurança.',
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
     if (!yes) return;
     api
       .post('users.delete', { userId: id })
@@ -161,7 +178,7 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
           Administrador
         </span>
       )}
-      <span className={`rbac-status${initial.active ? ' ok' : ' off'}`}>{initial.active ? 'Ativo' : 'Desativado'}</span>
+      <span className={`rbac-status${initial.active ? ' ok' : ' off'}`}>{initial.active ? 'Ativo' : user.pendingApproval ? 'Aguardando aprovação' : 'Desativado'}</span>
     </>
   );
   const tabs: EditorTab<Tab>[] = [
@@ -185,8 +202,9 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
         dirty={dirty}
         canWrite={!readOnly}
         saving={saving}
-        onRevert={() => setF(initial)}
+        onRevert={revert}
         onSave={() => setReview(true)}
+        saveBlocked={nameProblem}
         notices={readOnly && <Notice kind="lock">Somente leitura. {lockText(targetLock!)} Você pode ver, mas não alterar esta pessoa.</Notice>}
         tabs={tabs}
         active={tab}
@@ -198,15 +216,26 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
             <Section icon="rbac-id" title="Identidade" hint="Como a pessoa aparece no chat.">
               <div className="form">
                 <div className="two-col">
-                  <Field label="Nome">
-                    <input value={f.name} disabled={!dataEditable} onChange={(e) => set({ name: e.target.value })} />
+                  <Field label="Nome" error={nameProblem ?? undefined}>
+                    <input value={f.name} disabled={!dataEditable} maxLength={100} onChange={(e) => set({ name: e.target.value })} />
                   </Field>
                   <Field label="Nome de usuário">
                     <input value={f.username} disabled={!dataEditable} onChange={(e) => set({ username: e.target.value })} />
                   </Field>
                 </div>
-                <Field label="E-mail" hint={hidden ? 'Ver o e-mail pede a permissão Ver dados completos de outras pessoas.' : undefined}>
-                  <input type="email" value={hidden ? '' : f.email} placeholder={hidden ? 'Oculto' : undefined} disabled={!dataEditable || hidden} onChange={(e) => set({ email: e.target.value })} />
+                <Field
+                  label="E-mail"
+                  hint={
+                    hidden
+                      ? 'Ver o e-mail pede a permissão Ver dados completos de outras pessoas.'
+                      : changed.includes('email') && initial.verified
+                        ? f.verified
+                          ? 'O novo e-mail fica como verificado (você marcou na aba Segurança).'
+                          : 'Ao salvar, o e-mail fica como não verificado. Se o novo e-mail já foi conferido, marque E-mail verificado na aba Segurança.'
+                        : undefined
+                  }
+                >
+                  <input type="email" value={hidden ? '' : f.email} placeholder={hidden ? 'Oculto' : undefined} disabled={!dataEditable || hidden} onChange={(e) => setEmail(e.target.value)} />
                 </Field>
                 <Field label="Bio">
                   <textarea rows={3} value={f.bio} disabled={!dataEditable} maxLength={500} onChange={(e) => set({ bio: e.target.value })} />
@@ -272,7 +301,7 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
             <EffectiveAccess key={version} userId={id} draftRoles={changed.includes('roles') ? f.roles : undefined} />
           </div>
         )}
-        {tab === 'security' && <Security id={id} user={user} f={f} set={set} readOnly={readOnly} self={self} can={can} hidden={hidden} />}
+        {tab === 'security' && <Security id={id} user={user} f={f} set={set} setVerified={setVerified} emailChanged={changed.includes('email')} readOnly={readOnly} self={self} can={can} hidden={hidden} />}
         {tab === 'history' && <RbacHistory entity={id} embedded onChanged={() => setVersion((v) => v + 1)} />}
       </EditorShell>
       {review && <UserReview initial={initial} f={f} roles={roles.data} changed={changed} saving={saving} onClose={() => setReview(false)} onConfirm={() => void save()} />}
@@ -285,6 +314,8 @@ function Security({
   user,
   f,
   set,
+  setVerified,
+  emailChanged,
   readOnly,
   self,
   can,
@@ -294,6 +325,8 @@ function Security({
   user: any;
   f: Form;
   set: (p: Partial<Form>) => void;
+  setVerified: (v: boolean) => void;
+  emailChanged: boolean;
   readOnly: boolean;
   self: boolean;
   can: Record<string, boolean>;
@@ -306,8 +339,30 @@ function Security({
   // Sem chaves da criptografia não há o que redefinir: o botão trava como o do 2FA.
   const [e2eKeys, setE2eKeys] = useState(user.e2eConfigured !== false);
   const list = sessions.data ?? [];
+  const who = user.name || `@${user.username}`;
+  const resetTotp = async () => {
+    const yes = await confirmDialog({
+      title: `Redefinir o 2FA de ${who}?`,
+      body: 'A verificação em duas etapas da conta é desligada agora e os códigos de backup deixam de valer. A pessoa entra só com a senha até configurar o 2FA de novo (se um papel dela exige 2FA, ela configura no próximo acesso).',
+      confirmLabel: 'Redefinir 2FA',
+      danger: true,
+    });
+    if (yes)
+      api
+        .post('users.resetTOTP', { userId: id })
+        .then(() => (rbacOk('2FA redefinido.'), setTwoFactor(false)))
+        .catch(fail);
+  };
+  const removeAvatar = async () => {
+    const yes = await confirmDialog({ title: `Remover a foto de ${who}?`, body: 'A foto é apagada e volta a aparecer o avatar com as iniciais. Não dá para desfazer.', confirmLabel: 'Remover foto', danger: true });
+    if (yes)
+      api
+        .post('users.resetAvatar', { userId: id })
+        .then(() => (rbacOk('Avatar removido.'), setAvatar(false)))
+        .catch(fail);
+  };
   const logout = async () => {
-    const yes = await confirmDialog({ title: `Encerrar as sessões de @${user.username}?`, body: 'A pessoa sai da conta em todos os dispositivos e precisa entrar de novo.', confirmLabel: 'Encerrar sessões', danger: true });
+    const yes = await confirmDialog({ title: `Encerrar as sessões de @${user.username}?`, body: 'A pessoa sai da conta em todos os dispositivos e precisa entrar de novo. Os tokens de acesso dela também são revogados.', confirmLabel: 'Encerrar sessões', danger: true });
     if (yes)
       api
         .post('users.logout', { userId: id })
@@ -319,8 +374,17 @@ function Security({
       <div className="rbac-grid-75">
         <Section icon="security" title="Acesso à conta" hint="Entrar no chat, senha e verificação.">
           <div className="form">
-            <Field label="Nova senha" hint={can.password && can.info ? 'Deixe vazio para manter a atual.' : 'Trocar a senha pede a permissão Trocar a senha de outras pessoas.'}>
-              <input type="password" value={f.password} disabled={readOnly || !can.password || !can.info} autoComplete="new-password" onChange={(e) => set({ password: e.target.value })} />
+            <Field
+              label="Nova senha"
+              hint={
+                self
+                  ? 'A sua própria senha você troca em Minha conta › Segurança, com a senha atual.'
+                  : can.password && can.info
+                    ? 'Deixe vazio para manter a atual.'
+                    : 'Trocar a senha pede a permissão Trocar a senha de outras pessoas.'
+              }
+            >
+              <input type="password" value={f.password} disabled={readOnly || self || !can.password || !can.info} autoComplete="new-password" onChange={(e) => set({ password: e.target.value })} />
             </Field>
             <div className="toggle-list">
               <Toggle
@@ -328,12 +392,26 @@ function Security({
                 disabled={readOnly || self || !can.active}
                 onChange={(v) => set({ active: v })}
                 label="Ativo"
-                description={self ? 'Você não pode desativar a própria conta.' : f.active ? 'A pessoa consegue entrar no chat.' : 'Desligado, a pessoa não consegue entrar.'}
+                description={
+                  self
+                    ? 'Você não pode desativar a própria conta.'
+                    : f.active
+                      ? 'A pessoa consegue entrar no chat.'
+                      : user.pendingApproval
+                        ? 'Cadastro aguardando aprovação: ligue e salve para aprovar.'
+                        : 'Desligado, a pessoa não consegue entrar.'
+                }
               />
               {hidden ? (
                 <p className="field-hint">E-mail verificado: oculto. Ver pede a permissão Ver dados completos de outras pessoas.</p>
               ) : (
-                <Toggle checked={f.verified} disabled={readOnly || !can.info} onChange={(v) => set({ verified: v })} label="E-mail verificado" />
+                <Toggle
+                  checked={f.verified}
+                  disabled={readOnly || !can.info}
+                  onChange={setVerified}
+                  label="E-mail verificado"
+                  description={emailChanged ? 'O e-mail foi trocado: marque só se o novo endereço já foi conferido.' : undefined}
+                />
               )}
               <Toggle checked={f.requirePasswordChange} disabled={readOnly || !can.info} onChange={(v) => set({ requirePasswordChange: v })} label="Exigir troca de senha no próximo login" />
             </div>
@@ -341,14 +419,31 @@ function Security({
         </Section>
         <Section icon="rbac-technical" title="Ações imediatas" hint="Valem na hora, sem Salvar.">
           <div className="rbac-quick">
-            <button className="btn small" disabled={readOnly || !twoFactor || !can.totp} title={can.totp ? undefined : 'Pede a permissão Redefinir o 2FA de outras pessoas.'} onClick={() => api.post('users.resetTOTP', { userId: id }).then(() => (rbacOk('2FA redefinido.'), setTwoFactor(false))).catch(fail)}>
+            <button className="btn small" disabled={readOnly || !twoFactor || !can.totp} title={can.totp ? undefined : 'Pede a permissão Redefinir o 2FA de outras pessoas.'} onClick={() => void resetTotp()}>
               <Icon name="security" />
               {twoFactor ? 'Redefinir 2FA' : '2FA não configurado'}
             </button>
-            <button className="btn small" disabled={readOnly || !avatar || !can.avatar} title={can.avatar ? undefined : 'Pede a permissão Trocar a foto de outras pessoas.'} onClick={() => api.post('users.resetAvatar', { userId: id }).then(() => (rbacOk('Avatar removido.'), setAvatar(false))).catch(fail)}>
+            <button className="btn small" disabled={readOnly || !avatar || !can.avatar} title={can.avatar ? undefined : 'Pede a permissão Trocar a foto de outras pessoas.'} onClick={() => void removeAvatar()}>
               <Icon name="image-remove" />
               Remover avatar
             </button>
+            {/* A pessoa esqueceu a senha ou a conta foi criada sem uma: o link de "Esqueci minha senha", pelo e-mail dela. */}
+            {!self && can.password && user.type !== 'bot' && (
+              <button
+                className="btn small"
+                disabled={readOnly || hidden || !user.email}
+                title={!user.email && !hidden ? 'A pessoa não tem e-mail cadastrado.' : undefined}
+                onClick={() =>
+                  api
+                    .post('users.sendPasswordLink', { userId: id })
+                    .then((r) => rbacOk(r.message))
+                    .catch(fail)
+                }
+              >
+                <Icon name="email" />
+                Enviar link para definir a senha
+              </button>
+            )}
             {/* Criptografia de ponta a ponta: a pessoa esqueceu a senha e não consegue redefinir sozinha. */}
             {can.e2e && !self && (
               <button

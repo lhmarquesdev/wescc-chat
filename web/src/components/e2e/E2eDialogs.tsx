@@ -373,7 +373,7 @@ function ResetModal({ onDone, go }: DialogProps) {
               className="otp-input"
               inputMode="numeric"
               autoComplete="one-time-code"
-              maxLength={8}
+              maxLength={11}
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\s/g, ''))}
               autoFocus={!needsPassword}

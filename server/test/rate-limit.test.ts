@@ -4,20 +4,25 @@ import { admin, api, newUser, startServer, stopServer, urlOf, type Auth } from '
 // Limite de requisições da API (@fastify/rate-limit): a recusa sai no formato de erro da API, com o texto do limite,
 // o errorType próprio e o Retry-After, para a web mostrar a mensagem certa (e não "Erro 429").
 let A: Auth;
+let U2: Auth;
+let B2: Auth;
 beforeAll(async () => {
   await startServer();
   A = await admin();
+  // Entram antes dos limites baixos dos testes (o login conta pelo IP).
+  U2 = await newUser(A);
+  B2 = await newUser(A);
 });
 afterAll(() => stopServer());
 
 describe('limite de requisições da API', () => {
   it('a recusa traz o texto do limite, error-too-many-requests e Retry-After', async () => {
     const U = await newUser(A);
-    const s = await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: true, API_Enable_Rate_Limiter_Limit_Calls_Default: 5 } }, A);
+    const s = await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: true, API_Enable_Rate_Limiter_Limit_Calls_Default: 10 } }, A);
     expect(s.success).toBe(true);
     const headers = { 'x-user-id': U.userId, 'x-auth-token': U.authToken };
     let last: Response | null = null;
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 11; i++) {
       last = await fetch(urlOf('/api/v1/me'), { headers });
       if (last.status === 429) break;
       await last.arrayBuffer();
@@ -33,14 +38,39 @@ describe('limite de requisições da API', () => {
   });
 
   it('sem login a chave é o IP e a recusa tem o mesmo formato', async () => {
-    await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter_Limit_Calls_Default: 3 } }, A);
+    await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter_Limit_Calls_Default: 10 } }, A);
     let r: any = null;
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 11; i++) {
       r = await api('GET', 'info');
       if (r.status === 429) break;
     }
     expect(r.status).toBe(429);
     expect(r.errorType).toBe('error-too-many-requests');
     expect(r.error).toMatch(/^Limite de requisições excedido/);
+  });
+
+  it('0, vazio ou negativo é recusado; um valor antigo baixo demais não trava ninguém e as configurações ficam livres', async () => {
+    for (const v of [0, -5, '', 'abc', 30.5, 9]) {
+      const r = await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter_Limit_Calls_Default: v } }, A);
+      expect(r.status, String(v)).toBe(400);
+      expect(r.error, String(v)).toMatch(/^Chamadas por minuto: /);
+    }
+    // Valor gravado antes da validação: vale como 10 por minuto.
+    const { pool } = await import('../src/db/pool');
+    const { setSettingCache } = await import('../src/services/settings');
+    await pool.query(`UPDATE settings SET value = '-5' WHERE id = 'API_Enable_Rate_Limiter_Limit_Calls_Default'`);
+    setSettingCache('API_Enable_Rate_Limiter_Limit_Calls_Default', -5);
+    expect((await api('GET', 'me', undefined, U2)).success).toBe(true);
+    // Quem administra chega às configurações mesmo depois de estourar o limite e desfaz o valor.
+    let me: any = null;
+    for (let i = 0; i < 11; i++) me = await api('GET', 'me', undefined, A);
+    expect(me.status).toBe(429);
+    expect((await api('GET', 'settings', undefined, A)).status).toBe(200);
+    const fixed = await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter_Limit_Calls_Default: 300 } }, A);
+    expect(fixed.success).toBe(true);
+    // Para os outros, /settings conta normalmente.
+    let s: any = null;
+    for (let i = 0; i < 301 && s?.status !== 429; i++) s = await api('GET', 'settings', undefined, B2);
+    expect(s.status).toBe(429);
   });
 });

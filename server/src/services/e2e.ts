@@ -72,6 +72,13 @@ export async function fingerprintOf(userId: string): Promise<string | null> {
   return r ? fingerprintText(r.public_key) : null;
 }
 
+// A última redefinição da criptografia da pessoa (a própria ou pelo administrador) numa conversa em que ela tinha chave.
+// Sem chaves, a web diz que as mensagens cifradas de antes dela não abrem mais (configurar não traz de volta).
+export async function lastResetOf(userId: string): Promise<string | null> {
+  const r = await one('SELECT max(reset_at) AS at FROM e2e_room_resets WHERE user_id = $1', [userId]);
+  return r?.at ? new Date(r.at).toISOString() : null;
+}
+
 const inEncryptedRoom = async (userId: string) =>
   !!(await one('SELECT 1 FROM subscriptions s JOIN rooms r ON r.id = s.room_id WHERE s.user_id = $1 AND r.encrypted LIMIT 1', [userId]));
 

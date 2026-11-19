@@ -10,7 +10,7 @@ import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { E2E_ERR } from './e2e';
-import { canPostInRoom, sendMessage } from './messages';
+import { canPostInRoom, filterBadWords, sendMessage } from './messages';
 import { canAccessRoom, getRoom, loadRoomForUser } from './rooms';
 import { getSetting } from './settings';
 import type { Ctx } from './users';
@@ -56,18 +56,32 @@ export interface StoredFile {
   e2e?: boolean; // cifrado no navegador (sala criptografada)
 }
 
-function tooLarge(max: number) {
+// Os erros dizem qual arquivo foi recusado (vários arquivos saem de uma vez). Sala criptografada: o nome é genérico.
+function tooLarge(max: number, name = '') {
   const limit = max >= 1048576 ? `${Math.round(max / 1048576)} MB` : `${Math.max(1, Math.round(max / 1024))} KB`;
-  return badRequest('error-file-too-large', `Arquivo maior que o permitido (${limit}).`);
+  return badRequest('error-file-too-large', name ? `O arquivo “${name}” é maior que o permitido (${limit}).` : `Arquivo maior que o permitido (${limit}).`);
+}
+
+// Nome guardado: até 200 caracteres. Um nome longo perde o fim do nome, nunca a extensão (.pdf, .xlsx), que diz ao
+// computador de quem baixa como abrir o arquivo.
+export function storedFileName(filename: string | undefined, max = 200) {
+  const base = path.basename(filename || 'arquivo');
+  if (!base || base === '.' || base === '..') return 'arquivo';
+  const chars = [...base];
+  if (chars.length <= max) return base;
+  const ext = path.extname(base);
+  const keep = ext.length > 1 && ext.length <= 20 ? ext : '';
+  return `${chars.slice(0, max - [...keep].length).join('').replace(/[\s.]+$/, '')}${keep}`;
 }
 
 // Confere o tipo e grava no armazenamento; o tamanho é limitado pelo parser do multipart.
 // Sala criptografada: o servidor não sabe o tipo; a lista de tipos é conferida no navegador.
 async function writeFile(file: { file: Readable & { truncated?: boolean }; filename: string; mimetype: string }, max: number, opaque = false): Promise<StoredFile> {
   const type = opaque ? E2E_FILE_TYPE : safeMimeType(file.mimetype);
+  const name = opaque ? '' : storedFileName(file.filename);
   if (!opaque && !typeAllowed(type)) {
     file.file.resume();
-    throw badRequest('error-invalid-file-type', 'Tipo de arquivo não permitido.');
+    throw badRequest('error-invalid-file-type', `O tipo do arquivo “${name}” não é permitido.`);
   }
   const id = newId();
   const now = new Date();
@@ -78,17 +92,21 @@ async function writeFile(file: { file: Readable & { truncated?: boolean }; filen
     await pipeline(file.file, fs.createWriteStream(abs));
   } catch (e) {
     await fs.promises.rm(abs, { force: true });
-    if ((e as any)?.code === 'FST_REQ_FILE_TOO_LARGE') throw tooLarge(max);
+    if ((e as any)?.code === 'FST_REQ_FILE_TOO_LARGE') throw tooLarge(max, name);
     throw e;
   }
   if (file.file.truncated) {
     await fs.promises.rm(abs, { force: true });
-    throw tooLarge(max);
+    throw tooLarge(max, name);
   }
   const { size } = await fs.promises.stat(abs);
+  // Arquivo de 0 byte (cópia que falhou, atalho): nada para baixar.
+  if (!size) {
+    await fs.promises.rm(abs, { force: true });
+    throw badRequest('error-file-empty', name ? `O arquivo “${name}” está vazio.` : 'O arquivo está vazio.');
+  }
   if (opaque) return { id, name: E2E_FILE_NAME, type, size, rel, e2e: true };
-  const name = path.basename(file.filename || 'arquivo').slice(0, 200);
-  return { id, name: name && name !== '.' && name !== '..' ? name : 'arquivo', type, size, rel };
+  return { id, name, type, size, rel };
 }
 
 // _id, e2e e e2eMentions: arquivo de conversa criptografada (o _id está na cifra).
@@ -108,18 +126,22 @@ export async function readUpload(req: any, opts: { opaque?: boolean } = {}): Pro
   const max = getSetting<number>('FileUpload_MaxFileSize');
   const fields: Record<string, string> = {};
   let file: StoredFile | null = null;
+  let current = '';
   try {
     for await (const part of req.parts({ limits: max > 0 ? { ...FIELD_LIMITS, fileSize: max } : FIELD_LIMITS })) {
       if (part.type !== 'file') {
         if (part.valueTruncated) throw new ApiError(413, 'error-field-too-large', 'Texto grande demais no envio.');
         if (UPLOAD_FIELDS.includes(part.fieldname)) fields[part.fieldname] = String(part.value ?? '');
       } else if (file) part.file.resume();
-      else file = await writeFile(part, max, !!opts.opaque);
+      else {
+        current = opts.opaque ? '' : storedFileName(part.filename);
+        file = await writeFile(part, max, !!opts.opaque);
+      }
     }
   } catch (e) {
     if (file) await discardFile(file);
     const code = (e as any)?.code;
-    if (code === 'FST_REQ_FILE_TOO_LARGE') throw tooLarge(max);
+    if (code === 'FST_REQ_FILE_TOO_LARGE') throw tooLarge(max, current);
     if (LIMIT_ERRORS[code]) throw new ApiError(413, 'error-too-many-parts', LIMIT_ERRORS[code]);
     throw e;
   }
@@ -199,16 +221,28 @@ export async function saveUpload(
     // voice e video juntos: vale o que bate com o tipo do arquivo.
     const voice = voiceFields(file.type, fields);
     const video = voice ? null : videoFields(file.type, fields);
+    // Legenda: vai como o texto da mensagem, que tem menções, formatação, o filtro de palavras e o limite de tamanho, e
+    // pode ser editada. Com msg e description (outros clientes), a description fica no anexo, com o filtro e o limite.
+    const caption = (fields.description ?? '').trim();
+    const msg = (fields.msg ?? '').trim() || caption;
+    const description = msg !== caption ? uploadDescription(caption) : undefined;
     const f = await registerFile(file, rid, { userId: ctx.userId });
-    const att = fileAttachment(file, fields.description);
+    const att = fileAttachment(file, description);
     if (voice) Object.assign(att, { voice: true, audio_duration: voice.duration, audio_waveform: voice.waveform });
     if (video) Object.assign(att, { video_message: true, video_duration: video.duration });
     const files = [voice ? { ...f, voice: true, duration: voice.duration } : video ? { ...f, video: true, duration: video.duration } : f];
-    return await sendMessage(ctx, { rid, msg: fields.msg ?? '', tmid: fields.tmid || null, files, attachments: [att] }, { skipCommands: true, internalAttachments: true });
+    return await sendMessage(ctx, { rid, msg, tmid: fields.tmid || null, files, attachments: [att] }, { skipCommands: true, internalAttachments: true });
   } catch (e) {
     await discardFile(file);
     throw e;
   }
+}
+
+function uploadDescription(text: string) {
+  if (!text) return undefined;
+  const max = getSetting<number>('Message_MaxAllowedSize');
+  if (text.length > max) throw badRequest('error-message-size-exceeded', `A descrição excede ${max} caracteres.`);
+  return filterBadWords(text);
 }
 
 // Arquivo de conversa criptografada: nome, tipo, legenda, voz e vídeo vão dentro da mensagem cifrada.

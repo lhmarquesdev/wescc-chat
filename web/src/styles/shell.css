@@ -145,6 +145,12 @@
 .auth-main .icon-btn {
   color: hsl(0 0% 100% / 0.8);
 }
+/* Foco pelo teclado sobre o painel azul: contorno branco (o anel da marca a 30% some no azul, e o botão Entrar troca
+   a sombra do anel pela dele). */
+.auth-main :is(a, button, input[type='checkbox']):focus-visible {
+  outline: 2px solid hsl(var(--on-color));
+  outline-offset: 2px;
+}
 .auth-main .icon-btn:hover {
   background: hsl(0 0% 100% / 0.16);
   color: hsl(var(--on-color));
@@ -180,14 +186,19 @@
   color: hsl(var(--on-color));
   box-shadow: none;
 }
+/* Erro e avisos: cartão sólido, como os avisos do Atendeti (o branco translúcido sobre o azul ficava em 2,6:1). Vale
+   também para .callout.ok, .info…, cuja regra vem depois e deixava o aviso translúcido sobre o azul. */
 .auth-main .form-error,
-.auth-main .callout {
-  border-color: hsl(0 0% 100% / 0.35);
-  background: hsl(0 0% 100% / 0.16);
-  color: hsl(var(--on-color));
+.auth-main .callout,
+.auth-main .callout:is(.info, .ok, .warn, .err) {
+  border-color: transparent;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  box-shadow: 0 10px 24px -12px hsl(var(--brand-h) var(--brand-s) 15% / 0.45);
 }
-.auth-main .callout > .icon:first-child {
-  color: hsl(var(--on-color));
+.auth-main .form-error {
+  color: hsl(var(--st-red));
+  font-weight: var(--fw-medium);
 }
 .auth-main .muted {
   color: hsl(0 0% 100% / 0.8);
@@ -350,6 +361,30 @@
   flex-direction: column;
   position: relative;
 }
+/* "Pular para o conteúdo": fora da tela até receber o foco pelo teclado. */
+.skip-link {
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: var(--z-modal);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-full);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+  text-decoration: none;
+  transform: translateY(calc(-100% - var(--space-4)));
+}
+/* A sombra só com o link à vista: escondido acima da tela, ela aparecia como uma mancha no alto da página. */
+.skip-link:focus {
+  transform: none;
+  box-shadow: var(--shadow-2);
+}
+/* A área principal só recebe o foco pelo "Pular para o conteúdo": sem o anel em volta da tela toda. */
+.main:focus-visible {
+  box-shadow: none;
+}
 .main > :where(:not(.topbar, .offline-bar, .mobile-nav-btn)) {
   flex: 1 1 0;
   min-height: 0;
@@ -368,6 +403,24 @@
   line-height: var(--lh-12);
   font-weight: var(--fw-medium);
   text-align: center;
+}
+.offline-retry {
+  margin-left: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 1px solid hsl(var(--st-amber-line));
+  border-radius: var(--radius-full);
+  background: hsl(var(--background));
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.offline-retry:hover {
+  background: hsl(var(--st-amber-line));
+}
+@media (pointer: coarse) {
+  .offline-retry {
+    padding: var(--space-1) var(--space-3);
+  }
 }
 /* Erro de renderização (ErrorBoundary): o estado de erro no meio da área. */
 .page > .empty {
@@ -430,8 +483,13 @@
   line-height: var(--lh-14);
   color: hsl(var(--muted-foreground));
 }
+/* Sem espaço, as áreas da trilha encolhem com reticências e a página atual fica com até 70% (nada passa por baixo
+   do botão de tema). */
 .crumb {
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: inherit;
   text-decoration: none;
   white-space: nowrap;
@@ -441,7 +499,8 @@ a.crumb:hover {
   text-decoration: none;
 }
 .crumb.current {
-  flex-shrink: 1;
+  flex-shrink: 0;
+  max-width: 70%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -613,7 +672,7 @@ a.crumb:hover {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-medium);
-  color: hsl(var(--sidebar-foreground) / 0.7);
+  color: hsl(var(--sidebar-foreground) / 0.85); /* 4,9:1 sobre o azul da lateral */
 }
 
 /* Navegação principal: botões de 48px, ícone de 24px. */
@@ -754,7 +813,7 @@ button.side-item {
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
-  color: hsl(var(--sidebar-foreground) / 0.7);
+  color: hsl(var(--sidebar-foreground) / 0.85);
   font: var(--fw-medium) var(--fs-12) / var(--lh-12) var(--font-sans);
   text-align: left;
   cursor: pointer;
@@ -1047,6 +1106,19 @@ button.side-item {
   white-space: normal;
 }
 
+/* Estado vazio na lateral azul (nenhuma conversa, busca sem resultado, "Tudo lido"): texto claro sobre o azul. No
+   celular a lista usa o tema da página e fica com as cores comuns. */
+.sidebar:not([data-mode='list']) .empty,
+.sidebar:not([data-mode='list']) .empty-desc {
+  color: hsl(var(--sidebar-foreground) / 0.85);
+}
+.sidebar:not([data-mode='list']) .empty-title {
+  color: hsl(var(--sidebar-foreground));
+}
+.sidebar:not([data-mode='list']) .empty-icon {
+  color: hsl(var(--sidebar-foreground) / 0.6);
+}
+
 /* ---------- Lista de conversas como tela inicial (celular) ----------
    A lista usa o tema da página (não a ilha escura): só os valores das variáveis mudam. */
 .sidebar[data-mode='list'] {
@@ -1123,7 +1195,7 @@ button.side-item {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   font-weight: var(--fw-semibold);
-  color: hsl(var(--sidebar-foreground) / 0.7);
+  color: hsl(var(--sidebar-foreground) / 0.85);
 }
 .for-you-scroll {
   display: flex;
@@ -1456,7 +1528,7 @@ button.side-item {
   line-height: var(--lh-12);
   font-weight: var(--fw-medium);
   letter-spacing: 0;
-  color: hsl(var(--sidebar-foreground) / 0.7);
+  color: hsl(var(--sidebar-foreground) / 0.85);
   flex-shrink: 0;
 }
 .page-nav a:where(:not(.side-brand)) {
@@ -1527,11 +1599,12 @@ button.side-item {
   flex-wrap: wrap;
 }
 /* Takeover: em Administração e Minha conta a navegação de seções toma o lugar do menu lateral, de alto a baixo;
-   a barra do topo fica só sobre o conteúdo. */
-:where(.layout:has(.takeover)) > .sidebar-wrap {
+   a barra do topo fica só sobre o conteúdo. O :has() fica no próprio elemento estilizado: num ancestral (.layout,
+   .main), cada tecla digitada no compositor fazia o navegador recalcular a lista de mensagens inteira. */
+.sidebar-wrap:where(:has(~ .main > .takeover)) {
   display: none;
 }
-.main:has(> .takeover) > .topbar {
+.main > .topbar:has(~ .takeover) {
   margin-left: var(--side-w);
   transition: margin-left 200ms var(--ease-out);
 }
@@ -1541,7 +1614,7 @@ button.side-item {
 .takeover > .page-body {
   margin-top: var(--header-h);
 }
-[data-side='icon'] .main:has(> .takeover) > .topbar {
+[data-side='icon'] .main > .topbar:has(~ .takeover) {
   margin-left: var(--side-w-icon);
 }
 [data-side='icon'] .page-nav {
@@ -1744,6 +1817,12 @@ button.side-item {
 .dir-name + .pill {
   flex-shrink: 0;
 }
+/* Canal que pede código de acesso: a chave ao lado do nome. */
+.dir-code {
+  flex-shrink: 0;
+  margin-left: var(--space-1-5);
+  color: hsl(var(--muted-foreground));
+}
 .dir-team {
   display: block;
   max-width: 160px;
@@ -1865,11 +1944,14 @@ button.side-item {
 
 /* ---------- Tablet (761–1199px) ---------- */
 @media (min-width: 761px) and (max-width: 1199px) {
-  .sidebar-wrap {
-    width: 248px;
+  /* Menu lateral, menu de seções e a margem da barra do topo com a mesma largura (sem faixa vazia). */
+  .layout {
+    --side-w: 15.5rem;
   }
-  .takeover .page-nav {
-    width: 240px;
+  /* A trilha começa pela área: o nome do chat já está no menu. */
+  .crumbs > .crumb:first-child,
+  .crumbs > .crumb:first-child + .crumb-sep {
+    display: none;
   }
   .page-head {
     padding: 0 var(--space-6);
@@ -2168,7 +2250,17 @@ button.side-item {
   white-space: nowrap;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: hsl(var(--sidebar-foreground) / 0.7);
+  color: hsl(var(--sidebar-foreground) / 0.85);
+}
+/* Canal de time: o nome do time logo depois do nome do canal, no espaço que sobra. O nome do canal tem a preferência e só
+   encolhe quando o do time já está no mínimo (o title do item tem os dois inteiros). */
+.side-item:has(> .side-team) > .side-name {
+  flex: 0 1 auto;
+}
+.side-team {
+  flex: 1 1 0;
+  min-width: 2.5rem;
+  max-width: none;
 }
 /* Resultado do servidor: o nome em cima e o detalhe (@usuário, time e membros, "Sem conversa direta") embaixo, cada
    um com a largura toda da linha. Lado a lado, na barra de 272px o detalhe virava "c…" ou sumia; o title da linha
@@ -2205,7 +2297,7 @@ button.side-item {
 }
 @media (hover: hover) {
   .side-group-title.static:hover {
-    color: hsl(var(--sidebar-foreground) / 0.7);
+    color: hsl(var(--sidebar-foreground) / 0.85);
   }
 }
 /* Pessoa sem conversa direta: nome apagado e a pílula com o motivo na segunda linha (o @usuário fica no title). */
@@ -2283,6 +2375,9 @@ button.side-item {
 .me-silenced {
   flex-shrink: 0;
   color: hsl(var(--sidebar-foreground) / 0.7);
+}
+.topbar .me-silenced {
+  color: hsl(var(--muted-foreground));
 }
 
 /* ---------- Lembretes ---------- */

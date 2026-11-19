@@ -5,7 +5,7 @@ import { formatDateTime, plural, roleLabel, setRoleDescriptions } from '../../li
 import { usePermission, useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, Menu, Modal, Pager, SkeletonTable, Toggle, Tooltip, confirmDialog, useAsync, ThLabel } from '../../components/ui';
-import { ActivePill, RolePills, RowMenu, UserCell, lastSeen } from './parts';
+import { ActivePill, RolePills, RowMenu, SortTh, UserCell, lastSeen, type SortDir } from './parts';
 import type { LockReason } from '@shared/rbac';
 import { BulkRolesDialog } from './rbac/BulkRoles';
 import { loadGrant, lockText, rbacFail, userLockOf } from './rbac/data';
@@ -23,16 +23,34 @@ function origin(u: any) {
   return AUTH_LABEL[u.authSource] ?? u.authSource;
 }
 
-type Status = '' | 'active' | 'deactivated';
+type Status = '' | 'active' | 'deactivated' | 'pending';
 
-// CSV com ponto e vírgula (abre direto no Excel em português) e aspas quando preciso.
+// Colunas que ordenam a lista (o servidor também aceita o nome de usuário e a data de criação). Sem ordem escolhida,
+// fica a padrão: pessoas antes dos bots, pelo nome de usuário. No celular, as mesmas ordens num seletor.
+type SortKey = 'name' | 'email' | 'lastLogin';
+type Sort = { key: SortKey; dir: SortDir } | null;
+const SORT_OPTIONS: [string, string][] = [
+  ['name:1', 'Nome (A a Z)'],
+  ['name:-1', 'Nome (Z a A)'],
+  ['email:1', 'E-mail (A a Z)'],
+  ['email:-1', 'E-mail (Z a A)'],
+  ['lastLogin:1', 'Acesso mais antigo'],
+  ['lastLogin:-1', 'Acesso mais recente'],
+];
+
+const statusText = (u: any) => (u.active ? 'Ativo' : u.pendingApproval ? 'Aguardando aprovação' : 'Desativado');
+
+// CSV com ponto e vírgula (abre direto no Excel em português) e aspas quando preciso. Texto que começa com = + - @,
+// tabulação ou quebra de linha (um nome como =HYPERLINK(...)) ganha um apóstrofo: a planilha mostra o texto em vez
+// de executar a fórmula.
 function toCsv(users: any[]) {
   const cell = (v: unknown) => {
-    const s = String(v ?? '');
-    return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    let s = String(v ?? '');
+    if (/^[=+\-@\t\r\n]/.test(s)) s = `'${s}`;
+    return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const head = ['Nome', 'Usuário', 'E-mail', 'Papéis', 'Status', 'Origem', 'Último acesso'];
-  const rows = users.map((u) => [u.name, u.username, u.email, u.roles.map(roleLabel).join(', '), u.active ? 'Ativo' : 'Desativado', origin(u) || 'Local', formatDateTime(u.lastLogin)]);
+  const rows = users.map((u) => [u.name, u.username, u.email, u.roles.map(roleLabel).join(', '), statusText(u), origin(u) || 'Local', formatDateTime(u.lastLogin)]);
   return '﻿' + [head, ...rows].map((r) => r.map(cell).join(';')).join('\n');
 }
 
@@ -55,11 +73,17 @@ function UserList() {
   const me = useStore((s) => s.me)!;
   const navigate = useNavigate();
   const [params] = useSearchParams();
+  // O campo de busca responde na hora; a lista só pesquisa quando a pessoa para de digitar.
+  const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('');
-  const [status, setStatus] = useState<Status>('');
+  // ?status=pending: o link do aviso de cadastro aguardando aprovação abre a lista já no filtro.
+  const [status, setStatus] = useState<Status>(() => (['active', 'deactivated', 'pending'].includes(params.get('status') ?? '') ? (params.get('status') as Status) : ''));
   const [role, setRole] = useState(params.get('role') ?? '');
   const [offset, setOffset] = useState(0);
   const [count, setCount] = useState(25);
+  const [sort, setSort] = useState<Sort>(null);
+  const sortParam = sort ? JSON.stringify({ [sort.key]: sort.dir }) : undefined;
+  const sortBy = (key: SortKey) => (dir: SortDir) => (setSort({ key, dir }), setOffset(0));
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Pessoas já vistas (em qualquer página ou no "Selecionar todos"): a seleção vale entre páginas.
@@ -71,17 +95,14 @@ function UserList() {
   const canAssign = usePermission('assign-roles');
   const canActive = usePermission('edit-other-user-active-status');
   const canLogout = usePermission('logout-other-user');
-  const { data, loading, reload } = useAsync(() => api.get('users.list', { filter, status, role, offset, count }), [filter, status, role, offset, count]);
-  // Contagens do controle segmentado (com a busca e o papel aplicados).
-  const counts = useAsync(
-    () =>
-      Promise.all(['', 'active', 'deactivated'].map((s) => api.get('users.list', { filter, role, status: s, count: 1 }).then((r) => r.total as number))).then(([all, active, off]) => ({
-        all,
-        active,
-        off,
-      })),
-    [filter, role, data],
-  );
+  const canDelete = usePermission('delete-user');
+  useEffect(() => {
+    if (search === filter) return;
+    const t = setTimeout(() => (setFilter(search), setOffset(0)), 300);
+    return () => clearTimeout(t);
+  }, [search, filter]);
+  // As contagens do controle segmentado (com a busca e o papel aplicados) vêm na mesma chamada da lista.
+  const { data, loading, error, reload } = useAsync(() => api.get('users.list', { filter, status, role, sort: sortParam, offset, count, counts: 'true' }), [filter, status, role, sortParam, offset, count]);
   const roles = useAsync(() => api.get('roles.list').then((r) => (setRoleDescriptions(r.roles), r)), []);
   // Hierarquia de concessão: papéis que quem está usando a tela pode dar ou tirar (os outros aparecem com cadeado).
   const grant = useAsync(loadGrant, []);
@@ -117,14 +138,14 @@ function UserList() {
       for (const u of users) allOnPage ? n.delete(u._id) : n.add(u._id);
       return n;
     });
-  const resetFilters = () => (setFilter(''), setStatus(''), setRole(''), setOffset(0));
+  const resetFilters = () => (setSearch(''), setFilter(''), setStatus(''), setRole(''), setOffset(0));
   // Todas as páginas do filtro (até 500), em páginas de 500 como a exportação.
   const selectAll = async () => {
     setSelectingAll(true);
     try {
       const all: any[] = [];
       for (let o = 0; o < SELECT_MAX; o += 500) {
-        const r = await api.get('users.list', { filter, status, role, offset: o, count: 500 });
+        const r = await api.get('users.list', { filter, status, role, sort: sortParam, offset: o, count: 500 });
         all.push(...r.users);
         if (all.length >= r.total || !r.users.length) break;
       }
@@ -159,6 +180,7 @@ function UserList() {
         mentionSelf && sk.self ? 'você não foi incluído' : '',
         sk.locked ? `${sk.locked} com cadeado ${sk.locked === 1 ? 'ficou' : 'ficaram'} de fora` : '',
         sk.unchanged ? `${sk.unchanged} já ${sk.unchanged === 1 ? 'estava' : 'estavam'} assim` : '',
+        sk.lastAdmin ? 'o último administrador ativo continua ativo' : '',
       ].filter(Boolean);
       const tail = notes.length ? ` (${notes.join('; ')})` : '';
       if (r.users) ok(`${what}: ${plural(r.users, 'pessoa', 'pessoas')}${tail}.`);
@@ -185,7 +207,7 @@ function UserList() {
   const logoutSelected = async () => {
     const yes = await confirmDialog({
       title: `Encerrar as sessões de ${plural(others.length, 'pessoa', 'pessoas')}?`,
-      body: `Elas saem da conta em todos os dispositivos e precisam entrar de novo.${selfNote}`,
+      body: `Elas saem da conta em todos os dispositivos e precisam entrar de novo. Os tokens de acesso delas também são revogados.${selfNote}`,
       confirmLabel: 'Encerrar sessões',
       danger: true,
     });
@@ -208,10 +230,29 @@ function UserList() {
       .then(() => (ok(u.active ? 'Usuário desativado.' : 'Usuário ativado.'), reload()))
       .catch(fail);
   };
+  // Cadastro aguardando aprovação: Aprovar ativa a conta (e avisa a pessoa por e-mail); Recusar exclui o cadastro.
+  const approve = (u: any) =>
+    api
+      .post('users.setActiveStatus', { userId: u._id, activeStatus: true })
+      .then(() => (ok(`Cadastro de @${u.username} aprovado.`), reload()))
+      .catch(fail);
+  const reject = async (u: any) => {
+    const yes = await confirmDialog({
+      title: `Recusar o cadastro de @${u.username}?`,
+      body: 'O cadastro é excluído e a pessoa não consegue entrar. Ela pode se cadastrar de novo depois.',
+      confirmLabel: 'Recusar',
+      danger: true,
+    });
+    if (yes)
+      api
+        .post('users.delete', { userId: u._id })
+        .then(() => (ok(`Cadastro de @${u.username} recusado.`), reload()))
+        .catch(fail);
+  };
   const logoutOne = async (u: any) => {
     const yes = await confirmDialog({
       title: `Encerrar as sessões de @${u.username}?`,
-      body: 'A pessoa sai da conta em todos os dispositivos e precisa entrar de novo.',
+      body: 'A pessoa sai da conta em todos os dispositivos e precisa entrar de novo. Os tokens de acesso dela também são revogados.',
       confirmLabel: 'Encerrar sessões',
       danger: true,
     });
@@ -227,7 +268,7 @@ function UserList() {
     try {
       const all: any[] = [];
       for (let o = 0; ; o += 500) {
-        const r = await api.get('users.list', { filter, status, role, offset: o, count: 500 });
+        const r = await api.get('users.list', { filter, status, role, sort: sortParam, offset: o, count: 500 });
         all.push(...r.users);
         if (all.length >= r.total || !r.users.length) break;
       }
@@ -244,18 +285,20 @@ function UserList() {
     }
   };
 
-  const c = counts.data;
+  const c = data?.counts;
   return (
     <div className="rbac-shell list">
-      <ListStrip eyebrow="Usuários e papéis" title="Usuários" search={filter} onSearch={(v) => (setFilter(v), setOffset(0))} placeholder="Buscar por nome, usuário ou e-mail" count={data?.total}>
+      <ListStrip eyebrow="Usuários e papéis" title="Usuários" search={search} onSearch={setSearch} placeholder="Buscar por nome, usuário ou e-mail" count={data?.total}>
         <Chips<Status>
           label="Status"
           value={status}
           onChange={(v) => (setStatus(v), setOffset(0))}
           items={[
-            { id: '', label: 'Todos', count: c?.all },
+            { id: '', label: 'Todos', count: c?.total },
             { id: 'active', label: 'Ativos', count: c?.active },
-            { id: 'deactivated', label: 'Desativados', count: c?.off },
+            { id: 'deactivated', label: 'Desativados', count: c?.deactivated },
+            // Só aparece quando há cadastros esperando (ou com o filtro escolhido).
+            ...(c?.pending || status === 'pending' ? [{ id: 'pending' as const, label: 'Aguardando aprovação', count: c?.pending }] : []),
           ]}
         />
         <select className="rbac-strip-select" aria-label="Papel" value={role} onChange={(e) => (setRole(e.target.value), setOffset(0))}>
@@ -263,6 +306,24 @@ function UserList() {
           {globalRoles.map((r: any) => (
             <option key={r._id} value={r._id}>
               {roleLabel(r._id)}
+            </option>
+          ))}
+        </select>
+        {/* No celular a tabela vira cartões e o cabeçalho some: a ordem fica neste seletor. */}
+        <select
+          className="rbac-strip-select rbac-sort-select mobile-only"
+          aria-label="Ordenar"
+          value={sort ? `${sort.key}:${sort.dir}` : ''}
+          onChange={(e) => {
+            const [key, dir] = e.target.value.split(':');
+            setSort(key ? { key: key as SortKey, dir: Number(dir) as SortDir } : null);
+            setOffset(0);
+          }}
+        >
+          <option value="">Ordem padrão</option>
+          {SORT_OPTIONS.map(([v, label]) => (
+            <option key={v} value={v}>
+              {label}
             </option>
           ))}
         </select>
@@ -281,6 +342,19 @@ function UserList() {
       <div className="rbac-list-body flush">
         {loading && !data ? (
           <SkeletonTable rows={8} cols={6} />
+        ) : error && !data ? (
+          <Empty
+            icon="error"
+            tone="danger"
+            title="Não foi possível carregar os usuários"
+            action={
+              <button type="button" className="btn" onClick={reload}>
+                Tentar de novo
+              </button>
+            }
+          >
+            {error}
+          </Empty>
         ) : !users.length ? (
           <Empty
             icon="search"
@@ -310,21 +384,15 @@ function UserList() {
                     onChange={toggleAll}
                   />
                 </th>
-                <th>
-                  <ThLabel>Nome</ThLabel>
-                </th>
-                <th className="col-xl">
-                  <ThLabel>E-mail</ThLabel>
-                </th>
+                <SortTh label="Nome" dir={sort?.key === 'name' ? sort.dir : undefined} onSort={sortBy('name')} />
+                <SortTh label="E-mail" className="col-xl" dir={sort?.key === 'email' ? sort.dir : undefined} onSort={sortBy('email')} />
                 <th className="col-roles col-md">
                   <ThLabel>Papéis</ThLabel>
                 </th>
                 <th className="col-status">
                   <ThLabel>Status</ThLabel>
                 </th>
-                <th className="col-seen col-lg">
-                  <ThLabel>Último acesso</ThLabel>
-                </th>
+                <SortTh label="Último acesso" kind="date" className="col-seen col-lg" dir={sort?.key === 'lastLogin' ? sort.dir : undefined} onSort={sortBy('lastLogin')} />
                 <th className="actions-col">
                   <span className="visually-hidden">Ações</span>
                 </th>
@@ -365,7 +433,13 @@ function UserList() {
                       <RolePills roles={u.roles} />
                     </td>
                     <td data-label="Status">
-                      <ActivePill active={u.active} />
+                      {u.pendingApproval ? (
+                        <span className="pill warn" title="Aguardando aprovação">
+                          Aguardando
+                        </span>
+                      ) : (
+                        <ActivePill active={u.active} />
+                      )}
                     </td>
                     <td className="nowrap col-lg" data-label="Último acesso">
                       {u.lastLogin ? lastSeen(u.lastLogin) : <span className="muted">—</span>}
@@ -379,7 +453,19 @@ function UserList() {
                                 <Icon name={locked ? 'show' : 'edit'} />
                                 {locked ? 'Ver' : 'Editar'}
                               </button>
-                              {canActive && !locked && (
+                              {canActive && !locked && u.pendingApproval && (
+                                <button onClick={() => (close(), void approve(u))}>
+                                  <Icon name="success" />
+                                  Aprovar cadastro
+                                </button>
+                              )}
+                              {canDelete && !locked && u.pendingApproval && (
+                                <button onClick={() => (close(), void reject(u))}>
+                                  <Icon name="delete" />
+                                  Recusar cadastro
+                                </button>
+                              )}
+                              {canActive && !locked && !u.pendingApproval && (
                                 <button disabled={self} title={self ? 'Você não pode desativar a própria conta.' : undefined} onClick={() => (close(), void setOneActive(u))}>
                                   <Icon name={u.active ? 'disabled-user' : 'success'} />
                                   {u.active ? 'Desativar' : 'Ativar'}
@@ -514,14 +600,30 @@ function BulkRoleItem({ role, lock, onPick }: { role: any; lock?: LockReason; on
 // segurança e o resto ficam no editor, que abre logo em seguida.
 function CreateUser({ roles, onClose, onCreated }: { roles: any[]; onClose: () => void; onCreated: (id: string) => void }) {
   const [f, setF] = useState({ name: '', username: '', email: '', password: '', type: 'user', joinDefaultChannels: true, verified: true });
+  // Senha provisória: a pessoa troca no primeiro login (padrão). Com e-mail, dá para mandar o link de criar a senha.
+  const [requireChange, setRequireChange] = useState(true);
+  const [sendLink, setSendLink] = useState(false);
   const [initialRole, setInitialRole] = useState(roles.some((r) => r._id === 'user') ? 'user' : (roles[0]?._id ?? ''));
   const [busy, setBusy] = useState(false);
-  const valid = f.name.trim() && f.username.trim() && f.password;
+  const email = f.email.trim();
+  const person = f.type === 'user';
+  const linkOn = person && sendLink && !!email;
+  const valid = f.name.trim() && f.username.trim() && (linkOn || f.password);
   const create = async () => {
     setBusy(true);
     try {
-      const r = await api.post('users.create', { ...f, roles: initialRole ? [initialRole] : [], requirePasswordChange: false, active: true });
-      ok(`@${r.user.username} criado.`);
+      const r = await api.post('users.create', {
+        ...f,
+        email,
+        password: linkOn ? '' : f.password,
+        verified: !!email && f.verified,
+        roles: initialRole ? [initialRole] : [],
+        requirePasswordChange: person && !linkOn && requireChange,
+        sendPasswordEmail: linkOn,
+        active: true,
+      });
+      if (r.passwordEmailSent === false) useStore.getState().toast(`@${r.user.username} criado, mas o e-mail com o link não saiu. No editor, use "Enviar link para definir a senha" ou defina uma senha.`, 'error');
+      else ok(r.passwordEmailSent ? `@${r.user.username} criado. O link para definir a senha foi para ${email}.` : `@${r.user.username} criado.`);
       onCreated(r.user._id);
     } catch (e) {
       rbacFail(e);
@@ -553,12 +655,33 @@ function CreateUser({ roles, onClose, onCreated }: { roles: any[]; onClose: () =
         <Field label="Nome de usuário">
           <input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} />
         </Field>
-        <Field label="E-mail">
+        <Field label="E-mail" hint="Opcional. Serve para entrar, para redefinir a senha e para os avisos por e-mail.">
           <input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
         </Field>
-        <Field label="Senha">
-          <input type="password" value={f.password} autoComplete="new-password" onChange={(e) => setF({ ...f, password: e.target.value })} />
-        </Field>
+        {!linkOn && (
+          <Field label="Senha">
+            <input type="password" value={f.password} autoComplete="new-password" onChange={(e) => setF({ ...f, password: e.target.value })} />
+          </Field>
+        )}
+        {person && (
+          <div className="toggle-list">
+            <Toggle
+              checked={linkOn}
+              disabled={!email}
+              onChange={setSendLink}
+              label="Enviar link para a pessoa criar a senha"
+              description={email ? 'Vai por e-mail e vale por 3 dias. Você não precisa definir uma senha.' : 'Preencha o e-mail para usar esta opção.'}
+            />
+            {!linkOn && (
+              <Toggle
+                checked={requireChange}
+                onChange={setRequireChange}
+                label="Exigir troca de senha no primeiro login"
+                description="A pessoa entra com a senha que você definiu e escolhe uma nova."
+              />
+            )}
+          </div>
+        )}
         <Field label="Papel inicial" hint="Os outros papéis você ajusta no editor.">
           <select value={initialRole} onChange={(e) => setInitialRole(e.target.value)}>
             {roles.map((r) => (

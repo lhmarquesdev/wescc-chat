@@ -3,10 +3,11 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { MeetingInfo } from '@shared/calendar';
 import type { RoomCallState } from '@shared/index';
-import { api, errorMessage } from '../lib/api';
+import { api, ApiError, errorMessage } from '../lib/api';
 import { calendarApi, whenLabel } from '../lib/calendar';
-import { openCall, openJoin } from '../lib/call/store';
+import { openCall, openJoin, useCallStore } from '../lib/call/store';
 import { roomPath } from '../lib/format';
+import { linkify } from '../lib/markdown';
 import { explainCall } from '../lib/roomcall';
 import { useSetting } from '../lib/store';
 import { Icon } from '../components/Icon';
@@ -17,7 +18,23 @@ export function MeetPage() {
   const { code = '' } = useParams();
   const navigate = useNavigate();
   const callsOn = useSetting<boolean>('Calls_Enabled') !== false;
-  const { data, error, reload } = useAsync<MeetingInfo>(() => calendarApi.meeting(code), [code]);
+  // A reunião é uma sala de grupo: a chamada de vídeo precisa das chamadas em grupo (servidor de chamadas configurado).
+  // Sem elas, a página não oferece um "Entrar na reunião" que só falharia depois de mudar de tela.
+  const groupOn = useCallStore((s) => s.config?.groupEnabled) !== false;
+  const videoOn = callsOn && groupOn;
+  // Link errado, reunião só para convidados ou Agenda desligada não mudam com outra tentativa: "Tentar de novo" fica
+  // só para falha de rede, limite de pedidos ou erro do servidor.
+  const [retryable, setRetryable] = useState(false);
+  const { data, error, reload } = useAsync<MeetingInfo>(
+    () =>
+      calendarApi.meeting(code).catch((e) => {
+        const status = e instanceof ApiError ? e.status : 0;
+        setRetryable(status === 0 || status === 429 || status >= 500);
+        throw e;
+      }),
+    [code],
+  );
+  const calendarOn = useSetting<boolean>('Calendar_Enabled') !== false;
   const [busy, setBusy] = useState<'video' | 'chat' | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
 
@@ -27,7 +44,7 @@ export function MeetPage() {
     try {
       const { rid } = await calendarApi.join(code);
       navigate(roomPath({ _id: rid, t: 'p' }));
-      if (how === 'video' && callsOn) {
+      if (how === 'video' && videoOn) {
         // Chamada já aberta na sala: entra nela; senão abre a tela de entrada para começar.
         const st = await api.get<RoomCallState>('calls.roomCall', { roomId: rid }).catch(() => null);
         if (st?.call && st.canJoin) void openJoin(st.call._id, rid);
@@ -42,7 +59,13 @@ export function MeetPage() {
   };
 
   let body;
-  if (error)
+  if (!calendarOn)
+    body = (
+      <Empty icon="nav-calendar" title="A Agenda está desativada">
+        A Agenda e as reuniões estão desativadas neste chat. Fale com o administrador.
+      </Empty>
+    );
+  else if (error)
     body = (
       <Empty
         icon="cal-canceled"
@@ -83,7 +106,7 @@ export function MeetPage() {
           <UserAvatar username={e.owner.username} size={20} />
           Organizada por {e.owner.name || e.owner.username}
         </p>
-        {e.description && <p className="meet-desc">{e.description}</p>}
+        {e.description && <p className="meet-desc">{linkify(e.description)}</p>}
         {canceled ? (
           <div className="callout warn">
             <Icon name="cal-canceled" />
@@ -93,21 +116,22 @@ export function MeetPage() {
           <>
             {ended && (
               <p className="muted small">
-                Esta reunião já terminou. A sala continua aberta para o chat{callsOn ? ' e para uma nova chamada' : ''}.
+                Esta reunião já terminou. A sala continua aberta para o chat{videoOn ? ' e para uma nova chamada' : ''}.
               </p>
             )}
             <div className="meet-actions">
-              {callsOn && (
+              {videoOn && (
                 <button type="button" className="btn primary lg" aria-busy={busy === 'video' || undefined} disabled={!data.canJoin || !!busy} onClick={() => void enter('video')}>
                   <Icon name="meeting-join" />
                   Entrar na reunião
                 </button>
               )}
-              <button type="button" className={callsOn ? 'btn lg' : 'btn primary lg'} aria-busy={busy === 'chat' || undefined} disabled={!data.canJoin || !!busy} onClick={() => void enter('chat')}>
+              <button type="button" className={videoOn ? 'btn lg' : 'btn primary lg'} aria-busy={busy === 'chat' || undefined} disabled={!data.canJoin || !!busy} onClick={() => void enter('chat')}>
                 <Icon name="nav-chats" />
                 Abrir o chat da reunião
               </button>
             </div>
+            {callsOn && !groupOn && <p className="muted small">A chamada de vídeo da reunião ainda não está disponível neste chat. A conversa da reunião funciona normalmente.</p>}
             {!data.joined && data.canJoin && e.myResponse !== 'organizer' && e.meeting?.access === 'org' && (
               <p className="muted small">Ao entrar você passa a ser convidado desta reunião.</p>
             )}
@@ -137,7 +161,7 @@ export function MeetPage() {
     <div className="page meet-page">
       <div className="meet-wrap">
         {body}
-        {error && (
+        {error && retryable && calendarOn && (
           <button type="button" className="btn ghost small" onClick={reload}>
             Tentar de novo
           </button>

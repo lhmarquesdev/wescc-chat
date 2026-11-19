@@ -112,6 +112,9 @@ export function AdminOAuth() {
                 <th>
                   <ThLabel>URL de callback</ThLabel>
                 </th>
+                <th className="actions-col">
+                  <span className="visually-hidden">Ações</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -140,6 +143,15 @@ export function AdminOAuth() {
                     <button className="btn small ghost" title="Copiar URL de callback" aria-label="Copiar URL de callback" onClick={(e) => (e.stopPropagation(), void copyText(p.callbackUrl))}>
                       <Icon name="copy" />
                     </button>
+                  </td>
+                  <td className="actions-col">
+                    {/* Botão de verdade: o provedor abre pelo teclado (Tab + Enter) e pelo leitor de tela. */}
+                    <div className="row-actions">
+                      <button type="button" className="btn small ghost" onClick={(e) => (e.stopPropagation(), setEdit({ provider: p, preset: presetOf(p.type) }))}>
+                        <Icon name="edit" />
+                        Editar
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

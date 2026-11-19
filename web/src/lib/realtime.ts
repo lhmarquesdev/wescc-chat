@@ -1,7 +1,6 @@
-import type { ClientEvent, ServerEvent } from '@shared/index';
-import { getCredentials } from './api';
+import type { ClientEvent, LogoutReason, ServerEvent } from '@shared/index';
+import { api, getCredentials } from './api';
 import { applyEvent, useStore } from './store';
-import { rememberLogoutReason } from './logoutReason';
 
 type Listener = (ev: ServerEvent) => void;
 
@@ -13,6 +12,10 @@ class Realtime {
   private pingTimer: number | null = null;
   private watched = new Set<string>();
   private onReconnect: (() => void) | null = null;
+  // Sem interação há N minutos (ausência automática). Vai ao servidor a cada conexão: ele decide pelo conjunto das abas.
+  private idle = false;
+  private timer: number | null = null;
+  private onEnded: ((reason?: LogoutReason) => void) | null = null;
   // Id desta conexão no servidor (as chamadas usam para a sinalização).
   connectionId: string | null = null;
 
@@ -21,16 +24,27 @@ class Realtime {
     this.onReconnect = onReconnect;
     this.connect();
     this.setupIdle();
+    this.setupWake();
+  }
+
+  // Sessão encerrada de fora (conta desativada, administrador, outro dispositivo): session.ts limpa o navegador e abre
+  // a tela de entrar com o motivo.
+  setSessionEndedHandler(fn: (reason?: LogoutReason) => void) {
+    this.onEnded = fn;
   }
 
   stop() {
     this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
     this.ws?.close();
     this.ws = null;
     if (this.pingTimer) clearInterval(this.pingTimer);
   }
 
   private connect() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
     const creds = getCredentials();
     if (!creds || this.stopped) return;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -46,12 +60,14 @@ class Realtime {
         const wasRetry = this.retry > 0;
         this.retry = 0;
         for (const rid of this.watched) this.send({ type: 'watch', rid });
+        this.send({ type: 'idle', idle: this.idle });
         if (wasRetry || !first) this.onReconnect?.();
         first = false;
       }
       if (ev.type === 'force_logout') {
-        rememberLogoutReason(ev.reason);
-        location.href = '/login';
+        // O servidor fecha o socket logo depois (4003): sem reconectar nem ir duas vezes para a tela de entrar.
+        this.stopped = true;
+        this.onEnded?.(ev.reason);
         return;
       }
       applyEvent(ev);
@@ -62,8 +78,14 @@ class Realtime {
       useStore.getState().setConnected(false);
       if (this.stopped) return;
       if (e.code === 4001 || e.code === 4003) {
-        // Sessão inválida.
-        location.href = '/login';
+        // Token recusado (ou nenhum "auth" em 10 s, numa rede lenta): a API confirma. Sessão que não vale mais cai no
+        // tratamento do 401 (limpa o navegador e abre a tela de entrar com o aviso); valendo, tenta de novo.
+        void api
+          .get('me')
+          .catch(() => null)
+          .then(() => {
+            if (!this.stopped && getCredentials()) this.timer = window.setTimeout(() => this.connect(), Math.min(30_000, 1000 * 2 ** this.retry++));
+          });
         return;
       }
       if (e.code === 4005) {
@@ -71,11 +93,26 @@ class Realtime {
         location.reload();
         return;
       }
-      const delay = Math.min(30_000, 1000 * 2 ** this.retry++);
-      setTimeout(() => this.connect(), delay);
+      // 1, 2, 4, 8 e depois 10 s (com um pouco de variação, para as abas não voltarem todas juntas).
+      const delay = Math.min(10_000, 1000 * 2 ** this.retry++) * (0.8 + Math.random() * 0.4);
+      this.timer = window.setTimeout(() => this.connect(), delay);
     };
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.pingTimer = window.setInterval(() => this.send({ type: 'ping' }), 25_000);
+  }
+
+  // "Tentar agora", a rede voltou ou a pessoa voltou para a aba: reconecta já, sem esperar a próxima tentativa.
+  reconnectNow() {
+    if (this.stopped || !this.timer) return;
+    this.connect();
+  }
+
+  private setupWake() {
+    window.addEventListener('online', () => this.reconnectNow());
+    window.addEventListener('focus', () => this.reconnectNow());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this.reconnectNow();
+    });
   }
 
   send(ev: ClientEvent) {
@@ -100,19 +137,18 @@ class Realtime {
   // Ausência automática após N minutos sem interação.
   private setupIdle() {
     let last = Date.now();
-    let idle = false;
     const bump = () => {
       last = Date.now();
-      if (idle) {
-        idle = false;
+      if (this.idle) {
+        this.idle = false;
         this.send({ type: 'idle', idle: false });
       }
     };
     for (const ev of ['mousemove', 'keydown', 'mousedown', 'touchstart', 'focus']) window.addEventListener(ev, bump, { passive: true });
     setInterval(() => {
       const minutes = Number(useStore.getState().settings.Accounts_Default_Away_Minutes ?? 5);
-      if (!idle && minutes > 0 && Date.now() - last > minutes * 60_000) {
-        idle = true;
+      if (!this.idle && minutes > 0 && Date.now() - last > minutes * 60_000) {
+        this.idle = true;
         this.send({ type: 'idle', idle: true });
       }
     }, 15_000);

@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { many, one, query } from '../db/pool';
-import { badRequest, forbidden } from '../lib/errors';
+import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
+import { probeImage, sniffMime } from '@shared/imageProbe';
+import { audit } from '../services/audit';
 import { listCommands, runSlashCommand } from '../services/commands';
 import {
   deleteMessage,
@@ -11,6 +13,7 @@ import {
   getMessageRow,
   history,
   listByFlag,
+  mentionedNotInRoom,
   messageHistory,
   messagesAround,
   react,
@@ -21,13 +24,27 @@ import {
   syncMessages,
   threadMessages,
   threadsList,
+  STANDARD_EMOJI,
   updateMessage,
 } from '../services/messages';
 import { ackMessage, assertCanSeeReceipts, listAcks, myAcks } from '../services/notices';
 import { getReadReceipts } from '../services/reads';
 import { getRoomByName, loadRoomForUser, resolveRoom } from '../services/rooms';
 import { assertCanUpload, getFileForUser, inlineMimeType, listRoomFiles, readUpload, safeMimeType, saveUpload } from '../services/uploads';
-import { b, bool, paging, q, route, str } from './http';
+import { actorOf } from '../services/users';
+import { b, bool, dateParam, intParam, paging, q, route, str } from './http';
+
+// Emojis personalizados: o nome segue a regra do :código: das mensagens; o arquivo fica no banco e todo mundo o baixa.
+const EMOJI_NAME = /^[a-z0-9_+-]{1,40}$/;
+const EMOJI_MAX_KB = 256;
+const EMOJI_MAX_ALIASES = 10;
+
+// O motivo da denúncia é obrigatório (a moderação precisa saber o que houve).
+function reportReason(v: unknown) {
+  const text = String(v ?? '').trim();
+  if (text.length < 3) throw badRequest('error-report-reason', 'Informe o motivo da denúncia.');
+  return text.slice(0, 1000);
+}
 
 export function chatRoutes(app: FastifyInstance) {
   route(app, 'POST', 'chat.sendMessage', {}, async (req, _rep, ctx) => {
@@ -48,7 +65,10 @@ export function chatRoutes(app: FastifyInstance) {
       e2e: m.e2e,
       e2eMentions: Array.isArray(m.e2eMentions) ? m.e2eMentions.map(String) : undefined,
     });
-    return { message: out };
+    // Quem foi mencionado sem estar na sala não fica sabendo: a web avisa quem escreveu.
+    const sent = out as any;
+    const notInRoom = sent?.rid && Array.isArray(sent.mentions) ? await mentionedNotInRoom(ctx, sent.rid, sent.mentions) : [];
+    return { message: out, ...(notInRoom.length ? { mentionsNotInRoom: notInRoom } : {}) };
   });
   // Compatível com chat.postMessage do Rocket.Chat (integrações e bots).
   route(app, 'POST', 'chat.postMessage', {}, async (req, _rep, ctx) => {
@@ -74,7 +94,8 @@ export function chatRoutes(app: FastifyInstance) {
       const mentions = Array.isArray(body.e2eMentions) ? body.e2eMentions.map(String) : undefined;
       return { message: await updateMessage(ctx, str(body.msgId, 'msgId'), '', body.roomId, { envelope: body.e2e, mentions }) };
     }
-    return { message: await updateMessage(ctx, str(body.msgId, 'msgId'), str(body.text, 'text'), body.roomId) };
+    // Texto vazio: só num arquivo (tira a legenda); updateMessage recusa o resto com "Mensagem vazia.".
+    return { message: await updateMessage(ctx, str(body.msgId, 'msgId'), body.text === '' ? '' : str(body.text, 'text'), body.roomId) };
   });
   route(app, 'POST', 'chat.delete', {}, async (req, _rep, ctx) => {
     const body = b(req);
@@ -109,16 +130,18 @@ export function chatRoutes(app: FastifyInstance) {
   });
   route(app, 'GET', 'chat.getMessage', {}, async (req, _rep, ctx) => ({ message: await getMessage(ctx, str(q(req).msgId, 'msgId')) }));
   route(app, 'GET', 'chat.getMessageHistory', {}, async (req, _rep, ctx) => ({ history: await messageHistory(ctx, str(q(req).msgId, 'msgId')) }));
-  route(app, 'GET', 'chat.getMessagesAround', {}, async (req, _rep, ctx) => ({ messages: await messagesAround(ctx, str(q(req).msgId, 'msgId'), Number(q(req).count ?? 30)) }));
+  route(app, 'GET', 'chat.getMessagesAround', {}, async (req, _rep, ctx) => ({ messages: await messagesAround(ctx, str(q(req).msgId, 'msgId'), intParam(q(req).count, 'count', 30, 1, 100)) }));
 
   for (const prefix of ['channels', 'groups', 'im', 'rooms'] as const) {
     route(app, 'GET', `${prefix}.history`, {}, async (req, _rep, ctx) => {
       const query = q(req);
       const room = await resolveRoom(query);
       const messages = await history(ctx, room.id, {
-        latest: query.latest,
-        oldest: query.oldest,
-        count: Number(query.count ?? 50),
+        latest: dateParam(query.latest, 'latest', { optional: true }),
+        latestId: str(query.latestId, 'latestId', { optional: true }),
+        oldest: dateParam(query.oldest, 'oldest', { optional: true }),
+        oldestId: str(query.oldestId, 'oldestId', { optional: true }),
+        count: intParam(query.count, 'count', 50, 1, 200),
         inclusive: query.inclusive === 'true',
         showThreadMessages: query.showThreadMessages === 'true',
       });
@@ -132,10 +155,10 @@ export function chatRoutes(app: FastifyInstance) {
       return { ...r, count: r.files.length, offset: p.offset };
     });
   }
-  route(app, 'GET', 'chat.syncMessages', {}, async (req, _rep, ctx) => ({ result: await syncMessages(ctx, str(q(req).roomId, 'roomId'), str(q(req).lastUpdate, 'lastUpdate')) }));
+  route(app, 'GET', 'chat.syncMessages', {}, async (req, _rep, ctx) => ({ result: await syncMessages(ctx, str(q(req).roomId, 'roomId'), dateParam(q(req).lastUpdate, 'lastUpdate')) }));
   route(app, 'GET', 'chat.getThreadMessages', {}, async (req, _rep, ctx) => {
     const p = paging(q(req));
-    const r = await threadMessages(ctx, str(q(req).tmid, 'tmid'), { offset: p.offset, count: Number(q(req).count ?? 200) });
+    const r = await threadMessages(ctx, str(q(req).tmid, 'tmid'), { offset: p.offset, count: intParam(q(req).count, 'count', 200, 1, 500) });
     return { ...r, count: r.messages.length, offset: p.offset };
   });
   route(app, 'GET', 'chat.getThreadsList', {}, async (req, _rep, ctx) => {
@@ -156,7 +179,7 @@ export function chatRoutes(app: FastifyInstance) {
   }
   route(app, 'GET', 'chat.search', {}, async (req, _rep, ctx) => {
     const p = paging(q(req));
-    const r = await searchMessages(ctx, { rid: q(req).roomId || undefined, searchText: str(q(req).searchText, 'searchText'), ...p });
+    const r = await searchMessages(ctx, { rid: q(req).roomId || undefined, searchText: str(q(req).searchText, 'searchText'), tz: q(req).tz || undefined, ...p });
     return { ...r, count: r.messages.length, offset: p.offset };
   });
   route(app, 'GET', 'chat.getMessageReadReceipts', {}, async (req, _rep, ctx) => {
@@ -181,24 +204,29 @@ export function chatRoutes(app: FastifyInstance) {
     const m = await getMessageRow(str(body.messageId, 'messageId'));
     if (!m) throw badRequest('error-message-not-found', 'Mensagem não encontrada.');
     await loadRoomForUser(ctx, m.room_id);
-    await query('INSERT INTO moderation_reports (id, message_id, room_id, reported_user_id, reporter_id, description) VALUES ($1,$2,$3,$4,$5,$6)', [
-      newId(),
-      m.id,
-      m.room_id,
-      m.user_id,
-      ctx.userId,
-      String(body.description ?? '').slice(0, 1000),
-    ]);
+    const description = reportReason(body.description);
+    if (m.user_id === ctx.userId) throw badRequest('error-report-own', 'Você não pode denunciar a sua própria mensagem.');
+    // Uma denúncia aberta por pessoa e mensagem (índice único da migração 042): repetir não infla a contagem.
+    const row = await one(
+      `INSERT INTO moderation_reports (id, message_id, room_id, reported_user_id, reporter_id, description) VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (message_id, reporter_id) WHERE NOT resolved AND message_id IS NOT NULL DO NOTHING RETURNING id`,
+      [newId(), m.id, m.room_id, m.user_id, ctx.userId, description],
+    );
+    if (!row) throw badRequest('error-report-exists', 'Você já denunciou esta mensagem. A moderação vai analisar.');
     return {};
   });
   route(app, 'POST', 'moderation.reportUser', {}, async (req, _rep, ctx) => {
     const body = b(req);
-    await query('INSERT INTO moderation_reports (id, reported_user_id, reporter_id, description) VALUES ($1,$2,$3,$4)', [
-      newId(),
-      str(body.userId, 'userId'),
-      ctx.userId,
-      String(body.description ?? '').slice(0, 1000),
-    ]);
+    const user = await one<{ id: string }>('SELECT id FROM users WHERE id = $1', [str(body.userId, 'userId')]);
+    if (!user) throw notFound('error-user-not-found', 'Usuário não encontrado.');
+    if (user.id === ctx.userId) throw badRequest('error-report-own', 'Você não pode denunciar a si mesmo.');
+    const description = reportReason(body.description);
+    const row = await one(
+      `INSERT INTO moderation_reports (id, reported_user_id, reporter_id, description) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (reported_user_id, reporter_id) WHERE NOT resolved AND message_id IS NULL DO NOTHING RETURNING id`,
+      [newId(), user.id, ctx.userId, description],
+    );
+    if (!row) throw badRequest('error-report-exists', 'Você já denunciou esta pessoa. A moderação vai analisar.');
     return {};
   });
 
@@ -249,35 +277,81 @@ export function chatRoutes(app: FastifyInstance) {
     const rows = await many('SELECT id, name, aliases, content_type, created_at FROM custom_emoji ORDER BY name');
     return { emojis: { update: rows.map((r) => ({ _id: r.id, name: r.name, aliases: r.aliases, extension: r.content_type.split('/')[1], _updatedAt: r.created_at })), remove: [] } };
   });
-  route(app, 'POST', 'emoji-custom.create', { permissions: ['manage-emoji'] }, async (req) => {
+  route(app, 'POST', 'emoji-custom.create', { permissions: ['manage-emoji'] }, async (req, _rep, ctx) => {
+    if (!(req as any).isMultipart?.()) throw badRequest('error-invalid-params', 'Envie o emoji como multipart/form-data.');
     let name = '';
-    let aliases: string[] = [];
+    let aliasText = '';
     let data: Buffer | null = null;
-    let type = '';
-    for await (const part of req.parts()) {
-      if (part.type === 'file') {
-        data = await part.toBuffer();
-        type = part.mimetype;
-      } else if (part.fieldname === 'name') name = String(part.value);
-      else if (part.fieldname === 'aliases') aliases = String(part.value).split(',').map((s) => s.trim()).filter(Boolean);
+    try {
+      // Limites desta rota no lugar dos globais (1 GB): o emoji vai para o banco e é baixado inteiro por todo mundo.
+      for await (const part of req.parts({ limits: { files: 1, fields: 4, parts: 5, fieldSize: 8 * 1024, fileSize: EMOJI_MAX_KB * 1024 } })) {
+        if (part.type === 'file') data = await part.toBuffer();
+        else if (part.fieldname === 'name') name = String(part.value ?? '');
+        else if (part.fieldname === 'aliases') aliasText = String(part.value ?? '');
+      }
+    } catch (e) {
+      const code = (e as any)?.code;
+      if (code === 'FST_REQ_FILE_TOO_LARGE') throw new ApiError(413, 'error-emoji-too-large', `A imagem passa de ${EMOJI_MAX_KB} KB.`);
+      if (e instanceof ApiError) throw e;
+      throw badRequest('error-invalid-params', 'Não foi possível ler o envio do emoji. Tente de novo.');
     }
-    if (!/^[a-z0-9_+-]{1,40}$/i.test(name)) throw badRequest('error-invalid-emoji-name', 'Nome de emoji inválido.');
-    if (!data || !/^image\/(png|gif|jpeg|webp)$/.test(type)) throw badRequest('error-invalid-image', 'Imagem inválida.');
-    if (await one('SELECT 1 FROM custom_emoji WHERE name = $1', [name])) throw badRequest('error-emoji-exists', 'Já existe um emoji com esse nome.');
-    await query('INSERT INTO custom_emoji (id, name, aliases, content_type, data) VALUES ($1,$2,$3,$4,$5)', [newId(), name, aliases, type, data]);
+    // Nomes e apelidos em minúsculas e sem os dois-pontos: ":Logo:" e "logo" são o mesmo emoji.
+    const norm = (v: string) => v.trim().replace(/^:+|:+$/g, '').toLowerCase();
+    name = norm(name);
+    if (!EMOJI_NAME.test(name)) throw badRequest('error-invalid-emoji-name', 'Nome de emoji inválido. Use letras minúsculas, números, _ + e -, até 40 caracteres.');
+    const aliases = [...new Set(aliasText.split(',').map(norm).filter((a) => a && a !== name))];
+    const badAlias = aliases.find((a) => !EMOJI_NAME.test(a));
+    if (badAlias !== undefined) throw badRequest('error-invalid-emoji-alias', `Apelido inválido: "${badAlias.slice(0, 40)}". Use letras minúsculas, números, _ + e -, até 40 caracteres.`);
+    if (aliases.length > EMOJI_MAX_ALIASES) throw badRequest('error-invalid-emoji-alias', `Use no máximo ${EMOJI_MAX_ALIASES} apelidos.`);
+    // O arquivo tem de ser mesmo uma imagem (o tipo vem dos bytes, não do que o navegador disse).
+    const type = data ? sniffMime(data) : null;
+    if (!data || !type) throw badRequest('error-invalid-image', 'Imagem inválida. Use PNG, GIF, JPEG ou WebP.');
+    try {
+      probeImage(data, { maxFrames: 1000 });
+    } catch {
+      throw badRequest('error-invalid-image', 'Não foi possível ler esta imagem. O arquivo pode estar corrompido.');
+    }
+    // Um código vale um emoji só: nem outro nome ou apelido (sem diferença de maiúsculas) nem um emoji padrão.
+    const codes = [name, ...aliases];
+    const standard = codes.find((c) => STANDARD_EMOJI.has(c));
+    if (standard) throw badRequest('error-emoji-exists', `:${standard}: já é um emoji padrão. Escolha outro nome ou apelido.`);
+    const taken = await one<{ code: string }>(
+      `SELECT c AS code FROM custom_emoji e, unnest(array_prepend(e.name, e.aliases)) c WHERE lower(c) = ANY($1) LIMIT 1`,
+      [codes],
+    );
+    if (taken) throw badRequest('error-emoji-exists', `Já existe um emoji com o nome ou apelido :${taken.code.toLowerCase()}:.`);
+    try {
+      await query('INSERT INTO custom_emoji (id, name, aliases, content_type, data) VALUES ($1,$2,$3,$4,$5)', [newId(), name, aliases, type, data]);
+    } catch (e: any) {
+      if (e?.code === '23505') throw badRequest('error-emoji-exists', `Já existe um emoji com o nome ou apelido :${name}:.`);
+      throw e;
+    }
+    await audit(actorOf(ctx), 'emoji.created', { name }, { aliases, size: data.length, type });
     const { bus } = await import('../realtime/bus');
     bus.publish({ all: true }, { type: 'settings.changed', settings: [{ _id: '__emoji', value: Date.now() }] });
     return {};
   });
-  route(app, 'POST', 'emoji-custom.delete', { permissions: ['manage-emoji'] }, async (req) => {
-    await query('DELETE FROM custom_emoji WHERE id = $1', [str(b(req).emojiId, 'emojiId')]);
+  route(app, 'POST', 'emoji-custom.delete', { permissions: ['manage-emoji'] }, async (req, _rep, ctx) => {
+    const e = await one<{ name: string }>('DELETE FROM custom_emoji WHERE id = $1 RETURNING name', [str(b(req).emojiId, 'emojiId')]);
+    if (!e) throw notFound('error-emoji-not-found', 'Emoji não encontrado.');
+    await audit(actorOf(ctx), 'emoji.removed', { name: e.name });
+    // Quem está com o chat aberto recarrega a lista (o emoji some do seletor sem recarregar a página).
+    const { bus } = await import('../realtime/bus');
+    bus.publish({ all: true }, { type: 'settings.changed', settings: [{ _id: '__emoji', value: Date.now() }] });
     return {};
   });
   app.get('/emoji-custom/:name', async (req: any, reply) => {
     const name = String(req.params.name).replace(/\.[a-z]+$/, '');
-    const e = await one('SELECT content_type, data FROM custom_emoji WHERE name = $1 OR $1 = ANY(aliases)', [name]);
+    // O nome vence o apelido (instalações antigas podem ter um apelido igual ao nome de outro emoji).
+    const e = await one('SELECT content_type, data, created_at FROM custom_emoji WHERE name = $1 OR $1 = ANY(aliases) ORDER BY (name = $1) DESC LIMIT 1', [name]);
     if (!e) return reply.status(404).send();
-    reply.header('Cache-Control', 'public, max-age=3600');
+    // A web pede /emoji-custom/nome?v=<criação>: trocar a imagem (apagar e criar de novo) muda o endereço. Sem a versão
+    // certa, o navegador confere de novo a cada uso, para não mostrar a imagem antiga por uma hora.
+    const version = String(new Date(e.created_at).getTime());
+    reply.header('Cache-Control', q(req).v === version ? 'public, max-age=31536000, immutable' : 'no-cache');
+    reply.header('ETag', `"${version}"`);
+    reply.header('X-Content-Type-Options', 'nosniff');
+    if (req.headers['if-none-match'] === `"${version}"`) return reply.status(304).send();
     return reply.type(e.content_type).send(e.data);
   });
   void forbidden;

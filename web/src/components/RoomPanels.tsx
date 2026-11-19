@@ -1,19 +1,22 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Message, Room, Subscription } from '@shared/index';
-import { stickerPreviewText } from '@shared/stickers';
+import { messagePreviewText, stickerPreviewText } from '@shared/stickers';
 import { statusLine } from '@shared/status';
 import { api, errorMessage } from '../lib/api';
 import { partyOf, useDirect } from '../lib/direct';
 import { formatBytes, formatDateTime, formatRelative, formatWhen, plural, roleLabel, roomDisplayName, roomIconName, roomPath } from '../lib/format';
 import { useUserPresence } from '../lib/presence';
 import { renderMarkdown } from '../lib/markdown';
-import { authorName } from '../lib/messageRules';
+import { authorName, messageHref } from '../lib/messageRules';
 import { useNames } from '../lib/names';
+import { realtime } from '../lib/realtime';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { clearRoomError, resetTranslationViews, useLanguages, useMyLanguage, useRoomTranslate, useTranslations } from '../lib/translate';
 import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
 import { normalizeLang } from '@shared/translate';
+import { inviteStatusOf, inviteUses } from '../lib/invites';
+import { ROOM_NAME_MAX, roomNameProblem, roomTextProblem } from '@shared/roomName';
 import { Icon, type IconName } from './Icon';
 import { FileTile } from './MessageItem';
 import { useEscape, useIsPhone } from './overlay';
@@ -24,7 +27,7 @@ import { Avatar, Empty, Field, GroupAvatar, Menu, Segmented, SearchInput, Skelet
 import { InCallBadge } from './call/LiveIndicators';
 // Criptografia de ponta a ponta
 import { foldText } from '@shared/search';
-import { contentOf, E2E_PLACEHOLDER, plainOf, useE2e } from '../lib/e2e/client';
+import { contentOf, E2E_PLACEHOLDER, E2E_UI, plainOf, useE2e } from '../lib/e2e/client';
 import { useE2eMessage } from '../lib/e2e/hooks';
 import { openE2eDialog, requireE2eReady } from './e2e/E2eDialogs';
 // Permissões do canal: quem fala e o que cada pessoa pode fazer nele.
@@ -104,6 +107,13 @@ export function PanelHead({ title, sub, actions, onClose }: { title: string; sub
     refocusRoom();
     onClose();
   };
+  // Painel aberto: o foco entra nele pelo título (o leitor de tela anuncia, o próximo Tab já está no painel e o Esc
+  // fecha). Um campo do painel que já pegou o foco fica com ele.
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    const h = titleRef.current;
+    if (h && !h.closest('.panel')?.contains(document.activeElement)) h.focus({ preventScroll: true });
+  }, []);
   return (
     <div className="panel-head">
       {phone && (
@@ -111,7 +121,7 @@ export function PanelHead({ title, sub, actions, onClose }: { title: string; sub
           <Icon name="back" size={20} />
         </button>
       )}
-      <h2 className="panel-title">
+      <h2 className="panel-title" ref={titleRef} tabIndex={-1}>
         <span className="panel-title-text">{title}</span>
         {sub && <span className="sub">{sub}</span>}
       </h2>
@@ -141,7 +151,7 @@ export function RoomPanel(p: Props) {
         {p.id === 'members' && <MembersPanel {...p} />}
         {p.id === 'search' && <SearchPanel {...p} />}
         {p.id === 'files' && <FilesPanel {...p} />}
-        {(p.id === 'pinned' || p.id === 'starred' || p.id === 'mentions') && <FlagPanel {...p} />}
+        {(p.id === 'pinned' || p.id === 'starred' || p.id === 'mentions') && <FlagPanel key={`${p.id}:${p.room._id}`} {...p} />}
         {p.id === 'notifications' && <NotificationsPanel {...p} />}
         {p.id === 'invite' && <InvitePanel {...p} />}
         {p.id === 'prune' && <PrunePanel {...p} />}
@@ -162,6 +172,21 @@ function resultBody(m: ReturnType<typeof useE2eMessage<Message>>) {
   const v = m.e2eView;
   if (v && v.state !== 'ok') return <em className="msg-e2e">{E2E_PLACEHOLDER[v.state]}</em>;
   if (v?.content?.file && !m.msg) return `📎 ${v.content.file.name}`;
+  // Arquivo sem texto: o nome (ou "Mensagem de voz") e a legenda, que a busca também acha.
+  if (!m.msg && m.files?.length) {
+    const caption = m.attachments?.find((a) => a.description)?.description;
+    return (
+      <>
+        {messagePreviewText(m)}
+        {caption && (
+          <>
+            <br />
+            {caption}
+          </>
+        )}
+      </>
+    );
+  }
   return renderMarkdown(m.msg, { me: useStore.getState().me?.username, mentions: m.mentions });
 }
 
@@ -184,7 +209,8 @@ function MessageResult({ m: raw }: { m: Message }) {
   const m = useE2eMessage(raw);
   const navigate = useNavigate();
   return (
-    <button type="button" className="result" onClick={() => navigate(`${location.pathname.split('/thread/')[0]}?msg=${m._id}`)}>
+    // Resposta de tópico: abre o tópico com ela destacada.
+    <button type="button" className="result" onClick={() => navigate(messageHref(location.pathname.split('/thread/')[0], m))}>
       <ResultHead m={m} />
       <div className="result-body">{m.sticker ? <StickerView sticker={m.sticker} size="small" /> : resultBody(m)}</div>
     </button>
@@ -207,6 +233,8 @@ function roomForm(room: Room & Record<string, any>) {
     default: room.default,
     featured: room.featured,
     encrypted: room.encrypted,
+    // O código em si o servidor não devolve: só se a sala exige um. Vazio com "Exigir" ligado mantém o código atual.
+    joinCodeRequired: !!room.joinCodeRequired,
     joinCode: '',
     retention: room.retention ?? { enabled: false, overrideGlobal: false, maxAgeDays: 30, filesOnly: false, excludePinned: true },
   };
@@ -222,6 +250,8 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   const navigate = useNavigate();
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState<any>({});
+  // Valores da sala quando a edição abriu: o salvar manda só o que a pessoa mudou em relação a eles.
+  const [base, setBase] = useState<Record<string, any>>({});
   const imageRef = useRef<HTMLInputElement>(null);
   const canEdit = hasPerm('edit-room', roles);
   const canSetRO = hasPerm('set-readonly', roles);
@@ -230,14 +260,18 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   const canRetention = useStore((s) => s.me?.permissions.includes('edit-room-retention-policy'));
   const canToggleE2e = hasPerm('toggle-room-e2e-encryption', roles);
   const e2eSetting = !!useSetting<boolean>('E2E_Enable');
-  useEffect(() => {
-    setF(roomForm(room));
-  }, [room, edit]);
+  // O formulário nasce ao abrir a edição. A sala muda a cada mensagem nova (o evento da sala chega sempre): recarregar o
+  // formulário ali apagaria o que a pessoa está digitando.
+  const startEdit = () => {
+    const v = roomForm(room);
+    setF(v);
+    setBase(v);
+    setEdit(true);
+  };
 
   const save = async () => {
     try {
       // Só o que mudou: quem não tem set-readonly (moderador) salva o resto sem 403 e sem mensagens de sistema à toa.
-      const base: Record<string, any> = roomForm(room);
       const body: any = { rid: room._id };
       for (const [k, v] of Object.entries(f)) if (JSON.stringify(v) !== JSON.stringify(base[k])) body[k] = v;
       // Canal de avisos é sempre somente leitura: o servidor cuida de ro.
@@ -247,7 +281,14 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
         delete body.default;
         delete body.featured;
       }
-      if (!body.joinCode) delete body.joinCode;
+      // Código de acesso: desligar "Exigir" apaga o código (o servidor guarda vazio); ligado, um código novo troca o atual.
+      delete body.joinCodeRequired;
+      if (f.roomType === 'c' && f.joinCodeRequired && !f.joinCode.trim()) {
+        if (!base.joinCodeRequired || base.roomType !== 'c') return fail(new Error('Digite o código de acesso ou desligue “Exigir código de acesso”.'));
+        delete body.joinCode;
+      } else if (f.roomType === 'c' && !f.joinCodeRequired && base.joinCodeRequired) body.joinCode = '';
+      else if (f.roomType === 'c' && f.joinCodeRequired) body.joinCode = f.joinCode.trim();
+      else delete body.joinCode;
       // Ligar ou desligar a criptografia pede a mesma confirmação do menu da conversa (e a senha, para ligar).
       if ('encrypted' in body) {
         if (body.encrypted && !(await requireE2eReady())) return;
@@ -255,7 +296,7 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
           body.encrypted
             ? {
                 title: 'Ligar a criptografia de ponta a ponta?',
-                body: 'As próximas mensagens e arquivos ficam cifrados: só quem participa consegue ler. Busca, prévias do Jira, figurinhas, bots e integrações deixam de funcionar aqui. As mensagens antigas continuam como estão.',
+                body: E2E_UI.turnOn,
                 confirmLabel: 'Ligar criptografia',
               }
             : { title: 'Desligar a criptografia?', body: 'As próximas mensagens ficam legíveis no servidor. As mensagens criptografadas continuam cifradas.', confirmLabel: 'Desligar', danger: true },
@@ -272,6 +313,7 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   };
 
   const setAvatar = async (file: File) => {
+    if (file.size > 5 * 1024 * 1024) return fail(new Error('Imagem muito grande (máx. 5 MB).'));
     const fd = new FormData();
     fd.append('roomId', room._id);
     fd.append('image', file);
@@ -282,17 +324,19 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
     return (
       <div className="form">
         {room.t !== 'd' && (
-          <Field label="Nome">
-            <input value={f.roomName} onChange={(e) => setF({ ...f, roomName: e.target.value })} />
+          <Field label="Nome" error={!room.prid && f.roomName !== base.roomName ? (roomNameProblem(f.roomName) ?? undefined) : undefined}>
+            <input value={f.roomName} maxLength={room.prid ? 200 : ROOM_NAME_MAX} onChange={(e) => setF({ ...f, roomName: e.target.value })} />
           </Field>
         )}
-        <Field label="Tópico">
+        {/* Limite do servidor com o motivo embaixo do campo (sem cortar o que foi colado); um texto antigo maior só avisa
+            quando alguém o muda. */}
+        <Field label="Tópico" error={f.roomTopic !== base.roomTopic ? (roomTextProblem('topic', f.roomTopic) ?? undefined) : undefined}>
           <input value={f.roomTopic} onChange={(e) => setF({ ...f, roomTopic: e.target.value })} />
         </Field>
-        <Field label="Descrição">
+        <Field label="Descrição" error={f.roomDescription !== base.roomDescription ? (roomTextProblem('description', f.roomDescription) ?? undefined) : undefined}>
           <textarea rows={3} value={f.roomDescription} onChange={(e) => setF({ ...f, roomDescription: e.target.value })} />
         </Field>
-        <Field label="Anúncio">
+        <Field label="Anúncio" error={f.roomAnnouncement !== base.roomAnnouncement ? (roomTextProblem('announcement', f.roomAnnouncement) ?? undefined) : undefined}>
           <textarea rows={2} value={f.roomAnnouncement} onChange={(e) => setF({ ...f, roomAnnouncement: e.target.value })} />
         </Field>
         {room.t !== 'd' && (
@@ -340,13 +384,23 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
                 checked={f.encrypted}
                 onChange={(v) => setF({ ...f, encrypted: v })}
                 label="Criptografia de ponta a ponta"
-                description="Só quem participa lê. Busca, figurinhas, bots e integrações deixam de funcionar."
+                description={E2E_UI.turnOnShort}
               />
             )}
             {f.roomType === 'c' && (
-              <Field label="Código de acesso" hint="Deixe vazio para não exigir código.">
-                <input value={f.joinCode} onChange={(e) => setF({ ...f, joinCode: e.target.value })} placeholder="(sem alteração)" />
-              </Field>
+              <>
+                <Toggle
+                  checked={f.joinCodeRequired}
+                  onChange={(v) => setF({ ...f, joinCodeRequired: v, joinCode: v ? f.joinCode : '' })}
+                  label="Exigir código de acesso"
+                  description={base.joinCodeRequired && base.roomType === 'c' ? 'Este canal já exige um código para entrar.' : 'Quem entra no canal precisa digitar o código.'}
+                />
+                {f.joinCodeRequired && (
+                  <Field label={base.joinCodeRequired && base.roomType === 'c' ? 'Novo código de acesso' : 'Código de acesso'} hint={base.joinCodeRequired && base.roomType === 'c' ? 'Deixe vazio para manter o código atual.' : undefined}>
+                    <input value={f.joinCode} onChange={(e) => setF({ ...f, joinCode: e.target.value })} autoComplete="off" />
+                  </Field>
+                )}
+              </>
             )}
             {isAdmin && (
               <>
@@ -376,7 +430,7 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
           <input
             ref={imageRef}
             type="file"
-            accept="image/*"
+            accept="image/png,image/jpeg,image/gif,image/webp"
             tabIndex={-1}
             className="visually-hidden"
             onChange={(e) => {
@@ -409,6 +463,20 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   const toTeam = room.t !== 'd' && !room.teamMain && !room.prid && !room.teamId && hasPerm('create-team', roles) && canEdit;
   const toChannel = room.teamMain && hasPerm('edit-team', roles);
   const canArchive = room.t !== 'd' && hasPerm('archive-room', roles);
+  const canUnarchive = room.t !== 'd' && hasPerm('unarchive-room', roles);
+  const archive = async () => {
+    const yes = await confirmDialog({
+      title: `Arquivar ${room.prid ? name : `#${name}`}?`,
+      body: `Ninguém poderá enviar mensagens; o histórico continua visível. ${canUnarchive ? 'Dá para desarquivar depois.' : 'Depois, só um administrador consegue desarquivar.'}`,
+      confirmLabel: 'Arquivar',
+      danger: true,
+    });
+    if (!yes) return;
+    api
+      .post('channels.archive', { roomId: room._id })
+      .then(() => (ok('Sala arquivada.'), onChanged()))
+      .catch(fail);
+  };
   const convert = async (team: boolean) => {
     const yes = await confirmDialog(
       team
@@ -498,10 +566,10 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
           </p>
         )}
       </section>
-      {(canEdit && room.t !== 'd') || toTeam || toChannel || canArchive ? (
+      {(canEdit && room.t !== 'd') || toTeam || toChannel || canArchive || (room.archived && canUnarchive) ? (
         <div className="info-actions">
           {canEdit && room.t !== 'd' && (
-            <button type="button" className="btn ghost" onClick={() => setEdit(true)}>
+            <button type="button" className="btn ghost" onClick={startEdit}>
               <Icon name="edit" />
               Editar
             </button>
@@ -518,12 +586,31 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
               Converter em canal
             </button>
           )}
-          {canArchive && (
-            <button type="button" className="btn ghost" onClick={() => api.post(room.archived ? 'channels.unarchive' : 'channels.archive', { roomId: room._id }).then(onChanged).catch(fail)}>
-              <Icon name={room.archived ? 'unarchive' : 'archive'} />
-              {room.archived ? 'Desarquivar' : 'Arquivar'}
+          {canArchive && !room.archived && (
+            <button type="button" className="btn ghost" onClick={() => void archive()}>
+              <Icon name="archive" />
+              Arquivar
             </button>
           )}
+          {/* Desarquivar é outra permissão (por padrão só do administrador): quem não tem fica sabendo a quem pedir. */}
+          {room.archived &&
+            (canUnarchive ? (
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() =>
+                  api
+                    .post('channels.unarchive', { roomId: room._id })
+                    .then(() => (ok('Sala desarquivada.'), onChanged()))
+                    .catch(fail)
+                }
+              >
+                <Icon name="unarchive" />
+                Desarquivar
+              </button>
+            ) : (
+              canArchive && <p className="info-hint">Sala arquivada. Para desarquivar, peça a um administrador.</p>
+            ))}
         </div>
       ) : null}
       {canDelete && (
@@ -671,6 +758,7 @@ function TeamPanel({ room, roles }: Props) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [priv, setPriv] = useState(false);
+  const nameProblem = roomNameProblem(name);
   const canAdd = hasPerm('create-team-channel', roles) || hasPerm('add-team-channel', roles);
   const canEditRooms = hasPerm('edit-team-channel', roles);
   const canRemoveRooms = hasPerm('remove-team-channel', roles);
@@ -684,7 +772,9 @@ function TeamPanel({ room, roles }: Props) {
       )}
       {adding && (
         <div className="form panel-add">
-          <input placeholder="nome-do-canal" aria-label="Nome do canal" value={name} onChange={(e) => setName(e.target.value.replace(/\s/g, '-'))} />
+          <Field label="Nome do canal" error={name && nameProblem ? nameProblem : undefined}>
+            <input placeholder="nome-do-canal" maxLength={ROOM_NAME_MAX} value={name} onChange={(e) => setName(e.target.value.replace(/\s/g, '-'))} />
+          </Field>
           <Toggle checked={priv} onChange={setPriv} label="Privado" />
           <div className="row-actions">
             <button type="button" className="btn" onClick={() => setAdding(false)}>
@@ -693,6 +783,7 @@ function TeamPanel({ room, roles }: Props) {
             <button
               type="button"
               className="btn primary"
+              disabled={!!nameProblem}
               onClick={() => api.post('teams.createRoom', { teamId: room.teamId, name, type: priv ? 'p' : 'c' }).then(() => (setAdding(false), setName(''), reload())).catch(fail)}
             >
               Criar
@@ -768,14 +859,17 @@ function TeamPanel({ room, roles }: Props) {
 // Dono primeiro; o resto na ordem do servidor.
 const ROLE_ORDER = ['owner', 'moderator', 'leader', 'publisher'];
 
-function MemberRow({ m, muted, onClick }: { m: any; muted: boolean; onClick: () => void }) {
+function MemberRow({ m: listed, muted, onClick }: { m: any; muted: boolean; onClick: (username: string) => void }) {
+  // Nome ou @usuário trocado depois que a lista carregou: vale o novo (evento "user"), também no clique.
+  const renamed = useStore((s) => s.userNames[listed._id]);
+  const m = renamed ? { ...listed, ...renamed } : listed;
   const roles = [...(m.roles as string[])].sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b));
   // A presença ao vivo vale por cima da lista; o rótulo diz o status personalizado ("Em reunião").
   const pres = useUserPresence(m.username, { status: m.status, statusCustom: m.statusCustom });
   // Com mensagem, o status personalizado continua à vista ("Em atendimento · até as 15h"), como no cartão e na DM.
   const statusText = m.statusText ? statusLine(pres.label, pres.custom, m.statusText) : pres.status !== 'offline' ? pres.label : '';
   return (
-    <button type="button" className="member" onClick={onClick}>
+    <button type="button" className="member" onClick={() => onClick(m.username)}>
       <UserAvatar username={m.username} size={32} status={pres.status} statusCustom={pres.statusCustom} />
       <span className="member-who">
         <span className="member-name">
@@ -809,9 +903,14 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
   const [adding, setAdding] = useState<PickedUser[]>([]);
   // "Ocultar a lista de membros": sem view-broadcast-member-list o servidor recusa a lista.
   const hidden = !!room.broadcast && !hasPerm('view-broadcast-member-list', roles);
+  // Mostra de 100 em 100 ("Mostrar mais"); trocar de sala, filtro ou "Somente online" volta para os primeiros. Entrou ou
+  // saiu alguém (o número de membros mudou), a lista recarrega sozinha.
+  const listKey = `${room._id}|${filter}|${onlineOnly}`;
+  const [more, setMore] = useState({ key: listKey, n: MEMBERS_PAGE });
+  const shown = more.key === listKey ? more.n : MEMBERS_PAGE;
   const { data, error, loading, reload } = useAsync(
-    () => (hidden ? Promise.resolve(null) : api.get('rooms.membersOrderedByRole', { roomId: room._id, filter, count: 200 })),
-    [room._id, filter, hidden],
+    () => (hidden ? Promise.resolve(null) : loadMembers(room._id, filter, onlineOnly, shown)),
+    [room._id, filter, hidden, onlineOnly, shown, room.usersCount],
   );
   const canAdd = hasPerm('add-user-to-joined-room', roles);
   const direct = useDirect();
@@ -820,6 +919,8 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
   const all: any[] = data?.members ?? [];
   const online = all.filter((m) => m.status && m.status !== 'offline');
   const offline = onlineOnly ? [] : all.filter((m) => !m.status || m.status === 'offline');
+  const total: number = data?.total ?? all.length;
+  const onlineTotal: number = data?.online ?? online.length;
   if (hidden)
     return (
       <Empty icon="panel-members" title="Lista de membros oculta">
@@ -832,16 +933,17 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
         room.teamMain ? 'teams.addMembers' : room.t === 'p' ? 'groups.invite' : 'channels.invite',
         room.teamMain ? { teamId: room.teamId, members: adding.map((u) => ({ userId: u._id })) } : { roomId: room._id, userIds: adding.map((u) => u._id) },
       )
-      .then(() => (setAdding([]), setPicking(false), reload()))
+      .then(() => (ok(adding.length > 1 ? `${adding.length} pessoas adicionadas.` : 'Pessoa adicionada.'), setAdding([]), setPicking(false), reload()))
       .catch(fail);
-  const group = (title: string, list: any[]) =>
+  // O número do grupo é o total da sala (o servidor conta), não só o que já apareceu na lista.
+  const group = (title: string, list: any[], count: number) =>
     list.length > 0 && (
       <div className="member-group" role="group" aria-label={title}>
         <h4 className="group-label">
-          {title} · {list.length.toLocaleString('pt-BR')}
+          {title} · {count.toLocaleString('pt-BR')}
         </h4>
         {list.map((m) => (
-          <MemberRow key={m._id} m={m} muted={!!room.muted?.includes(m.username)} onClick={() => onUserClick(m.username)} />
+          <MemberRow key={m._id} m={m} muted={!!room.muted?.includes(m.username)} onClick={onUserClick} />
         ))}
       </div>
     );
@@ -888,19 +990,65 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
         </Empty>
       ) : (
         <>
-          {group('Online', online)}
-          {group('Offline', offline)}
+          {group('Online', online, onlineTotal)}
+          {group('Offline', offline, Math.max(total - onlineTotal, offline.length))}
+          {all.length < total && (
+            <div className="members-more">
+              <p className="access-hint">
+                Mostrando {all.length.toLocaleString('pt-BR')} de {total.toLocaleString('pt-BR')}. Busque pelo nome ou veja mais.
+              </p>
+              <button type="button" className="btn" disabled={loading} aria-busy={loading || undefined} onClick={() => setMore({ key: listKey, n: shown + MEMBERS_PAGE })}>
+                Mostrar mais
+              </button>
+            </div>
+          )}
         </>
       )}
     </>
   );
 }
 
-// Termos a destacar nos resultados: sem operadores (from:, has:…) nem /regex/; aspas viram uma frase.
+const MEMBERS_PAGE = 100;
+
+// Membros da sala até n (o servidor entrega no máximo 500 por vez): por papel, online primeiro.
+async function loadMembers(roomId: string, filter: string, onlineOnly: boolean, n: number) {
+  const params = { roomId, filter, ...(onlineOnly ? { status: 'online,away,busy' } : {}) };
+  const first = await api.get('rooms.membersOrderedByRole', { ...params, count: Math.min(n, 500) });
+  const members: any[] = [...first.members];
+  while (members.length < Math.min(n, first.total)) {
+    const r = await api.get('rooms.membersOrderedByRole', { ...params, count: Math.min(n - members.length, 500), offset: members.length });
+    if (!r.members.length) break;
+    members.push(...r.members);
+  }
+  return { ...first, members };
+}
+
+// Termos a destacar nos resultados: sem operadores (from:, has:…) nem /regex/; aspas viram uma frase. Dobrados
+// (foldText), como a busca: "reuniao" destaca "Reunião".
 function searchTerms(q: string) {
   return [...q.matchAll(/"([^"]+)"|(\S+)/g)]
-    .map((m) => (m[1] ?? m[2]).toLowerCase())
-    .filter((t) => t.length > 1 && !/^[a-z]+:/i.test(t) && !/^\/.*\/[a-z]*$/i.test(t));
+    .map((m) => m[1] ?? m[2])
+    // Um símbolo sozinho ("%", "!") também se destaca: é o que a busca achou.
+    .filter((t) => (t.length > 1 || /[^\p{L}\p{N}]/u.test(t)) && !/^[a-z]+:/i.test(t) && !/^\/.*\/[a-z]*$/i.test(t))
+    .map(foldText);
+}
+
+// Texto dobrado com, para cada posição, onde começa e onde termina no original o caractere de onde ela veio.
+function foldWithMap(s: string) {
+  let text = '';
+  const from: number[] = [];
+  const to: number[] = [];
+  for (let i = 0; i < s.length; ) {
+    const len = (s.codePointAt(i) ?? 0) > 0xffff ? 2 : 1;
+    const f = foldText(s.slice(i, i + len));
+    for (let k = 0; k < f.length; k++) {
+      from.push(i);
+      to.push(i + len);
+    }
+    text += f;
+    i += len;
+  }
+  return { text, from, to };
 }
 
 // Destaque com a CSS Custom Highlight API: não mexe no DOM que o React desenha. Sem suporte, fica sem destaque.
@@ -914,12 +1062,12 @@ function useHighlight(ref: RefObject<HTMLElement | null>, terms: string[], key: 
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       if (!n.parentElement?.closest('.result-body')) continue;
-      const text = (n.textContent ?? '').toLowerCase();
+      const { text, from, to } = foldWithMap(n.textContent ?? '');
       for (const t of terms) {
         for (let i = text.indexOf(t); i >= 0; i = text.indexOf(t, i + t.length)) {
           const r = document.createRange();
-          r.setStart(n, i);
-          r.setEnd(n, i + t.length);
+          r.setStart(n, from[i]);
+          r.setEnd(n, to[i + t.length - 1]);
           ranges.push(r);
         }
       }
@@ -984,20 +1132,59 @@ function E2eSearchPanel({ room }: Props) {
   );
 }
 
+// Uma página de resultados; os filtros de data valem no fuso do navegador (o das horas que a pessoa vê).
+const SEARCH_PAGE = 50;
+const NO_RESULTS: Message[] = [];
+const searchPage = (roomId: string, searchText: string, offset: number) =>
+  api.get('chat.search', { roomId, searchText, count: SEARCH_PAGE, offset, tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
+
+// Filtro escolhido e ainda sem valor ("from:@", "after:"): o que falta digitar. A busca espera em vez de procurar o
+// operador como texto.
+function pendingFilter(q: string) {
+  const op = /(?:^|\s)(from:@?|in:#?|before:|after:|on:)$/i.exec(q)?.[1];
+  if (!op) return '';
+  if (/^from/i.test(op)) return `Digite o usuário depois de ${op} (ex.: from:@ana.souza).`;
+  if (/^in/i.test(op)) return `Digite o nome do canal depois de ${op}.`;
+  return `Digite a data depois de ${op} (AAAA-MM-DD ou DD/MM/AAAA).`;
+}
+
 function ServerSearchPanel({ room }: Props) {
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
   const list = useRef<HTMLDivElement>(null);
+  const filters = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const t = setTimeout(() => setQ(text.trim()), 300);
     return () => clearTimeout(t);
   }, [text]);
-  const { data, loading, error } = useAsync(() => (q ? api.get('chat.search', { roomId: room._id, searchText: q, count: 50 }) : Promise.resolve(null)), [q, room._id]);
+  const pending = pendingFilter(q);
+  const { data, loading, error } = useAsync(() => (q && !pending ? searchPage(room._id, q, 0) : Promise.resolve(null)), [q, room._id]);
+  // Escolher um filtro põe o operador na busca e volta ao campo com o cursor no fim, pronto para o nome ou a data.
+  const addTip = (op: string) => {
+    setText((t) => `${t.trim()} ${op}`.trim() + (op.endsWith(':') || op.endsWith('@') ? '' : ' '));
+    requestAnimationFrame(() => {
+      const input = filters.current?.querySelector('input');
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  };
+  // Páginas seguintes ("Carregar mais resultados"), da busca da primeira página.
+  const [more, setMore] = useState<{ of: unknown; messages: Message[]; loading: boolean; error: string }>({ of: null, messages: NO_RESULTS, loading: false, error: '' });
+  const extra = more.of === data ? more : { of: data, messages: NO_RESULTS, loading: false, error: '' };
+  const shown = useMemo(() => (data ? [...data.messages, ...extra.messages] : []), [data, extra.messages]);
+  const loadMore = () => {
+    const base = data;
+    setMore({ ...extra, loading: true, error: '' });
+    searchPage(room._id, q, shown.length)
+      .then((r) => setMore((x) => (x.of === base ? { ...x, messages: [...x.messages, ...r.messages], loading: false } : x)))
+      .catch((e) => setMore((x) => (x.of === base ? { ...x, loading: false, error: errorMessage(e) } : x)));
+  };
   const terms = searchTerms(q);
-  useHighlight(list, terms, data);
+  useHighlight(list, terms, shown);
   return (
     <>
-      <div className="panel-filters">
+      <div className="panel-filters" ref={filters}>
         <SearchInput autoFocus value={text} onChange={setText} placeholder="Buscar mensagens" />
         {/* Os filtros mais usados, com o que fazem, atrás de um toque: a nuvem de operadores parecia sintaxe de
             programador. Escolher um filtro põe o operador na busca. */}
@@ -1009,7 +1196,7 @@ function ServerSearchPanel({ room }: Props) {
           <ul className="search-help" aria-label="Operadores de busca">
             {SEARCH_TIPS.map(([op, what]) => (
               <li key={op}>
-                <button type="button" className="search-tip" onClick={() => setText((t) => `${t.trim()} ${op}`.trim() + (op.endsWith(':') || op.endsWith('@') ? '' : ' '))}>
+                <button type="button" className="search-tip" onClick={() => addTip(op)}>
                   <kbd>{op}</kbd>
                   <span>{what}</span>
                 </button>
@@ -1023,18 +1210,28 @@ function ServerSearchPanel({ room }: Props) {
         <Empty icon="search" title="Buscar nesta sala">
           Digite acima para procurar nas mensagens desta sala.
         </Empty>
+      ) : pending ? (
+        <Empty icon="search" title="Complete o filtro">
+          {pending}
+        </Empty>
       ) : loading ? (
         <div role="status" aria-label="Buscando…">
           <SkeletonList n={5} delay={0} />
         </div>
       ) : (
         data &&
-        (data.messages.length ? (
+        (shown.length ? (
           <div className="results" ref={list}>
-            <p className="results-count">{plural(data.messages.length, 'resultado', 'resultados')}</p>
-            {data.messages.map((m: Message) => (
+            <p className="results-count">{plural(Math.max(data.total ?? 0, shown.length), 'resultado', 'resultados')}</p>
+            {shown.map((m: Message) => (
               <MessageResult key={m._id} m={m} />
             ))}
+            {extra.error && <div className="form-error">{extra.error}</div>}
+            {shown.length < (data.total ?? 0) && (
+              <button type="button" className="btn ghost results-more" disabled={extra.loading} onClick={loadMore}>
+                {extra.loading ? 'Carregando…' : 'Carregar mais resultados'}
+              </button>
+            )}
           </div>
         ) : (
           <Empty icon="search" title={`Nada encontrado para "${q}"`}>
@@ -1182,8 +1379,32 @@ const FLAG_EMPTY: Record<'pinned' | 'starred' | 'mentions', [IconName, string, s
 
 function FlagPanel({ id, room }: Props) {
   const path = id === 'pinned' ? 'chat.getPinnedMessages' : id === 'starred' ? 'chat.getStarredMessages' : 'chat.getMentionedMessages';
-  const { data, loading } = useAsync(() => api.get(path, { roomId: room._id, count: 100 }), [room._id, id]);
-  if (loading) return <SkeletonList />;
+  const { data, loading, reload } = useAsync(() => api.get(path, { roomId: room._id, count: 100 }), [room._id, id]);
+  const meId = useStore((s) => s.me?._id);
+  // O painel acompanha a sala: fixar, favoritar ou ser mencionado (e desfazer, editar ou apagar uma que está na lista)
+  // aparece sem fechar e abrir de novo. Vários eventos seguidos viram uma busca só.
+  const shown = useRef(new Set<string>());
+  shown.current = new Set((data?.messages ?? []).map((m: Message) => m._id));
+  useEffect(() => {
+    let timer: number | undefined;
+    const later = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(reload, 300);
+    };
+    const off = realtime.on((ev) => {
+      if (ev.type === 'message.deleted' && ev.rid === room._id && shown.current.has(ev._id)) later();
+      if (ev.type !== 'message' || ev.message.rid !== room._id) return;
+      const m = ev.message;
+      const flagged = id === 'pinned' ? !!m.pinned : id === 'starred' ? !!m.starred?.some((s) => s._id === meId) : !!m.mentions?.some((u) => u._id === meId);
+      if (flagged || shown.current.has(m._id)) later();
+    });
+    return () => {
+      off();
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room._id, id, meId]);
+  if (loading && !data) return <SkeletonList />;
   if (!data?.messages.length) {
     const [icon, title, text] = FLAG_EMPTY[id as keyof typeof FLAG_EMPTY];
     return (
@@ -1318,21 +1539,30 @@ function TranslatePanel({ room, sub }: Props) {
 }
 
 function InvitePanel({ room }: Props) {
+  const me = useStore((s) => s.me?._id);
   const [days, setDays] = useState(7);
   const [maxUses, setMaxUses] = useState(0);
   const [link, setLink] = useState('');
   const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  // Todos os links da sala (de qualquer pessoa): quem pode criar links aqui também revoga os dos outros.
+  const list = useAsync(() => api.get('listInvites', { rid: room._id }), [room._id]);
+  const invites: any[] = list.data?.invites ?? [];
   useEffect(() => {
     if (!copied) return;
     const t = setTimeout(() => setCopied(false), 1500);
     return () => clearTimeout(t);
   }, [copied]);
   const gen = async () => {
+    setBusy(true);
     try {
       const r = await api.post('findOrCreateInvite', { rid: room._id, days, maxUses });
       setLink(`${location.origin}${r.url}`);
+      list.reload();
     } catch (e) {
       fail(e);
+    } finally {
+      setBusy(false);
     }
   };
   const copy = () =>
@@ -1340,6 +1570,28 @@ function InvitePanel({ room }: Props) {
       () => setCopied(true),
       () => fail(new Error('Não foi possível copiar. Selecione o link e copie.')),
     );
+  const copyOne = (id: string) =>
+    navigator.clipboard?.writeText(`${location.origin}/invite/${id}`).then(
+      () => ok('Link copiado.'),
+      () => fail(new Error('Não foi possível copiar o link.')),
+    );
+  const revoke = async (i: any) => {
+    const active = i.status === 'active';
+    const yes = await confirmDialog({
+      title: active ? 'Revogar o link de convite?' : 'Excluir o link de convite?',
+      body: active ? 'O link para de funcionar para quem ainda não entrou. Quem já entrou continua na sala.' : 'O link sai da lista. Ele já não funcionava.',
+      confirmLabel: active ? 'Revogar' : 'Excluir',
+      danger: true,
+    });
+    if (!yes) return;
+    try {
+      await api.del(`removeInvite/${i._id}`);
+      if (link.endsWith(`/invite/${i._id}`)) setLink('');
+      list.reload();
+    } catch (e) {
+      fail(e);
+    }
+  };
   return (
     <div className="form">
       <Field label="Expira em">
@@ -1361,7 +1613,7 @@ function InvitePanel({ room }: Props) {
           ))}
         </select>
       </Field>
-      <button type="button" className="btn primary" onClick={gen}>
+      <button type="button" className="btn primary" onClick={gen} disabled={busy} aria-busy={busy || undefined}>
         <Icon name="link" />
         Gerar link
       </button>
@@ -1374,6 +1626,53 @@ function InvitePanel({ room }: Props) {
           </button>
         </div>
       )}
+      <p className="muted small">O link só funciona enquanto quem o criou participa da sala e pode convidar. Quem já participa e abre o link não gasta um uso.</p>
+      <section className="invite-links" aria-label="Links desta sala">
+        <h3 className="invite-links-title">
+          Links desta sala
+          {invites.length > 0 && <span className="pill">{invites.length}</span>}
+        </h3>
+        {list.loading && !list.data ? (
+          <SkeletonList n={2} />
+        ) : list.error ? (
+          <p className="muted small">Não foi possível carregar os links. {list.error}</p>
+        ) : !invites.length ? (
+          <p className="muted small">Nenhum link criado nesta sala.</p>
+        ) : (
+          <ul className="invite-list">
+            {invites.map((i) => {
+              const st = inviteStatusOf(i.status);
+              const author = !i.createdBy ? 'uma conta excluída' : i.createdBy._id === me ? 'você' : `@${i.createdBy.username}`;
+              const when = !i.expires ? 'Nunca expira' : `${i.status === 'expired' ? 'Expirou em' : 'Expira em'} ${formatDateTime(i.expires)}`;
+              return (
+                <li key={i._id} className={`invite-item ${i.status}`}>
+                  <div className="invite-top">
+                    <span className={`pill ${st.tone}`} title={st.hint}>
+                      {st.label}
+                    </span>
+                    <span className="invite-uses">{inviteUses(i)}</span>
+                    <span className="spacer" />
+                    {i.status === 'active' && (
+                      <button type="button" className="icon-btn" title="Copiar link" aria-label="Copiar link" onClick={() => copyOne(i._id)}>
+                        <Icon name="copy" />
+                      </button>
+                    )}
+                    {i.canRevoke && (
+                      <button type="button" className="btn small ghost danger" onClick={() => revoke(i)}>
+                        {i.status === 'active' ? 'Revogar' : 'Excluir'}
+                      </button>
+                    )}
+                  </div>
+                  <span className="invite-meta">
+                    {when} · criado por {author}
+                  </span>
+                  {i.status !== 'active' && <span className="invite-meta">{st.hint}</span>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

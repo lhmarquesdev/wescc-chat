@@ -310,6 +310,11 @@
   color: hsl(var(--brand-ink-2));
   vertical-align: -2px;
 }
+/* Na barra lateral (fundo da marca) o tom da marca some: usa a cor do texto dela. */
+.sidebar-wrap .in-call-badge,
+.sidebar-wrap .side-live.in {
+  color: hsl(var(--sidebar-foreground) / 0.85);
+}
 .user-card-status .in-call-badge,
 .member-name .in-call-badge {
   margin-left: var(--space-1);
@@ -383,7 +388,7 @@
     display: none;
   }
   /* Sem ações para trazer, a hora da linha em grupo fica no lugar ao passar o mouse. */
-  .call-list li:has(> .call-list-gap) .call-time {
+  .call-list li > .call-time:has(~ .call-list-gap) {
     visibility: visible;
   }
 }

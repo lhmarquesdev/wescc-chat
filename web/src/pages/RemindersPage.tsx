@@ -9,6 +9,7 @@ import { useNames } from '../lib/names';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
 import { messagePreview } from '../components/MessageNotices';
+import { ReminderModal } from '../components/ReminderModal';
 import { TakeoverHead } from '../components/Sidebar';
 import { Empty, Menu } from '../components/ui';
 
@@ -19,6 +20,7 @@ export function RemindersPage() {
   const navigate = useNavigate();
   useNames();
   const [, tick] = useState(0);
+  const [custom, setCustom] = useState<MessageReminder | null>(null); // "Escolher data e hora…"
   // Abre buscando de novo (a retenção ou outra aba pode ter mudado a lista) e o relógio do "hoje às" anda.
   useEffect(() => {
     void api
@@ -37,6 +39,9 @@ export function RemindersPage() {
     try {
       await api.post('reminders.delete', { reminderId: r._id });
       useStore.getState().removeReminder(r._id);
+      // Um próximo removido sem querer volta com o mesmo horário ("Concluir" um avisado é o fim dele).
+      if (!r.firedAt && r.message)
+        useStore.getState().toast('Lembrete removido.', 'info', { icon: 'remind', duration: 6000, action: { label: 'Desfazer', onClick: () => void snooze(r, new Date(r.remindAt)) } });
     } catch (e) {
       fail(e);
     }
@@ -91,12 +96,14 @@ export function RemindersPage() {
             </button>
           )}
           {m && (
+            // Avisado: adiar (todos os atalhos ficam depois de agora). Próximo: os atalhos podem antecipar, então o menu é
+            // "Mudar horário".
             <Menu
-              label="Adiar"
-              sheetTitle="Adiar"
+              label={isFired ? 'Adiar' : 'Mudar horário'}
+              sheetTitle={isFired ? 'Adiar' : 'Mudar horário'}
               trigger={
                 <button type="button" className="btn small ghost">
-                  Adiar
+                  {isFired ? 'Adiar' : 'Mudar horário'}
                 </button>
               }
             >
@@ -107,6 +114,9 @@ export function RemindersPage() {
                       {p.label}
                     </button>
                   ))}
+                  <button type="button" onClick={() => (close(), setCustom(r))}>
+                    Escolher data e hora…
+                  </button>
                   {isFired && (
                     <>
                       <hr />
@@ -157,6 +167,7 @@ export function RemindersPage() {
           </>
         )}
       </div>
+      {custom?.message && <ReminderModal m={custom.message} startCustom onClose={() => setCustom(null)} />}
     </div>
   );
 }

@@ -2,23 +2,35 @@ import type { RoomRetention, RoomType, Subscription, SubscriptionNotifyPrefs } f
 import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { LOCK_TEXT } from '@shared/rbac';
+import { escapeLike } from '@shared/search';
+import { roomNameProblem, roomTextProblem, type RoomTextField } from '@shared/roomName';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
-import { assertCanBringIn, assertCanStartDirect } from './direct';
+import { assertCanBringIn, assertCanStartDirect, isPrivateRoom } from './direct';
 import { announceDeparture, announceRotate, assertCanToggleE2e, E2E_ERR, e2eOn, forgetRoomKeys, hasUserKeys, noteReturn, requestKeyForNewMember } from './e2e';
 import { mapRoom, mapSubscription, visibleStatusCustom } from './mappers';
 import { sendSystemMessage, withExtra } from './messages';
 import { hasPermission, rolesHavePermission, getUserRoles, roleInfos } from './permissions';
-import { getSetting } from './settings';
+import { getSetting, updateSettings } from './settings';
 import { actorOf, getUserById, type Ctx } from './users';
 import { emit } from './hooks';
 import { forgetRoomTranslations } from '../translate/forget';
 
-const ROOM_NAME_RE = /^[0-9a-zA-ZÀ-ſ._-]{1,64}$/;
-
 export function validateRoomName(name: string) {
-  if (!ROOM_NAME_RE.test(name)) throw badRequest('error-invalid-room-name', `"${name}" não é um nome de sala válido (use letras, números, ponto, hífen e sublinhado).`);
+  const problem = roomNameProblem(name);
+  if (problem) throw badRequest('error-invalid-room-name', problem);
+}
+
+// Tópico, descrição ou anúncio novo (null apaga): undefined quando não muda. Só o valor novo passa pelo limite: um texto
+// antigo maior continua até alguém trocá-lo (o formulário da administração reenvia todos os campos).
+function roomText(field: RoomTextField, v: unknown, current: string | null | undefined): string | undefined {
+  if (v === undefined) return undefined;
+  const value = v === null ? '' : v;
+  if (value === (current ?? '')) return undefined;
+  const problem = roomTextProblem(field, value);
+  if (problem) throw badRequest('error-invalid-params', problem);
+  return value as string;
 }
 
 export async function getRoom(rid: string, db?: Queryable) {
@@ -48,9 +60,23 @@ export async function canAccessRoom(userId: string, room: any): Promise<boolean>
       const team = await one('SELECT type FROM teams WHERE id = $1', [room.team_id]);
       if (team?.type === 1 && !(await one('SELECT 1 FROM team_members WHERE team_id = $1 AND user_id = $2', [room.team_id, userId]))) return false;
     }
+    // Discussão aberta num canal: só quem lê a sala de origem (um canal que virou privado não deixa a discussão aberta).
+    if (room.prid && !(await canAccessRoom(userId, await getRoom(room.prid)))) return false;
     return hasPermission(userId, 'view-c-room');
   }
   return false;
+}
+
+// Sala que qualquer pessoa pode ver sem participar: canal fora de time privado (a discussão segue a sala de origem).
+// Só ela vai para todas as conexões; grupo, DM e canal de time privado ficam com quem participa.
+export async function isPublicRoom(room: any): Promise<boolean> {
+  if (room?.t !== 'c' || (await isPrivateRoom(room))) return false;
+  return !room.prid || isPublicRoom(await getRoom(room.prid));
+}
+
+// O que todas as conexões recebem de um canal público: nunca a prévia da última mensagem.
+function publicRoomView(room: any) {
+  return { ...mapRoom(room), lastMessage: undefined };
 }
 
 export async function loadRoomForUser(ctx: Ctx, rid: string) {
@@ -74,6 +100,8 @@ async function dmNameFor(room: any, userId: string) {
   const others = room.uids.filter((u: string) => u !== userId);
   const ids = others.length ? others : [userId];
   const users = await many('SELECT id, username, name FROM users WHERE id = ANY($1)', [ids]);
+  // Conversa a dois com uma conta excluída: fica o nome gravado na sala ("Fulano (conta excluída)").
+  if (!users.length && room.fname) return { name: room.fname, fname: room.fname };
   users.sort((a, b) => a.username.localeCompare(b.username));
   return { name: users.map((u) => u.username).join(', '), fname: users.map((u) => u.name || u.username).join(', ') };
 }
@@ -96,7 +124,28 @@ export async function notifyRoomUpdated(rid: string) {
   const room = await getRoom(rid);
   if (!room) return;
   bus.publish({ room: rid }, { type: 'room', action: 'updated', room: mapRoom(room) });
-  if (room.t === 'c') bus.publish({ all: true }, { type: 'room', action: 'updated', room: mapRoom(room) });
+  // Quem está na sala (ou assiste) já recebeu acima, com a última mensagem.
+  if (await isPublicRoom(room)) bus.publish({ all: true, skipRoom: rid }, { type: 'room', action: 'updated', room: publicRoomView(room) });
+}
+
+// Canal que deixa de ser público sem passar pelas configurações da sala (saiu de um time privado, o time privado foi
+// excluído ou virou sala) e discussões abertas de uma sala que ficou privada: viram grupo privado com os mesmos membros,
+// nunca um canal aberto a todos. Quem só assistia deixa de receber os eventos.
+export async function privatizeRooms(ctx: Ctx, rids: string[]) {
+  if (!rids.length) return;
+  const rows = await many(`UPDATE rooms SET t = 'p', updated_at = now() WHERE id = ANY($1) AND t = 'c' RETURNING id`, [rids]);
+  for (const r of rows) {
+    bus.unwatchRoom(r.id);
+    await sendSystemMessage(r.id, 'room_changed_privacy', { id: ctx.userId, username: ctx.username }, 'private');
+    await notifyRoomUpdated(r.id);
+    await republishSubscriptions(r.id);
+  }
+}
+
+// As salas e as discussões abertas nelas (discussão não tem discussão).
+export async function withDiscussions(rids: string[]): Promise<string[]> {
+  if (!rids.length) return [];
+  return [...rids, ...(await many(`SELECT id FROM rooms WHERE prid = ANY($1)`, [rids])).map((r) => r.id)];
 }
 
 // A sala mudou algo que a inscrição de cada membro mostra (nome, tipo, canal de avisos, sala principal de time):
@@ -130,7 +179,7 @@ export async function listSubscriptions(userId: string, updatedSince?: string) {
       const others = room.uids.filter((u: string) => u !== userId);
       const us = (others.length ? others : [userId]).map((id: string) => dmUsers.get(id)).filter(Boolean);
       us.sort((a: any, b: any) => a.username.localeCompare(b.username));
-      dm = { name: us.map((u: any) => u.username).join(', '), fname: us.map((u: any) => u.name || u.username).join(', ') };
+      dm = !us.length && room.fname ? { name: room.fname, fname: room.fname } : { name: us.map((u: any) => u.username).join(', '), fname: us.map((u: any) => u.name || u.username).join(', ') };
     }
     return mapSubscription(r, room, user, dm);
   });
@@ -160,7 +209,8 @@ export async function userRoomIds(userId: string): Promise<string[]> {
 export async function addUserToRoom(
   rid: string,
   userId: string,
-  opts: { inviter?: { id: string; username: string }; silent?: boolean; roles?: string[]; db?: Queryable } = {},
+  // batch: quem chama adiciona várias pessoas e avisa o número de membros uma vez no fim (convite, sala nova).
+  opts: { inviter?: { id: string; username: string }; silent?: boolean; roles?: string[]; db?: Queryable; batch?: boolean } = {},
 ) {
   const room = await getRoom(rid, opts.db);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
@@ -194,6 +244,8 @@ export async function addUserToRoom(
   }
   bus.joinRoom(userId, rid);
   const after = async () => {
+    // O número de membros mudou (cabeçalho e painel Membros de quem está na sala).
+    if (!opts.batch) await notifyRoomUpdated(rid);
     await notifySubscription(userId, rid, 'inserted', sub);
     if (!opts.silent && room.t !== 'd') {
       if (opts.inviter && opts.inviter.id !== userId) {
@@ -231,8 +283,17 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
   await query('UPDATE rooms SET users_count = GREATEST(users_count - 1, 0), updated_at = now() WHERE id = $1', [rid]);
   if (room.team_main && room.team_id) {
     await query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [room.team_id, userId]);
+    // Fora de um time privado: os canais do time em que a pessoa não entrou (e que ela só assistia) param de chegar.
+    const unjoined = await many(
+      `SELECT r.id FROM rooms r JOIN teams t ON t.id = r.team_id AND t.type = 1
+        WHERE r.team_id = $1 AND NOT r.team_main AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = r.id AND s.user_id = $2)`,
+      [room.team_id, userId],
+    );
+    for (const r of unjoined) bus.leaveRoom(userId, r.id);
   }
   bus.leaveRoom(userId, rid);
+  // O número de membros mudou: quem fica na sala vê na hora (quem saiu já não recebe o aviso de grupo privado).
+  await notifyRoomUpdated(rid);
   bus.publish({ user: userId }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(sub, room) });
   // Criptografia: quem fica gera uma chave nova (ela não lê o que vier depois). O aviso sai depois de tirar a pessoa da
   // sala: o pedido de chave nova não chega para ela.
@@ -241,7 +302,40 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
     if (opts.by && opts.by.id !== userId) await sendSystemMessage(rid, 'ru', opts.by, user.username);
     else await sendSystemMessage(rid, 'ul', { id: user.id, username: user.username }, user.username);
   }
+  // Sala de reunião da Agenda: quem foi tirado por outra pessoa deixa de ser convidado (não volta pelo link).
+  if (opts.by && opts.by.id !== userId) {
+    const { dropMeetingInvite } = await import('../calendar/events');
+    await dropMeetingInvite(rid, userId, opts.by).catch(() => {});
+  }
   if (user) emit('room.left', { room, user: { _id: user.id, username: user.username } });
+}
+
+// Canais padrão: Configurações › Geral e a marca "Padrão" de Administração › Salas são a mesma lista. Gravar a
+// configuração marca as salas da lista e desmarca as outras (antes ela só valia no primeiro boot, sem sala padrão);
+// marcar, desmarcar, renomear ou excluir uma sala padrão regrava a configuração. Discussões ficam fora da lista (a
+// marca delas continua só em Administração › Salas): o nome delas é um código e a configuração as recusava (erro 500).
+export async function applyDefaultChannels() {
+  const names = String(getSetting('Default_Channels') ?? '').split(',').map((s) => s.trim().replace(/^#/, '').toLowerCase()).filter(Boolean);
+  await query(
+    `UPDATE rooms SET is_default = (lower(name) = ANY($1::text[])), updated_at = now()
+     WHERE t IN ('c','p') AND prid IS NULL AND is_default IS DISTINCT FROM (lower(name) = ANY($1::text[]))`,
+    [names],
+  );
+}
+
+async function syncDefaultChannelsSetting() {
+  const rows = await many(`SELECT name FROM rooms WHERE is_default AND t IN ('c','p') AND prid IS NULL ORDER BY created_at`);
+  const value = rows.map((r) => r.name).join(',');
+  if (value !== String(getSetting('Default_Channels') ?? '')) await updateSettings({ Default_Channels: value });
+}
+
+// Boot: antes a configuração só valia no primeiro boot e podia ser diferente da marca "Padrão", que é o que vale para
+// quem entra. A configuração passa a mostrar as salas marcadas, sem mudar nenhuma sala (gravar a lista antiga
+// desmarcaria, sem aviso, as salas marcadas só em Administração › Salas).
+export async function syncDefaultChannelsOnBoot() {
+  const key = (v: string[]) => [...new Set(v.map((s) => s.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))].sort().join(',');
+  const rows = await many(`SELECT name FROM rooms WHERE is_default AND t IN ('c','p') AND prid IS NULL`);
+  if (key(rows.map((r) => r.name)) !== key(String(getSetting('Default_Channels') ?? '').split(','))) await syncDefaultChannelsSetting();
 }
 
 export async function joinDefaultChannels(userId: string) {
@@ -255,7 +349,8 @@ export async function listMembers(rid: string, opts: { offset?: number; count?: 
   if (opts.filter) w += ` AND (u.username ILIKE $${params.push(`%${opts.filter}%`)} OR u.name ILIKE $${params.length})`;
   if (opts.status?.length) w += ` AND u.status = ANY($${params.push(opts.status)})`;
   const rows = await many(
-    `SELECT u.id, u.username, u.name, u.status, u.status_text, u.status_custom, u.avatar_etag, s.roles AS room_roles, count(*) OVER() AS total
+    `SELECT u.id, u.username, u.name, u.status, u.status_text, u.status_custom, u.avatar_etag, s.roles AS room_roles, count(*) OVER() AS total,
+       count(*) FILTER (WHERE coalesce(u.status, 'offline') <> 'offline') OVER() AS online_total
      FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.room_id = $1 ${w}
      ORDER BY ${opts.orderByRole ? `CASE WHEN 'owner' = ANY(s.roles) THEN 0 WHEN 'moderator' = ANY(s.roles) THEN 1 WHEN 'leader' = ANY(s.roles) THEN 2 WHEN 'publisher' = ANY(s.roles) THEN 3 ELSE 4 END,` : ''}
        (u.status <> 'offline') DESC, u.username LIMIT ${Math.min(opts.count ?? 50, 500)} OFFSET ${Number(opts.offset ?? 0)}`,
@@ -263,6 +358,8 @@ export async function listMembers(rid: string, opts: { offset?: number; count?: 
   );
   return {
     total: Number(rows[0]?.total ?? 0),
+    // Quantos dos encontrados estão online (o painel Membros mostra o total de cada grupo, não só o da página).
+    online: Number(rows[0]?.online_total ?? 0),
     members: rows.map((r) => ({
       _id: r.id,
       username: r.username,
@@ -309,6 +406,8 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
     validateRoomName(input.name);
     if (await getRoomByName(input.name)) throw badRequest('error-duplicate-channel-name', `Já existe uma sala chamada ${input.name}.`);
   }
+  const topic = roomText('topic', input.topic, '') ?? '';
+  const description = roomText('description', input.description, '') ?? '';
   // Grupo criado já criptografado (a discussão herda da sala de origem, conferida em createDiscussion).
   if (input.encrypted && !input.prid) {
     if (input.type !== 'p') throw E2E_ERR.roomType();
@@ -329,8 +428,8 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
       input.type,
       input.name,
       input.fname ?? input.name,
-      input.topic ?? '',
-      input.description ?? '',
+      topic,
+      description,
       owner?.id ?? null,
       ro,
       input.broadcast ?? false,
@@ -345,11 +444,12 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
       input.reactWhenReadOnly ?? false,
     ],
   );
-  if (owner) await addUserToRoom(id, owner.id, { roles: ['owner'], silent: true });
-  for (const u of users) await addUserToRoom(id, u.id, { inviter: owner ?? undefined, silent: true });
+  // A sala nova sai com o número de membros certo no aviso de criação (canal) e na inscrição de cada um.
+  if (owner) await addUserToRoom(id, owner.id, { roles: ['owner'], silent: true, batch: true });
+  for (const u of users) await addUserToRoom(id, u.id, { inviter: owner ?? undefined, silent: true, batch: true });
   if (ctx) await audit(actorOf(ctx), 'room.created', { rid: id, name: input.name, t: input.type });
   const room = await getRoom(id);
-  if (room.t === 'c') bus.publish({ all: true }, { type: 'room', action: 'inserted', room: mapRoom(room) });
+  if (await isPublicRoom(room)) bus.publish({ all: true }, { type: 'room', action: 'inserted', room: publicRoomView(room) });
   emit('room.created', { room, owner: owner ? { _id: owner.id, username: owner.username } : null });
   return room;
 }
@@ -357,9 +457,9 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
 export async function createDirect(ctx: Ctx, usernames: string[]) {
   if (!(await hasPermission(ctx.userId, 'create-d'))) throw forbidden();
   const names = [...new Set(usernames.map((u) => u.replace(/^@/, '').toLowerCase()))].filter((u) => u !== ctx.username.toLowerCase());
-  const others = names.length ? await many('SELECT id, username FROM users WHERE lower(username) = ANY($1)', [names]) : [];
+  const others = names.length ? await many('SELECT id, username, active FROM users WHERE lower(username) = ANY($1)', [names]) : [];
   if (others.length !== names.length) throw badRequest('error-invalid-user', 'Usuário não encontrado.');
-  if (others.length > 8) throw badRequest('error-too-many-users', 'Máximo de 9 participantes em mensagem direta.');
+  if (others.length > 8) throw badRequest('error-too-many-users', 'Uma mensagem direta junta no máximo 8 pessoas além de você.');
   const all = [{ id: ctx.userId, username: ctx.username }, ...others];
   const uids = all.map((u) => u.id).sort();
   const existing = await one(`SELECT * FROM rooms WHERE t = 'd' AND dm_key = $1`, [uids.join(',')]);
@@ -375,6 +475,9 @@ export async function createDirect(ctx: Ctx, usernames: string[]) {
     return existing;
   }
   // Só uma conversa nova passa pela política; reabrir uma antiga mostra o histórico e o compositor explica o bloqueio.
+  // Com uma conta desativada não se começa conversa (ela não lê nem responde).
+  const gone = others.find((u) => !u.active);
+  if (gone) throw badRequest('error-user-deactivated', `A conta de @${gone.username} está desativada.`);
   await assertCanStartDirect(ctx, others.map((u) => u.id));
   const id = newId();
   const inserted = await one(
@@ -384,7 +487,7 @@ export async function createDirect(ctx: Ctx, usernames: string[]) {
   );
   // Corrida com outra criação simultânea da mesma DM: devolve a existente.
   if (!inserted) return one(`SELECT * FROM rooms WHERE t = 'd' AND dm_key = $1`, [uids.join(',')]);
-  for (const u of all) await addUserToRoom(id, u.id, { silent: true });
+  for (const u of all) await addUserToRoom(id, u.id, { silent: true, batch: true });
   return getRoom(id);
 }
 
@@ -427,13 +530,23 @@ export async function inviteToRoom(ctx: Ctx, rid: string, userIds: string[]) {
     (room.t === 'p' && rolesHavePermission(roles, 'add-user-to-any-p-room'));
   if (!allowed) throw forbidden();
   await assertCanBringIn(ctx.userId, room, userIds);
-  for (const uid of userIds) await addUserToRoom(rid, uid, { inviter: { id: ctx.userId, username: ctx.username } });
+  for (const uid of userIds) await addUserToRoom(rid, uid, { inviter: { id: ctx.userId, username: ctx.username }, batch: true });
+  // Um aviso do número de membros para o convite inteiro, e não um por pessoa.
+  if (userIds.length) await notifyRoomUpdated(rid);
+}
+
+// Dono da sala só é silenciado ou removido por quem pode Definir donos nela (outro dono ou administrador): um moderador
+// não age sobre quem está acima dele.
+async function assertCanActOnOwner(ctx: Ctx, rid: string, target: { user_id: string; roles: string[] } | null) {
+  if (!target?.roles.includes('owner') || target.user_id === ctx.userId) return;
+  if (!(await hasPermission(ctx.userId, 'set-owner', rid))) throw forbidden('Só donos podem silenciar ou remover outro dono.');
 }
 
 export async function kickFromRoom(ctx: Ctx, rid: string, userId: string) {
   if (!(await hasPermission(ctx.userId, 'remove-user', rid))) throw forbidden();
   const target = await getSubscriptionRow(rid, userId);
   if (!target) throw badRequest('error-user-not-in-room', 'Usuário não está na sala.');
+  await assertCanActOnOwner(ctx, rid, target);
   if (target.roles.includes('owner')) {
     const n = await one(`SELECT count(*)::int AS n FROM subscriptions WHERE room_id = $1 AND 'owner' = ANY(roles)`, [rid]);
     if (n.n <= 1) throw badRequest('error-you-are-last-owner', 'Não é possível remover o último dono.');
@@ -476,6 +589,10 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
     await assertCanToggleE2e(ctx, room, !!s.encrypted, roles);
     toggleChecked = true;
   }
+  // Antes de gravar qualquer coisa: um texto recusado não deixa a gravação pela metade.
+  const topic = roomText('topic', s.roomTopic, room.topic);
+  const description = roomText('description', s.roomDescription, room.description);
+  const announcement = roomText('announcement', s.roomAnnouncement, room.announcement);
   const sets: string[] = [];
   const params: unknown[] = [rid];
   const sys: [string, string][] = [];
@@ -486,22 +603,24 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
       validateRoomName(s.roomName);
       const other = await getRoomByName(s.roomName);
       if (other && other.id !== rid) throw badRequest('error-duplicate-channel-name', 'Já existe uma sala com esse nome.');
-    }
+    } else if (typeof s.roomName !== 'string' || !s.roomName.trim()) throw badRequest('error-invalid-params', 'Informe o nome da discussão.');
+    // Discussão: o mesmo limite de quando ela é criada.
+    else if (s.roomName.length > 200) throw badRequest('error-invalid-params', 'O nome da discussão pode ter no máximo 200 caracteres.');
     sets.push(`name = $${params.push(s.roomName)}`, `fname = $${params.length}`);
     sys.push(['r', s.roomName]);
     if (room.team_main && room.team_id) await query('UPDATE teams SET name = $2 WHERE id = $1', [room.team_id, s.roomName]);
   }
-  if (s.roomTopic !== undefined && s.roomTopic !== room.topic) {
-    sets.push(`topic = $${params.push(s.roomTopic)}`);
-    sys.push(['room_changed_topic', s.roomTopic]);
+  if (topic !== undefined) {
+    sets.push(`topic = $${params.push(topic)}`);
+    sys.push(['room_changed_topic', topic]);
   }
-  if (s.roomDescription !== undefined && s.roomDescription !== room.description) {
-    sets.push(`description = $${params.push(s.roomDescription)}`);
-    sys.push(['room_changed_description', s.roomDescription]);
+  if (description !== undefined) {
+    sets.push(`description = $${params.push(description)}`);
+    sys.push(['room_changed_description', description]);
   }
-  if (s.roomAnnouncement !== undefined && s.roomAnnouncement !== room.announcement) {
-    sets.push(`announcement = $${params.push(s.roomAnnouncement)}`);
-    sys.push(['room_changed_announcement', s.roomAnnouncement]);
+  if (announcement !== undefined) {
+    sets.push(`announcement = $${params.push(announcement)}`);
+    sys.push(['room_changed_announcement', announcement]);
   }
   if (s.roomType !== undefined && s.roomType !== room.t && room.t !== 'd') {
     if (!can(s.roomType === 'c' ? 'create-c' : 'create-p')) throw forbidden();
@@ -573,11 +692,20 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   if (!sets.length) return room;
   sets.push('updated_at = now()');
   await query(`UPDATE rooms SET ${sets.join(', ')} WHERE id = $1`, params);
+  if (s.roomType === 'p' && room.t === 'c') {
+    // Ficou privada (na sala principal, o time todo): quem só assistia a sala, os canais do time ou as discussões deixa
+    // de receber, e as discussões abertas viram grupos privados.
+    const team = room.team_main && room.team_id ? (await many('SELECT id FROM rooms WHERE team_id = $1 AND NOT team_main', [room.team_id])).map((r) => r.id) : [];
+    const all = await withDiscussions([rid, ...team]);
+    for (const id of all) bus.unwatchRoom(id);
+    await privatizeRooms(ctx, all.filter((id) => id !== rid && !team.includes(id)));
+  }
   if (s.encrypted === true && !room.encrypted) {
     // Sala criptografada não guarda nem faz traduções: o servidor não pode ler o texto.
     for (const sub of await forgetRoomTranslations(rid)) await notifySubscription(sub.user_id, rid, 'updated', sub);
   }
   for (const [t, msg] of sys) await sendSystemMessage(rid, t, me, msg);
+  if ((s.default !== undefined && s.default !== !!room.is_default) || (s.roomName !== undefined && room.is_default)) await syncDefaultChannelsSetting();
   await audit(actorOf(ctx), 'room.settings.changed', { rid, name: room.name }, { fields: Object.keys(s) });
   await notifyRoomUpdated(rid);
   // Ligada de novo com a troca pendente (alguém voltou ou saiu enquanto estava desligada): quem tem a chave troca agora.
@@ -589,11 +717,12 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   return getRoom(rid);
 }
 
-export async function setArchived(ctx: Ctx, rid: string, archived: boolean) {
+// skipPermission: o próprio chat arquiva (sala de uma reunião cancelada pelo organizador).
+export async function setArchived(ctx: Ctx, rid: string, archived: boolean, opts: { skipPermission?: boolean } = {}) {
   const room = await getRoom(rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   if (room.t === 'd') throw badRequest('error-not-allowed', 'DMs não podem ser arquivadas.');
-  if (!(await hasPermission(ctx.userId, archived ? 'archive-room' : 'unarchive-room', rid))) throw forbidden();
+  if (!opts.skipPermission && !(await hasPermission(ctx.userId, archived ? 'archive-room' : 'unarchive-room', rid))) throw forbidden();
   await query('UPDATE rooms SET archived = $2, updated_at = now() WHERE id = $1', [rid, archived]);
   await sendSystemMessage(rid, archived ? 'room-archived' : 'room-unarchived', { id: ctx.userId, username: ctx.username }, '');
   await audit(actorOf(ctx), archived ? 'room.archived' : 'room.unarchived', { rid, name: room.name });
@@ -609,10 +738,13 @@ export async function deleteRoom(ctx: Ctx, rid: string) {
   if (!(await hasPermission(ctx.userId, perm, rid))) throw forbidden();
   if (room.team_main) throw badRequest('error-not-allowed', 'Exclua o time em vez da sala principal.');
   const subs = await many('SELECT * FROM subscriptions WHERE room_id = $1', [rid]);
+  // Antes de excluir: a discussão consulta a sala de origem, e o canal de time, o time.
+  const isPublic = await isPublicRoom(room);
   const { deleteRoomFiles } = await import('./uploads');
   await deleteRoomFiles(rid);
   // Discussões filhas são removidas em cascata.
   await query('DELETE FROM rooms WHERE id = $1', [rid]);
+  if (room.is_default) await syncDefaultChannelsSetting();
   if (room.prid && room.pmid) {
     await query('UPDATE messages SET dcount = GREATEST(dcount - 1, 0), drid = NULL WHERE id = $1', [room.pmid]);
   }
@@ -625,11 +757,17 @@ export async function deleteRoom(ctx: Ctx, rid: string) {
     );
     for (const row of cards) bus.publish({ room: row.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
   }
+  // Quem está com a sala aberta sem participar (membro do time vendo a prévia de um canal de time privado) também fica
+  // sabendo. Só assiste à sala quem pôde abri-la, então nada vaza.
+  if (!isPublic) bus.publish({ room: rid }, { type: 'room', action: 'removed', room: mapRoom(room) });
   for (const s of subs) {
     bus.leaveRoom(s.user_id, rid);
     bus.publish({ user: s.user_id }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(s, room) });
   }
-  bus.publish({ all: true }, { type: 'room', action: 'removed', room: mapRoom(room) });
+  // Canal público: todos sabem que saiu (diretório, quem está vendo a prévia), sem o conteúdo dele. Grupo privado e DM:
+  // só quem participava, que também recebe o aviso com a sala aberta na tela.
+  if (isPublic) bus.publish({ all: true }, { type: 'room', action: 'removed', room: publicRoomView(room) });
+  else for (const s of subs) bus.publish({ user: s.user_id }, { type: 'room', action: 'removed', room: mapRoom(room) });
   await audit(actorOf(ctx), 'room.deleted', { rid, name: room.name, t: room.t });
 }
 
@@ -699,6 +837,14 @@ export async function setMuted(ctx: Ctx, rid: string, userId: string, mute: bool
   if (!(await hasPermission(ctx.userId, 'mute-user', rid))) throw forbidden();
   const target = await one('SELECT username FROM users WHERE id = $1', [userId]);
   if (!target) throw notFound('error-invalid-user', 'Usuário não encontrado.');
+  const sub = await getSubscriptionRow(rid, userId);
+  const room = await getRoom(rid);
+  const isMuted = !!room?.muted?.includes(target.username);
+  // Silenciar só quem está na sala. Quem saiu continua silenciado (sair e voltar não tira o silêncio) e ainda dá para tirar.
+  if (!sub && (mute || !isMuted)) throw badRequest('error-user-not-in-room', 'Usuário não está na sala.');
+  await assertCanActOnOwner(ctx, rid, sub);
+  // Nada muda: sem outra mensagem "silenciou fulano" na sala.
+  if (isMuted === mute) return;
   await query(
     mute
       ? 'UPDATE rooms SET muted = array_append(array_remove(muted, $2), $2), updated_at = now() WHERE id = $1'
@@ -762,14 +908,17 @@ export async function updateSubscriptionFlags(ctx: Ctx, rid: string, data: { fav
 
 // ---------- Diretório ----------
 
+// Busca sem acento e sem maiúsculas, como a da barra lateral: $1 é o termo já com % e _ escapados (escapeLike).
+// Sem view-c-room, canais e times públicos não aparecem: só os em que a pessoa já está (a regra de canAccessRoom).
 export async function directory(ctx: Ctx, opts: { type: 'channels' | 'users' | 'teams'; text?: string; offset?: number; count?: number; sort?: string }) {
   const count = Math.min(opts.count ?? 25, 100);
   const offset = Number(opts.offset ?? 0);
-  const text = `%${opts.text ?? ''}%`;
+  const text = escapeLike(String(opts.text ?? ''));
+  const has = (col: string) => `wescc_fold(${col}) LIKE '%' || wescc_fold($1) || '%'`;
   if (opts.type === 'users') {
     const rows = await many(
       `SELECT id, username, name, status, status_text, status_custom, avatar_etag, bio, roles, created_at, count(*) OVER() AS total FROM users
-       WHERE active AND type = 'user' AND (username ILIKE $1 OR name ILIKE $1)
+       WHERE active AND type = 'user' AND (${has('username')} OR ${has('name')})
        ORDER BY username LIMIT ${count} OFFSET ${offset}`,
       [text],
     );
@@ -788,12 +937,13 @@ export async function directory(ctx: Ctx, opts: { type: 'channels' | 'users' | '
       })),
     };
   }
+  const seePublic = await hasPermission(ctx.userId, 'view-c-room');
   if (opts.type === 'teams') {
     const rows = await many(
       `SELECT t.*, r.description, r.topic, r.users_count, (SELECT count(*) FROM rooms x WHERE x.team_id = t.id AND NOT x.team_main)::int AS rooms_count,
          count(*) OVER() AS total
        FROM teams t JOIN rooms r ON r.id = t.room_id
-       WHERE t.name ILIKE $1 AND (t.type = 0 OR EXISTS (SELECT 1 FROM team_members m WHERE m.team_id = t.id AND m.user_id = $2))
+       WHERE ${has('t.name')} AND (${seePublic ? 't.type = 0 OR ' : ''}EXISTS (SELECT 1 FROM team_members m WHERE m.team_id = t.id AND m.user_id = $2))
        ORDER BY t.name LIMIT ${count} OFFSET ${offset}`,
       [text, ctx.userId],
     );
@@ -805,12 +955,15 @@ export async function directory(ctx: Ctx, opts: { type: 'channels' | 'users' | '
   const rows = await many(
     `SELECT r.*, u.username AS owner_username, t.name AS team_name, count(*) OVER() AS total FROM rooms r
      LEFT JOIN users u ON u.id = r.owner_id LEFT JOIN teams t ON t.id = r.team_id
-     WHERE r.t = 'c' AND r.prid IS NULL AND (r.name ILIKE $1 OR r.fname ILIKE $1 OR r.topic ILIKE $1)
+     WHERE r.t = 'c' AND r.prid IS NULL AND (${has('r.name')} OR ${has("coalesce(r.fname, '')")} OR ${has("coalesce(r.topic, '')")})
        AND (r.team_id IS NULL OR t.type = 0 OR EXISTS (SELECT 1 FROM team_members m WHERE m.team_id = r.team_id AND m.user_id = $2))
+       ${seePublic ? '' : 'AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = r.id AND s.user_id = $2)'}
      ORDER BY r.featured DESC, r.users_count DESC, r.name LIMIT ${count} OFFSET ${offset}`,
     [text, ctx.userId],
   );
-  return { total: Number(rows[0]?.total ?? 0), result: rows.map((r) => ({ ...mapRoom(r), teamName: r.team_name })) };
+  // Canal com código: a web pede o código antes de entrar (quem tem join-without-join-code entra sem ele).
+  const bypass = rows.some((r) => r.join_code) && (await hasPermission(ctx.userId, 'join-without-join-code'));
+  return { total: Number(rows[0]?.total ?? 0), result: rows.map((r) => ({ ...mapRoom(r), teamName: r.team_name, joinCodeRequired: !!r.join_code && !bypass })) };
 }
 
 export async function adminListRooms(opts: { filter?: string; types?: RoomType[]; offset?: number; count?: number }) {

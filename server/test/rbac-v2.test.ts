@@ -646,9 +646,11 @@ describe('nome de papel: nenhum papel criado se passa por outro', () => {
       expect((await api('POST', 'rbac.roles.update', { roleId: turno, description }, mano)).errorType, description).toBe(novo.errorType);
       expect((await api('POST', 'roles.update', { roleId: turno, description }, mano)).errorType, description).toBe(novo.errorType);
     }
-    // RLO: "\u202EnimdA" aparece "Admin"; recusado de vez, com o motivo em português.
-    const rlo = await api('POST', 'rbac.roles.create', { name: uniq('falso'), description: '\u202enimdA' }, mano);
-    expect(rlo).toMatchObject({ status: 400, errorType: 'RBAC_INVALID_ROLE_LABEL', error: expect.stringContaining('caracteres invisíveis') });
+    // RLO: "\u202EnimdA" aparece "Admin". O controle de direção sai na entrada de toda requisição (lib/sanitize.ts):
+    // o papel fica com o nome que se lê de verdade, sem se passar por outro.
+    const rlo = await api('POST', 'rbac.roles.create', { name: uniq('rlo'), description: '\u202enimdA' }, mano);
+    expect(rlo.success).toBe(true);
+    expect(JSON.stringify(rlo)).not.toContain('\u202e');
     // O identificador também (o nome exibido vazio vira o identificador).
     for (const name of ['Adm1n', 'administrator', 'Administradora']) {
       expect((await api('POST', 'rbac.roles.create', { name, description: 'Turno' }, mano)).errorType, name).toBe('RBAC_RESERVED_ROLE_NAME');

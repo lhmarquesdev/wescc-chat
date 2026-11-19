@@ -14,12 +14,19 @@ export interface ToastItem {
 }
 
 // e2eKeys: impressão da chave pública da criptografia de ponta a ponta (null sem chaves). e2eResetByAdmin: um
-// administrador redefiniu a criptografia e a pessoa ainda não criou a senha nova.
-export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean; e2eKeys?: string | null; e2eResetByAdmin?: boolean };
+// administrador redefiniu a criptografia e a pessoa ainda não criou a senha nova. e2eResetAt: sem chaves, a hora da
+// última redefinição (a própria ou pelo administrador).
+// hasPassword: a conta tem senha do chat (contas só de SAML/OAuth não têm).
+export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean; e2eKeys?: string | null; e2eResetByAdmin?: boolean; hasPassword?: boolean; e2eResetAt?: string };
 
 interface RoomMessages {
   list: Message[];
   hasMore: boolean;
+  // A lista não chega à última mensagem (aberta num link para uma antiga ou na primeira não lida): as de depois
+  // carregam quando a pessoa rola até o fim, e as que chegam em tempo real ficam para essa hora.
+  hasNewer?: boolean;
+  // A pessoa enviou daqui com a lista longe do fim: a lista volta para as últimas (MessageList).
+  toLatest?: number;
   loaded: boolean;
   stale?: boolean; // a pessoa saiu da sala: o que veio depois não chegou (se voltar, carrega de novo)
 }
@@ -45,6 +52,10 @@ interface State {
   reminders: MessageReminder[];
   scheduled: ScheduledMessage[];
   pollVotes: Record<string, string[]>;
+  // Foto e nome que mudaram desde que a tela carregou (eventos "user"): os avatares e as listas já carregadas usam o
+  // novo sem recarregar. avatarEtags: @usuário -> versão da foto; userNames: id -> nome e @usuário atuais.
+  avatarEtags: Record<string, string>;
+  userNames: Record<string, { name: string; username: string }>;
 
   setMe(me: Me | null): void;
   setSettings(s: Record<string, any>): void;
@@ -52,8 +63,11 @@ interface State {
   upsertSubscription(s: Subscription): void;
   removeSubscription(rid: string): void;
   upsertRoom(r: Room): void;
-  setMessages(rid: string, list: Message[], hasMore: boolean): void;
+  setMessages(rid: string, list: Message[], hasMore: boolean, hasNewer?: boolean): void;
   prependMessages(rid: string, list: Message[], hasMore: boolean): void;
+  appendMessages(rid: string, list: Message[], hasNewer: boolean): void;
+  sentFromRoom(rid: string): void;
+  mergeLatest(rid: string, latest: Message[], hasMore: boolean): void;
   upsertMessage(m: Message): void;
   removeMessage(rid: string, id: string, tmid?: string | null): void;
   setThread(tmid: string, list: Message[]): void;
@@ -115,6 +129,8 @@ const initial = {
   reminders: [],
   scheduled: [],
   pollVotes: {},
+  avatarEtags: {},
+  userNames: {},
 };
 
 export const useStore = create<State>((set, get) => ({
@@ -131,19 +147,46 @@ export const useStore = create<State>((set, get) => ({
     set({ subscriptions: subs });
   },
   upsertRoom: (r) => set({ rooms: { ...get().rooms, [r._id]: r } }),
-  setMessages: (rid, list, hasMore) => set({ messages: { ...get().messages, [rid]: { list, hasMore, loaded: true } } }),
+  setMessages: (rid, list, hasMore, hasNewer = false) => set({ messages: { ...get().messages, [rid]: { list, hasMore, hasNewer, loaded: true } } }),
   prependMessages: (rid, list, hasMore) => {
     const cur = get().messages[rid];
     const ids = new Set(cur?.list.map((m) => m._id));
     const merged = [...list.filter((m) => !ids.has(m._id)), ...(cur?.list ?? [])];
     set({ messages: { ...get().messages, [rid]: { ...cur, list: merged, hasMore, loaded: true } } });
   },
+  appendMessages: (rid, list, hasNewer) => {
+    const cur = get().messages[rid];
+    if (!cur) return;
+    const ids = new Set(cur.list.map((m) => m._id));
+    set({ messages: { ...get().messages, [rid]: { ...cur, list: [...cur.list, ...list.filter((m) => !ids.has(m._id))], hasNewer } } });
+  },
+  sentFromRoom: (rid) => {
+    const cur = get().messages[rid];
+    if (cur?.hasNewer) set({ messages: { ...get().messages, [rid]: { ...cur, toLatest: Date.now() } } });
+  },
+  // As últimas mensagens da sala, buscadas de novo (reconexão): da primeira delas em diante vale o servidor (novas,
+  // editadas e apagadas); as mais antigas que já estavam carregadas ficam, e as que o tempo real trouxe durante a
+  // busca continuam no fim. Sem ponto em comum (chegou mais de uma página), a lista recomeça do que veio.
+  mergeLatest: (rid, latest, hasMore) => {
+    const cur = get().messages[rid];
+    if (!cur) return;
+    const from = latest[0]?.ts ?? '';
+    const to = latest[latest.length - 1]?.ts ?? '';
+    const ids = new Set(latest.map((m) => m._id));
+    const newer = to ? cur.list.filter((m) => m.ts > to && !ids.has(m._id)) : [];
+    const joins = hasMore && !!from && cur.list.some((m) => m.ts >= from);
+    const older = joins ? cur.list.filter((m) => m.ts < from) : [];
+    set({ messages: { ...get().messages, [rid]: { ...cur, list: [...older, ...latest, ...newer], hasMore: joins ? cur.hasMore : hasMore, loaded: true } } });
+  },
   upsertMessage: (m) => {
     const st = get();
     const out: Partial<State> = {};
     const isReply = !!m.tmid && !(m as any).tshow;
     const cur = st.messages[m.rid];
-    if (cur && (!isReply || cur.list.some((x) => x._id === m._id))) {
+    const last = cur?.list[cur.list.length - 1];
+    // Lista longe do fim (hasNewer): a mensagem nova entra quando a pessoa rolar até lá, sem buraco no meio.
+    const beyond = !!cur?.hasNewer && !!last && m.ts > last.ts && !cur.list.some((x) => x._id === m._id);
+    if (cur && !beyond && (!isReply || cur.list.some((x) => x._id === m._id))) {
       out.messages = { ...st.messages, [m.rid]: { ...cur, list: insertSorted(cur.list, m) } };
     }
     if (m.tmid && st.threads[m.tmid]) {
@@ -299,14 +342,28 @@ export function applyEvent(ev: ServerEvent) {
       // Só o evento da própria escolha muda o status personalizado (o do perfil chega como os outros o veem).
       if (st.me && ev.user._id === st.me._id) st.setMe({ ...st.me, ...selfUserPatch(ev.user) } as Me);
       if (ev.user.roles) useStore.setState({ userRoles: { ...st.userRoles, [ev.user._id]: ev.user.roles } });
-      if (ev.user.avatarETag !== undefined && ev.user.username) avatarBust[ev.user.username] = String(ev.user.avatarETag ?? Date.now());
+      if (ev.user.avatarETag !== undefined && ev.user.username) {
+        // Sem foto (removida): um endereço fixo para as iniciais, diferente do da foto que estava no cache.
+        const v = ev.user.avatarETag ?? 'none';
+        if (st.avatarEtags[ev.user.username] !== v) useStore.setState({ avatarEtags: { ...useStore.getState().avatarEtags, [ev.user.username]: v } });
+      }
+      if (ev.user.name !== undefined && ev.user.username) renameUser(ev.user._id, ev.user.name, ev.user.username);
       break;
     case 'poll.myVotes':
       st.setPollVotes({ [ev.messageId]: ev.optionIds });
       break;
     case 'message.reminder':
-      if (ev.action === 'removed') st.removeReminder(ev.reminder._id);
-      else st.upsertReminder(ev.reminder);
+      if (ev.action === 'removed') {
+        st.removeReminder(ev.reminder._id);
+        // Saiu sem a pessoa pedir: ela fica sabendo, para não perder o que queria lembrar.
+        if (ev.reason === 'no-access') st.toast('Um lembrete foi removido porque você não tem mais acesso à conversa.', 'info', { icon: 'remind', duration: 8000, key: 'reminder-removed' });
+        else if (ev.reason === 'message-deleted') {
+          const sub = st.subscriptions[ev.reminder.rid];
+          const label = sub ? sub.fname || sub.name : '';
+          const where = !label ? '' : sub!.t === 'd' ? ` da conversa com ${label}` : ` de ${sub!.t === 'c' ? '#' : ''}${label}`;
+          st.toast(`Um lembrete${where} foi removido porque a mensagem foi apagada.`, 'info', { icon: 'remind', duration: 8000, key: 'reminder-removed' });
+        }
+      } else st.upsertReminder(ev.reminder);
       break;
     case 'message.scheduled':
       if (ev.action === 'removed') st.removeScheduled(ev.scheduled._id);
@@ -315,8 +372,8 @@ export function applyEvent(ev: ServerEvent) {
     case 'settings.changed': {
       const patch: Record<string, unknown> = {};
       for (const s of ev.settings) {
-        if (s._id === '__emoji') useStore.setState({ emojiVersion: st.emojiVersion + 1 });
-        else patch[s._id] = s.value;
+        // __emoji: session.ts recarrega a lista e só então avisa (emojiVersion), para as telas lerem a lista nova.
+        if (s._id !== '__emoji') patch[s._id] = s.value;
       }
       st.setSettings(patch);
       break;
@@ -324,7 +381,27 @@ export function applyEvent(ev: ServerEvent) {
   }
 }
 
-export const avatarBust: Record<string, string> = {};
+// Nome ou @usuário novo de outra pessoa: as mensagens já carregadas (salas e tópicos) e as listas que leem userNames
+// passam a mostrar o novo. As conversas diretas chegam atualizadas pelo servidor (evento da inscrição).
+function renameUser(id: string, name: string, username: string) {
+  const st = useStore.getState();
+  const known = st.userNames[id];
+  if (known && known.name === name && known.username === username) return;
+  let changed = false;
+  const fix = (list: Message[]) => {
+    if (!list.some((m) => m.u?._id === id && (m.u.name !== name || m.u.username !== username))) return list;
+    changed = true;
+    return list.map((m) => (m.u?._id === id ? { ...m, u: { ...m.u, name, username } } : m));
+  };
+  const messages: State['messages'] = {};
+  for (const [rid, cur] of Object.entries(st.messages)) {
+    const list = fix(cur.list);
+    messages[rid] = list === cur.list ? cur : { ...cur, list };
+  }
+  const threads: State['threads'] = {};
+  for (const [tmid, list] of Object.entries(st.threads)) threads[tmid] = fix(list);
+  useStore.setState({ ...(changed ? { messages, threads } : {}), userNames: { ...st.userNames, [id]: { name, username } } });
+}
 
 // Chave do aviso "Sua mensagem agendada … não foi enviada" (um por agendada).
 export const scheduledFailKey = (id: string) => `scheduled-failed-${id}`;

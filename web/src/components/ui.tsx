@@ -16,7 +16,7 @@ import {
   type RefObject,
 } from 'react';
 import { createRoot } from 'react-dom/client';
-import { avatarBust, useStore, type ToastItem } from '../lib/store';
+import { useStore, type ToastItem } from '../lib/store';
 import { useUserPresence } from '../lib/presence';
 import { Icon, type IconName } from './Icon';
 import { Portal, Sheet, focusables, useAnchored, useEscape, useFocusTrap, useIsPhone, useScrollLock, useSheetDrag, type Placement } from './overlay';
@@ -52,7 +52,9 @@ export function useDelay(ms = 250) {
 // ---------- Avatares e presença ----------
 
 export function Avatar({ username, size = 32, rid, etag }: { username?: string; size?: number; rid?: string; etag?: string | null }) {
-  const bust = username ? avatarBust[username] ?? etag ?? '' : etag ?? '';
+  // A versão que chegou pelo evento "user" vale por cima da que veio com a tela: a foto nova aparece sem recarregar.
+  const live = useStore((s) => (username ? s.avatarEtags[username] : undefined));
+  const bust = live ?? etag ?? '';
   const src = rid ? `/avatar/room/${rid}?v=${bust}` : `/avatar/${encodeURIComponent(username ?? '')}?v=${bust}`;
   const ref = useRef<HTMLImageElement>(null);
   // Imagem que já veio do cache aparece direto; a que ainda carrega entra com um fade curto.
@@ -155,17 +157,18 @@ export function Modal({
     if (phone && !variant) setHasForm(!!ref.current?.querySelector(`.modal-body ${TEXT_FIELD}`));
   }, [phone, variant]);
   const kind: ModalVariant = phone ? (variant && variant !== 'dialog' ? variant : wide || hasForm ? 'fullscreen' : 'sheet') : 'dialog';
-  useEscape(true, onClose);
+  useEscape(true, onClose, true);
   useFocusTrap(ref, true, FIRST_FIELD);
   useScrollLock(true);
   useSheetDrag(ref, onClose, kind === 'sheet');
   const cls = ['modal', wide && 'wide', size, kind !== 'dialog' && kind, className].filter(Boolean).join(' ');
   const headAction = useHeadAction(kind === 'fullscreen', footRef);
   const bodyRef = useFootDivider(footRef, !!footer);
+  const onEnter = useEnterSubmits(ref, footRef);
   return (
     <Portal>
       <div className="modal-backdrop" data-kind={kind} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-        <div ref={ref} className={cls} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} data-head-action={headAction ? '' : undefined}>
+        <div ref={ref} className={cls} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} data-head-action={headAction ? '' : undefined} onKeyDown={onEnter}>
           {kind === 'sheet' && <div className="sheet-handle" aria-hidden="true" />}
           <div className="modal-head">
             <div className="modal-titles">
@@ -248,6 +251,24 @@ function useHeadAction(on: boolean, footRef: RefObject<HTMLDivElement | null>) {
     return () => mo.disconnect();
   }, [on, footRef]);
   return action;
+}
+
+// Enter num campo de texto do corpo aciona o botão principal do rodapé (o mesmo da barra em tela cheia), como num
+// formulário: "Criar canal" + nome + Enter cria. Fica de fora: campo dentro de um <form> (o navegador já envia), área
+// de texto, campo que já tratou o Enter (chama preventDefault), busca ou escolha de pessoa/sala com texto digitado
+// (o Enter ali escolhe, não envia), botão principal desativado ou ocupado, e botões de perigo (só com clique).
+function useEnterSubmits(ref: RefObject<HTMLDivElement | null>, footRef: RefObject<HTMLDivElement | null>) {
+  return (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Enter' || e.defaultPrevented || e.repeat || e.nativeEvent.isComposing || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+    const t = e.target;
+    if (!(t instanceof HTMLInputElement) || t.form || t.readOnly || t.disabled || !t.matches(TEXT_FIELD)) return;
+    if (t.closest('.modal') !== ref.current || !t.closest('.modal-body')) return; // modal aberto por cima deste
+    if (t.value.trim() && t.matches('[role="combobox"], [type="search"]')) return;
+    const primary = [...(footRef.current?.querySelectorAll<HTMLButtonElement>('button.primary') ?? [])].pop();
+    if (!primary || primary.disabled || primary.getAttribute('aria-busy') === 'true') return;
+    e.preventDefault();
+    primary.click();
+  };
 }
 
 // ---------- Confirmação ----------
@@ -410,6 +431,7 @@ export function SearchInput({
   autoFocus,
   className,
   id,
+  label,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -417,6 +439,7 @@ export function SearchInput({
   autoFocus?: boolean;
   className?: string;
   id?: string;
+  label?: string; // nome para o leitor de tela; sem ele, o texto de exemplo (com id, o <label> de quem chama)
 }) {
   const ref = useRef<HTMLInputElement>(null);
   return (
@@ -427,6 +450,7 @@ export function SearchInput({
         id={id}
         type="search"
         className="search-input"
+        aria-label={label ?? (id ? undefined : placeholder)}
         value={value}
         placeholder={placeholder}
         autoFocus={autoFocus}

@@ -1,19 +1,22 @@
 import type { FastifyInstance } from 'fastify';
 import { many, one, pool } from '../db/pool';
-import { badRequest, forbidden, notFound } from '../lib/errors';
+import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { audit } from '../services/audit';
-import { fingerprintOf, hasUserKeys, resetUserKeys } from '../services/e2e';
+import { fingerprintOf, hasUserKeys, lastResetOf, resetUserKeys } from '../services/e2e';
 import { readDeviceId } from '../services/loginDevices';
 import { mapUser, visibleStatusCustom } from '../services/mappers';
 import { createCustomStatus, deleteCustomStatus, getCustomStatus, listCustomStatuses, updateCustomStatus } from '../services/userStatus';
 import { getUserRoles, hasPermission, permissionsForRoles, roleInfos } from '../services/permissions';
 import { getSetting } from '../services/settings';
 import { userLock } from '@shared/rbac';
+import { escapeLike } from '@shared/search';
+import { clampStatusText } from '@shared/status';
 import { bus } from '../realtime/bus';
 import { assertCanManageUser, assertRoleChange, effectiveRoles, grantContext, writeUserRoles } from '../services/rbac';
 import { recordHistory } from '../services/rbacHistory';
 import {
   actorOf,
+  checkResetToken,
   type Ctx,
   createPersonalToken,
   createUser,
@@ -27,13 +30,17 @@ import {
   login,
   logout,
   needs2faSetup,
+  normalizeEmail,
+  normalizeName,
   registerUser,
   removePersonalToken,
   requestPasswordReset,
   resetPasswordWithToken,
   resetAvatar,
   revokeAllSessions,
+  revokePersonalTokens,
   revokeSession,
+  sendPasswordSetupEmail,
   setAvatar,
   setPreferences,
   setStatus,
@@ -46,6 +53,7 @@ import { b, bool, paging, parseCookies, q, route, str, strArray } from './http';
 async function meResponse(userId: string) {
   const u = await getUserById(userId);
   const roles = await getUserRoles(userId);
+  const e2eKeys = await fingerprintOf(userId);
   // O servidor também bloqueia o resto da API enquanto a troca de senha ou o 2FA estiverem pendentes (api/http.ts).
   return {
     ...mapUser(u, { full: true }),
@@ -53,8 +61,12 @@ async function meResponse(userId: string) {
     requirePasswordChange: u.require_password_change,
     require2faSetup: await needs2faSetup(u),
     // Criptografia de ponta a ponta: a impressão da chave pública (null sem chaves) e se um administrador redefiniu.
-    e2eKeys: await fingerprintOf(userId),
+    e2eKeys,
     e2eResetByAdmin: !!u.e2e_reset_at || undefined,
+    // Se a conta tem senha do chat (contas só de SAML/OAuth não têm): a tela pede a senha ou o nome de usuário.
+    hasPassword: !!u.password_hash,
+    // Sem chaves depois de uma redefinição: quando foi (as mensagens cifradas de antes dela não abrem mais).
+    e2eResetAt: e2eKeys ? undefined : ((await lastResetOf(userId)) ?? undefined),
   };
 }
 
@@ -62,6 +74,33 @@ export async function resolveUserParam(params: Record<string, any>) {
   const u = params.userId ? await getUserById(params.userId) : params.username ? await getUserByUsername(params.username) : null;
   if (!u) throw notFound('error-invalid-user', 'Usuário não encontrado.');
   return u;
+}
+
+// Ordenação de users.list, no formato do Rocket.Chat (sort={"lastLogin":-1}). O nome compara sem acento e sem
+// maiúsculas; quem nunca entrou conta como o acesso mais antigo; sem e-mail fica no fim. E-mail e último acesso só
+// para quem administra (os outros não veem esses campos). Pessoas continuam antes dos bots, e o nome de usuário
+// desempata em ordem alfabética (a paginação não repete nem pula ninguém).
+const USER_SORT: Record<string, { col: string; admin?: boolean; nulls?: (asc: boolean) => string }> = {
+  username: { col: 'lower(username)' },
+  name: { col: 'wescc_fold(name)' },
+  createdAt: { col: 'created_at' },
+  email: { col: 'lower(email)', admin: true, nulls: () => ' NULLS LAST' },
+  lastLogin: { col: 'last_login', admin: true, nulls: (asc) => (asc ? ' NULLS FIRST' : ' NULLS LAST') },
+};
+function userListOrder(raw: unknown, admin: boolean) {
+  if (raw === undefined || raw === '') return `(type = 'bot'), username`;
+  let s: unknown;
+  try {
+    s = typeof raw === 'string' ? JSON.parse(raw) : undefined;
+  } catch {
+    s = undefined;
+  }
+  const entries = s && typeof s === 'object' && !Array.isArray(s) ? Object.entries(s) : [];
+  const [key, dir] = entries.length === 1 ? entries[0] : [];
+  const sort = key && Object.hasOwn(USER_SORT, key) ? USER_SORT[key] : undefined;
+  if (!sort || (sort.admin && !admin) || (dir !== 1 && dir !== -1)) throw badRequest('error-invalid-params', 'Não dá para ordenar a lista de usuários por esse campo.');
+  const asc = dir === 1;
+  return `(type = 'bot'), ${sort.col} ${asc ? 'ASC' : 'DESC'}${sort.nulls?.(asc) ?? ''}, username`;
 }
 
 export function usersRoutes(app: FastifyInstance) {
@@ -91,10 +130,11 @@ export function usersRoutes(app: FastifyInstance) {
       await audit({ id: u.id, username: u.username, ip: req.ip }, 'auth.login', { sessionId: s.sessionId, method });
       return { status: 'success', data: { userId: u.id, authToken: s.authToken, me: await meResponse(u.id) } };
     }
-    const user = str(body.user ?? body.username ?? body.email, 'user');
+    // Espaço antes ou depois do usuário (sugestão do teclado do celular, copiar e colar) não faz o login falhar.
+    const user = str(body.user ?? body.username ?? body.email, 'user').trim();
     const password = str(body.password, 'password');
     try {
-      const r = await login({ user, password, code: body.code, device: { userAgent: req.headers['user-agent'], ip: req.ip, deviceId: readDeviceId(req.headers.cookie) } });
+      const r = await login({ user, password, code: body.code == null ? undefined : String(body.code), device: { userAgent: req.headers['user-agent'], ip: req.ip, deviceId: readDeviceId(req.headers.cookie) } });
       reply.header('set-cookie', r.deviceCookie);
       return { status: 'success', data: { userId: r.user.id, authToken: r.authToken, me: await meResponse(r.user.id) } };
     } catch (e) {
@@ -114,8 +154,10 @@ export function usersRoutes(app: FastifyInstance) {
 
   route(app, 'POST', 'users.register', { auth: false }, async (req) => {
     const body = b(req);
+    // Campo vazio ou inválido: registerUser responde com a mensagem do campo, depois de conferir se o cadastro está aberto.
+    const text = (v: unknown) => (typeof v === 'string' ? v : '');
     const row = await registerUser(
-      { username: str(body.username, 'username'), name: str(body.name, 'name'), email: str(body.email, 'email'), pass: str(body.pass, 'pass'), secretURL: body.secretURL },
+      { username: text(body.username), name: text(body.name), email: text(body.email), pass: text(body.pass), secretURL: body.secretURL },
       req.ip,
     );
     return { user: mapUser(row) };
@@ -126,6 +168,7 @@ export function usersRoutes(app: FastifyInstance) {
     await requestPasswordReset(str(b(req).email, 'email', { max: 320 }), req.ip);
     return {};
   });
+  route(app, 'POST', 'users.checkResetToken', { auth: false }, async (req) => ({ valid: await checkResetToken(str(b(req).token, 'token', { max: 200 })) }));
   route(app, 'POST', 'users.resetPassword', { auth: false }, async (req) => {
     const body = b(req);
     await resetPasswordWithToken(str(body.token, 'token', { max: 200 }), str(body.password, 'password', { max: 1000 }), req.ip);
@@ -139,7 +182,8 @@ export function usersRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'users.2fa.verifyTotp', {}, async (req, _rep, ctx) => verifyAndEnableTotp(ctx, str(b(req).code, 'code')));
   route(app, 'POST', 'users.2fa.disableTotp', {}, async (req, _rep, ctx) => {
-    await disableTotp(ctx, str(b(req).code, 'code'));
+    const body = b(req);
+    await disableTotp(ctx, str(body.code, 'code'), typeof body.password === 'string' ? body.password : undefined);
     return {};
   });
 
@@ -170,12 +214,14 @@ export function usersRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'sessions.logout.others', {}, async (_req, _rep, ctx) => {
     if (!getSetting('Device_Management_Allow_Logout_All')) throw forbidden();
-    return { removed: await revokeAllSessions(ctx.userId, ctx.sessionId) };
+    return { removed: await revokeAllSessions(ctx.userId, ctx.sessionId, 'session-revoked') };
   });
-  route(app, 'GET', 'sessions.list.all', { permissions: ['view-device-management'] }, async (req) => {
+  route(app, 'GET', 'sessions.list.all', { permissions: ['view-device-management'] }, async (req, _rep, ctx) => {
     const query = q(req);
     const r = await listSessions({ ...paging(query), search: query.filter, userId: query.userId });
-    return { ...r, count: r.sessions.length, offset: paging(query).offset };
+    // current: a sessão de quem está vendo (encerrar é sair da conta); os papéis de cada dono dizem à tela quais
+    // sessões têm cadeado (dono com papel acima de quem vê), como na lista de usuários.
+    return { ...r, sessions: r.sessions.map((s) => ({ ...s, current: s._id === ctx.sessionId })), count: r.sessions.length, offset: paging(query).offset };
   });
   route(app, 'POST', 'sessions.logout', { permissions: ['view-device-management', 'logout-other-user'] }, async (req, _rep, ctx) => {
     const sid = str(b(req).sessionId, 'sessionId');
@@ -189,9 +235,11 @@ export function usersRoutes(app: FastifyInstance) {
   route(app, 'GET', 'users.getPersonalAccessTokens', { permissions: ['create-personal-access-tokens'] }, async (_req, _rep, ctx) => ({
     tokens: await listPersonalTokens(ctx.userId),
   }));
-  route(app, 'POST', 'users.generatePersonalAccessToken', { permissions: ['create-personal-access-tokens'] }, async (req, _rep, ctx) => ({
-    token: await createPersonalToken(ctx, str(b(req).tokenName, 'tokenName', { max: 100 }), !!bool(b(req).bypassTwoFactor)),
-  }));
+  route(app, 'POST', 'users.generatePersonalAccessToken', { permissions: ['create-personal-access-tokens'] }, async (req, _rep, ctx) => {
+    const body = b(req);
+    const confirm = { password: typeof body.password === 'string' ? body.password : undefined, code: typeof body.code === 'string' ? body.code : undefined };
+    return { token: await createPersonalToken(ctx, str(body.tokenName, 'tokenName', { max: 100 }), !!bool(body.bypassTwoFactor), confirm) };
+  });
   route(app, 'POST', 'users.removePersonalAccessToken', {}, async (req, _rep, ctx) => {
     await removePersonalToken(ctx.userId, str(b(req).tokenName, 'tokenName'));
     return {};
@@ -200,14 +248,19 @@ export function usersRoutes(app: FastifyInstance) {
   // ---------- Perfil próprio ----------
   route(app, 'POST', 'users.updateOwnBasicInfo', {}, async (req, _rep, ctx) => {
     const d = b(req).data ?? {};
-    // Na troca de senha obrigatória só a senha pode ser alterada.
-    const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: d.statusText };
+    // "Encerrar as outras sessões" junto com a senha nova (quem troca porque a senha vazou): as outras saem na hora.
+    const logoutOthers = !!d.newPassword && bool(d.logoutOthers) === true;
+    if (logoutOthers && !getSetting('Device_Management_Allow_Logout_All')) throw forbidden('Encerrar todas as outras sessões está desativado.');
+    // Na troca de senha obrigatória só a senha pode ser alterada (e vazia não é resposta: antes saía 200 sem mudar nada).
+    if (ctx.setup === 'password' && (typeof d.newPassword !== 'string' || !d.newPassword)) throw badRequest('error-invalid-params', 'Digite a nova senha.');
+    const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: typeof d.statusText === 'string' && d.statusText !== '' ? clampStatusText(d.statusText.trim()) : (d.statusText ?? undefined) };
     const row = await updateUser(
       ctx,
       ctx.userId,
       fields,
       { asAdmin: false, currentPassword: d.currentPassword },
     );
+    if (logoutOthers) return { user: mapUser(row, { full: true }), sessionsEnded: await revokeAllSessions(ctx.userId, ctx.sessionId, d.newPassword ? 'password-changed' : 'session-revoked') };
     return { user: mapUser(row, { full: true }) };
   });
   route(app, 'POST', 'users.setPreferences', {}, async (req, _rep, ctx) => {
@@ -224,7 +277,9 @@ export function usersRoutes(app: FastifyInstance) {
       if (!other) throw notFound('error-invalid-user', 'Usuário não encontrado.');
       await assertCanManageUser(ctx, target);
     }
-    const message = body.message === undefined || body.message === null ? undefined : String(body.message);
+    // Texto (vazio limpa a mensagem); outro tipo é recusado em vez de virar "[object Object]".
+    // Só espaços também limpa (antes gravava os espaços como mensagem).
+    const message = body.message === undefined || body.message === null ? undefined : body.message === '' ? '' : str(body.message, 'message').trim();
     // Status personalizado: vale o tipo dele e ganha de status. Sem statusId, um status de base limpa o personalizado.
     let status: string | undefined = body.status;
     let customId: string | null = null;
@@ -275,7 +330,12 @@ export function usersRoutes(app: FastifyInstance) {
     if (!getSetting('Accounts_AllowDeleteOwnAccount')) throw forbidden('Excluir a própria conta está desativado.');
     const u = await getUserById(ctx.userId);
     const { verifyPassword } = await import('../lib/password');
-    if (u.password_hash && !(await verifyPassword(str(b(req).password, 'password'), u.password_hash))) throw badRequest('error-invalid-password', 'Senha incorreta.');
+    if (u.password_hash) {
+      if (!(await verifyPassword(str(b(req).password, 'password'), u.password_hash))) throw badRequest('error-invalid-password', 'Senha incorreta.');
+    } else if (String(b(req).username ?? '').trim().replace(/^@/, '').toLowerCase() !== u.username.toLowerCase()) {
+      // Conta sem senha do chat (só SAML/OAuth): a pessoa confirma digitando o próprio nome de usuário.
+      throw badRequest('error-invalid-confirmation', 'Digite seu nome de usuário para confirmar.');
+    }
     await deleteUser(ctx, ctx.userId);
     return {};
   });
@@ -295,16 +355,22 @@ export function usersRoutes(app: FastifyInstance) {
     let target = ctx.userId;
     let data: Buffer | null = null;
     let type = '';
+    const allowed = async () => {
+      if (target !== ctx.userId && !(await hasPermission(ctx.userId, 'edit-other-user-avatar'))) throw forbidden();
+      if (target !== ctx.userId) await assertCanManageUser(ctx, target);
+      if (target === ctx.userId && !getSetting('Accounts_AllowUserAvatarChange')) throw forbidden('Alteração de avatar desativada.');
+    };
     if (req.isMultipart()) {
-      const parts = req.parts();
-      for await (const part of parts) {
-        if (part.type === 'file') {
-          data = await part.toBuffer();
-          type = part.mimetype;
-        } else if (part.fieldname === 'userId' && part.value) {
-          target = String(part.value);
-        }
-      }
+      // A permissão é conferida antes de ler o arquivo (com o userId que veio antes dele) e de novo depois. Sem userId
+      // antes do arquivo ele ainda pode vir depois (curl -F image=@... -F userId=...): aí vale só a conferência de baixo.
+      const r = await readAvatarUpload(req, async (fields) => {
+        if (!fields.userId) return;
+        target = fields.userId;
+        await allowed();
+      });
+      if (r.fields.userId) target = r.fields.userId;
+      data = r.data;
+      type = r.type;
     } else {
       const body = b(req);
       if (body.userId) target = body.userId;
@@ -313,9 +379,7 @@ export function usersRoutes(app: FastifyInstance) {
       type = m[1];
       data = Buffer.from(m[2], 'base64');
     }
-    if (target !== ctx.userId && !(await hasPermission(ctx.userId, 'edit-other-user-avatar'))) throw forbidden();
-    if (target !== ctx.userId) await assertCanManageUser(ctx, target);
-    if (target === ctx.userId && !getSetting('Accounts_AllowUserAvatarChange')) throw forbidden('Alteração de avatar desativada.');
+    await allowed();
     if (!data) throw badRequest('error-invalid-image', 'Imagem ausente.');
     await setAvatar(target, type, data);
     return {};
@@ -342,16 +406,38 @@ export function usersRoutes(app: FastifyInstance) {
     const params: unknown[] = [`%${query.filter ?? query.text ?? ''}%`];
     let w = '(username ILIKE $1 OR name ILIKE $1' + (admin ? ' OR email ILIKE $1)' : ')');
     if (!admin) w += ' AND active';
-    if (query.status === 'active') w += ' AND active';
-    if (query.status === 'deactivated') w += ' AND NOT active';
     if (query.role) w += ` AND $${params.push(query.role)} = ANY(roles)`;
     if (query.type) w += ` AND type = $${params.push(query.type)}`;
-    // Pessoas antes dos bots: a lista abre pelas contas que se administram de verdade.
-    const rows = await many(`SELECT *, count(*) OVER() AS total FROM users WHERE ${w} ORDER BY (type = 'bot'), username LIMIT ${count} OFFSET ${offset}`, params);
-    return { users: rows.map((r) => mapUser(r, { full: admin })), count: rows.length, offset, total: Number(rows[0]?.total ?? 0) };
+    const base = w;
+    if (query.status === 'active') w += ' AND active';
+    // Desativados não inclui quem aguarda aprovação: cada um tem o seu filtro.
+    if (query.status === 'deactivated') w += ' AND NOT active AND NOT pending_approval';
+    if (query.status === 'pending') w += ' AND NOT active AND pending_approval';
+    // Pessoas antes dos bots: a lista abre pelas contas que se administram de verdade. sort= ordena por uma coluna.
+    const order = userListOrder(query.sort, admin);
+    const rows = await many(`SELECT *, count(*) OVER() AS total FROM users WHERE ${w} ORDER BY ${order} LIMIT ${count} OFFSET ${offset}`, params);
+    // counts=true: os números de cada status (com a busca e o papel), na mesma chamada, para os filtros da tela.
+    const counts =
+      admin && query.counts === 'true'
+        ? await one(
+            `SELECT count(*)::int AS total, count(*) FILTER (WHERE active)::int AS active,
+                    count(*) FILTER (WHERE NOT active AND NOT pending_approval)::int AS deactivated, count(*) FILTER (WHERE NOT active AND pending_approval)::int AS pending
+               FROM users WHERE ${base}`,
+            params,
+          )
+        : undefined;
+    return { users: rows.map((r) => mapUser(r, { full: admin })), count: rows.length, offset, total: Number(rows[0]?.total ?? 0), ...(counts ? { counts } : {}) };
   });
   route(app, 'GET', 'users.autocomplete', {}, async (req, _rep, ctx) => {
-    const term = String(q(req).selector ? JSON.parse(q(req).selector).term ?? '' : q(req).term ?? '');
+    // selector (como no Rocket.Chat): JSON com term; quebrado é recusado com aviso, não com erro interno.
+    let selector: any;
+    try {
+      selector = q(req).selector ? JSON.parse(String(q(req).selector)) : undefined;
+    } catch {
+      selector = null;
+    }
+    if (selector !== undefined && (selector === null || typeof selector !== 'object')) throw badRequest('error-invalid-params', 'Parâmetro selector inválido.');
+    const term = String(selector ? selector.term ?? '' : q(req).term ?? '');
     const exclude = strArray(q(req).exclude);
     // inRoom só para quem pode ver os membros da sala; sem acesso, ou com a lista de membros oculta, o rid é ignorado.
     let rid: string | undefined;
@@ -363,9 +449,9 @@ export function usersRoutes(app: FastifyInstance) {
     }
     const rows = await many(
       `SELECT id, username, name, status, avatar_etag, roles ${rid ? ', EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = $4 AND s.user_id = users.id) AS in_room' : ''}
-       FROM users WHERE active AND (username ILIKE $1 OR name ILIKE $1) AND NOT (username = ANY($2))
+       FROM users WHERE active AND (wescc_fold(username) LIKE wescc_fold($1) OR wescc_fold(name) LIKE wescc_fold($1)) AND NOT (username = ANY($2))
        ORDER BY ${rid ? 'in_room DESC, ' : ''}(lower(username) = lower($3)) DESC, username LIMIT 15`,
-      rid ? [`${term}%`, exclude, term, rid] : [`${term}%`, exclude, term],
+      rid ? [`${escapeLike(term)}%`, exclude, term, rid] : [`${escapeLike(term)}%`, exclude, term],
     );
     // roles (globais): a web decide antes do clique se dá para abrir uma conversa direta.
     return { items: rows.map((r) => ({ _id: r.id, username: r.username, name: r.name, status: r.status, avatarETag: r.avatar_etag, roles: r.roles, inRoom: r.in_room })) };
@@ -389,12 +475,22 @@ export function usersRoutes(app: FastifyInstance) {
     // Hierarquia de concessão: só dá papéis que cabem no que o ator tem (ou delegados a ele), inclusive o Usuário
     // que a conta recebe quando nenhum papel vem no pedido.
     await assertRoleChange(ctx, '', [], roles);
+    // "Enviar link para definir a senha": a senha fica opcional e a pessoa cria a dela pelo e-mail (o mesmo link de
+    // "Esqueci minha senha"). Sem o e-mail, sem a redefinição ligada ou sem SMTP a conta nem é criada.
+    const sendLink = !!bool(body.sendPasswordEmail);
+    if (sendLink) {
+      if (!normalizeEmail(body.email)) throw badRequest('error-invalid-params', 'Informe o e-mail para enviar o link de definir a senha.');
+      if (!getSetting('Accounts_PasswordReset'))
+        throw badRequest('error-password-reset-disabled', 'O link usa "Esqueci minha senha", que está desligado em Configurações › Contas. Ligue-o ou defina uma senha.');
+      const { mailStatus } = await import('../services/mailer');
+      if (!mailStatus().configured) throw badRequest('error-smtp-not-configured', 'O envio de e-mail não está configurado (Configurações › E-mail). Configure-o ou defina uma senha.');
+    }
     const row = await createUser(
       {
         username: str(body.username, 'username'),
-        name: str(body.name, 'name'),
+        name: normalizeName(body.name),
         email: body.email,
-        password: str(body.password, 'password'),
+        password: sendLink && !body.password ? null : str(body.password, 'password'),
         roles,
         active: bool(body.active) ?? true,
         verified: bool(body.verified) ?? false,
@@ -405,7 +501,24 @@ export function usersRoutes(app: FastifyInstance) {
       actorOf(ctx),
     );
     if (strArray(body.roles).length) await recordHistory(pool, { entityType: 'user', entityId: row.id, entityLabel: row.username, action: 'create', actor: { id: ctx.userId, username: ctx.username }, changes: [{ field: 'roles', before: null, after: row.roles }] });
-    return { user: mapUser(row, { full: true }) };
+    // A conta fica criada mesmo se o envio falhar: a tela avisa e o editor tem "Enviar link para definir a senha".
+    const passwordEmailSent = sendLink ? await sendPasswordSetupEmail(row.id).catch(() => false) : undefined;
+    return { user: mapUser(row, { full: true }), ...(sendLink ? { passwordEmailSent } : {}) };
+  });
+  // Editor de usuário: manda por e-mail o link para a pessoa definir uma senha nova (a atual vale até ela trocar).
+  route(app, 'POST', 'users.sendPasswordLink', { permissions: ['edit-other-user-password'] }, async (req, _rep, ctx) => {
+    const userId = str(b(req).userId, 'userId');
+    await assertCanManageUser(ctx, userId);
+    const u = await getUserById(userId);
+    if (!u) throw notFound('error-invalid-user', 'Usuário não encontrado.');
+    if (!u.email) throw badRequest('error-invalid-email', 'Esta pessoa não tem e-mail. Cadastre um e-mail ou defina a senha aqui.');
+    if (!getSetting('Accounts_PasswordReset')) throw badRequest('error-password-reset-disabled', 'O link usa "Esqueci minha senha", que está desligado em Configurações › Contas.');
+    const { mailStatus } = await import('../services/mailer');
+    if (!mailStatus().configured) throw badRequest('error-smtp-not-configured', 'O envio de e-mail não está configurado (Configurações › E-mail).');
+    if (!u.active || u.type === 'bot' || u.auth_source === 'ldap') throw badRequest('error-action-not-allowed', 'Esta conta não entra com senha do chat (desativada, bot ou LDAP).');
+    if (!(await sendPasswordSetupEmail(userId, 'admin'))) throw badRequest('error-email-failed', 'Não foi possível enviar o e-mail. Confira Configurações › E-mail e tente de novo.');
+    await audit(actorOf(ctx), 'user.password.link.sent', { userId, username: u.username });
+    return { message: `Link enviado para ${u.email}.` };
   });
   // Dados e papéis têm chaves separadas: edit-other-user-info para nome, e-mail, bio e o resto; assign-roles para os
   // papéis. A tela manda só o que mudou, então quem só dá papéis salva sem esbarrar nos dados (e vice-versa).
@@ -438,6 +551,8 @@ export function usersRoutes(app: FastifyInstance) {
       await assertRoleChange(ctx, userId, current, roles);
     }
     if (d.password && !(await hasPermission(ctx.userId, 'edit-other-user-password'))) throw forbidden();
+    // A própria senha só muda com a senha atual (Minha conta): uma sessão esquecida aberta não tranca o dono para fora.
+    if (d.password && userId === ctx.userId) throw badRequest('error-action-not-allowed', 'Para trocar a sua própria senha, use Minha conta › Segurança (pede a senha atual).');
     let row = await updateUser(ctx, userId, d, { asAdmin: true });
     if (roles) {
       // Os papéis gravam com o histórico, na mesma transação dele.
@@ -464,9 +579,11 @@ export function usersRoutes(app: FastifyInstance) {
     const userId = b(req).userId ?? ctx.userId;
     if (userId !== ctx.userId && !(await hasPermission(ctx.userId, 'logout-other-user'))) throw forbidden();
     if (userId !== ctx.userId) await assertCanManageUser(ctx, userId);
-    const n = await revokeAllSessions(userId);
-    await audit(actorOf(ctx), 'user.logout.all', { userId }, { sessions: n });
-    return { message: `Sessões encerradas: ${n}` };
+    const n = await revokeAllSessions(userId, undefined, userId !== ctx.userId ? 'admin-logout' : undefined);
+    // Encerrar as sessões de outra pessoa (conta invadida, desligamento) também revoga os tokens de acesso dela.
+    const tokens = userId !== ctx.userId ? await revokePersonalTokens(userId) : 0;
+    await audit(actorOf(ctx), 'user.logout.all', { userId }, { sessions: n, tokens });
+    return { message: `Sessões encerradas: ${n}${tokens ? `. Tokens de acesso revogados: ${tokens}` : ''}` };
   });
   // Ativar, desativar e encerrar sessões em lote (a tela seleciona até 500 pessoas): uma chamada só, sem esbarrar no
   // limite de chamadas por minuto. Ficam de fora quem tem cadeado (papéis acima dos seus) e a própria conta.
@@ -475,25 +592,36 @@ export function usersRoutes(app: FastifyInstance) {
     const active = !!bool(body.activeStatus);
     const { targets, skipped } = await bulkAccountTargets(ctx, body.userIds);
     let users = 0;
+    let lastAdmin = 0;
     for (const t of targets) {
       if (t.active === active) {
         skipped.unchanged++;
         continue;
       }
-      await updateUser(ctx, t.id, { active }, { asAdmin: true });
+      try {
+        await updateUser(ctx, t.id, { active }, { asAdmin: true });
+      } catch (e) {
+        // O último administrador ativo fica de fora (updateUser recusa), e o resto do lote segue.
+        if (!(e instanceof ApiError && e.errorType === 'error-action-not-allowed')) throw e;
+        lastAdmin++;
+        continue;
+      }
       users++;
     }
-    return { users, skipped };
+    return { users, skipped: { ...skipped, ...(lastAdmin ? { lastAdmin } : {}) } };
   });
   route(app, 'POST', 'users.bulkLogout', { permissions: ['logout-other-user'] }, async (req, _rep, ctx) => {
     const { targets, skipped } = await bulkAccountTargets(ctx, b(req).userIds);
     let sessions = 0;
+    let tokens = 0;
     for (const t of targets) {
-      const n = await revokeAllSessions(t.id);
-      await audit(actorOf(ctx), 'user.logout.all', { userId: t.id }, { sessions: n, bulk: true });
+      const n = await revokeAllSessions(t.id, undefined, 'admin-logout');
+      const k = await revokePersonalTokens(t.id);
+      await audit(actorOf(ctx), 'user.logout.all', { userId: t.id }, { sessions: n, tokens: k, bulk: true });
       sessions += n;
+      tokens += k;
     }
-    return { users: targets.length, sessions, skipped };
+    return { users: targets.length, sessions, tokens, skipped };
   });
   route(app, 'POST', 'users.resetTOTP', { permissions: ['edit-other-user-totp'] }, async (req, _rep, ctx) => {
     const userId = str(b(req).userId, 'userId');
@@ -517,7 +645,7 @@ export function usersRoutes(app: FastifyInstance) {
     return {};
   });
   route(app, 'GET', 'users.listPendingApproval', { permissions: ['view-user-administration'] }, async () => {
-    const rows = await many(`SELECT * FROM users WHERE NOT active AND last_login IS NULL ORDER BY created_at DESC LIMIT 200`);
+    const rows = await many(`SELECT * FROM users WHERE NOT active AND pending_approval ORDER BY created_at DESC LIMIT 200`);
     return { users: rows.map((r) => mapUser(r, { full: true })) };
   });
 
@@ -528,6 +656,8 @@ export function usersRoutes(app: FastifyInstance) {
     if (name.startsWith('room/')) return reply.callNotFound();
     const visible = !!req.ctx || avatarsPublic();
     reply.header('Cache-Control', visible && !req.ctx ? 'public, max-age=300' : 'private, max-age=300');
+    // O navegador segue o tipo gravado (sempre o detectado no conteúdo), sem adivinhar outro.
+    reply.header('X-Content-Type-Options', 'nosniff');
     if (!visible) return reply.type('image/svg+xml').send(initialsSvg(name));
     const u = await one('SELECT u.id, u.username, u.name, a.content_type, a.data, a.updated_at FROM users u LEFT JOIN avatars a ON a.user_id = u.id WHERE lower(u.username) = lower($1)', [name]);
     if (u?.data) return reply.type(u.content_type).send(u.data);
@@ -537,6 +667,7 @@ export function usersRoutes(app: FastifyInstance) {
   app.get('/avatar/uid/:id', async (req: any, reply) => {
     const visible = !!req.ctx || avatarsPublic();
     reply.header('Cache-Control', visible && !req.ctx ? 'public, max-age=300' : 'private, max-age=300');
+    reply.header('X-Content-Type-Options', 'nosniff');
     if (!visible) return reply.type('image/svg+xml').send(initialsSvg('?'));
     const u = await one('SELECT u.id, u.username, u.name, a.content_type, a.data FROM users u LEFT JOIN avatars a ON a.user_id = u.id WHERE u.id = $1', [String(req.params.id)]);
     if (u?.data) return reply.type(u.content_type).send(u.data);
@@ -545,6 +676,7 @@ export function usersRoutes(app: FastifyInstance) {
   app.get('/avatar/room/:rid', async (req: any, reply) => {
     const r = await one('SELECT r.*, a.content_type, a.data FROM rooms r LEFT JOIN room_avatars a ON a.room_id = r.id WHERE r.id = $1', [req.params.rid]);
     reply.header('Cache-Control', 'private, max-age=300');
+    reply.header('X-Content-Type-Options', 'nosniff');
     // Sala privada, DM ou atendimento: só para quem tem acesso. Canal público: segue a configuração de avatares.
     const { canAccessRoom } = await import('../services/rooms');
     const visible = !!r && (r.t === 'c' && avatarsPublic() ? true : !!req.ctx && (await canAccessRoom(req.ctx.userId, r)));
@@ -552,6 +684,39 @@ export function usersRoutes(app: FastifyInstance) {
     if (r.data) return reply.type(r.content_type).send(r.data);
     return reply.type('image/svg+xml').send(initialsSvg(r.fname || r.name || '#'));
   });
+}
+
+const AVATAR_MAX = 5 * 1024 * 1024;
+
+// Foto de usuário ou de sala por multipart: o limite de 5 MB vale no próprio leitor (o geral é de 1 GB), então um
+// arquivo maior é descartado enquanto chega, sem ir inteiro para a memória. beforeFile roda antes de o arquivo ser
+// lido, com os campos que vieram antes dele (a permissão).
+export async function readAvatarUpload(req: any, beforeFile?: (fields: Record<string, string>) => Promise<void>) {
+  const fields: Record<string, string> = {};
+  let data: Buffer | null = null;
+  let type = '';
+  try {
+    for await (const part of req.parts({ limits: { fileSize: AVATAR_MAX, files: 1, fields: 5, parts: 6, fieldSize: 1024 } })) {
+      if (part.type !== 'file') {
+        if (part.value) fields[part.fieldname] = String(part.value);
+        continue;
+      }
+      try {
+        await beforeFile?.(fields);
+      } catch (e) {
+        part.file.resume();
+        throw e;
+      }
+      data = await part.toBuffer();
+      type = part.mimetype;
+    }
+  } catch (e) {
+    const code = (e as any)?.code;
+    if (code === 'FST_REQ_FILE_TOO_LARGE') throw badRequest('error-file-too-large', 'Imagem muito grande (máx. 5 MB).');
+    if (code === 'FST_FILES_LIMIT' || code === 'FST_FIELDS_LIMIT' || code === 'FST_PARTS_LIMIT') throw badRequest('error-invalid-params', 'Envie só uma imagem por vez.');
+    throw e;
+  }
+  return { data, type, fields };
 }
 
 const BULK_MAX = 500;
@@ -579,8 +744,10 @@ const COLORS = ['#4453db', '#0e7490', '#047857', '#b45309', '#be185d', '#6d28d9'
 
 export function initialsSvg(name: string) {
   const clean = name.trim() || '?';
-  const parts = clean.split(/[\s._-]+/).filter(Boolean);
-  const initials = (parts.length > 1 ? parts[0][0] + parts[1][0] : clean.slice(0, 2)).toUpperCase();
+  // A primeira letra ou algarismo de cada parte: "🦊 Raposa Feliz 🎉" dá RF (parts[0][0] era meio emoji, "�").
+  // Sem letra nenhuma, o primeiro caractere inteiro.
+  const parts = clean.split(/[\s._-]+/).map((p) => p.match(/[\p{L}\p{N}]/gu) ?? []).filter((p) => p.length);
+  const initials = (parts.length > 1 ? parts[0][0] + parts[1][0] : parts.length ? parts[0].slice(0, 2).join('') : Array.from(clean)[0]).toUpperCase();
   let h = 0;
   for (const ch of clean) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   const color = COLORS[h % COLORS.length];

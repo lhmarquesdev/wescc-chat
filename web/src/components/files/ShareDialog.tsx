@@ -3,10 +3,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { DRIVE_LEVELS, type DriveAclEntry, type DriveFolder, type DriveSubject } from '@shared/drive';
 import { errorMessage } from '../../lib/api';
 import { filesApi } from '../../lib/files';
-import { useStore } from '../../lib/store';
+import { usePermission, useStore } from '../../lib/store';
 import { Icon } from '../Icon';
 import type { IconName } from '../icons';
-import { Avatar, Modal, Spinner, Toggle } from '../ui';
+import { Avatar, confirmDialog, Modal, Spinner, Toggle } from '../ui';
 
 const TYPE_ICON: Record<string, IconName> = { role: 'files-manage', room: 'files-room', user: 'files-user' };
 const TYPE_LABEL: Record<string, string> = { role: 'Papel', room: 'Canal ou grupo', user: 'Pessoa' };
@@ -37,6 +37,7 @@ function LevelSelect({ value, onChange, label }: { value: number; onChange: (l: 
 export function ShareDialog({ folder, acl, onClose, onSaved }: { folder: DriveFolder; acl: DriveAclEntry[]; onClose: () => void; onSaved: (acl: DriveAclEntry[]) => void }) {
   const me = useStore((s) => s.me)!;
   const toast = useStore((s) => s.toast);
+  const manageAll = usePermission('manage-all-files');
   const [entries, setEntries] = useState<Entry[]>(() => acl.filter((e) => !e.from));
   const inherited = acl.filter((e) => e.from);
   const [inherit, setInherit] = useState(folder.inherit);
@@ -71,9 +72,26 @@ export function ShareDialog({ folder, acl, onClose, onSaved }: { folder: DriveFo
   };
   const set = (i: number, level: 1 | 2 | 3) => setEntries((l) => l.map((e, j) => (j === i ? { ...e, level } : e)));
   const remove = (i: number) => setEntries((l) => l.filter((_, j) => j !== i));
-  const removesMe = !entries.some((e) => e.type === 'user' && e.id === me._id && e.level === 3);
+  const isMe = (e: Pick<DriveAclEntry, 'type' | 'id' | 'level'>) => e.type === 'user' && e.id === me._id && e.level === 3;
+  const removesMe = !entries.some(isMe);
+  // Sem você como "Gerencia" (e sem herdar isso da pasta de cima), você pode perder o acesso ao salvar.
+  const losesManage = removesMe && !manageAll && !(isSub && inherit && inherited.some(isMe));
+  const wasMe = acl.some((e) => !e.from && isMe(e));
+  // Pasta principal ou restrita precisa de alguém com "Gerencia" (o servidor também recusa).
+  const noManager = !manageAll && (!isSub || !inherit) && !entries.some((e) => e.level === 3);
 
   const save = async () => {
+    if (
+      losesManage &&
+      wasMe &&
+      !(await confirmDialog({
+        title: 'Tirar você de “Gerencia”?',
+        body: 'Depois de salvar, você pode perder o acesso a esta pasta. Só quem a gerencia (ou um administrador) poderá devolvê-lo.',
+        confirmLabel: 'Salvar mesmo assim',
+        danger: true,
+      }))
+    )
+      return;
     setSaving(true);
     try {
       const out = await filesApi.share(
@@ -104,7 +122,7 @@ export function ShareDialog({ folder, acl, onClose, onSaved }: { folder: DriveFo
           <button type="button" className="btn" onClick={onClose}>
             Cancelar
           </button>
-          <button type="button" className="btn primary" disabled={saving} onClick={save}>
+          <button type="button" className="btn primary" disabled={saving || noManager} onClick={save}>
             {saving && <Spinner size="sm" />}
             Salvar
           </button>
@@ -124,9 +142,10 @@ export function ShareDialog({ folder, acl, onClose, onSaved }: { folder: DriveFo
               e.stopPropagation();
               setListOpen(false);
             }
-            if (e.key === 'Enter' && suggestions[0]) {
+            // Com texto na busca, o Enter escolhe a sugestão e nunca salva (o Enter do diálogo aciona o Salvar).
+            if (e.key === 'Enter' && (suggestions[0] || text.trim())) {
               e.preventDefault();
-              add(suggestions[0]);
+              if (suggestions[0]) add(suggestions[0]);
             }
           }}
           placeholder="Adicionar papel, canal, grupo ou pessoa"
@@ -174,11 +193,19 @@ export function ShareDialog({ folder, acl, onClose, onSaved }: { folder: DriveFo
           </li>
         ))}
       </ul>
-      {removesMe && entries.length > 0 && (
+      {noManager ? (
         <p className="fl-share-warn">
           <Icon name="warning" size={16} />
-          Você não está como “Gerencia”: depois de salvar, talvez não consiga mais mudar este compartilhamento.
+          Deixe pelo menos alguém com “Gerencia” nesta pasta (uma pessoa, um papel ou um canal) para poder salvar.
         </p>
+      ) : (
+        losesManage &&
+        (wasMe || entries.length > 0) && (
+          <p className="fl-share-warn">
+            <Icon name="warning" size={16} />
+            Você não está como “Gerencia”: depois de salvar, talvez não consiga mais abrir esta pasta nem mudar este compartilhamento.
+          </p>
+        )
       )}
 
       {isSub && (
@@ -195,13 +222,13 @@ export function ShareDialog({ folder, acl, onClose, onSaved }: { folder: DriveFo
         <>
           <h3 className="fl-share-h">Herdado das pastas de cima</h3>
           <ul className="fl-acl inherited">
-            {inherited.map((e) => (
-              <li key={`${e.from!._id}:${e.type}:${e.id}`}>
+            {inherited.map((e, i) => (
+              <li key={`${i}:${e.type}:${e.id}`}>
                 <SubjectIcon e={e} />
                 <span className="fl-subject-text">
                   <strong className="ellipsis">{e.label}</strong>
                   <small className="muted ellipsis">
-                    {e.sublabel ?? TYPE_LABEL[e.type]} · de “{e.from!.name}”
+                    {e.sublabel ?? TYPE_LABEL[e.type]} · {e.from!.name ? `de “${e.from!.name}”` : 'de uma pasta de cima'}
                   </small>
                 </span>
                 <span className="pill small">{DRIVE_LEVELS.find((l) => l.level === e.level)?.label}</span>
