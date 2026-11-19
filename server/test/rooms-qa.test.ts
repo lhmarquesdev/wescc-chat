@@ -197,3 +197,40 @@ describe('membros ao vivo', () => {
     wsCaio.close();
   });
 });
+
+describe('nomes e limites ao criar', () => {
+  const create = (name: string) => api('POST', 'channels.create', { name }, ana);
+  it('nome precisa de letra ou número, sem × ÷, com mensagem para cada problema', async () => {
+    for (const bad of ['.', '..', '-', '×÷', '_-_']) {
+      const r = await create(bad);
+      expect(r.status, bad).toBe(400);
+      expect(r.error, bad).toMatch(/pelo menos uma letra ou número|não é permitido/);
+    }
+    expect((await create('a'.repeat(65))).error).toBe('O nome pode ter no máximo 64 caracteres.');
+    expect((await create('nome/com/barra')).error).toBe('O caractere “/” não é permitido. Use letras, números, ponto, hífen ou sublinhado.');
+    expect((await create('festa🎉')).error).toContain('“🎉”');
+    expect((await create('a×b')).error).toContain('“×”');
+    expect((await create(uniq('Operação'))).success).toBe(true);
+    expect((await create(uniq('x').slice(0, 10) + 'a'.repeat(54))).success).toBe(true);
+  });
+
+  it('canal do time sem nome e discussão longa explicam em português', async () => {
+    const t = await api('POST', 'teams.create', { name: uniq('time-nomes'), type: 0 }, ana);
+    const r = await api('POST', 'teams.createRoom', { teamId: t.team._id, name: '', type: 'c' }, ana);
+    expect(r.status).toBe(400);
+    expect(r.error).toBe('Informe o nome.');
+    const c = await create(uniq('origem'));
+    const d = await api('POST', 'rooms.createDiscussion', { prid: c.channel._id, t_name: 'x'.repeat(250) }, ana);
+    expect(d.error).toBe('O nome da discussão pode ter no máximo 200 caracteres.');
+    expect((await api('POST', 'rooms.createDiscussion', { prid: c.channel._id, t_name: '' }, ana)).error).toBe('Informe o nome da discussão.');
+  });
+
+  it('mensagem direta com mais de 8 pessoas além de você', async () => {
+    const people = [];
+    for (let i = 0; i < 9; i++) people.push((await newUser(A, { roles: ['user'] })).username);
+    const r = await api('POST', 'im.create', { usernames: people.join(',') }, ana);
+    expect(r.status).toBe(400);
+    expect(r.error).toBe('Uma mensagem direta junta no máximo 8 pessoas além de você.');
+    expect((await api('POST', 'im.create', { usernames: people.slice(0, 8).join(',') }, ana)).success).toBe(true);
+  });
+});

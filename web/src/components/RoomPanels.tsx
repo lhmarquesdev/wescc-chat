@@ -14,6 +14,7 @@ import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { clearRoomError, resetTranslationViews, useLanguages, useMyLanguage, useRoomTranslate, useTranslations } from '../lib/translate';
 import { capitalize, languageLabel, languageOptions } from '../lib/translateRules';
 import { normalizeLang } from '@shared/translate';
+import { ROOM_NAME_MAX, roomNameProblem } from '@shared/roomName';
 import { Icon, type IconName } from './Icon';
 import { FileTile } from './MessageItem';
 import { useEscape, useIsPhone } from './overlay';
@@ -298,8 +299,8 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
     return (
       <div className="form">
         {room.t !== 'd' && (
-          <Field label="Nome">
-            <input value={f.roomName} onChange={(e) => setF({ ...f, roomName: e.target.value })} />
+          <Field label="Nome" error={!room.prid && f.roomName !== base.roomName ? (roomNameProblem(f.roomName) ?? undefined) : undefined}>
+            <input value={f.roomName} maxLength={room.prid ? 200 : ROOM_NAME_MAX} onChange={(e) => setF({ ...f, roomName: e.target.value })} />
           </Field>
         )}
         <Field label="Tópico">
@@ -730,6 +731,7 @@ function TeamPanel({ room, roles }: Props) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [priv, setPriv] = useState(false);
+  const nameProblem = roomNameProblem(name);
   const canAdd = hasPerm('create-team-channel', roles) || hasPerm('add-team-channel', roles);
   const canEditRooms = hasPerm('edit-team-channel', roles);
   const canRemoveRooms = hasPerm('remove-team-channel', roles);
@@ -743,7 +745,9 @@ function TeamPanel({ room, roles }: Props) {
       )}
       {adding && (
         <div className="form panel-add">
-          <input placeholder="nome-do-canal" aria-label="Nome do canal" value={name} onChange={(e) => setName(e.target.value.replace(/\s/g, '-'))} />
+          <Field label="Nome do canal" error={name && nameProblem ? nameProblem : undefined}>
+            <input placeholder="nome-do-canal" maxLength={ROOM_NAME_MAX} value={name} onChange={(e) => setName(e.target.value.replace(/\s/g, '-'))} />
+          </Field>
           <Toggle checked={priv} onChange={setPriv} label="Privado" />
           <div className="row-actions">
             <button type="button" className="btn" onClick={() => setAdding(false)}>
@@ -752,6 +756,7 @@ function TeamPanel({ room, roles }: Props) {
             <button
               type="button"
               className="btn primary"
+              disabled={!!nameProblem}
               onClick={() => api.post('teams.createRoom', { teamId: room.teamId, name, type: priv ? 'p' : 'c' }).then(() => (setAdding(false), setName(''), reload())).catch(fail)}
             >
               Criar

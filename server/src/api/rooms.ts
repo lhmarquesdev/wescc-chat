@@ -365,6 +365,8 @@ export function roomsRoutes(app: FastifyInstance) {
   // ---------- Discussões ----------
   route(app, 'POST', 'rooms.createDiscussion', {}, async (req, _rep, ctx) => {
     const body = b(req);
+    if (body.t_name === undefined || body.t_name === null || String(body.t_name).trim() === '') throw badRequest('error-invalid-params', 'Informe o nome da discussão.');
+    if (String(body.t_name).length > 200) throw badRequest('error-invalid-params', 'O nome da discussão pode ter no máximo 200 caracteres.');
     const room = await createDiscussion(ctx, {
       prid: str(body.prid, 'prid'),
       pmid: body.pmid,
@@ -502,7 +504,8 @@ export function roomsRoutes(app: FastifyInstance) {
   route(app, 'POST', 'teams.createRoom', {}, async (req, _rep, ctx) => {
     const body = b(req);
     const room = await createTeamRoom(ctx, await requireTeam(body), {
-      name: str(body.name, 'name'),
+      // Vazio ou inválido: a regra de nome da sala explica (validateRoomName), em vez de "parâmetro obrigatório".
+      name: String(body.name ?? ''),
       type: body.type === 'p' ? 'p' : 'c',
       members: strArray(body.members),
       readOnly: !!bool(body.readOnly),

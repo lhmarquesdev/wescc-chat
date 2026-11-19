@@ -2,6 +2,7 @@ import type { RoomRetention, RoomType, Subscription, SubscriptionNotifyPrefs } f
 import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { LOCK_TEXT } from '@shared/rbac';
+import { roomNameProblem } from '@shared/roomName';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
@@ -15,10 +16,9 @@ import { actorOf, getUserById, type Ctx } from './users';
 import { emit } from './hooks';
 import { forgetRoomTranslations } from '../translate/forget';
 
-const ROOM_NAME_RE = /^[0-9a-zA-ZÀ-ſ._-]{1,64}$/;
-
 export function validateRoomName(name: string) {
-  if (!ROOM_NAME_RE.test(name)) throw badRequest('error-invalid-room-name', `"${name}" não é um nome de sala válido (use letras, números, ponto, hífen e sublinhado).`);
+  const problem = roomNameProblem(name);
+  if (problem) throw badRequest('error-invalid-room-name', problem);
 }
 
 export async function getRoom(rid: string, db?: Queryable) {
@@ -377,7 +377,7 @@ export async function createDirect(ctx: Ctx, usernames: string[]) {
   const names = [...new Set(usernames.map((u) => u.replace(/^@/, '').toLowerCase()))].filter((u) => u !== ctx.username.toLowerCase());
   const others = names.length ? await many('SELECT id, username FROM users WHERE lower(username) = ANY($1)', [names]) : [];
   if (others.length !== names.length) throw badRequest('error-invalid-user', 'Usuário não encontrado.');
-  if (others.length > 8) throw badRequest('error-too-many-users', 'Máximo de 9 participantes em mensagem direta.');
+  if (others.length > 8) throw badRequest('error-too-many-users', 'Uma mensagem direta junta no máximo 8 pessoas além de você.');
   const all = [{ id: ctx.userId, username: ctx.username }, ...others];
   const uids = all.map((u) => u.id).sort();
   const existing = await one(`SELECT * FROM rooms WHERE t = 'd' AND dm_key = $1`, [uids.join(',')]);
