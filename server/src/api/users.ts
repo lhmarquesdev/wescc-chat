@@ -14,6 +14,7 @@ import { assertCanManageUser, assertRoleChange, effectiveRoles, grantContext, wr
 import { recordHistory } from '../services/rbacHistory';
 import {
   actorOf,
+  checkResetToken,
   cleanName,
   type Ctx,
   createPersonalToken,
@@ -131,6 +132,7 @@ export function usersRoutes(app: FastifyInstance) {
     await requestPasswordReset(str(b(req).email, 'email', { max: 320 }), req.ip);
     return {};
   });
+  route(app, 'POST', 'users.checkResetToken', { auth: false }, async (req) => ({ valid: await checkResetToken(str(b(req).token, 'token', { max: 200 })) }));
   route(app, 'POST', 'users.resetPassword', { auth: false }, async (req) => {
     const body = b(req);
     await resetPasswordWithToken(str(body.token, 'token', { max: 200 }), str(body.password, 'password', { max: 1000 }), req.ip);

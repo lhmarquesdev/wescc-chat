@@ -340,35 +340,78 @@ export function ForgotPasswordPage() {
   );
 }
 
+// O token do link fica guardado nesta aba: recarregar a página (ou o celular descartar a aba enquanto a pessoa busca a
+// senha no gerenciador) não perde o link. Sai ao concluir ou quando o link não vale mais.
+const RESET_KEY = 'wescc.resetToken';
+function readResetToken() {
+  const fromLink = new URLSearchParams(location.hash.slice(1)).get('token');
+  try {
+    if (fromLink) sessionStorage.setItem(RESET_KEY, fromLink);
+    return fromLink ?? sessionStorage.getItem(RESET_KEY) ?? '';
+  } catch {
+    return fromLink ?? '';
+  }
+}
+function forgetResetToken() {
+  try {
+    sessionStorage.removeItem(RESET_KEY);
+  } catch {
+    // armazenamento indisponível
+  }
+}
+
 // Aberta pelo link do e-mail: /reset-password#token=...
 export function ResetPasswordPage() {
-  const [token] = useState(() => new URLSearchParams(location.hash.slice(1)).get('token') ?? '');
+  const [token] = useState(readResetToken);
+  // O link é conferido ao abrir: usado ou vencido, a tela avisa antes de a pessoa digitar a senha duas vezes.
+  const [valid, setValid] = useState<boolean | null>(token ? null : false);
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const minLen = useSetting<number>('Accounts_Password_Policy_MinLength');
   // Tira o token da barra de endereço (histórico e capturas de tela).
   useEffect(() => {
     if (location.hash) history.replaceState(null, '', location.pathname);
   }, []);
+  useEffect(() => {
+    if (!token) return;
+    api
+      .post('users.checkResetToken', { token })
+      .then((r: { valid: boolean }) => setValid(r.valid))
+      // Sem resposta (rede): mostra o formulário; o servidor confere de novo ao salvar.
+      .catch(() => setValid(true));
+  }, [token]);
+  useEffect(() => {
+    if (valid === false || done) forgetResetToken();
+  }, [valid, done]);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (p1 !== p2) return setError('As senhas não conferem.');
+    setBusy(true);
     try {
       await api.post('users.resetPassword', { token, password: p1 });
       setDone(true);
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      setBusy(false);
     }
   };
-  if (!token)
+  if (valid === false)
     return (
-      <AuthShell title="Link inválido" subtitle="Peça um novo link em “Esqueci minha senha”.">
+      <AuthShell title="Link inválido ou expirado" subtitle="O link já foi usado, venceu (vale por 1 hora) ou foi trocado por um mais novo. Peça outro em “Esqueci minha senha”.">
         <Link className="btn primary lg full" to="/forgot-password">
           Esqueci minha senha
         </Link>
+      </AuthShell>
+    );
+  if (valid === null)
+    return (
+      <AuthShell title="Nova senha">
+        <div className="spinner" role="status" aria-label="Conferindo o link" />
       </AuthShell>
     );
   if (done)
@@ -393,7 +436,8 @@ export function ResetPasswordPage() {
         <Field label="Confirmar nova senha">
           <PasswordInput autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} />
         </Field>
-        <button className="btn primary lg full block" disabled={!p1}>
+        <button className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !p1}>
+          {busy && <span className="spinner sm" aria-hidden="true" />}
           Salvar senha
         </button>
       </form>

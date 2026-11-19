@@ -455,6 +455,14 @@ export async function sendPasswordSetupEmail(userId: string) {
   return sendMail({ to: u.email, subject: `Defina sua senha no ${site}`, text, html });
 }
 
+// A tela de nova senha confere o link ao abrir: usado, vencido ou trocado por um mais novo, ela avisa antes de a pessoa
+// digitar a senha. O token tem 32 bytes aleatórios: a resposta não ajuda a adivinhar nenhum.
+export async function checkResetToken(token: string) {
+  if (!getSetting('Accounts_PasswordReset')) return false;
+  const u = await one('SELECT u.* FROM password_resets p JOIN users u ON u.id = p.user_id WHERE p.token_hash = $1 AND p.expires_at > now()', [sha256(token)]);
+  return !!u && canResetPassword(u);
+}
+
 export async function resetPasswordWithToken(token: string, password: string, ip?: string) {
   if (!getSetting('Accounts_PasswordReset')) throw forbidden('A redefinição de senha está desativada.');
   const invalid = () => badRequest('error-invalid-token', 'Link inválido ou expirado. Peça um novo em "Esqueci minha senha".');
