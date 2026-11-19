@@ -303,6 +303,12 @@
 .menu button.danger:where(:hover, :focus-visible) {
   background: hsl(var(--st-red-soft));
 }
+/* Destrutivo desativado ("Apagar" depois do prazo): cinza como os outros itens desativados, sem o vermelho. */
+.menu button.danger:disabled,
+.menu button.danger:disabled .icon {
+  background: none;
+  color: hsl(var(--text-5));
+}
 /* O ponto de status ocupa a largura de um ícone: os rótulos ficam na mesma coluna. */
 .menu :where(button, a) > .status-dot {
   margin-inline: calc((16px - var(--dot, 10px)) / 2);
