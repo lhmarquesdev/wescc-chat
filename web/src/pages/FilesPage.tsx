@@ -46,7 +46,20 @@ const toneOf = (f: { name: string; type: string }) => {
   return ext === 'txt' || ext === 'md' ? 'text' : kindOf(f);
 };
 const isText = (f: DriveFile) => /^text\//.test(f.type) || /\.(txt|md|csv|log|json|xml|ya?ml|ini|sql)$/i.test(f.name);
-const canPreview = (f: DriveFile) => /^(image|video|audio)\//.test(f.type) || f.type === 'application/pdf' || isText(f);
+const TEXT_PREVIEW_MAX = 512 * 1024;
+const isMedia = (f: DriveFile) => /^(video|audio)\//.test(f.type);
+// Vídeo e áudio que o navegador diz que não toca (AVI, WMV, FLV...) não ganham player. O .mov do celular costuma tocar
+// mesmo assim: tenta, e se falhar a prévia vira o aviso.
+const playable = (f: DriveFile) => {
+  if (f.type === 'video/quicktime') return true;
+  try {
+    return document.createElement(f.type.startsWith('audio/') ? 'audio' : 'video').canPlayType(f.type) !== '';
+  } catch {
+    return true;
+  }
+};
+const canPreview = (f: DriveFile) =>
+  /^image\//.test(f.type) || (isMedia(f) && playable(f)) || f.type === 'application/pdf' || (isText(f) && f.size <= TEXT_PREVIEW_MAX);
 // O navegador mostra na própria aba (o mesmo que inlineMimeType no servidor); o resto vai como download.
 const opensInTab = (f: DriveFile) => /^(image\/(png|jpeg|gif|webp|bmp|avif)|(audio|video)\/[a-z0-9.+-]+|application\/pdf)$/.test(f.type);
 // Prévias desta tela: ?preview não entra no histórico como download.
@@ -1092,36 +1105,56 @@ function TrashRow({ icon, name, where, who, when, canPurge, onRestore, onPurge }
 
 // ---------- Detalhes ----------
 
-function FilePreview({ file }: { file: DriveFile }) {
+// onFail: a prévia não abriu (formato que o navegador não mostra, acesso tirado): quem usa esconde o "Ampliar".
+function FilePreview({ file, onFail }: { file: DriveFile; onFail?: () => void }) {
   const [text, setText] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const fail = useCallback(() => {
+    setFailed(true);
+    onFail?.();
+  }, [onFail]);
   useEffect(() => {
     setText(null);
-    if (!isText(file) || file.size > 512 * 1024) return;
+    setFailed(false);
+    if (!isText(file) || file.size > TEXT_PREVIEW_MAX) return;
     let alive = true;
     fetch(previewUrl(file), { credentials: 'same-origin' })
-      .then((r) => r.text())
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
       .then((t) => alive && setText(t))
-      .catch(() => alive && setText(''));
+      .catch(() => alive && fail());
     return () => {
       alive = false;
     };
-  }, [file]);
-  if (file.type.startsWith('image/')) return <img className="fl-preview-img" src={previewUrl(file)} alt={file.name} />;
-  if (file.type.startsWith('video/')) return <video className="fl-preview-media" src={previewUrl(file)} controls preload="metadata" />;
-  if (file.type.startsWith('audio/')) return <audio className="fl-preview-audio" src={previewUrl(file)} controls preload="metadata" />;
+  }, [file, fail]);
+  if (failed || !canPreview(file)) {
+    const why =
+      isText(file) && file.size > TEXT_PREVIEW_MAX && !failed
+        ? `Arquivo de texto grande demais para a prévia (mais de ${formatBytes(TEXT_PREVIEW_MAX)}). Baixe para abrir.`
+        : isMedia(file) || file.type.startsWith('image/')
+          ? 'Este formato não abre no navegador. Baixe para abrir.'
+          : failed
+            ? 'Não deu para carregar a prévia. Baixe para abrir.'
+            : 'Sem prévia para este tipo. Baixe para abrir.';
+    return (
+      <div className="fl-preview-none">
+        <FileGlyph file={file} size={32} />
+        <span className="muted">{why}</span>
+      </div>
+    );
+  }
+  if (file.type.startsWith('image/')) return <img className="fl-preview-img" src={previewUrl(file)} alt={file.name} onError={fail} />;
+  if (file.type.startsWith('video/')) return <video className="fl-preview-media" src={previewUrl(file)} controls preload="metadata" onError={fail} />;
+  if (file.type.startsWith('audio/')) return <audio className="fl-preview-audio" src={previewUrl(file)} controls preload="metadata" onError={fail} />;
   if (file.type === 'application/pdf') return <iframe className="fl-preview-pdf" src={previewUrl(file)} title={`Prévia de ${file.name}`} />;
-  if (isText(file) && file.size <= 512 * 1024) return text === null ? <Skeleton height={120} /> : <pre className="fl-preview-text">{text.slice(0, 20000)}</pre>;
-  return (
-    <div className="fl-preview-none">
-      <FileGlyph file={file} size={32} />
-      <span className="muted">Sem prévia para este tipo. Baixe para abrir.</span>
-    </div>
-  );
+  return text === null ? <Skeleton height={120} /> : <pre className="fl-preview-text">{text.slice(0, 20000)}</pre>;
 }
 
 function FileDetails({ file, level, actions, onClose }: { file: DriveFile; level: number; actions: ItemActions; onClose: () => void }) {
   const phone = useIsPhone();
   const [full, setFull] = useState(false);
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [file._id]);
+  const onFail = useCallback(() => setBroken(true), []);
   return (
     <div className="fl-detail">
       {!phone && (
@@ -1136,8 +1169,8 @@ function FileDetails({ file, level, actions, onClose }: { file: DriveFile; level
         </div>
       )}
       <div className="fl-preview">
-        <FilePreview file={file} />
-        {canPreview(file) && !phone && (
+        <FilePreview file={file} onFail={onFail} />
+        {canPreview(file) && !broken && !phone && (
           <button type="button" className="btn small fl-preview-open" onClick={() => setFull(true)}>
             <Icon name="expand" />
             Ampliar
