@@ -3,7 +3,7 @@
 // Salvar abre o "Revisar alterações" e grava só o que esta tela mudou (deltas): o que outra pessoa salvou no meio-tempo
 // em outras permissões continua.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { areaLevel, HOLDERS_LOCK_TEXT, isSensitive, KEY_AREA, levelText, RBAC_GROUPS, rbacLabel, ROLE_PURPOSE, roleNameProblem, VISIBLE_KEYS } from '@shared/rbac';
 import { roleDisplayName } from '@shared/messageText';
 import { api } from '../../../lib/api';
@@ -593,10 +593,11 @@ function RolePeople({ role, grant, onChanged }: { role: RbacRole; grant: Grant; 
             <button type="button" className="btn small" disabled={loadingMore} aria-busy={loadingMore || undefined} onClick={loadMore}>
               Carregar mais {Math.min(left, PEOPLE_PAGE)}
             </button>
-            <button type="button" className="btn small ghost" onClick={() => navigate(`/admin/users?role=${encodeURIComponent(role._id)}`)}>
+            {/* Link (não botão): com alterações não salvas no papel, a guarda de saída pergunta antes. */}
+            <Link className="btn small ghost" to={`/admin/users?role=${encodeURIComponent(role._id)}`}>
               <Icon name="search" />
               Buscar na lista de usuários
-            </button>
+            </Link>
           </div>
         )}
       </Section>
