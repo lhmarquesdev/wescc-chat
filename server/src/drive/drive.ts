@@ -491,10 +491,14 @@ export async function setAcl(ctx: Ctx, folderId: unknown, input: { inherit?: unk
   });
   const before = Object.fromEntries(prev.map((p) => [`${p.subject_type}:${p.subject_id}`, p.level]));
   const after = Object.fromEntries([...entries.values()].map((e) => [`${e.type}:${e.id}`, e.level]));
+  const keys = { added: Object.keys(after).filter((k) => !(k in before)), removed: Object.keys(before).filter((k) => !(k in after)), changed: Object.keys(after).filter((k) => k in before && before[k] !== after[k]) };
+  // O histórico mostra quem ganhou, perdeu ou mudou de nível, com o nome do momento (a pessoa pode sair depois).
+  const names = await subjectLabels([...keys.added, ...keys.removed, ...keys.changed].map((k) => ({ type: k.slice(0, k.indexOf(':')) as DriveSubjectType, id: k.slice(k.indexOf(':') + 1) })));
+  const who = (k: string, level: number, from?: number) => ({ key: k, label: names.get(k)?.label ?? 'alguém que não existe mais', level, ...(from ? { from } : {}) });
   const diff = {
-    added: Object.keys(after).filter((k) => !(k in before)),
-    removed: Object.keys(before).filter((k) => !(k in after)),
-    changed: Object.keys(after).filter((k) => k in before && before[k] !== after[k]),
+    added: keys.added.map((k) => who(k, after[k])),
+    removed: keys.removed.map((k) => who(k, before[k])),
+    changed: keys.changed.map((k) => who(k, after[k], before[k])),
     inherit: f.parent_id && inherit !== f.inherit ? inherit : undefined,
   };
   await logActivity(ctx, f.id, null, 'acl.update', diff);

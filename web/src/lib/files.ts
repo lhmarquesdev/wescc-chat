@@ -13,7 +13,7 @@ export const filesApi = {
   search: (text: string) => api.get<{ folders: (DriveFolder & { path: { _id: string; name: string }[] })[]; files: DriveFile[] }>('files.search', { text }),
   recent: () => api.get<{ files: DriveFile[] }>('files.recent').then((r) => r.files),
   storage: () => api.get<{ storage: DriveStorage }>('files.storage').then((r) => r.storage),
-  activity: (folderId: string) => api.get<{ total: number; events: DriveActivity[] }>('files.activity', { folderId, count: 60 }),
+  activity: (folderId: string, offset = 0) => api.get<{ total: number; events: DriveActivity[] }>('files.activity', { folderId, count: 60, offset }),
   subjects: (text: string) => api.get<{ subjects: DriveSubject[] }>('files.subjects', { text }).then((r) => r.subjects),
   createFolder: (body: { name: string; parentId?: string | null; color?: string | null }) => api.post<{ folder: DriveFolder }>('files.folder.create', body).then((r) => r.folder),
   updateFolder: (folderId: string, body: { name?: string; color?: string | null }) => api.post<{ name?: string }>('files.folder.update', { folderId, ...body }),

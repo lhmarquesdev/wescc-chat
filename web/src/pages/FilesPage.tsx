@@ -1261,12 +1261,35 @@ const ACTIVITY_TEXT: Record<string, (d: Record<string, any>) => string> = {
   'folder.restore': (d) => `restaurou a pasta ${d.name}`,
   'folder.purge': (d) => `apagou a pasta ${d.name} de vez`,
   'acl.update': (d) => {
-    const n = (d.added?.length ?? 0) + (d.removed?.length ?? 0) + (d.changed?.length ?? 0);
-    const parts = [d.added?.length && `${d.added.length} acesso(s) novo(s)`, d.removed?.length && `${d.removed.length} retirado(s)`, d.changed?.length && `${d.changed.length} alterado(s)`].filter(Boolean);
-    const inh = d.inherit === false ? ' e deixou a pasta restrita' : d.inherit === true ? ' e voltou a herdar o acesso' : '';
-    return n ? `mudou o compartilhamento (${parts.join(', ')})${inh}` : `mudou o compartilhamento${inh}`;
+    const list = (x: unknown): AclChange[] => (Array.isArray(x) ? x : []);
+    const added = list(d.added);
+    const removed = list(d.removed);
+    const changed = list(d.changed);
+    const inh = d.inherit === false ? 'deixou a pasta restrita' : d.inherit === true ? 'voltou a herdar o acesso da pasta de cima' : '';
+    // Eventos antigos guardavam só quem era (sem o nome): mostra quantos.
+    if ([...added, ...removed, ...changed].some((x) => typeof x === 'string')) {
+      const parts = [
+        added.length && plural(added.length, 'acesso novo', 'acessos novos'),
+        removed.length && plural(removed.length, 'retirado', 'retirados'),
+        changed.length && plural(changed.length, 'alterado', 'alterados'),
+      ].filter(Boolean);
+      return `mudou o compartilhamento${parts.length ? ` (${parts.join(', ')})` : ''}${inh ? ` e ${inh}` : ''}`;
+    }
+    const names = (xs: AclChange[], fmt: (x: AclEntryChange) => string) => nameList((xs as AclEntryChange[]).map(fmt), 3);
+    const parts = [
+      added.length && `deu acesso a ${names(added, (x) => `${aclWho(x)} (${driveLevelLabel(x.level)})`)}`,
+      changed.length && `mudou ${names(changed, (x) => `${aclWho(x)} para ${driveLevelLabel(x.level)}`)}`,
+      removed.length && `tirou o acesso de ${names(removed, aclWho)}`,
+      inh,
+    ].filter((x): x is string => !!x);
+    return parts.length ? parts.join('; ') : 'mudou o compartilhamento';
   },
 };
+
+// Compartilhamento no histórico: quem ganhou, perdeu ou mudou de nível, com o nome do momento.
+type AclEntryChange = { key: string; label: string; level: number; from?: number };
+type AclChange = string | AclEntryChange;
+const aclWho = (x: AclEntryChange) => (x.key.startsWith('role:') ? `quem tem o papel ${x.label}` : x.key.startsWith('room:') ? `membros de ${x.label}` : x.label);
 
 const ACTIVITY_ICON: Record<string, IconName> = {
   'file.upload': 'files-upload',
@@ -1279,32 +1302,63 @@ const ACTIVITY_ICON: Record<string, IconName> = {
 };
 
 function ActivityList({ folderId }: { folderId: string }) {
+  const toast = useStore((s) => s.toast);
   const [r, setR] = useState<DriveActivity[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
+    let alive = true;
+    setR(null);
+    setErr(null);
     filesApi.activity(folderId).then(
-      (x) => setR(x.events),
-      (e) => setErr(errorMessage(e)),
+      (x) => alive && (setR(x.events), setTotal(x.total)),
+      (e) => alive && setErr(errorMessage(e)),
     );
+    return () => {
+      alive = false;
+    };
   }, [folderId]);
+  // "Ver mais": a página seguinte, a partir do que já está na tela (sem repetir o que entrou no meio tempo).
+  const more = async () => {
+    if (!r) return;
+    setLoadingMore(true);
+    try {
+      const x = await filesApi.activity(folderId, r.length);
+      setR((cur) => [...(cur ?? []), ...x.events.filter((e) => !cur?.some((c) => c._id === e._id))]);
+      setTotal(x.total);
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
   if (err) return <p className="muted">{err}</p>;
   if (!r) return <Skeleton height={60} />;
   if (!r.length) return <p className="muted">Nada registrado ainda.</p>;
   return (
-    <ol className="fl-activity">
-      {r.map((e) => (
-        <li key={e._id}>
-          <span className="fl-act-icon">
-            <Icon name={ACTIVITY_ICON[e.action] ?? (e.action.startsWith('folder') ? 'files-folder' : 'file')} size={14} />
-          </span>
-          <span>
-            <strong>{e.actor.name || e.actor.username || 'Sistema'}</strong> {(ACTIVITY_TEXT[e.action] ?? (() => e.action))(e.data as Record<string, any>)}
-            {typeof e.data.folder === 'string' && <span className="muted"> em {e.data.folder}</span>}
-            <small className="muted">{formatWhen(e.ts)}</small>
-          </span>
-        </li>
-      ))}
-    </ol>
+    <>
+      <ol className="fl-activity">
+        {r.map((e) => (
+          <li key={e._id}>
+            <span className="fl-act-icon">
+              <Icon name={ACTIVITY_ICON[e.action] ?? (e.action.startsWith('folder') ? 'files-folder' : 'file')} size={14} />
+            </span>
+            <span>
+              <strong>{e.actor.name || e.actor.username || 'Sistema'}</strong> {(ACTIVITY_TEXT[e.action] ?? (() => e.action))(e.data as Record<string, any>)}
+              {typeof e.data.folder === 'string' && <span className="muted"> em {e.data.folder}</span>}
+              <small className="muted">{formatWhen(e.ts)}</small>
+            </span>
+          </li>
+        ))}
+      </ol>
+      {r.length < total && (
+        <button type="button" className="btn small fl-activity-more" onClick={() => void more()} disabled={loadingMore}>
+          {loadingMore && <Spinner size="sm" />}
+          Ver mais ({plural(total - r.length, 'evento', 'eventos')})
+        </button>
+      )}
+    </>
   );
 }
 

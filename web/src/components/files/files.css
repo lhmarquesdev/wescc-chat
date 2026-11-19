@@ -852,6 +852,9 @@
   margin-top: 2px;
   font-size: var(--fs-12);
 }
+.fl-activity-more {
+  margin-top: var(--space-3);
+}
 .fl-act-icon {
   display: grid;
   place-items: center;

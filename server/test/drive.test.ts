@@ -517,6 +517,20 @@ describe('nomes, avisos e limites', () => {
     }
   });
 
+  it('histórico: compartilhamento com nomes e níveis, e a página seguinte', async () => {
+    await share(eq, [{ type: 'user', id: A.userId, level: 3 }, { type: 'user', id: bruno.userId, level: 1 }, { type: 'user', id: carla.userId, level: 3 }, { type: 'user', id: davi.userId, level: 2 }], A);
+    await share(eq, [{ type: 'user', id: A.userId, level: 3 }, { type: 'user', id: bruno.userId, level: 1 }, { type: 'user', id: carla.userId, level: 3 }], A);
+    const r = await api('GET', 'files.activity', { folderId: eq, count: 2 }, carla);
+    expect(r.events.map((e: any) => e.action)).toEqual(['acl.update', 'acl.update']);
+    expect(r.events[0].data.removed).toEqual([{ key: `user:${davi.userId}`, label: 'Davi Rocha', level: 2 }]);
+    expect(r.events[1].data.added).toEqual([{ key: `user:${davi.userId}`, label: 'Davi Rocha', level: 2 }]);
+    expect(r.events[1].data.changed).toEqual([{ key: `user:${bruno.userId}`, label: 'Bruno Lima', level: 1, from: 2 }]);
+    expect(r.total).toBeGreaterThan(2);
+    // Página seguinte (Ver mais).
+    const next = await api('GET', 'files.activity', { folderId: eq, count: 2, offset: 2 }, carla);
+    expect(next.events.map((e: any) => e._id)).not.toContain(r.events[0]._id);
+  });
+
   it('histórico com offset ou count fora do normal não dá erro 500', async () => {
     for (const offset of ['1e309', '-5', '1.5', 'abc', '99999999999999999999']) {
       const x = await api('GET', 'files.activity', { folderId: eq, offset }, carla);
