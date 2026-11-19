@@ -907,7 +907,7 @@ texto. Por isso a proteção depende de o servidor do chat ser o original e de o
 - **Encaminhar** (menu da mensagem, `forward-message`: Administrador, Usuário e Operação): para até 10 conversas por
   vez, com comentário opcional e os arquivos junto; a mensagem mostra de onde veio, sem revelar um grupo privado ou
   uma conversa direta a quem não participa dela. Valem as regras de envio de cada destino (somente leitura, canal de
-  avisos, arquivada, Operação); os destinos que não aceitam já aparecem desativados.
+  avisos, arquivada, silenciado, Operação); os destinos que não aceitam já aparecem desativados, com o motivo.
 - **Enquetes** (botão + › Criar enquete, `create-poll`: Administrador, Usuário, Dono, Moderador e Publicador): 2 a 10
   opções, com escolha múltipla, voto anônimo (ninguém vê quem votou, nem quem criou) e prazo opcional (de 5 minutos a
   90 dias). Votar não depende da permissão; encerrar antes do prazo, só quem criou ou um moderador da sala.
