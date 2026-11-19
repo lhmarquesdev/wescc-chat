@@ -285,6 +285,28 @@ describe('login em dispositivo novo', () => {
   });
 });
 
+describe('nome do dispositivo', () => {
+  it('iPhone e iPad são iOS (não macOS); Chrome, Firefox e Edge de celular têm o nome certo', async () => {
+    const u = await account();
+    const cases: [string, string][] = [
+      ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1', 'Safari em iOS'],
+      ['Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1', 'Safari em iOS'],
+      ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/119.0.6045.169 Mobile/15E148 Safari/604.1', 'Chrome em iOS'],
+      ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/120.0 Mobile/15E148 Safari/605.1.15', 'Firefox em iOS'],
+      ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 EdgiOS/120.0.2210.84 Mobile/15E148 Safari/605.1.15', 'Edge em iOS'],
+      ['Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EdgA/120.0.0.0', 'Edge em Android'],
+      ['Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36', 'Chrome em Android'],
+      [FIREFOX_MAC, 'Firefox em macOS'],
+      [CHROME, 'Chrome em Windows'],
+    ];
+    for (const [ua, name] of cases) {
+      const { auth } = await browserLogin(u.username, { ua });
+      const s = (await api('GET', 'sessions.list', {}, auth)).sessions.find((x: any) => x.current);
+      expect(s.device.name).toBe(name);
+    }
+  });
+});
+
 describe('regras do dispositivo', () => {
   it('prefixo da rede', () => {
     expect(ipPrefix('10.0.0.12')).toBe('10.0.0.0/24');

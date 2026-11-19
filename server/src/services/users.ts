@@ -192,8 +192,10 @@ export interface DeviceInfo {
 
 function parseDevice(d: DeviceInfo) {
   const ua = d.userAgent ?? '';
-  const os = /Windows/i.test(ua) ? 'Windows' : /Mac OS X/i.test(ua) ? 'macOS' : /Android/i.test(ua) ? 'Android' : /iPhone|iPad/i.test(ua) ? 'iOS' : /Linux/i.test(ua) ? 'Linux' : 'Desconhecido';
-  const browser = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : ua ? 'Outro' : 'API';
+  // iPhone e iPad dizem "like Mac OS X", e o Android diz "Linux": os celulares vêm antes. No iPhone, Chrome, Firefox e
+  // Edge se chamam CriOS, FxiOS e EdgiOS (e o Edge do Android, EdgA).
+  const os = /Windows/i.test(ua) ? 'Windows' : /iPhone|iPad|iPod/i.test(ua) ? 'iOS' : /Android/i.test(ua) ? 'Android' : /Mac OS X/i.test(ua) ? 'macOS' : /Linux/i.test(ua) ? 'Linux' : 'Desconhecido';
+  const browser = /Edg(e|A|iOS)?\//.test(ua) ? 'Edge' : /Chrome\/|CriOS\//.test(ua) ? 'Chrome' : /Firefox\/|FxiOS\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : ua ? 'Outro' : 'API';
   return { userAgent: ua, ip: d.ip, os, browser, name: d.name ?? `${browser} em ${os}` };
 }
 
