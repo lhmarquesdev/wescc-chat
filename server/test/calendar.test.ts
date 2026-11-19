@@ -139,7 +139,10 @@ describe('reuniões', () => {
 
     const info = await api('GET', 'calendar.meeting', { code: m.code }, bruno);
     expect([info.canJoin, info.joined]).toEqual([true, true]);
-    expect((await api('GET', 'calendar.meeting', { code: m.code }, carla)).error).toBe(CAL_TEXT.invitedOnly);
+    // Quem não foi convidado fica sabendo a quem pedir o convite (o nome de quem organizou), e o erro é 403.
+    const barred = await api('GET', 'calendar.meeting', { code: m.code }, carla);
+    expect([barred.status, barred.error]).toEqual([403, CAL_TEXT.invitedOnlyBy('Ana Souza')]);
+    expect(JSON.stringify(barred)).not.toContain('Reunião de turno');
     expect((await api('POST', 'calendar.meeting.join', { code: m.code }, carla)).error).toBe(CAL_TEXT.invitedOnly);
     expect((await api('GET', 'calendar.meeting', { code: 'xxx-yyyy-zzz' }, bruno)).error).toBe(CAL_TEXT.meetingNotFound);
     expect((await api('GET', 'calendar.meeting.byRoom', { roomId: m.rid }, bruno)).event._id).toBe(c.event._id);

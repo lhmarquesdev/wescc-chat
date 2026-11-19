@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { MeetingInfo } from '@shared/calendar';
 import type { RoomCallState } from '@shared/index';
-import { api, errorMessage } from '../lib/api';
+import { api, ApiError, errorMessage } from '../lib/api';
 import { calendarApi, whenLabel } from '../lib/calendar';
 import { openCall, openJoin, useCallStore } from '../lib/call/store';
 import { roomPath } from '../lib/format';
@@ -21,7 +21,18 @@ export function MeetPage() {
   // Sem elas, a página não oferece um "Entrar na reunião" que só falharia depois de mudar de tela.
   const groupOn = useCallStore((s) => s.config?.groupEnabled) !== false;
   const videoOn = callsOn && groupOn;
-  const { data, error, reload } = useAsync<MeetingInfo>(() => calendarApi.meeting(code), [code]);
+  // Link errado, reunião só para convidados ou Agenda desligada não mudam com outra tentativa: "Tentar de novo" fica
+  // só para falha de rede, limite de pedidos ou erro do servidor.
+  const [retryable, setRetryable] = useState(false);
+  const { data, error, reload } = useAsync<MeetingInfo>(
+    () =>
+      calendarApi.meeting(code).catch((e) => {
+        const status = e instanceof ApiError ? e.status : 0;
+        setRetryable(status === 0 || status === 429 || status >= 500);
+        throw e;
+      }),
+    [code],
+  );
   const [busy, setBusy] = useState<'video' | 'chat' | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
 
@@ -142,7 +153,7 @@ export function MeetPage() {
     <div className="page meet-page">
       <div className="meet-wrap">
         {body}
-        {error && (
+        {error && retryable && (
           <button type="button" className="btn ghost small" onClick={reload}>
             Tentar de novo
           </button>

@@ -1104,7 +1104,8 @@ como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os teste
 Em **Agenda** cada pessoa vê os próprios eventos (mês, semana ou lista), cria eventos e reuniões e responde aos
 convites (vou, talvez, não vou). Uma **reunião com link** cria uma sala privada com os convidados (chat e chamada de
 vídeo em grupo) e um link `https://<site>/meet/<código>`. Em "Quem entra pelo link", "Só convidados" barra quem não
-foi convidado; "Qualquer pessoa do chat" deixa entrar quem tiver o link (e a pessoa passa a ser convidada). As regras
+foi convidado (a página do link diz quem organizou, para a pessoa pedir o convite); "Qualquer pessoa do chat" deixa
+entrar quem tiver o link (e a pessoa passa a ser convidada). As regras
 da Operação valem também aqui: quem não pode chamar alguém numa conversa direta também não o convida. Criar reuniões
 com link pede a permissão `create-calendar-meeting` (papéis `admin` e `user`). Os lembretes chegam no chat e por push
 (padrão 10 minutos antes). A chamada da reunião usa o servidor das chamadas em grupo (veja **Chamadas em grupo**);
