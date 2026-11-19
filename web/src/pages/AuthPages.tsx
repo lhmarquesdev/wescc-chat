@@ -290,6 +290,8 @@ export function ForgotPasswordPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const available = useSetting<boolean>('Accounts_PasswordReset_Available') !== false;
+  // Indisponível porque o administrador desligou a redefinição (e não por falta de e-mail): o motivo é outro.
+  const resetOff = useSetting<boolean>('Accounts_PasswordReset') === false;
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -319,7 +321,10 @@ export function ForgotPasswordPage() {
     );
   if (!available)
     return (
-      <AuthShell title="Esqueci minha senha" subtitle="Este chat não envia e-mails. Peça ao administrador para redefinir a sua senha.">
+      <AuthShell
+        title="Esqueci minha senha"
+        subtitle={`${resetOff ? 'A redefinição de senha por e-mail está desligada neste chat.' : 'Este chat não envia e-mails.'} Peça ao administrador para redefinir a sua senha.`}
+      >
         {ldap && <LdapResetNote />}
         <Link className="btn lg full" to="/login">
           <Icon name="back" />
@@ -463,7 +468,8 @@ function registerErrors(f: RegisterForm): Partial<Record<keyof RegisterForm, str
   if (!f.username) e.username = 'Preencha o nome de usuário.';
   else if (!USERNAME_RE.test(f.username)) e.username = 'Use de 2 a 40 letras sem acento, números, ponto, hífen ou sublinhado.';
   if (!f.email.trim()) e.email = 'Preencha o e-mail.';
-  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) e.email = 'Digite um e-mail válido, como nome@empresa.com.br.';
+  // A mesma regra do servidor (EMAIL_RE).
+  else if (!/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)*$/.test(f.email.trim())) e.email = 'Digite um e-mail válido, como nome@empresa.com.br.';
   if (!f.pass) e.pass = 'Crie uma senha.';
   else if (!f.pass.trim()) e.pass = 'A senha não pode ter só espaços.';
   if (f.pass && f.confirm !== f.pass) e.confirm = 'As senhas não conferem.';
