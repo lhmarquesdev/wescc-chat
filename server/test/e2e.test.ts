@@ -1233,7 +1233,8 @@ describe('criptografia: quem volta só lê dali para frente', () => {
       await sleep(500);
       expect(countSince(ws, since, isRotate)).toBe(1);
       expect(ws.events.slice(since).find(isRotate)).toMatchObject({ keyID: g2.keyID });
-      expect(countSince(ws, since, isRoom)).toBe(1);
+      // Dois avisos da sala: o da troca pendente e o do número de membros (um para o convite inteiro).
+      expect(countSince(ws, since, isRoom)).toBe(2);
       expect(await roomRow(g1.rid)).toMatchObject({ e2e_key_id: g2.keyID, e2e_rotate: true });
       // A Ana troca (uma geração para as dez); o Zé volta ainda na janela: o aviso dele sai no fim dela, com a geração nova.
       const { room: g3, inserted } = await rotateKey(g2, ana, back);

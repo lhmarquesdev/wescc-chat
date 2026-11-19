@@ -99,19 +99,6 @@ export async function notifyRoomUpdated(rid: string) {
   if (room.t === 'c') bus.publish({ all: true }, { type: 'room', action: 'updated', room: mapRoom(room) });
 }
 
-// Entradas e saídas mudam o número de membros (cabeçalho e painel Membros): um aviso por sala, juntando os que chegam em
-// rajada (o time inteiro entrando numa sala padrão, uma sala criada com muitas pessoas).
-const membersChanged = new Map<string, NodeJS.Timeout>();
-function notifyMembersChanged(rid: string) {
-  if (membersChanged.has(rid)) return;
-  const t = setTimeout(() => {
-    membersChanged.delete(rid);
-    void notifyRoomUpdated(rid).catch(() => {});
-  }, 150);
-  t.unref?.();
-  membersChanged.set(rid, t);
-}
-
 // A sala mudou algo que a inscrição de cada membro mostra (nome, tipo, canal de avisos, sala principal de time):
 // cada membro recebe a inscrição de novo.
 export async function republishSubscriptions(rid: string) {
@@ -173,7 +160,8 @@ export async function userRoomIds(userId: string): Promise<string[]> {
 export async function addUserToRoom(
   rid: string,
   userId: string,
-  opts: { inviter?: { id: string; username: string }; silent?: boolean; roles?: string[]; db?: Queryable } = {},
+  // batch: quem chama adiciona várias pessoas e avisa o número de membros uma vez no fim (convite, sala nova).
+  opts: { inviter?: { id: string; username: string }; silent?: boolean; roles?: string[]; db?: Queryable; batch?: boolean } = {},
 ) {
   const room = await getRoom(rid, opts.db);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
@@ -206,8 +194,9 @@ export async function addUserToRoom(
     await query(`INSERT INTO team_members (team_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [room.team_id, userId], opts.db);
   }
   bus.joinRoom(userId, rid);
-  notifyMembersChanged(rid);
   const after = async () => {
+    // O número de membros mudou (cabeçalho e painel Membros de quem está na sala).
+    if (!opts.batch) await notifyRoomUpdated(rid);
     await notifySubscription(userId, rid, 'inserted', sub);
     if (!opts.silent && room.t !== 'd') {
       if (opts.inviter && opts.inviter.id !== userId) {
@@ -247,7 +236,8 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
     await query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [room.team_id, userId]);
   }
   bus.leaveRoom(userId, rid);
-  notifyMembersChanged(rid);
+  // O número de membros mudou: quem fica na sala vê na hora (quem saiu já não recebe o aviso de grupo privado).
+  await notifyRoomUpdated(rid);
   bus.publish({ user: userId }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(sub, room) });
   // Criptografia: quem fica gera uma chave nova (ela não lê o que vier depois). O aviso sai depois de tirar a pessoa da
   // sala: o pedido de chave nova não chega para ela.
@@ -363,8 +353,9 @@ export async function createRoom(ctx: Ctx | null, input: CreateRoomInput) {
       input.reactWhenReadOnly ?? false,
     ],
   );
-  if (owner) await addUserToRoom(id, owner.id, { roles: ['owner'], silent: true });
-  for (const u of users) await addUserToRoom(id, u.id, { inviter: owner ?? undefined, silent: true });
+  // A sala nova sai com o número de membros certo no aviso de criação (canal) e na inscrição de cada um.
+  if (owner) await addUserToRoom(id, owner.id, { roles: ['owner'], silent: true, batch: true });
+  for (const u of users) await addUserToRoom(id, u.id, { inviter: owner ?? undefined, silent: true, batch: true });
   if (ctx) await audit(actorOf(ctx), 'room.created', { rid: id, name: input.name, t: input.type });
   const room = await getRoom(id);
   if (room.t === 'c') bus.publish({ all: true }, { type: 'room', action: 'inserted', room: mapRoom(room) });
@@ -402,7 +393,7 @@ export async function createDirect(ctx: Ctx, usernames: string[]) {
   );
   // Corrida com outra criação simultânea da mesma DM: devolve a existente.
   if (!inserted) return one(`SELECT * FROM rooms WHERE t = 'd' AND dm_key = $1`, [uids.join(',')]);
-  for (const u of all) await addUserToRoom(id, u.id, { silent: true });
+  for (const u of all) await addUserToRoom(id, u.id, { silent: true, batch: true });
   return getRoom(id);
 }
 
@@ -445,7 +436,9 @@ export async function inviteToRoom(ctx: Ctx, rid: string, userIds: string[]) {
     (room.t === 'p' && rolesHavePermission(roles, 'add-user-to-any-p-room'));
   if (!allowed) throw forbidden();
   await assertCanBringIn(ctx.userId, room, userIds);
-  for (const uid of userIds) await addUserToRoom(rid, uid, { inviter: { id: ctx.userId, username: ctx.username } });
+  for (const uid of userIds) await addUserToRoom(rid, uid, { inviter: { id: ctx.userId, username: ctx.username }, batch: true });
+  // Um aviso do número de membros para o convite inteiro, e não um por pessoa.
+  if (userIds.length) await notifyRoomUpdated(rid);
 }
 
 // Dono da sala só é silenciado ou removido por quem pode Definir donos nela (outro dono ou administrador): um moderador
