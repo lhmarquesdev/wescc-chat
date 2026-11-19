@@ -157,6 +157,13 @@ describe('o que vai para todas as conexões', () => {
     );
   });
 
+  it('seletor do compartilhamento de Arquivos não mostra canal de time privado a quem não é do time', async () => {
+    const { name } = await privateTeamChannel();
+    const rooms = async (who: Auth) => (await api('GET', 'files.subjects', { text: name }, who)).subjects.filter((s: any) => s.type === 'room').map((s: any) => s.label);
+    expect(await rooms(eve)).toEqual([]);
+    expect(await rooms(bruno)).toEqual([`#${name}`]);
+  });
+
   it('mensagem em canal de time privado não chega a quem não é do time; canal público chega sem a prévia', async () => {
     const { rid } = await privateTeamChannel();
     const pub = await api('POST', 'channels.create', { name: `aviso-${tag()}`, members: [bruno.username] }, alice);
@@ -244,6 +251,34 @@ describe('quem perde o acesso para de receber na hora', () => {
       expect(we.events.some((e) => e.type === 'message' && e.message?.msg?.includes('CONFIDENCIAL'))).toBe(false);
     } finally {
       we.close();
+    }
+  });
+
+  it('quem sai de um time privado para de receber os canais do time que só assistia', async () => {
+    const { team, rid } = await privateTeamChannel();
+    const joined = await api('POST', 'teams.createRoom', { teamId: team._id, name: `entrou-${tag()}`, type: 'c', members: [bruno.username] }, alice);
+    const jid = joined.room._id;
+    const wb = await ws(bruno);
+    try {
+      wb.send({ type: 'watch', rid });
+      await sleep(200);
+      await send(alice, rid, 'antes, do time');
+      await wb.waitFor((e) => e.type === 'message' && e.message?.msg === 'antes, do time');
+      expect((await api('POST', 'teams.removeMember', { teamId: team._id, userId: bruno.userId }, alice)).success).toBe(true);
+      expect((await api('GET', 'channels.history', { roomId: rid }, bruno)).status).toBe(403);
+      await send(alice, rid, 'SEGREDO depois de sair do time');
+      // O canal em que ele entrou continua chegando (a inscrição fica).
+      await send(alice, jid, 'canal em que bruno entrou');
+      await wb.waitFor((e) => e.type === 'message' && e.message?.msg === 'canal em que bruno entrou');
+      expect(wb.events.some((e) => e.type === 'message' && e.message?.msg?.includes('SEGREDO'))).toBe(false);
+      // Pedir de novo não adianta.
+      wb.send({ type: 'watch', rid });
+      await sleep(200);
+      await send(alice, rid, 'SEGREDO 2');
+      await sleep(300);
+      expect(wb.events.some((e) => e.type === 'message' && e.message?.msg === 'SEGREDO 2')).toBe(false);
+    } finally {
+      wb.close();
     }
   });
 

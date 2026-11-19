@@ -266,6 +266,13 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
   await query('UPDATE rooms SET users_count = GREATEST(users_count - 1, 0), updated_at = now() WHERE id = $1', [rid]);
   if (room.team_main && room.team_id) {
     await query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [room.team_id, userId]);
+    // Fora de um time privado: os canais do time em que a pessoa não entrou (e que ela só assistia) param de chegar.
+    const unjoined = await many(
+      `SELECT r.id FROM rooms r JOIN teams t ON t.id = r.team_id AND t.type = 1
+        WHERE r.team_id = $1 AND NOT r.team_main AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = r.id AND s.user_id = $2)`,
+      [room.team_id, userId],
+    );
+    for (const r of unjoined) bus.leaveRoom(userId, r.id);
   }
   bus.leaveRoom(userId, rid);
   bus.publish({ user: userId }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(sub, room) });
