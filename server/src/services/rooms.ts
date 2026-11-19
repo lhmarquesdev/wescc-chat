@@ -430,10 +430,18 @@ export async function inviteToRoom(ctx: Ctx, rid: string, userIds: string[]) {
   for (const uid of userIds) await addUserToRoom(rid, uid, { inviter: { id: ctx.userId, username: ctx.username } });
 }
 
+// Dono da sala só é silenciado ou removido por quem pode Definir donos nela (outro dono ou administrador): um moderador
+// não age sobre quem está acima dele.
+async function assertCanActOnOwner(ctx: Ctx, rid: string, target: { user_id: string; roles: string[] } | null) {
+  if (!target?.roles.includes('owner') || target.user_id === ctx.userId) return;
+  if (!(await hasPermission(ctx.userId, 'set-owner', rid))) throw forbidden('Só donos podem silenciar ou remover outro dono.');
+}
+
 export async function kickFromRoom(ctx: Ctx, rid: string, userId: string) {
   if (!(await hasPermission(ctx.userId, 'remove-user', rid))) throw forbidden();
   const target = await getSubscriptionRow(rid, userId);
   if (!target) throw badRequest('error-user-not-in-room', 'Usuário não está na sala.');
+  await assertCanActOnOwner(ctx, rid, target);
   if (target.roles.includes('owner')) {
     const n = await one(`SELECT count(*)::int AS n FROM subscriptions WHERE room_id = $1 AND 'owner' = ANY(roles)`, [rid]);
     if (n.n <= 1) throw badRequest('error-you-are-last-owner', 'Não é possível remover o último dono.');
@@ -699,6 +707,7 @@ export async function setMuted(ctx: Ctx, rid: string, userId: string, mute: bool
   if (!(await hasPermission(ctx.userId, 'mute-user', rid))) throw forbidden();
   const target = await one('SELECT username FROM users WHERE id = $1', [userId]);
   if (!target) throw notFound('error-invalid-user', 'Usuário não encontrado.');
+  await assertCanActOnOwner(ctx, rid, await getSubscriptionRow(rid, userId));
   await query(
     mute
       ? 'UPDATE rooms SET muted = array_append(array_remove(muted, $2), $2), updated_at = now() WHERE id = $1'

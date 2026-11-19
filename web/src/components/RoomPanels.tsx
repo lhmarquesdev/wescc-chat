@@ -272,6 +272,7 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   };
 
   const setAvatar = async (file: File) => {
+    if (file.size > 5 * 1024 * 1024) return fail(new Error('Imagem muito grande (máx. 5 MB).'));
     const fd = new FormData();
     fd.append('roomId', room._id);
     fd.append('image', file);
@@ -376,7 +377,7 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
           <input
             ref={imageRef}
             type="file"
-            accept="image/*"
+            accept="image/png,image/jpeg,image/gif,image/webp"
             tabIndex={-1}
             className="visually-hidden"
             onChange={(e) => {

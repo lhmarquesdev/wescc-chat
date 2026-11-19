@@ -6,6 +6,7 @@ import { newId } from '../lib/ids';
 import { audit } from '../services/audit';
 import { assertCanBringIn, directParentFor, directPolicyFor } from '../services/direct';
 import { mapRoom, mapTeam } from '../services/mappers';
+import { imageType } from '../importer/pending';
 import { cleanHistory, createDiscussion, listDiscussions } from '../services/messages';
 import { hasPermission } from '../services/permissions';
 import {
@@ -62,6 +63,8 @@ import { b, bool, paging, q, route, str, strArray } from './http';
 import { resolveUserParam } from './users';
 
 const PREFIX_TYPE: Record<string, 'c' | 'p'> = { channels: 'c', groups: 'p' };
+
+const ROOM_AVATAR_MAX = 5 * 1024 * 1024;
 
 export function roomsRoutes(app: FastifyInstance) {
   // ---------- Assinaturas e salas do usuário ----------
@@ -188,16 +191,23 @@ export function roomsRoutes(app: FastifyInstance) {
   route(app, 'POST', 'rooms.setAvatar', {}, async (req, _rep, ctx) => {
     let rid = '';
     let data: Buffer | null = null;
-    let type = '';
-    for await (const part of req.parts()) {
-      if (part.type === 'file') {
-        data = await part.toBuffer();
-        type = part.mimetype;
-      } else if (part.fieldname === 'roomId') rid = String(part.value);
+    // Mesmo limite da foto de perfil (5 MB), lido no máximo até ali: a imagem vai inteira para o banco e para quem abre a
+    // sala. O tipo vem do conteúdo, não do que o navegador declarou.
+    try {
+      for await (const part of req.parts({ limits: { fileSize: ROOM_AVATAR_MAX, files: 1, fields: 4, parts: 5, fieldSize: 1024 } })) {
+        if (part.type === 'file') data = await part.toBuffer();
+        else if (part.fieldname === 'roomId') rid = String(part.value);
+      }
+    } catch (e) {
+      const code = String((e as any)?.code ?? '');
+      if (code === 'FST_REQ_FILE_TOO_LARGE') throw badRequest('error-file-too-large', 'Imagem muito grande (máx. 5 MB).');
+      if (code.startsWith('FST_')) throw badRequest('error-invalid-params', 'Envie uma imagem por vez.');
+      throw e;
     }
     if (!rid || !data) throw badRequest('error-invalid-params', 'roomId e imagem são obrigatórios.');
     if (!(await hasPermission(ctx.userId, 'edit-room-avatar', rid))) throw forbidden();
-    if (!/^image\/(png|jpeg|gif|webp)$/.test(type)) throw badRequest('error-invalid-image', 'Formato não suportado.');
+    const type = imageType(data);
+    if (!type) throw badRequest('error-invalid-image', 'Formato não suportado. Use uma imagem PNG, JPEG, GIF ou WEBP.');
     await query(
       `INSERT INTO room_avatars (room_id, content_type, data) VALUES ($1,$2,$3) ON CONFLICT (room_id) DO UPDATE SET content_type = EXCLUDED.content_type, data = EXCLUDED.data, updated_at = now()`,
       [rid, type, data],
