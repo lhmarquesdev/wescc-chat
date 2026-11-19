@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
 import { normalizeHighlights } from '@shared/highlights';
+import { foldText } from '@shared/search';
 import { formatDateTime } from '../lib/format';
 import { disablePushHere, enablePushHere, pushEnabledHere, pushSupported, syncPushSubscription } from '../lib/push';
 import { endSession, startSession } from '../lib/session';
@@ -445,12 +446,23 @@ function HighlightsCard() {
       return false;
     }
   };
+  // Palavra que já está na lista (sem acento e sem maiúsculas, como o servidor compara): avisa em vez de sumir calada.
+  const repeated = (parts: string[]) => {
+    const have = new Map(words.map((w) => [foldText(w.replace(/\s+/g, ' ').trim()), w]));
+    for (const p of parts) {
+      const old = have.get(foldText(p.replace(/\s+/g, ' ').trim()));
+      if (old) return old === p ? `“${p}” já está na lista.` : `“${p}” já está na lista (como “${old}”).`;
+    }
+    return '';
+  };
   const add = async () => {
     const parts = draft
       .split(',')
       .map((w) => w.trim())
       .filter(Boolean);
     if (!parts.length) return;
+    const dup = repeated(parts);
+    if (dup) return setError(dup);
     if (await save([...words, ...parts])) setDraft('');
   };
   const remove = (w: string) => {
@@ -500,6 +512,12 @@ function HighlightsCard() {
                       const parts = v.split(',');
                       const rest = parts.pop() ?? '';
                       const done = parts.map((w) => w.trim()).filter(Boolean);
+                      const dup = repeated(done);
+                      if (dup) {
+                        setError(dup);
+                        setDraft(v.replace(/,\s*$/, ''));
+                        return;
+                      }
                       setDraft(rest);
                       if (done.length) void save([...words, ...done]).then((ok2) => !ok2 && setDraft(v.replace(/,\s*$/, '')));
                       return;
