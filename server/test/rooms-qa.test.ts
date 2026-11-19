@@ -54,12 +54,14 @@ describe('mover salas para um time', () => {
     const t = await api('POST', 'teams.create', { name: uniq('time-bia'), type: 0 }, bia);
     const g = await api('POST', 'groups.create', { name: uniq('so-admin') }, A);
     await api('POST', 'chat.sendMessage', { message: { rid: g.group._id, msg: 'texto privado' } }, A);
+    expect((await api('POST', 'groups.setAnnouncement', { roomId: g.group._id, announcement: 'anúncio privado' }, A)).success).toBe(true);
     expect((await api('POST', 'teams.addMembers', { teamId: t.team._id, members: [{ userId: A.userId }] }, bia)).success).toBe(true);
     expect((await api('POST', 'teams.addRooms', { teamId: t.team._id, rooms: [g.group._id] }, A)).success).toBe(true);
     const list = await api('GET', 'teams.listRooms', { teamId: t.team._id }, bia);
     const row = list.rooms.find((r: any) => r._id === g.group._id);
     expect(row).toBeTruthy();
     expect(row.lastMessage).toBeUndefined();
+    expect(row.announcement).toBeUndefined();
     // Marcar como padrão traria todo o time (bia junto) para o grupo: bia não pode pôr pessoas nele.
     const d = await api('POST', 'teams.updateRoom', { roomId: g.group._id, isDefault: true }, bia);
     expect(d.status).toBe(403);

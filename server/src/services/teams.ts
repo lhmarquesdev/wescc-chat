@@ -109,7 +109,10 @@ export async function teamRooms(ctx: Ctx, team: any, opts: { filter?: string; of
     rooms: rows.map((r) => {
       const room: any = { ...mapRoom(r), isMember: r.is_member, teamDefault: !!r.custom_fields?.teamDefault };
       // Grupo privado de que a pessoa não participa: aparece na lista (Ver todas as salas do time), sem o conteúdo.
-      if (r.t === 'p' && !r.is_member) delete room.lastMessage;
+      if (r.t === 'p' && !r.is_member) {
+        delete room.lastMessage;
+        delete room.announcement;
+      }
       return room;
     }),
   };
