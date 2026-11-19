@@ -224,7 +224,12 @@ function DirectWindow({ call, me }: { call: Call; me: UserRef }) {
   const hasLocalVideo = local.camera || sharing;
   const muted = !local.mic;
   const cameraOff = !local.camera;
-  const status = ringing ? 'Chamando…' : phase === 'reconnecting' ? 'Reconectando…' : !connected ? 'Conectando…' : elapsed;
+  // Ligando para quem está offline (recebe só a notificação push, se tiver ativado) ou Ocupado (o toque continua,
+  // de propósito): quem liga fica sabendo enquanto espera. Quem está offline não vem no mapa de presença.
+  const otherStatus = useStore((s) => s.presence[other.username]?.status ?? 'offline');
+  const away = ringing && call.caller._id === me._id ? (otherStatus === 'offline' ? 'offline' : otherStatus === 'busy' ? 'Ocupado' : null) : null;
+  const ringNote = away === 'offline' ? `${name} está offline e recebe a chamada como notificação, se tiver ativado.` : away ? `${name} está Ocupado e pode não atender agora.` : null;
+  const status = ringing ? (away ? `Chamando… (${away})` : 'Chamando…') : phase === 'reconnecting' ? 'Reconectando…' : !connected ? 'Conectando…' : elapsed;
   // O outro lado desligou o microfone ou a câmera (ele avisa pela sinalização): marca, como nos quadros em grupo.
   const remoteMuted = connected && !!remote && !remote.mic;
   const mutedMark = remoteMuted ? <Icon name="mic-off" size={14} label="Microfone desligado" className="call-muted" /> : null;
@@ -266,6 +271,7 @@ function DirectWindow({ call, me }: { call: Call; me: UserRef }) {
           </strong>
           <span className="call-status">{status}</span>
           {camOffNote && <span className="call-status">{camOffNote}</span>}
+          {ringNote && <span className="call-status call-ring-note">{ringNote}</span>}
         </>
       )}
     </div>

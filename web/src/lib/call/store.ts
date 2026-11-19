@@ -1323,6 +1323,10 @@ function directEndedText(call: Call): string {
     const other = call.endedBy === call.caller._id ? call.caller : call.callee;
     return `A chamada caiu: ${other ? callUserLabel(other) : 'a outra pessoa'} perdeu a conexão.`;
   }
+  // Ninguém atendeu e a pessoa estava offline (só a notificação push, se ativada): diz isso, não só "Sem resposta.".
+  if (call.status === 'missed' && call.callee && call.caller._id === meRef()?._id && (useStore.getState().presence[call.callee.username]?.status ?? 'offline') === 'offline') {
+    return `Sem resposta. ${callUserLabel(call.callee)} estava offline.`;
+  }
   return ENDED_TEXT[call.status] ?? 'Chamada encerrada.';
 }
 

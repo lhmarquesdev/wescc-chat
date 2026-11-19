@@ -271,8 +271,9 @@ dispositivo em Minha conta › Preferências.
 Em qualquer mensagem direta entre duas pessoas, os botões 📞 e 🎥 no topo da conversa ligam para a outra pessoa, que
 recebe o toque em todos os dispositivos com o chat aberto (e uma notificação push se estiver com o chat fechado). Dá
 para atender só com áudio, desligar o microfone ou a câmera, compartilhar a tela, ampliar a janela e trocar o
-microfone, a câmera ou a saída de áudio (⚙ Configurações de áudio e vídeo, na janela da chamada). Cada chamada fica
-registrada na conversa e no histórico em 📞 Chamadas, na barra lateral.
+microfone, a câmera ou a saída de áudio (⚙ Configurações de áudio e vídeo, na janela da chamada). Ligando para alguém
+offline ou Ocupado, a janela avisa quem liga enquanto toca (o toque para quem está Ocupado continua, de propósito). Cada
+chamada fica registrada na conversa e no histórico em 📞 Chamadas, na barra lateral.
 
 - O áudio e o vídeo vão direto entre os navegadores (WebRTC); o servidor só repassa a sinalização e guarda o histórico.
 - Uma queda curta da conexão com o servidor (rede instável, notebook que dormiu, servidor reiniciado) não derruba a

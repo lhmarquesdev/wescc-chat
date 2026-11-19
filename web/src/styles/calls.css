@@ -469,6 +469,13 @@
   font-size: var(--fs-15);
   line-height: var(--lh-15);
 }
+/* Aviso de uma frase (pessoa offline ou Ocupado): quebra em linhas, em vez de passar da janela. */
+.call-placeholder > .call-ring-note {
+  max-width: 36ch;
+  margin-top: var(--space-2);
+  padding: 0 var(--space-4);
+  white-space: normal;
+}
 .call-hidden {
   position: absolute;
   width: 1px;
