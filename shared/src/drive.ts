@@ -33,6 +33,8 @@ export interface DriveFolder {
   updatedAt: string;
   // Só nas listagens de pasta: quantos itens tem dentro (pastas visíveis + arquivos) e o tamanho dos arquivos.
   items?: number;
+  // Só as subpastas visíveis (a árvore só mostra a seta de abrir quando há alguma).
+  subfolders?: number;
   size?: number;
   // Compartilhada com mais alguém além de quem criou.
   shared?: boolean;

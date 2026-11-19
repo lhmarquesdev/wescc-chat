@@ -93,7 +93,7 @@ function fileOut(r: any, users: (id: string | null) => DriveUserRef | null, extr
 
 // Contagem de itens, tamanho e "compartilhada" de uma lista de pastas.
 async function folderStats(acc: Access, ids: string[]) {
-  if (!ids.length) return new Map<string, { items: number; size: number; shared: boolean }>();
+  if (!ids.length) return new Map<string, { items: number; subfolders: number; size: number; shared: boolean }>();
   const files = await many<{ folder_id: string; n: number; size: string }>(
     'SELECT folder_id, count(*)::int AS n, coalesce(sum(size), 0) AS size FROM drive_files WHERE folder_id = ANY($1) AND trashed_at IS NULL GROUP BY folder_id',
     [ids],
@@ -109,7 +109,8 @@ async function folderStats(acc: Access, ids: string[]) {
   return new Map(
     ids.map((id) => {
       const f = fm.get(id);
-      return [id, { items: (f?.n ?? 0) + acc.children(id).length, size: Number(f?.size ?? 0), shared: (am.get(id)?.others ?? 0) > 0 }];
+      const subfolders = acc.children(id).length;
+      return [id, { items: (f?.n ?? 0) + subfolders, subfolders, size: Number(f?.size ?? 0), shared: (am.get(id)?.others ?? 0) > 0 }];
     }),
   );
 }

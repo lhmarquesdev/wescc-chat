@@ -129,12 +129,12 @@ export function FilesPage() {
   useEffect(() => {
     const off = realtime.on((ev) => {
       if (ev.type !== 'drive.changed') return;
-      if (!folderId || ev.folderIds.includes(folderId) || data?.folders.some((f) => ev.folderIds.includes(f._id))) reload();
+      if (!folderId || ev.folderIds.includes(folderId) || data?.folders.some((f) => ev.folderIds.includes(f._id)) || home?.folders.some((f) => ev.folderIds.includes(f._id))) reload();
     });
     return () => {
       off();
     };
-  }, [folderId, data, reload]);
+  }, [folderId, data, home, reload]);
 
   // Envio terminado nesta pasta: atualiza a lista.
   const uploads = useUploads();
@@ -270,7 +270,7 @@ export function FilesPage() {
         </div>
       )}
       <div className={details && !phone ? 'fl-layout with-details' : 'fl-layout'}>
-        {!phone && <FilesNav home={home} currentId={folderId ?? null} path={data?.path ?? []} trash={trash} />}
+        {!phone && <FilesNav home={home} currentId={folderId ?? null} path={data?.path ?? []} trash={trash} tick={tick} />}
         <main className="fl-main" aria-label={title}>
           {!trash && !search && folderId && <Breadcrumb data={data} />}
           {!trash && !(search.trim().length >= 2) && (folderId ? data : home) && (
@@ -374,7 +374,7 @@ export function FilesPage() {
 
 // ---------- Navegação lateral ----------
 
-function FilesNav({ home, currentId, path, trash }: { home: Awaited<ReturnType<typeof filesApi.home>> | null; currentId: string | null; path: { _id: string; name: string }[]; trash: boolean }) {
+function FilesNav({ home, currentId, path, trash, tick }: { home: Awaited<ReturnType<typeof filesApi.home>> | null; currentId: string | null; path: { _id: string; name: string }[]; trash: boolean; tick: number }) {
   const onPath = new Set(path.map((p) => p._id));
   return (
     <nav className="fl-nav" aria-label="Pastas">
@@ -393,7 +393,7 @@ function FilesNav({ home, currentId, path, trash }: { home: Awaited<ReturnType<t
       ) : (
         <ul className="fl-tree" role="tree">
           {home.folders.map((f) => (
-            <TreeNode key={f._id} folder={f} depth={0} currentId={currentId} onPath={onPath} />
+            <TreeNode key={f._id} folder={f} depth={0} currentId={currentId} onPath={onPath} tick={tick} />
           ))}
         </ul>
       )}
@@ -408,13 +408,24 @@ function FilesNav({ home, currentId, path, trash }: { home: Awaited<ReturnType<t
   );
 }
 
-function TreeNode({ folder, depth, currentId, onPath }: { folder: DriveFolder; depth: number; currentId: string | null; onPath: Set<string> }) {
+// Os filhos são pedidos de novo ao trocar de pasta, quando a tela recarrega (tick: pasta criada, renomeada...) e quando
+// outra pessoa muda esta pasta (drive.changed).
+function TreeNode({ folder, depth, currentId, onPath, tick }: { folder: DriveFolder; depth: number; currentId: string | null; onPath: Set<string>; tick: number }) {
   const [open, setOpen] = useState(onPath.has(folder._id));
   const [children, setChildren] = useState<DriveFolder[] | null>(null);
-  const hasKids = (folder.items ?? 0) > 0;
+  const [changes, setChanges] = useState(0);
+  const hasKids = open && children ? children.length > 0 : (folder.subfolders ?? folder.items ?? 0) > 0;
   useEffect(() => {
     if (onPath.has(folder._id)) setOpen(true);
   }, [onPath, folder._id]);
+  useEffect(() => {
+    const off = realtime.on((ev) => {
+      if (ev.type === 'drive.changed' && ev.folderIds.includes(folder._id)) setChanges((n) => n + 1);
+    });
+    return () => {
+      off();
+    };
+  }, [folder._id]);
   useEffect(() => {
     if (!open) return;
     let alive = true;
@@ -425,7 +436,7 @@ function TreeNode({ folder, depth, currentId, onPath }: { folder: DriveFolder; d
     return () => {
       alive = false;
     };
-  }, [open, folder._id, currentId]);
+  }, [open, folder._id, currentId, tick, changes]);
   const active = currentId === folder._id;
   return (
     <li role="treeitem" aria-expanded={hasKids ? open : undefined} aria-selected={active}>
@@ -442,7 +453,7 @@ function TreeNode({ folder, depth, currentId, onPath }: { folder: DriveFolder; d
       {open && children && children.length > 0 && (
         <ul role="group">
           {children.map((c) => (
-            <TreeNode key={c._id} folder={c} depth={depth + 1} currentId={currentId} onPath={onPath} />
+            <TreeNode key={c._id} folder={c} depth={depth + 1} currentId={currentId} onPath={onPath} tick={tick} />
           ))}
         </ul>
       )}

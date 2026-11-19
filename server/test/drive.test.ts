@@ -188,6 +188,7 @@ describe('arquivos', () => {
     const view = await folder(root, davi);
     expect(view.files.map((f: any) => f.name)).toEqual(['Relatório.txt', 'Resumo.txt']);
     expect(view.folder.items).toBe(3); // 2 arquivos + a subpasta visível
+    expect(view.folder.subfolders).toBe(1); // a árvore só mostra a seta quando há subpasta
   });
 
   it('busca e recentes respeitam o acesso', async () => {
