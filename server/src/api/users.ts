@@ -579,8 +579,10 @@ const COLORS = ['#4453db', '#0e7490', '#047857', '#b45309', '#be185d', '#6d28d9'
 
 export function initialsSvg(name: string) {
   const clean = name.trim() || '?';
-  const parts = clean.split(/[\s._-]+/).filter(Boolean);
-  const initials = (parts.length > 1 ? parts[0][0] + parts[1][0] : clean.slice(0, 2)).toUpperCase();
+  // A primeira letra ou algarismo de cada parte: "🦊 Raposa Feliz 🎉" dá RF (parts[0][0] era meio emoji, "�").
+  // Sem letra nenhuma, o primeiro caractere inteiro.
+  const parts = clean.split(/[\s._-]+/).map((p) => p.match(/[\p{L}\p{N}]/gu) ?? []).filter((p) => p.length);
+  const initials = (parts.length > 1 ? parts[0][0] + parts[1][0] : parts.length ? parts[0].slice(0, 2).join('') : Array.from(clean)[0]).toUpperCase();
   let h = 0;
   for (const ch of clean) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   const color = COLORS[h % COLORS.length];

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { errorHandler } from '../src/api/http';
+import { initialsSvg } from '../src/api/users';
 import { cleanInput, hasVisibleText } from '../src/lib/sanitize';
 import { admin, api, newUser, startServer, stopServer, urlOf, type Auth } from './helpers';
 
@@ -155,5 +156,17 @@ describe('caracteres invisíveis e de direção', () => {
 
     const m = await api('POST', 'chat.sendMessage', { message: { rid: room, msg: 'exemplo: \u202efdp.exe' } }, A);
     expect(m.message.msg).toBe('exemplo: \u202efdp.exe');
+  });
+});
+
+describe('iniciais do avatar', () => {
+  const text = (name: string) => initialsSvg(name).match(/<text[^>]*>([^<]*)<\/text>/)![1];
+  it('emoji no começo do nome não vira meio caractere', () => {
+    expect(text('🦊 Raposa Feliz 🎉')).toBe('RF');
+    expect(text('Ana Souza')).toBe('AS');
+    expect(text('qa.visual')).toBe('QV');
+    expect(text('admin')).toBe('AD');
+    expect(text('🦊')).toBe('🦊');
+    expect(text('')).toBe('?');
   });
 });
