@@ -207,6 +207,35 @@ export function str(v: unknown, name: string, opts: { optional?: boolean; max?: 
   return v;
 }
 
+// Número inteiro de um parâmetro (count da query): vazio vale o padrão, o que não é número é recusado e o resto fica
+// entre min e max. Sem isso "count=abc" chegava ao SQL como NaN e virava erro 500.
+export function intParam(v: unknown, name: string, def: number, min: number, max: number): number {
+  if (v === undefined || v === null || v === '') return def;
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*-?\d+\s*$/.test(v) ? Number(v) : NaN;
+  if (!Number.isSafeInteger(n)) throw new ApiError(400, 'error-invalid-params', `O parâmetro "${name}" deve ser um número inteiro.`);
+  return Math.min(max, Math.max(min, n));
+}
+
+// Data de um parâmetro (latest, oldest, lastUpdate). ISO 8601 segue como veio (com os microssegundos, se houver); outro
+// formato que o JavaScript entende vira ISO; o resto é recusado (antes chegava ao banco e virava erro 500).
+export function dateParam(v: unknown, name: string, opts: { optional?: boolean } = {}): string {
+  const s = str(v, name, opts);
+  if (s === undefined) return s;
+  const bad = () => new ApiError(400, 'error-invalid-params', `O parâmetro "${name}" deve ser uma data (ex.: 2026-11-19T10:00:00Z).`);
+  const t = Date.parse(s);
+  // O banco não aceita o ano 0 nem anos de mais de 4 dígitos, que o JavaScript aceita.
+  const year = new Date(t).getUTCFullYear();
+  if (Number.isNaN(t) || year < 1 || year > 9999) throw bad();
+  const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/i.exec(s);
+  if (!iso) return new Date(t).toISOString();
+  // Dia que não existe (2026-02-30, 2026-04-31): o JavaScript passa para o mês seguinte, o banco recusa.
+  const [y, m, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
+  const day = new Date(0);
+  day.setUTCFullYear(y, m - 1, d);
+  if (y < 1 || day.getUTCMonth() !== m - 1 || day.getUTCDate() !== d) throw bad();
+  return s;
+}
+
 export function bool(v: unknown): boolean | undefined {
   if (v === undefined || v === null || v === '') return undefined;
   return v === true || v === 'true' || v === 1 || v === '1';

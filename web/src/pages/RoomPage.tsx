@@ -12,6 +12,7 @@ import { renderMarkdown } from '../lib/markdown';
 import { sendText } from '../lib/direct';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { lastOwnEditable } from '../lib/messageRules';
+import { markUnread } from '../lib/markUnread';
 import { useTranslateAllowed } from '../lib/translate';
 import { Composer } from '../components/Composer';
 import { Icon, type IconName } from '../components/Icon';
@@ -383,8 +384,9 @@ export function RoomPage() {
             : // Criptografia: sem a senha ou sem a chave da conversa não dá para escrever.
               e2eBlock?.text;
   // As mesmas recusas do servidor: reagir não exige poder escrever (canal de avisos com reações), mas sala arquivada,
-  // silêncio e DM bloqueada também barram a reação. Discussão e edição seguem as regras de envio.
-  const canReact = !!room && !room.archived && !muted && room.direct?.canSend !== false && (!room.ro || room.reactWhenReadOnly || canPostRO);
+  // silêncio e DM bloqueada também barram a reação. Discussão e edição seguem as regras de envio. Quem só visualiza o
+  // canal (sem entrar) não reage, não cita e não responde: o servidor recusa, e o convite para entrar fica no compositor.
+  const canReact = !!room && !!sub && !room.archived && !muted && room.direct?.canSend !== false && (!room.ro || room.reactWhenReadOnly || canPostRO);
   // Discussão dentro de discussão o servidor também recusa.
   const canDiscuss = !disabledReason && !room?.prid && (canWithRoles('start-discussion', roles) || canWithRoles('start-discussion-other-user', roles));
   // "Ocultar a lista de membros": o servidor recusa a lista para quem não tem view-broadcast-member-list.
@@ -409,16 +411,26 @@ export function RoomPage() {
           ? 'Você está silenciado nesta sala.'
           : directBlocked || '';
   const canClosePolls = canWithRoles('delete-message', roles);
+  // Editar a mensagem de outra pessoa: a permissão com os papéis da sala (dono, moderador), como o servidor confere.
+  const canEditOthers = canWithRoles('edit-message', roles);
+  // Prazo para editar e apagar as próprias mensagens (minutos; 0 = sem prazo). Quem modera (edit-message, delete-message)
+  // e quem tem bypass-time-limit-edit-and-delete não tem prazo, como no servidor.
+  const bypassTime = canWithRoles('bypass-time-limit-edit-and-delete', roles);
+  const editBlock = useSetting<number>('Message_AllowEditing_BlockEditInMinutes') ?? 0;
+  const deleteBlock = useSetting<number>('Message_AllowDeleting_BlockDeleteInMinutes') ?? 0;
+  const editLimit = canEditOthers || bypassTime ? 0 : editBlock;
+  const deleteLimit = canWithRoles('delete-message', roles) || canWithRoles('force-delete-message', roles) || bypassTime ? 0 : deleteBlock;
   // Quem votou: num canal de avisos (ou com a lista oculta) só quem publica ou vê a lista.
   const canSeePollVoters = !(room?.notice || room?.broadcast) || canPostRO || (!!room?.broadcast && !membersHidden);
   const gate = useMemo(
-    () => ({ canReact, canReply: !disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters }),
-    [canReact, disabledReason, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters],
+    () => ({ canReact, canReply: !disabledReason && !!sub, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers, editLimit, deleteLimit }),
+    [canReact, disabledReason, sub, canDiscuss, canSeeReceipts, receiptsLimited, canSeeLimitedReceipts, canPin, canForwardFrom, voteBlocked, canClosePolls, canSeePollVoters, canEditOthers, editLimit, deleteLimit],
   );
 
   const actions = useMemo(
     () => ({
-      onReplyThread: (m: Message) => threadsOn && navigate(`${roomPath({ _id: rid, t: room?.t ?? 'c' })}/thread/${m._id}`),
+      // Resposta que também aparece na sala (tshow): o tópico é o da raiz dela.
+      onReplyThread: (m: Message) => threadsOn && navigate(`${roomPath({ _id: rid, t: room?.t ?? 'c' })}/thread/${m.tmid ?? m._id}`),
       onEdit: (m: Message) => setEditing(m),
       onQuote: (m: Message) => setQuoting(m),
       onDiscussion: (m: Message) => setDiscussionFrom(m),
@@ -431,7 +443,7 @@ export function RoomPage() {
   // Seta para cima no compositor vazio: a mesma regra do "Editar" do menu (sem figurinhas nem mensagens de sistema).
   const editLast = () => {
     const { messages, settings } = useStore.getState();
-    const mine = lastOwnEditable(messages[rid]?.list ?? [], me._id, !!settings.Message_AllowEditing);
+    const mine = lastOwnEditable(messages[rid]?.list ?? [], me._id, !!settings.Message_AllowEditing, editLimit);
     // Mensagem cifrada: edita o texto decifrado (sem ele, nada a editar).
     if (mine && mine.e2e) {
       const c = contentOf(mine);
@@ -735,7 +747,7 @@ export function RoomPage() {
                           <Icon name={sub.f ? 'unfavorite' : 'favorite'} />
                           {sub.f ? 'Remover dos favoritos' : 'Favoritar'}
                         </button>
-                        <button onClick={() => (api.post('subscriptions.unread', { roomId: rid }), close())}>
+                        <button onClick={() => (close(), void markUnread(rid, () => navigate('/home')))}>
                           <Icon name="mark-unread" />
                           Marcar como não lida
                         </button>
@@ -765,7 +777,15 @@ export function RoomPage() {
           {/* Chamadas em grupo: a faixa da chamada viva, depois da faixa de avisos e antes do anúncio. */}
           <CallBanner room={room} />
           {room.announcement && <Announcement text={room.announcement} />}
-          <MessageList key={rid} rid={rid} sub={sub} actions={actions} canModerate={canModerate} notice={room.notice ? { ack: room.noticeAck, canPost: canPostRO } : undefined} />
+          <MessageList
+            key={rid}
+            rid={rid}
+            sub={sub}
+            actions={actions}
+            canModerate={canModerate}
+            notice={room.notice ? { ack: room.noticeAck, canPost: canPostRO } : undefined}
+            threadOpen={!!tmid}
+          />
           <TypingIndicator id={rid} />
           {sub ? (
             <Composer

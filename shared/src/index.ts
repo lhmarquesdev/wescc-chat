@@ -173,6 +173,7 @@ export interface Subscription {
 
 export interface Reaction {
   usernames: string[];
+  ts?: string; // primeira reação com este emoji: as reações aparecem nessa ordem (o jsonb não guarda a ordem das chaves)
 }
 
 export interface Attachment {
@@ -192,6 +193,7 @@ export interface Attachment {
   author_name?: string;
   author_alias?: string; // apelido do autor (integração, webhooks); só o servidor preenche
   ts?: string;
+  removed?: boolean; // a mensagem citada (ou fixada) foi apagada: o texto é só o aviso; só o servidor preenche
   // anexos de integrações e mensagens importadas do Slack
   pretext?: string;
   color?: string;

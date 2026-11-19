@@ -6,9 +6,17 @@
 // ']' (?ids[]=1, filter[x]=y, [::1]), menos um '[' que abre outro "[texto](", e é aí que a tentativa que falhou para.
 export const MD_LINK_SRC = '\\[[^\\[\\]\\n]+\\]\\((?:https?:\\/\\/|\\/)(?:[^)\\s\\[]|\\[(?![^\\[\\]\\n]*\\]\\())+\\)';
 export const CODE_SRC = '`[^`\\n]+`';
-export const URL_SRC = "(?:https?:\\/\\/|www\\.)[^\\s<]+[^\\s<.,;:!?)\\]'\"]";
+// Parêntese no endereço: um par "(...)" fica no link (wiki/Brasil_(desambiguação)); um ")" solto só fica quando vem
+// mais endereço depois, então "(veja https://x.example/a)." não leva o ")" nem o ponto. As alternativas começam em
+// caracteres diferentes (um "(" ou é par ou é solto), então a busca continua linear.
+export const URL_SRC =
+  "(?:https?:\\/\\/|www\\.)(?:[^\\s<()]|\\([^\\s<()]*\\)|\\((?![^\\s<()]*\\))(?=[^\\s<])|\\)(?=[^\\s<.,;:!?()\\]'\"]))*(?:[^\\s<.,;:!?()\\]'\"]|\\([^\\s<()]*\\))";
+// E-mail vira link mailto:. Começa só no início da palavra (o lookbehind), então cada trecho é lido uma vez; o ponto
+// final da frase fica fora (o domínio termina em letra, número ou "-").
+export const EMAIL_SRC = '(?<![\\w.+-])[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+';
 export const BOLD_SRC = '\\*\\*[^*\\n]+\\*\\*|\\*[^*\\s][^*\\n]*\\*';
-export const ITALIC_SRC = '__[^_\\n]+__|(?<![\\w])_[^_\\s][^_\\n]*_(?![\\w])';
+// Itálico não abre logo depois de "\": ¯\_(ツ)_/¯ (o /shrug) aparece como é, e não com "(ツ)" em itálico.
+export const ITALIC_SRC = '__[^_\\n]+__|(?<![\\w\\\\])_[^_\\s][^_\\n]*_(?![\\w])';
 export const STRIKE_SRC = '~~[^~\\n]+~~|~[^~\\s][^~\\n]*~';
 export const MENTION_SRC = '(?<![\\w@])@[0-9a-zA-Z._-]+';
 export const CHANNEL_SRC = '(?<![\\w#&])#[0-9a-zA-Z\\u00C0-\\u017F._-]+';

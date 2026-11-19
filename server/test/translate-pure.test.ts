@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHANNEL_SRC, CODE_SRC, EMOJI_SRC, MD_LINK_SRC, MENTION_SRC, URL_SRC } from '@shared/markdownTokens';
+import { CHANNEL_SRC, CODE_SRC, EMAIL_SRC, EMOJI_SRC, MD_LINK_SRC, MENTION_SRC, URL_SRC } from '@shared/markdownTokens';
 import {
   baseLang,
   cleanRun,
@@ -38,12 +38,13 @@ const CORPUS = [
   '',
   '\n\n',
   'www.example.com/caminho?x=1 no começo',
+  'Escreva para suporte@empresa.com.br ou veja https://pt.wikipedia.org/wiki/Brasil_(desambiguação).',
   '@ana @bruno',
   'texto com `código` e mais `outro código` no fim',
   '> # título citado\n> - item citado',
 ];
 
-const KEEP = new RegExp([CODE_SRC, MD_LINK_SRC, URL_SRC, MENTION_SRC, CHANNEL_SRC, EMOJI_SRC].map((s) => `(?:${s})`).join('|'));
+const KEEP = new RegExp([CODE_SRC, MD_LINK_SRC, URL_SRC, EMAIL_SRC, MENTION_SRC, CHANNEL_SRC, EMOJI_SRC].map((s) => `(?:${s})`).join('|'));
 
 describe('trechos (splitForTranslation, joinTranslation)', () => {
   it('ida e volta exata em qualquer texto', () => {

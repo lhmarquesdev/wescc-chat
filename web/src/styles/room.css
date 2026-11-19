@@ -395,6 +395,20 @@
 .msg-flag.star {
   color: hsl(var(--warning));
 }
+/* Linha agrupada (sem cabeçalho): as marcas vão no fim do texto, como o "editada", ou numa linha embaixo. */
+.msg-body .msg-flag {
+  margin-left: 6px;
+  vertical-align: -1px;
+}
+.msg-flags {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+.own > .msg-main > .msg-body .msg-flag {
+  color: inherit;
+  opacity: 0.85;
+}
 .receipt {
   display: inline-flex;
   align-self: center;
@@ -412,8 +426,22 @@
   margin-left: 6px;
 }
 .msg-thread-hint {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: var(--fs-12);
+  line-height: var(--lh-12);
   color: hsl(var(--muted-foreground));
+  text-align: left;
+  cursor: pointer;
+}
+/* Abre o tópico da resposta (com ela destacada) */
+.msg-thread-hint:hover {
+  color: hsl(var(--brand-ink-2));
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 /* Tradução pedida pelo menu: "Traduzida do inglês · Ver original" abaixo do corpo */
 .msg-translated {
@@ -478,10 +506,12 @@ button.msg-tr-mark:hover {
     padding: 14px 8px;
     margin: -14px -8px;
   }
-  button.msg-tr-mark {
+  button.msg-tr-mark,
+  .msg-thread-hint {
     position: relative;
   }
-  button.msg-tr-mark::after {
+  button.msg-tr-mark::after,
+  .msg-thread-hint::after {
     content: '';
     position: absolute;
     top: 50%;
@@ -1105,6 +1135,32 @@ button.reaction:hover {
   font-size: var(--fs-14);
   line-height: var(--lh-14);
   overflow-wrap: anywhere;
+}
+/* Citação e nota de fixação levam à mensagem original (a data é o botão para o teclado). */
+.quote-att.linked {
+  cursor: pointer;
+}
+.quote-att.linked:hover {
+  border-left-color: hsl(var(--brand-ink-2));
+  background: hsl(var(--surface-3));
+}
+.quote-jump {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.quote-jump > time {
+  color: inherit;
+}
+.quote-att.linked:hover .quote-jump,
+.quote-jump:hover {
+  color: hsl(var(--brand-ink-2));
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 /* Anexos no formato do Slack (integrações e mensagens importadas) */
 .att-rich-wrap {
@@ -1876,6 +1932,59 @@ a.att-title {
 .upload-list + input {
   width: 100%;
   margin-top: 12px;
+}
+/* Arquivo que o servidor recusaria (vazio, tipo, tamanho): marcado antes de enviar e deixado de fora. */
+.upload-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.upload-problem {
+  margin: 4px 0 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: hsl(var(--st-red));
+}
+.upload-list li.blocked :is(.upload-name, .upload-size) {
+  color: hsl(var(--muted-foreground));
+}
+/* /help: um comando por linha; no celular a descrição desce para baixo do nome. */
+.commands-help li {
+  padding: 0;
+}
+.commands-help button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  width: 100%;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.commands-help button:hover {
+  background: hsl(var(--surface-3));
+}
+.commands-help code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: hsl(var(--foreground));
+}
+.commands-help-params {
+  font-weight: var(--fw-regular);
+  color: hsl(var(--muted-foreground));
+}
+.commands-help-desc {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: hsl(var(--muted-foreground));
 }
 .drop-overlay {
   position: fixed;

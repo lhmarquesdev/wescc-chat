@@ -124,17 +124,20 @@ describe('canais de avisos', () => {
     await pool.query(`INSERT INTO custom_emoji (id, name, aliases, content_type, data) VALUES ($1, $2, $3, 'image/png', $4)`, [name('emoji'), custom, [`${custom}_alt`], Buffer.from('png')]);
     expect((await api('POST', 'chat.react', { messageId: m.message._id, emoji: `:${custom}:` }, member)).status).toBe(200);
     expect((await api('POST', 'chat.react', { messageId: m.message._id, emoji: `:${custom}_alt:` }, member)).status).toBe(200);
-    // Quem publica escreve o que quiser; o leitor pode se juntar a uma reação que já existe e tirar a sua.
-    expect((await api('POST', 'chat.react', { messageId: m.message._id, emoji: ':confirmado_pela_gerencia:' }, owner)).status).toBe(200);
+    // Quem publica também só reage com emoji (como no Rocket.Chat); numa reação que já existe com outro código (importada)
+    // o leitor pode entrar e sair.
+    expect((await api('POST', 'chat.react', { messageId: m.message._id, emoji: ':confirmado_pela_gerencia:' }, owner)).errorType).toBe('error-invalid-emoji');
+    await pool.query(`UPDATE messages SET reactions = reactions || jsonb_build_object(':confirmado_pela_gerencia:', jsonb_build_object('usernames', jsonb_build_array($2::text))) WHERE id = $1`, [m.message._id, owner.username]);
     expect((await api('POST', 'chat.react', { messageId: m.message._id, emoji: ':confirmado_pela_gerencia:' }, member)).status).toBe(200);
     expect((await api('POST', 'chat.react', { messageId: m.message._id, emoji: ':confirmado_pela_gerencia:' }, member)).status).toBe(200);
     const reactions = (await api('GET', 'chat.getMessage', { msgId: m.message._id }, owner)).message.reactions;
     expect(Object.keys(reactions).sort()).toEqual([':confirmado_pela_gerencia:', `:${custom}:`, `:${custom}_alt:`, ':thumbsup:'].sort());
     expect(reactions[':confirmado_pela_gerencia:'].usernames).toEqual([owner.username]);
-    // Em sala comum quem lê também escreve: a reação segue livre como antes.
+    // Em sala comum vale a mesma regra: emoji da lista ou personalizado, nunca texto livre.
     const plainRoom = (await api('POST', 'channels.create', { name: name('livre'), members: [member.username] }, owner)).channel._id;
     const pm = await send(owner, plainRoom, 'oi');
-    expect((await api('POST', 'chat.react', { messageId: pm.message._id, emoji: ':qualquer_coisa:' }, member)).status).toBe(200);
+    expect((await api('POST', 'chat.react', { messageId: pm.message._id, emoji: ':qualquer_coisa:' }, member)).errorType).toBe('error-invalid-emoji');
+    expect((await api('POST', 'chat.react', { messageId: pm.message._id, emoji: `:${custom}:` }, member)).status).toBe(200);
     const reply = await send(member, ch._id, 'dúvida', { tmid: m.message._id });
     expect(reply.status).toBe(403);
     expect(reply.error).toBe(READER_TEXT);

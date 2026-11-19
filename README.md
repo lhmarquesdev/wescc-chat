@@ -848,7 +848,8 @@ empresa e nenhum serviço da internet (Google, DeepL, Microsoft…) é usado.
 - Fora do ar, lento ou recusando: a mensagem fica no original (marcada “sem tradução”) e o chat tenta de novo sozinho
   depois de 30 segundos; a lista de idiomas também volta sozinha.
 - Nunca são traduzidas: salas criptografadas e mensagens cifradas, mensagens de sistema, figurinhas, enquetes e
-  encaminhadas. Trechos de código, links, menções, canais e emojis não vão para o tradutor e ficam iguais.
+  encaminhadas. Trechos de código, links, endereços de e-mail, menções, canais e emojis não vão para o tradutor e
+  ficam iguais.
 - Notificações, e-mails, busca, prévia na barra lateral, citações e a auditoria continuam mostrando o original.
   Nenhum texto de mensagem vai para o log.
 
@@ -929,6 +930,11 @@ texto. Por isso a proteção depende de o servidor do chat ser o original e de o
   vez, com comentário opcional e os arquivos junto; a mensagem mostra de onde veio, sem revelar um grupo privado ou
   uma conversa direta a quem não participa dela. Valem as regras de envio de cada destino (somente leitura, canal de
   avisos, arquivada, Operação); os destinos que não aceitam já aparecem desativados.
+- **Comandos de barra**: `/help` abre a lista dos comandos com o que cada um faz; um comando que não existe (por
+  exemplo `/leav`) não vira mensagem: o chat avisa, sugere o mais parecido e oferece “Enviar como texto”. Reações só
+  com emojis da lista (os padrão e os personalizados da Administração), na ordem em que apareceram, e só de quem está
+  na sala: quem só visualiza um canal público entra nele para reagir, citar ou responder. A descrição de um arquivo é o
+  texto da mensagem: aceita menções e formatação, e “Editar” muda essa descrição.
 - **Enquetes** (botão + › Criar enquete, `create-poll`: Administrador, Usuário, Dono, Moderador e Publicador): 2 a 10
   opções, com escolha múltipla, voto anônimo (ninguém vê quem votou, nem quem criou) e prazo opcional (de 5 minutos a
   90 dias). Votar não depende da permissão; encerrar antes do prazo, só quem criou ou um moderador da sala.

@@ -6,13 +6,13 @@ import { mediaTypeAllowed, stickerPreviewText } from '@shared/stickers';
 import { localCommandText } from '@shared/e2e';
 import { editEncrypted, quoteOf, sendEncrypted, sendEncryptedFile, type E2eFileMeta } from '../lib/e2e/client';
 import { api, ApiError, errorMessage, uploadTo } from '../lib/api';
-import { slashCommands } from '../lib/commands';
+import { slashCommands, type SlashCommand } from '../lib/commands';
 import { EMOJI, searchEmoji } from '../lib/emoji';
-import { formatBytes, roomPath } from '../lib/format';
-import { mentionGroups, mentionSuggestions } from '../lib/messageRules';
+import { formatBytes, nameList, roomPath } from '../lib/format';
+import { editTextOf, mentionGroups, mentionSuggestions, unknownSlashCommand } from '../lib/messageRules';
 import { whenText } from '../lib/messageTimes';
 import { realtime } from '../lib/realtime';
-import { registerComposer, useStickers } from '../lib/stickers';
+import { clientMessageId, registerComposer, useStickers } from '../lib/stickers';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { namesIn, useNames } from '../lib/names';
 import { Icon, type IconName } from './Icon';
@@ -114,6 +114,8 @@ function ComposerView({
   const [alsoChannel, setAlsoChannel] = useState(false);
   const [pending, setPending] = useState<File[]>([]);
   const [fileDesc, setFileDesc] = useState('');
+  // /help: a lista de comandos num modal (antes, um aviso enorme que sumia sozinho).
+  const [help, setHelp] = useState<SlashCommand[] | null>(null);
   const [askAck, setAskAck] = useState(true);
   const [drop, setDrop] = useState<DOMRect | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
@@ -126,6 +128,10 @@ function ComposerView({
   // Figurinhas: a sala (onde dá para enviar) e o pedido "Ver no seletor" do cartão da figurinha.
   const room = useStore((s) => s.rooms[rid]);
   const sub = useStore((s) => s.subscriptions[rid]);
+  // Upload permitido nesta sala (conversa direta segue FileUpload_Enabled_Direct): vale para o botão, para colar e para
+  // arrastar. Antes, colar ou soltar um arquivo numa DM sem upload abria a janela e só dava erro depois de Enviar.
+  const uploadsHere = !!uploadsOn && !(room?.t === 'd' && uploadsInDirect === false);
+  const uploadsOff = !uploadsOn ? 'Upload de arquivos desativado.' : 'Upload em mensagens diretas desativado.'; // o texto do servidor
   const navigate = useNavigate();
   const whiteList = useSetting<string>('FileUpload_MediaTypeWhiteList') ?? '';
   const blackList = useSetting<string>('FileUpload_MediaTypeBlackList') ?? '';
@@ -135,6 +141,12 @@ function ComposerView({
   const [scheduleSheet, setScheduleSheet] = useState(false);
   const [scheduleCustom, setScheduleCustom] = useState(false);
   const sendPress = useRef<{ timer: number; fired: boolean } | null>(null);
+  // Envio em andamento (rede lenta): Enter e o botão não mandam de novo. O _id vem daqui; reenviar o mesmo texto depois
+  // de uma falha usa o mesmo, e o servidor devolve a mensagem que já tinha saído, sem cópia.
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const sendKey = useRef<{ key: string; id: string } | null>(null);
+  const textNow = useRef('');
   // Folha "Agendar envio" aberta pelo toque longo: o clique que vem ao soltar o dedo cai em cima dela e é descartado.
   const swallowSheetClicks = useRef(0);
   const pickerRequest = useStickers((s) => s.pickerRequest);
@@ -177,8 +189,10 @@ function ComposerView({
   const wasEditing = useRef(false);
   useEffect(() => {
     if (editing) {
-      setText(editing.msg);
+      setText(editTextOf(editing));
       ta.current?.focus();
+      // A mensagem em edição fica à vista: a seta para cima pega a última da pessoa, que pode estar lá em cima.
+      box.current?.closest('.thread-panel, .room-main')?.querySelector(`[id="msg-${editing._id}"]`)?.scrollIntoView({ block: 'nearest' });
     } else if (wasEditing.current) {
       // Fim da edição (salva ou cancelada): volta o rascunho da mensagem nova, que a edição não tocou.
       setText(readDraft());
@@ -206,14 +220,15 @@ function ComposerView({
     el.style.height = `${el.scrollHeight}px`;
   }, [text, phone]);
 
-  // Arrastar um arquivo sobre a sala (ou o painel do tópico) mostra a área de soltar.
+  // Arrastar um arquivo sobre a sala (ou o painel do tópico) mostra a área de soltar. Sem upload aqui, soltar só avisa
+  // (sem isso o navegador abria o arquivo no lugar do chat).
   useEffect(() => {
     const host = box.current?.closest<HTMLElement>('.thread-panel, .room-main');
-    if (!host || !uploadsOn || disabled) return;
+    if (!host || disabled) return;
     let depth = 0;
     const files = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
     const enter = (e: DragEvent) => {
-      if (!files(e)) return;
+      if (!files(e) || !uploadsHere) return;
       e.preventDefault();
       if (depth++ === 0) setDrop(host.getBoundingClientRect());
     };
@@ -221,7 +236,7 @@ function ComposerView({
       if (files(e)) e.preventDefault();
     };
     const leave = (e: DragEvent) => {
-      if (!files(e)) return;
+      if (!files(e) || !uploadsHere) return;
       if (--depth <= 0) {
         depth = 0;
         setDrop(null);
@@ -232,7 +247,8 @@ function ComposerView({
       e.preventDefault();
       depth = 0;
       setDrop(null);
-      if (e.dataTransfer?.files.length) setPending([...e.dataTransfer.files]);
+      if (!uploadsHere) useStore.getState().toast(uploadsOff, 'error');
+      else if (e.dataTransfer?.files.length) setPending([...e.dataTransfer.files]);
     };
     host.addEventListener('dragenter', enter);
     host.addEventListener('dragover', over);
@@ -244,7 +260,7 @@ function ComposerView({
       host.removeEventListener('dragleave', leave);
       host.removeEventListener('drop', dropped);
     };
-  }, [uploadsOn, disabled]);
+  }, [uploadsHere, uploadsOff, disabled]);
 
   const saveDraft = (v: string) => {
     // O texto de uma edição não é rascunho de mensagem nova: depois de uma recarga, o Enter publicaria uma cópia.
@@ -294,11 +310,13 @@ function ComposerView({
       const [, trig, term] = m;
       if (trig === '@') {
         const r = await api.get('users.autocomplete', { term, rid }).catch(() => ({ items: [] }));
+        // Quem não está na sala vem depois dos membros e não recebe o aviso da menção.
+        const outside = useStore.getState().rooms[rid]?.t === 'd' ? 'não está na conversa' : 'não está na sala';
         const person = (u: any): Suggestion => ({
           key: u._id,
           lead: <Avatar username={u.username} size={24} />,
           title: u.name || u.username,
-          sub: `@${u.username}`,
+          sub: u.inRoom === false ? `@${u.username} · ${outside}` : `@${u.username}`,
           insert: `@${u.username} `,
         });
         const people: Suggestion[] = r.items.filter((u: any) => u.username !== me.username).map(person);
@@ -369,13 +387,73 @@ function ComposerView({
   };
 
   const over = text.length > maxSize;
+  textNow.current = text;
+  // Arquivo: a legenda pode ficar vazia (o arquivo continua). Na cifrada, não.
+  const fileEdit = !!editing && !editing.e2e && !!editing.files?.length;
 
-  const send = async () => {
-    let msg = text.trim();
-    if (!msg && !pending.length) return;
+  // Mencionou quem não está na sala: essa pessoa não recebe aviso nenhum. Quem pode adicionar pessoas adiciona dali.
+  const warnNotInRoom = (list?: { _id: string; username: string; name?: string }[]) => {
+    if (!list?.length || !room) return;
+    const st = useStore.getState();
+    const names = nameList(list.map((u) => u.name || u.username));
+    const where = room.t === 'd' ? 'nesta conversa' : 'nesta sala';
+    const text = list.length === 1 ? `${names} não está ${where} e não recebeu o aviso da menção.` : `${names} não estão ${where} e não receberam o aviso da menção.`;
+    const roles = [...me.roles, ...(sub?.roles ?? [])];
+    const canAdd = room.t !== 'd' && (canWithRoles('add-user-to-joined-room', roles) || canWithRoles(room.t === 'p' ? 'add-user-to-any-p-room' : 'add-user-to-any-c-room', roles));
+    const add = () =>
+      api
+        .post(
+          room.teamMain ? 'teams.addMembers' : room.t === 'p' ? 'groups.invite' : 'channels.invite',
+          room.teamMain ? { teamId: room.teamId, members: list.map((u) => ({ userId: u._id })) } : { roomId: rid, userIds: list.map((u) => u._id) },
+        )
+        .then(() => st.toast(list.length === 1 ? `${names} agora está na sala.` : `${names} agora estão na sala.`, 'success'))
+        .catch((e) => st.toast(errorMessage(e), 'error'));
+    st.toast(text, 'warning', { duration: 10000, action: canAdd ? { label: 'Adicionar à sala', onClick: () => void add() } : undefined });
+  };
+
+  // Comando que não deixa nada na sala (/status, /msg): a confirmação que o servidor manda.
+  const commandDone = (r?: { ok?: boolean; command?: string; text?: string; rid?: string }) => {
+    if (!r?.ok || !r.command || !r.text) return;
+    const to = r.rid;
+    useStore.getState().toast(r.text, 'success', to ? { action: { label: 'Abrir conversa', onClick: () => navigate(roomPath({ _id: to, t: 'd' })) } } : undefined);
+  };
+
+  const clearSent = (msg: string) => {
+    // O que a pessoa começou a escrever enquanto a mensagem saía fica no compositor.
+    if (textNow.current.trim() !== msg) return;
+    setText('');
+    saveDraft('');
+    reqSeq.current++;
+    setSugs([]);
+  };
+
+  // asText: "Enviar como texto" do aviso de comando que não existe.
+  const send = async (opts: { asText?: boolean } = {}) => {
+    if (sendingRef.current) return;
+    const msg = textNow.current.trim();
+    const isEdit = !!editing;
+    if (!msg && !pending.length && !fileEdit) return;
     if (msg.length > maxSize) return useStore.getState().toast(`A mensagem excede ${maxSize} caracteres.`, 'error');
+    // Salvou sem mudar nada: só sai da edição (não marca "editada").
+    if (editing && msg === editTextOf(editing).trim()) return setEditing(null);
     sendTyping(false);
+    sendingRef.current = true;
+    setSending(true);
     try {
+      if (!editing && !opts.asText && msg.startsWith('/')) {
+        const list = await slashCommands(me._id);
+        if (/^\/help(?:\s|$)/i.test(msg) && list.length) {
+          setHelp(list);
+          return clearSent(msg);
+        }
+        // Erro de digitação (/leav): o texto fica na caixa e não vai para a sala como mensagem.
+        const unknown = unknownSlashCommand(msg, list.map((c) => c.command));
+        if (unknown) {
+          const hint = unknown.suggestion ? ` Você quis dizer /${unknown.suggestion}?` : '';
+          useStore.getState().toast(`O comando /${unknown.name} não existe.${hint}`, 'warning', { duration: 8000, action: { label: 'Enviar como texto', onClick: () => void send({ asText: true }) } });
+          return;
+        }
+      }
       if (room?.encrypted) {
         if (!(await sendE2e(msg))) return;
       } else if (editing) {
@@ -384,15 +462,25 @@ function ComposerView({
       } else {
         const attachments = quoting ? [{ text: quoting.msg, author_name: quoting.u.username, ts: quoting.ts, message_link: `?msg=${quoting._id}` }] : undefined;
         const ackRequired = ackOption && askAck && !tmid ? true : undefined;
-        await api.post('chat.sendMessage', { message: { rid, msg, tmid, tshow: tmid ? alsoChannel || undefined : undefined, attachments, ackRequired } });
+        const key = JSON.stringify([rid, tmid ?? '', msg, quoting?._id ?? '', !!alsoChannel, !!ackRequired]);
+        const _id = sendKey.current?.key === key ? sendKey.current.id : clientMessageId();
+        sendKey.current = { key, id: _id };
+        const r = await api.post('chat.sendMessage', { message: { _id, rid, msg, tmid, tshow: tmid ? alsoChannel || undefined : undefined, attachments, ackRequired } });
+        sendKey.current = null;
         if (quoting) setQuoting(null);
+        // A lista longe do fim (link para uma antiga, primeira não lida): volta para as últimas, onde a mensagem aparece.
+        if (!tmid) useStore.getState().sentFromRoom(rid);
+        warnNotInRoom(r.mentionsNotInRoom);
+        commandDone(r.message);
       }
-      setText('');
-      saveDraft('');
-      reqSeq.current++;
-      setSugs([]);
+      // "Também enviar na sala" vale para uma resposta só (como no Rocket.Chat): a seguinte fica no tópico.
+      if (!isEdit && tmid) setAlsoChannel(false);
+      clearSent(msg);
     } catch (e) {
       useStore.getState().toast(errorMessage(e), 'error');
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
   };
 
@@ -413,7 +501,8 @@ function ComposerView({
       const local = localCommandText(name, args);
       if (local !== null) text = local;
       else if ((await slashCommands(me._id)).some((c) => c.command === name)) {
-        await api.post('commands.run', { roomId: rid, command: name, params: args, tmid });
+        const r = await api.post('commands.run', { roomId: rid, command: name, params: args, tmid });
+        commandDone(r.result);
         return true;
       }
     }
@@ -423,14 +512,17 @@ function ComposerView({
     return true;
   };
 
-  // Arquivo de conversa criptografada: o servidor não vê o tipo nem o tamanho real, então a lista de tipos e o limite
-  // (com os 16 bytes da cifra) são conferidos aqui, com os mesmos textos do servidor.
+  // O que o servidor recusaria, conferido antes de enviar (as mesmas regras de uploads.ts): o modal marca cada arquivo e
+  // nada sobe à toa. Na conversa criptografada o servidor não vê o tipo nem o tamanho real, e só esta conferência vale
+  // (a cifra soma 16 bytes).
   const maxFile = useSetting<number>('FileUpload_MaxFileSize') ?? 0;
-  const e2eFileProblem = (f: File) => {
-    if (!mediaTypeAllowed(f.type || 'application/octet-stream', whiteList, blackList)) return 'Tipo de arquivo não permitido.';
-    if (maxFile > 0 && f.size + 16 > maxFile) {
+  const fileProblem = (f: File) => {
+    if (!f.size) return 'Arquivo vazio.';
+    const type = (f.type || 'application/octet-stream').split(';')[0].trim().toLowerCase();
+    if (!mediaTypeAllowed(type, whiteList, blackList)) return 'Tipo de arquivo não permitido.';
+    if (maxFile > 0 && f.size + (room?.encrypted ? 16 : 0) > maxFile) {
       const limit = maxFile >= 1048576 ? `${Math.round(maxFile / 1048576)} MB` : `${Math.max(1, Math.round(maxFile / 1024))} KB`;
-      return `Arquivo maior que o permitido (${limit}).`;
+      return `Maior que o permitido (${limit}).`;
     }
     return null;
   };
@@ -454,12 +546,10 @@ function ComposerView({
   const doUpload = async (files: File[], description: string, extra: Record<string, string> = {}, label?: string) => {
     let caption = description;
     for (const f of files) {
-      if (room?.encrypted) {
-        const problem = e2eFileProblem(f);
-        if (problem) {
-          useStore.getState().toast(problem, 'error');
-          continue;
-        }
+      const problem = fileProblem(f);
+      if (problem) {
+        useStore.getState().toast(`${label ?? f.name}: ${problem}`, 'error');
+        continue;
       }
       const id = ++uploadSeq.current;
       const abort = new AbortController();
@@ -467,8 +557,10 @@ function ComposerView({
       try {
         const progress = (p: number) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, progress: p } : x)));
         if (room?.encrypted) await sendEncryptedFile(room, f, { msg: caption, tmid, meta: await e2eMeta(f, extra), onProgress: progress, signal: abort.signal });
-        else await uploadTo(`rooms.upload/${rid}`, f, { description: caption, tmid: tmid ?? '', ...extra }, progress, abort.signal);
+        // A legenda vai como o texto da mensagem: menções, formatação e Editar valem para ela.
+        else await uploadTo(`rooms.upload/${rid}`, f, { msg: caption, tmid: tmid ?? '', ...extra }, progress, abort.signal);
         caption = '';
+        if (!tmid) useStore.getState().sentFromRoom(rid);
       } catch (e) {
         // Cancelado por quem enviou: a barra some e basta.
         if (!(e instanceof ApiError && e.errorType === 'aborted')) useStore.getState().toast(errorMessage(e), 'error');
@@ -482,8 +574,6 @@ function ComposerView({
     onActivity: sendRecording,
     onSend: (r) => void doUpload([r.file], '', { voice: '1', duration: r.duration.toFixed(1), waveform: r.waveform.join(',') }, 'mensagem de voz'),
   });
-  // Upload permitido nesta sala (conversa direta segue FileUpload_Enabled_Direct).
-  const uploadsHere = !!uploadsOn && !(room?.t === 'd' && uploadsInDirect === false);
   // Caixa vazia: o botão Enviar vira o microfone (como no WhatsApp).
   const micOn = uploadsHere && !editing && !text.trim() && !pending.length;
   // Itens do "+": vídeo (upload permitido e o tipo aceito), enquete (create-poll). Sala criptografada: nenhum dos dois
@@ -651,10 +741,15 @@ function ComposerView({
     setSugs([]);
     sendTyping(false);
     setQuoting(null);
+    setAlsoChannel(false);
   };
   const ackPending = !!ackOption && askAck && !tmid;
   const cancelPending = () => (setPending([]), setFileDesc(''));
-  const confirmPending = () => (void doUpload(pending, fileDesc), setPending([]), setFileDesc(''));
+  const pendingOk = pending.filter((f) => !fileProblem(f));
+  const descOver = fileDesc.trim().length > maxSize;
+  const canConfirm = pendingOk.length > 0 && !descOver;
+  // Os arquivos marcados no modal (vazio, tipo, tamanho) ficam de fora.
+  const confirmPending = () => canConfirm && (void doUpload(pendingOk, fileDesc), setPending([]), setFileDesc(''));
 
   const scheduledStrip = !tmid && <ScheduledStrip rid={rid} onOpen={() => navigate(`${roomPath({ _id: rid, t: room?.t ?? sub?.t ?? 'c' })}?tab=scheduled`)} />;
 
@@ -797,10 +892,10 @@ function ComposerView({
           onKeyDown={onKeyDown}
           onPaste={(e) => {
             const files = [...e.clipboardData.files];
-            if (files.length && uploadsOn) {
+            if (files.length && uploadsHere) {
               e.preventDefault();
               setPending(files);
-            }
+            } else if (files.length && !e.clipboardData.getData('text')) useStore.getState().toast(uploadsOff, 'error');
           }}
           onBlur={() => setTimeout(() => setSugs([]), 150)}
         />
@@ -900,7 +995,7 @@ function ComposerView({
             <button type="button" className="btn small ghost" onClick={cancelEdit}>
               Cancelar
             </button>
-            <button type="button" className="btn primary small send save" onClick={send} disabled={!text.trim() || over}>
+            <button type="button" className="btn primary small send save" onClick={() => void send()} disabled={(!text.trim() && !fileEdit) || over || sending} aria-busy={sending || undefined}>
               Salvar
             </button>
           </span>
@@ -921,12 +1016,13 @@ function ComposerView({
               type="button"
               className="btn primary send"
               onClick={onSendClick}
-              disabled={!text.trim() || over}
-              title={phone && schedulable ? 'Enviar (segure para agendar)' : 'Enviar'}
+              disabled={!text.trim() || over || sending}
+              aria-busy={sending || undefined}
+              title={sending ? 'Enviando…' : phone && schedulable ? 'Enviar (segure para agendar)' : 'Enviar'}
               {...sendPressProps}
             >
-              <Icon name="send" size={18} />
-              <span className="visually-hidden">Enviar</span>
+              {sending ? <span className="spinner" aria-hidden="true" /> : <Icon name="send" size={18} />}
+              <span className="visually-hidden">{sending ? 'Enviando…' : 'Enviar'}</span>
             </button>
             {!phone && schedulable && <ScheduleArrow onPick={(at) => void schedule(at)} onCustom={() => setScheduleCustom(true)} />}
           </span>
@@ -971,7 +1067,7 @@ function ComposerView({
           request={request}
           onClose={closePicker}
           onEmoji={(c) => (insertAtCaret(`:${c}: `), closePicker())}
-          onSent={() => setQuoting(null)}
+          onSent={() => (setQuoting(null), setAlsoChannel(false))}
           focusComposer={() => ta.current?.focus({ preventScroll: true })}
         />
       )}
@@ -992,31 +1088,61 @@ function ComposerView({
               <button type="button" className="btn ghost" onClick={cancelPending}>
                 Cancelar
               </button>
-              <button type="button" className="btn primary" onClick={confirmPending}>
-                Enviar
+              <button type="button" className="btn primary" onClick={confirmPending} disabled={!canConfirm}>
+                {pendingOk.length && pendingOk.length < pending.length ? `Enviar ${pendingOk.length === 1 ? '1 arquivo' : `${pendingOk.length} arquivos`}` : 'Enviar'}
               </button>
             </>
           }
         >
           <ul className="plain-list upload-list">
-            {pending.map((f) => (
-              <li key={f.name}>
-                {f.type.startsWith('image/') ? <img className="upload-preview" src={URL.createObjectURL(f)} alt="" /> : <FileTile name={f.name} mime={f.type} />}
-                <span className="upload-name">{f.name}</span>
-                <span className="upload-size">{formatBytes(f.size)}</span>
-              </li>
-            ))}
+            {pending.map((f, i) => {
+              const problem = fileProblem(f);
+              return (
+                <li key={`${i}-${f.name}`} className={problem ? 'blocked' : undefined}>
+                  {f.type.startsWith('image/') && !problem ? <img className="upload-preview" src={URL.createObjectURL(f)} alt="" /> : <FileTile name={f.name} mime={f.type} />}
+                  <span className="upload-text">
+                    <span className="upload-name">{f.name}</span>
+                    {problem && <span className="upload-problem">{problem} Não será enviado.</span>}
+                  </span>
+                  <span className="upload-size">{formatBytes(f.size)}</span>
+                </li>
+              );
+            })}
           </ul>
           <input
             autoFocus
             placeholder={pending.length > 1 ? 'Descrição (opcional, vai com o primeiro arquivo)' : 'Descrição (opcional)'}
             aria-label="Descrição"
+            aria-invalid={descOver || undefined}
             value={fileDesc}
             onChange={(e) => setFileDesc(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && confirmPending()}
           />
+          {descOver && <p className="upload-problem">{`A descrição excede ${maxSize} caracteres (${fileDesc.trim().length}).`}</p>}
         </Modal>
       )}
+      {help && <CommandsHelp commands={help} onPick={(c) => (setHelp(null), setText(`/${c} `), requestAnimationFrame(() => ta.current?.focus()))} onClose={() => setHelp(null)} />}
     </div>
+  );
+}
+
+// /help: os comandos desta pessoa, um por linha, com os parâmetros. Clicar põe o comando na caixa.
+function CommandsHelp({ commands, onPick, onClose }: { commands: SlashCommand[]; onPick: (command: string) => void; onClose: () => void }) {
+  return (
+    <Modal title="Comandos disponíveis" description="Digite / no campo de mensagem para ver a lista enquanto escreve." onClose={onClose}>
+      <ul className="plain-list commands-help">
+        {commands.map((c) => (
+          <li key={c.command}>
+            <button type="button" onClick={() => onPick(c.command)}>
+              <code>
+                /{c.command}
+                {c.params && <span className="commands-help-params"> {c.params}</span>}
+              </code>
+              <span className="commands-help-desc">{c.description}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Modal>
   );
 }

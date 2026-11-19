@@ -77,7 +77,11 @@ export function filterBadWords(msg: string) {
     .map((w) => w.trim())
     .filter(Boolean);
   let out = msg;
-  for (const w of words) out = out.replace(new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), (m) => '*'.repeat(m.length));
+  // Limite de palavra que entende acento: o \b do JavaScript só conhece a-z, e "mané", "égua" ou "MANÉ" passavam.
+  for (const w of words) {
+    const re = new RegExp(`(?<![\\p{L}\\p{N}_])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'giu');
+    out = out.replace(re, (m) => '*'.repeat([...m].length));
+  }
   return out;
 }
 
@@ -102,6 +106,9 @@ export function withExtra(row: any) {
 export function rowPreview(row: any, opts: { withName?: boolean } = {}) {
   return messagePreviewText({ msg: row.msg, sticker: row.extra?.sticker, files: row.files, forward: row.extra?.forward, poll: row.extra?.poll, e2e: row.e2e }, opts);
 }
+
+// Tamanho máximo de customFields (JSON) numa mensagem.
+const CUSTOM_FIELDS_MAX = 4096;
 
 export interface SendInput {
   _id?: string;
@@ -194,6 +201,45 @@ async function quoteAttachment(ctx: Ctx, link: string): Promise<Attachment | nul
   return { text: rowPreview({ ...m, files }, { withName: false }), author_name: m.username, ...aliasOf(m), ts: m.created_at, message_link: `?msg=${m.id}` };
 }
 
+// A nota "fixou uma mensagem" (na sala da mensagem) e as citações (em qualquer sala; índice messages_quote_links_idx)
+// guardam uma cópia do texto. Quem apaga uma mensagem para tirar um dado sensível não pode deixá-lo nas cópias: com a
+// original apagada (ids), a cópia vira "Mensagem removida"; editada (edited, a linha nova), recebe o texto novo.
+export async function refreshMessageCopies(rid: string, ids: string[], edited?: any) {
+  if (!ids.length) return;
+  const set = new Set(ids);
+  const swap = (list: unknown, pin: boolean) => {
+    let changed = false;
+    const out = (Array.isArray(list) ? list : []).map((a: any) => {
+      const target = a?.message_link ? quotedMessageId(String(a.message_link)) : null;
+      if (!target || !set.has(target)) return a;
+      changed = true;
+      if (!edited) return { ...a, text: 'Mensagem removida', removed: true };
+      // Cifrada: a nota fica sem texto e a web decifra a original (pinnedMessageId), como ao fixar.
+      const files = (edited.files ?? []) as MessageFile[];
+      return { ...a, text: pin && edited.e2e ? '' : rowPreview({ ...edited, files }, { withName: false }) };
+    });
+    return changed ? out : null;
+  };
+  const pins = await many(
+    `SELECT * FROM messages WHERE room_id = $1 AND t = 'message_pinned'
+       AND (extra->>'pinnedMessageId' = ANY($2) OR jsonb_path_query_array(extra->'attachments', '$[*].message_link') ?| $3)`,
+    [rid, ids, ids.map((id) => `/msg/${id}`)],
+  );
+  for (const p of pins) {
+    const next = swap(p.extra?.attachments, true);
+    if (!next) continue;
+    const row = await one(`UPDATE messages SET extra = jsonb_set(extra, '{attachments}', $2::jsonb), updated_at = now() WHERE id = $1 RETURNING *`, [p.id, JSON.stringify(next)]);
+    if (row) bus.publish({ room: row.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
+  }
+  const quotes = await many(`SELECT * FROM messages WHERE jsonb_path_query_array(attachments, '$[*].message_link') ?| $1`, [ids.map((id) => `?msg=${id}`)]);
+  for (const q of quotes) {
+    const next = swap(q.attachments, false);
+    if (!next) continue;
+    const row = await one('UPDATE messages SET attachments = $2, updated_at = now() WHERE id = $1 RETURNING *', [q.id, JSON.stringify(next)]);
+    if (row) bus.publish({ room: row.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
+  }
+}
+
 // external: anexos de integração (webhook de entrada, conta de robô) ou já gravados no chat (encaminhar), que podem
 // mostrar imagens de outros endereços.
 export async function sanitizeAttachments(ctx: Ctx, list: unknown, opts: { external?: boolean } = {}): Promise<Attachment[]> {
@@ -254,6 +300,8 @@ export async function sendMessage(
   } = {},
 ) {
   const sticker = opts.sticker ? input.sticker : undefined; // só o servidor monta figurinhas
+  // A API recebe JSON: msg como número ou objeto quebrava o trim() e virava erro 500.
+  if (input.msg != null && typeof input.msg !== 'string') throw badRequest('error-invalid-params', 'A mensagem precisa ser texto.');
   const room = await getRoom(input.rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   const roles = (await canPostInRoom(ctx, room, { ignoreReadOnly: opts.ignoreReadOnly === true })) ?? (await getUserRoles(ctx.userId, room.id));
@@ -294,7 +342,16 @@ export async function sendMessage(
     if (handled !== false) return handled;
   }
 
-  if ((input.alias || input.avatar) && !opts.trusted && !rolesHavePermission(roles, 'message-impersonate')) throw forbidden('Sem permissão para personificar.');
+  // Apelido, avatar e emoji no lugar da foto: só integrações e quem pode personificar (bots).
+  if ((input.alias || input.avatar || input.emoji) && !opts.trusted && !rolesHavePermission(roles, 'message-impersonate')) throw forbidden('Sem permissão para personificar.');
+  for (const [k, v] of [['alias', input.alias], ['emoji', input.emoji], ['avatar', input.avatar]] as const) {
+    if (v != null && typeof v !== 'string') throw badRequest('error-invalid-params', `O campo "${k}" deve ser texto.`);
+  }
+  // Campos extras (integrações): um objeto pequeno, guardado como veio em toda mensagem.
+  if (input.customFields != null) {
+    if (typeof input.customFields !== 'object' || Array.isArray(input.customFields)) throw badRequest('error-invalid-params', 'O campo "customFields" deve ser um objeto.');
+    if (JSON.stringify(input.customFields).length > CUSTOM_FIELDS_MAX) throw badRequest('error-invalid-params', 'Os campos extras (customFields) passam de 4 KB.');
+  }
 
   let tmid: string | null = input.tmid ?? null;
   let parent: any = null;
@@ -337,8 +394,13 @@ export async function sendMessage(
     const existing = await getMessageRow(input._id!);
     if (existing) return sameE2eMessage(ctx, room, existing, e2e);
   }
+  // A mesma mensagem enviada de novo (Enter duas vezes com a rede lenta, a resposta que se perdeu): o mesmo _id da mesma
+  // pessoa na mesma sala volta a que já existe, sem cópia.
+  const clientId = !e2e && !sticker && input._id && /^[A-Za-z0-9]{10,24}$/.test(input._id) ? input._id : null;
+  const sentBefore = clientId ? await getMessageRow(clientId) : null;
+  if (sentBefore && sentBefore.user_id === ctx.userId && sentBefore.room_id === room.id) return withExtra(sentBefore);
   // Figurinha: sendSticker já conferiu o _id; um conflito volta como erro de chave para o envio idempotente, nunca como cópia.
-  const id = e2e ? input._id! : input._id && /^[A-Za-z0-9]{10,24}$/.test(input._id) && (sticker || !(await getMessageRow(input._id))) ? input._id : newId();
+  const id = e2e ? input._id! : sticker && input._id && /^[A-Za-z0-9]{10,24}$/.test(input._id) ? input._id : clientId && !sentBefore ? clientId : newId();
   const receipts = getSetting<boolean>('Message_Read_Receipt_Enabled');
   const extra: Record<string, unknown> = {};
   if (input.tshow && tmid) extra.tshow = true;
@@ -382,8 +444,10 @@ export async function sendMessage(
     row = await insert();
   } catch (e) {
     // Duas cópias da mesma mensagem cifrada ao mesmo tempo: a segunda vê a primeira.
-    const existing = e2e && (e as { code?: string })?.code === '23505' ? await getMessageRow(id) : null;
-    if (existing) return sameE2eMessage(ctx, room, existing, e2e!);
+    const existing = (e2e || id === clientId) && (e as { code?: string })?.code === '23505' ? await getMessageRow(id) : null;
+    if (existing && e2e) return sameE2eMessage(ctx, room, existing, e2e);
+    // Os dois envios repetidos chegaram juntos: o segundo devolve o primeiro.
+    if (existing && existing.user_id === ctx.userId && existing.room_id === room.id) return withExtra(existing);
     throw e;
   }
   if (opts.onInserted) {
@@ -441,6 +505,22 @@ export async function sendMessage(
   // Encaminhar não é upload: o arquivo já estava no chat.
   if (input.files?.length && !opts.forward) emit('file.uploaded', { room, message, file: input.files[0], user: { _id: ctx.userId, username: ctx.username } });
   return message;
+}
+
+// Mencionados que não estão na sala: eles não recebem nada (notificação e não lidas são só de quem participa). A web
+// avisa quem escreveu e oferece adicionar. Com a lista de membros oculta (canal de avisos), só para quem pode vê-la.
+export async function mentionedNotInRoom(ctx: Ctx, rid: string, mentions: UserRef[] | undefined) {
+  const ids = (mentions ?? []).filter((m) => m._id !== 'all' && m._id !== 'here' && (m as any).type !== 'team').map((m) => m._id);
+  if (!ids.length) return [];
+  const room = await getRoom(rid);
+  if (!room || (room.broadcast && !(await hasPermission(ctx.userId, 'view-broadcast-member-list', rid)))) return [];
+  const rows = await many(
+    `SELECT u.id, u.username, u.name FROM users u
+      WHERE u.id = ANY($1) AND u.active AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = $2 AND s.user_id = u.id)
+      ORDER BY u.username`,
+    [ids, rid],
+  );
+  return rows.map((u) => ({ _id: u.id, username: u.username, name: u.name }));
 }
 
 // Menções de uma mensagem cifrada: os @usuário que a web leu no texto (no máximo 50), pelas mesmas regras do texto.
@@ -527,6 +607,10 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   const canEditAny = rolesHavePermission(roles, 'edit-message');
   const own = m.user_id === ctx.userId;
   if (!canEditAny) {
+    // Editar é publicar texto: como para enviar, só quem está na sala. Removido de um grupo (ou de uma DM), a pessoa
+    // não reescreve o que disse lá.
+    await loadRoomForUser(ctx, m.room_id);
+    if (!(await getSubscriptionRow(m.room_id, ctx.userId))) throw forbidden('Você precisa entrar na sala para editar mensagens.');
     if (!getSetting('Message_AllowEditing') || !own) throw forbidden('Você não pode editar esta mensagem.');
     const block = getSetting<number>('Message_AllowEditing_BlockEditInMinutes');
     if (block > 0 && minutesSince(m.created_at) > block && !rolesHavePermission(roles, 'bypass-time-limit-edit-and-delete'))
@@ -541,6 +625,14 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   const e2e = room.encrypted || e2eEdit ? await checkE2eInput(ctx, room, { _id: m.id, e2e: e2eEdit?.envelope, msg: text }) : null;
   const msg = e2e ? '' : filterBadWords(text.trim());
   if (msg.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
+  // Legenda de arquivo das versões antigas (description do anexo, com o texto vazio): a web abre a edição com ela, e o
+  // texto salvo passa a ser a legenda (sai do anexo, para não aparecer duas vezes).
+  const legacyCaption = !e2e && !m.msg && ((m.attachments ?? []) as any[]).some((a) => a?.type === 'file' && a.description);
+  // Salvou sem mudar nada: não marca "editada" nem guarda uma versão igual.
+  if (!e2e && msg === m.msg && !legacyCaption) return withExtra(m);
+  // Sem texto só se sobra outra coisa (arquivo, citação, anexo), como no envio. Tirar tudo é apagar, não editar.
+  if (!e2e && !msg && !(m.files ?? []).length && !(m.attachments ?? []).length) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  const attachments = legacyCaption ? (m.attachments as any[]).map((a) => (a?.type === 'file' && a.description ? { ...a, description: undefined } : a)) : null;
   const { mentions, channels } = await parseMentions(e2e ? e2eMentionText(e2eEdit?.mentions) : msg, room, ctx.userId);
   assertEditGroupMentions(roles, room, m.mentions ?? [], mentions);
   if (getSetting('Message_KeepHistory')) {
@@ -553,11 +645,14 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
     ]);
   }
   const row = await one(
-    `UPDATE messages SET msg = $2, mentions = $3, channels = $4, edited_at = now(), edited_by = $5, e2e = $6, updated_at = now() WHERE id = $1 RETURNING *`,
-    [m.id, msg, JSON.stringify(mentions), JSON.stringify(e2e ? [] : channels), JSON.stringify({ _id: ctx.userId, username: ctx.username }), e2e ? JSON.stringify(e2e) : null],
+    `UPDATE messages SET msg = $2, mentions = $3, channels = $4, edited_at = now(), edited_by = $5, e2e = $6, attachments = COALESCE($7::jsonb, attachments), updated_at = now()
+      WHERE id = $1 RETURNING *`,
+    [m.id, msg, JSON.stringify(mentions), JSON.stringify(e2e ? [] : channels), JSON.stringify({ _id: ctx.userId, username: ctx.username }), e2e ? JSON.stringify(e2e) : null, attachments ? JSON.stringify(attachments) : null],
   );
   // Tradução: a do texto antigo não vale mais (quem está com a mensagem na tela pede de novo pelo editedAt).
   await forgetMessageTranslations(m.id);
+  // A nota de fixação e as citações mostram o texto novo, não o que a pessoa tirou.
+  await refreshMessageCopies(m.room_id, [m.id], row);
   // Prévia da sala: o texto novo. Editada cifrada, "Mensagem criptografada", também quando a mensagem era aberta (de
   // antes de ligar a criptografia): o texto antigo não fica na lista de conversas.
   if (room.last_message?._id === m.id) {
@@ -582,6 +677,8 @@ export async function deleteMessage(ctx: Ctx, msgId: string, opts: { asAdmin?: b
   const own = m.user_id === ctx.userId;
   const canAny = rolesHavePermission(roles, 'delete-message') || rolesHavePermission(roles, 'force-delete-message');
   if (!canAny && !opts.asAdmin) {
+    // Quem não modera só apaga onde ainda lê (removido de um grupo ou de uma DM, não mexe mais no que ficou lá).
+    await loadRoomForUser(ctx, m.room_id);
     if (!own || !getSetting('Message_AllowDeleting') || !rolesHavePermission(roles, 'delete-own-message')) throw forbidden('Você não pode apagar esta mensagem.');
     const block = getSetting<number>('Message_AllowDeleting_BlockDeleteInMinutes');
     if (block > 0 && minutesSince(m.created_at) > block && !rolesHavePermission(roles, 'bypass-time-limit-edit-and-delete'))
@@ -594,6 +691,8 @@ export async function deleteMessage(ctx: Ctx, msgId: string, opts: { asAdmin?: b
 export async function removeMessageRow(m: any) {
   const { deleteFilesOfMessage } = await import('./uploads');
   await deleteFilesOfMessage(m.id);
+  // As versões antigas (edições) saem junto: apagar a mensagem não deixa o texto guardado em outro lugar.
+  await query('DELETE FROM message_history WHERE message_id = $1', [m.id]);
   // "Lembrar-me": o lembrete sai com a mensagem e a pessoa fica sabendo (Lembretes, outras abas).
   const { removeRemindersOfMessage } = await import('./reminders');
   await removeRemindersOfMessage(m.id);
@@ -623,6 +722,7 @@ export async function removeMessageRow(m: any) {
     );
     if (parent) bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message: withExtra(parent) });
   }
+  await refreshMessageCopies(m.room_id, [m.id]);
   // Recalcula a última mensagem da sala, se necessário.
   const room = await getRoom(m.room_id);
   if (room?.last_message?._id === m.id) {
@@ -671,12 +771,18 @@ export async function react(ctx: Ctx, msgId: string, emoji: string, shouldReact?
   const has = users.includes(ctx.username);
   const add = shouldReact ?? !has;
   if (add === has) return withExtra(m);
-  // Em sala somente leitura a reação é a única voz de quem lê: reação nova só com emoji de verdade, nunca texto livre.
-  if (add && reader && !users.length && !(await isKnownEmoji(key))) throw badRequest('error-invalid-emoji', 'Escolha um emoji da lista para reagir.');
-  if (add) reactions[key] = { usernames: [...users, ctx.username] };
+  // Reagir é participar, como enviar: quem só visualiza um canal (sem entrar) precisa entrar antes. Tirar a própria
+  // reação continua valendo depois de sair.
+  if (add && !(await getSubscriptionRow(m.room_id, ctx.userId))) throw forbidden('Você precisa entrar na sala para reagir.');
+  // Reação nova só com emoji de verdade (da lista ou personalizado), nunca texto livre: :qualquer_coisa: aparecia como
+  // texto embaixo da mensagem. Numa reação que já existe (importada, emoji personalizado que saiu) a pessoa ainda entra.
+  if (add && !users.length && !(await isKnownEmoji(key))) throw badRequest('error-invalid-emoji', 'Escolha um emoji da lista para reagir.');
+  // ts: hora da primeira reação com o emoji. O jsonb guarda as chaves em outra ordem (:+1: antes de :tada:), e as
+  // reações trocavam de lugar na tela quando alguém reagia; a web ordena por ela.
+  if (add) reactions[key] = { ...reactions[key], usernames: [...users, ctx.username], ts: reactions[key]?.ts ?? new Date().toISOString() };
   else {
     const rest = users.filter((u) => u !== ctx.username);
-    if (rest.length) reactions[key] = { usernames: rest };
+    if (rest.length) reactions[key] = { ...reactions[key], usernames: rest };
     else delete reactions[key];
   }
   const row = await one('UPDATE messages SET reactions = $2, updated_at = now() WHERE id = $1 RETURNING *', [m.id, JSON.stringify(reactions)]);
@@ -756,17 +862,31 @@ export async function getMessage(ctx: Ctx, msgId: string) {
   return withExtra(m);
 }
 
-export async function history(ctx: Ctx, rid: string, opts: { latest?: string; oldest?: string; count?: number; inclusive?: boolean; showThreadMessages?: boolean }) {
+export async function history(
+  ctx: Ctx,
+  rid: string,
+  opts: { latest?: string; latestId?: string; oldest?: string; oldestId?: string; count?: number; inclusive?: boolean; showThreadMessages?: boolean },
+) {
   await loadRoomForUser(ctx, rid);
   const params: unknown[] = [rid];
   const w: string[] = ['room_id = $1'];
   if (!opts.showThreadMessages) w.push(`(tmid IS NULL OR extra->>'tshow' = 'true')`);
   const op = opts.inclusive ? '=' : '';
-  if (opts.latest) w.push(`created_at <${op} $${params.push(opts.latest)}`);
-  if (opts.oldest) w.push(`created_at >${op} $${params.push(opts.oldest)}`);
+  // Página a partir de uma mensagem já carregada (latestId/oldestId, que a web manda): o limite é a hora gravada dela
+  // (microssegundos) e, na mesma hora, o id. Só com o ts (milissegundos), as mensagens da mesma hora no limite da página
+  // (importação, robô, mensagens de sistema em lote) nunca carregavam. A primeira condição deixa o índice da sala valer.
+  const edge = async (cmp: '<' | '>', ts?: string, id?: string) => {
+    const at = id ? (await one<{ at: string }>('SELECT created_at::text AS at FROM messages WHERE id = $1 AND room_id = $2', [id, rid]))?.at : undefined;
+    if (at) {
+      const a = params.push(at);
+      w.push(`created_at ${cmp}= $${a}`, `(created_at, id) ${cmp}${op} ($${a}::timestamptz, $${params.push(id)})`);
+    } else if (ts) w.push(`created_at ${cmp}${op} $${params.push(ts)}`);
+  };
+  await edge('<', opts.latest, opts.latestId);
+  await edge('>', opts.oldest, opts.oldestId);
   const count = Math.min(opts.count ?? 50, 200);
-  const order = opts.oldest && !opts.latest ? 'ASC' : 'DESC';
-  const rows = await many(`SELECT * FROM messages WHERE ${w.join(' AND ')} ORDER BY created_at ${order} LIMIT ${count}`, params);
+  const order = (opts.oldest || opts.oldestId) && !(opts.latest || opts.latestId) ? 'ASC' : 'DESC';
+  const rows = await many(`SELECT * FROM messages WHERE ${w.join(' AND ')} ORDER BY created_at ${order}, id ${order} LIMIT ${count}`, params);
   if (order === 'ASC') rows.reverse();
   return rows.map(withExtra);
 }
@@ -775,13 +895,16 @@ export async function messagesAround(ctx: Ctx, msgId: string, count = 30) {
   const m = await getMessageRow(msgId);
   if (!m) throw notFound('error-message-not-found', 'Mensagem não encontrada.');
   await loadRoomForUser(ctx, m.room_id);
+  // A hora da própria linha (microssegundos), não a do Date do JavaScript (milissegundos): senão o destino caía entre as
+  // de depois, e a lista tinha uma a menos do que o pedido.
+  // Na mesma hora, o id desempata (a mesma ordem do history, que carrega as de antes e as de depois a partir daqui).
   const before = await many(
-    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at <= $2 ORDER BY created_at DESC LIMIT $3`,
-    [m.room_id, m.created_at, count],
+    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at <= (SELECT created_at FROM messages WHERE id = $2) AND (created_at, id) <= (SELECT created_at, id FROM messages WHERE id = $2) ORDER BY created_at DESC, id DESC LIMIT $3`,
+    [m.room_id, m.id, count],
   );
   const after = await many(
-    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at > $2 ORDER BY created_at ASC LIMIT $3`,
-    [m.room_id, m.created_at, count],
+    `SELECT * FROM messages WHERE room_id = $1 AND (tmid IS NULL OR extra->>'tshow' = 'true') AND created_at >= (SELECT created_at FROM messages WHERE id = $2) AND (created_at, id) > (SELECT created_at, id FROM messages WHERE id = $2) ORDER BY created_at ASC, id ASC LIMIT $3`,
+    [m.room_id, m.id, count],
   );
   return [...after.reverse(), ...before].map(withExtra);
 }
@@ -960,10 +1083,15 @@ export async function searchMessages(ctx: Ctx, opts: { rid?: string; searchText:
   return { total: Number(rows[0]?.total ?? 0), messages: rows.map(withExtra) };
 }
 
+// As versões antigas guardam o que a pessoa tirou ao editar (uma senha, um dado pessoal): só quem escreveu e quem pode
+// editar as mensagens dos outros na sala (dono, moderador, administrador) as veem.
 export async function messageHistory(ctx: Ctx, msgId: string) {
   const m = await getMessageRow(msgId);
   if (!m) throw notFound('error-message-not-found', 'Mensagem não encontrada.');
-  await loadRoomForUser(ctx, m.room_id);
+  if (!rolesHavePermission(await getUserRoles(ctx.userId, m.room_id), 'edit-message')) {
+    await loadRoomForUser(ctx, m.room_id);
+    if (m.user_id !== ctx.userId) throw forbidden('Só quem escreveu a mensagem e quem modera a sala veem as versões anteriores.');
+  }
   return many('SELECT msg, e2e, edited_by, created_at FROM message_history WHERE message_id = $1 ORDER BY id', [msgId]);
 }
 

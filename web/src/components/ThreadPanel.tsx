@@ -1,13 +1,14 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
 import { plural, roomDisplayName } from '../lib/format';
-import { continuesGroup } from '../lib/messageRules';
+import { continuesGroup, lastOwnEditable } from '../lib/messageRules';
+import { contentOf } from '../lib/e2e/client';
 import { useSetting, useStore } from '../lib/store';
 import { Composer } from './Composer';
 import { Icon } from './Icon';
-import { MessageItem } from './MessageItem';
+import { MessageGateContext, MessageItem } from './MessageItem';
 import { PanelHead, refocusRoom, usePanelEscape } from './RoomPanels';
 import { SkeletonMessages } from './ui';
 // Integrações (Jira)
@@ -49,9 +50,11 @@ export function ThreadPanel({
   const ephSlots = useMemo(() => placeEphemeral(ephemeral, replies ?? []), [ephemeral, replies]);
   // Respostas seguidas da mesma pessoa se agrupam como na conversa (continuesGroup, com o mesmo intervalo).
   const groupingPeriod = useSetting<number>('Message_GroupingPeriod') ?? 300;
-  // Resposta aberta por um resultado da busca: rola até ela e destaca, como o ?msg= na conversa.
-  const reply = (useLocation().state as { reply?: string } | null)?.reply;
+  // Link para uma resposta (Copiar link, Fixadas, Favoritas, busca): /thread/<tmid>?msg=<id> a destaca.
+  const [params] = useSearchParams();
+  const target = params.get('msg');
   const shown = useRef<string | null>(null);
+  const counts = useRef('');
   const [flash, setFlash] = useState<string | null>(null);
 
   useEffect(() => {
@@ -74,19 +77,35 @@ export function ThreadPanel({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const target = reply && reply !== shown.current ? el.querySelector<HTMLElement>(`[id="msg-${reply}"]`) : null;
-    if (!target) {
-      el.scrollTop = el.scrollHeight;
-      return;
+    const key = `${replies?.length}:${ephemeral.length}`;
+    const grew = key !== counts.current;
+    counts.current = key;
+    // A resposta do link, uma vez, no meio do painel e destacada; depois, as novas respostas levam ao fim como sempre.
+    if (target && replies && shown.current !== target) {
+      shown.current = target;
+      const row = el.querySelector<HTMLElement>(`#msg-${CSS.escape(target)}`);
+      if (row) {
+        row.scrollIntoView({ block: 'center' });
+        setFlash(target);
+        setTimeout(() => setFlash((f) => (f === target ? null : f)), 2500);
+        return;
+      }
     }
-    shown.current = reply!;
-    target.scrollIntoView({ block: 'center' });
-    setFlash(reply!);
-    setTimeout(() => setFlash((f) => (f === reply ? null : f)), 2500);
+    if (grew) el.scrollTop = el.scrollHeight;
     // Integrações (Jira): também quando chega uma resposta efêmera
-  }, [replies?.length, ephemeral.length, reply]);
+  }, [replies?.length, ephemeral.length, target]);
 
   const actions = { onEdit: setEditing, onQuote: setQuoting, onUserClick };
+  // Seta para cima no compositor do tópico: a última resposta da pessoa, como na sala (RoomPage.editLast).
+  const gate = useContext(MessageGateContext);
+  const editLast = () => {
+    const mine = lastOwnEditable(replies ?? [], me._id, !!useStore.getState().settings.Message_AllowEditing, gate.editLimit);
+    // Mensagem cifrada: edita o texto decifrado (sem ele, nada a editar).
+    if (mine && mine.e2e) {
+      const c = contentOf(mine);
+      if (c) setEditing({ ...mine, msg: c.msg });
+    } else if (mine) setEditing(mine);
+  };
   const name = roomDisplayName(sub, room);
   const where = room.t === 'd' ? name : `#${name}`;
   const count = root?.tcount ?? replies?.length ?? 0;
@@ -162,6 +181,7 @@ export function ThreadPanel({
           setEditing={setEditing}
           quoting={quoting}
           setQuoting={setQuoting}
+          onEditLast={editLast}
         />
       )}
     </aside>
