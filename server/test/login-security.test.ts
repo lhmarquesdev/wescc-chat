@@ -220,3 +220,49 @@ describe('cadastro', () => {
     expect(getSetting('Accounts_RegistrationForm')).toBe('Disabled');
   });
 });
+
+describe('saída forçada com motivo', () => {
+  // O motivo que chega ao navegador com o force_logout (a tela de entrar explica a saída).
+  const reasonOf = async (s: Auth, action: () => Promise<unknown>) => {
+    const ws = connectWs(s);
+    await ws.ready;
+    await action();
+    const ev = await ws.waitFor((e) => e.type === 'force_logout');
+    ws.close();
+    return ev.reason;
+  };
+
+  it('desativar, encerrar sessões, trocar a senha e encerrar em outro dispositivo dizem o motivo', async () => {
+    let u = await newUser(A);
+    expect(await reasonOf(u, () => api('POST', 'users.setActiveStatus', { userId: u.userId, activeStatus: false }, A))).toBe('deactivated');
+    u = await newUser(A);
+    expect(await reasonOf(u, () => api('POST', 'users.bulkSetActiveStatus', { userIds: [u.userId], activeStatus: false }, A))).toBe('deactivated');
+    u = await newUser(A);
+    expect(await reasonOf(u, () => api('POST', 'users.logout', { userId: u.userId }, A))).toBe('admin-logout');
+    u = await newUser(A);
+    expect(await reasonOf(u, () => api('POST', 'users.bulkLogout', { userIds: [u.userId] }, A))).toBe('admin-logout');
+    u = await newUser(A);
+    const sid = (await api('GET', 'sessions.list', undefined, u)).sessions.find((s: any) => s.current)._id;
+    expect(await reasonOf(u, () => api('POST', 'sessions.logout', { sessionId: sid }, A))).toBe('admin-logout');
+    u = await newUser(A);
+    expect(await reasonOf(u, () => api('POST', 'users.update', { userId: u.userId, data: { password: 'trocada-pelo-admin-1' } }, A))).toBe('password-changed');
+
+    u = await newUser(A);
+    outbox.length = 0;
+    await api('POST', 'users.forgotPassword', { email: `${u.username}@test.local` });
+    await sleep(50);
+    const link = /reset-password#token=([A-Za-z0-9_-]+)/.exec(outbox[0].text)![1];
+    expect(await reasonOf(u, () => api('POST', 'users.resetPassword', { token: link, password: 'senha-redefinida-1' }))).toBe('password-changed');
+
+    u = await newUser(A);
+    const other = await login(u.username, PW);
+    expect(await reasonOf(u, () => api('POST', 'sessions.logout.others', {}, other))).toBe('session-revoked');
+    u = await newUser(A);
+    const other2 = await login(u.username, PW);
+    const first = (await api('GET', 'sessions.list', undefined, other2)).sessions.find((s: any) => !s.current)._id;
+    expect(await reasonOf(u, () => api('POST', 'sessions.logout.me', { sessionId: first }, other2))).toBe('session-revoked');
+    // O Sair (a própria sessão) não tem motivo: as outras abas do navegador só voltam para a tela de entrar.
+    u = await newUser(A);
+    expect(await reasonOf(u, () => api('POST', 'logout', {}, u))).toBeUndefined();
+  });
+});

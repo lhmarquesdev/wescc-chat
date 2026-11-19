@@ -1092,7 +1092,7 @@ class Conversion {
     // Salas que a passagem de uma conta provisória mexeu: contadores, threads e última mensagem são recalculados no fim.
     for (const rid of fx.rooms) this.msgRooms.add(rid);
     for (const w of fx.warnings) await markRecordError(w.id, w.msg);
-    for (const id of fx.deactivated) await revokeAllSessions(id).catch(() => 0);
+    for (const id of fx.deactivated) await revokeAllSessions(id, undefined, 'deactivated').catch(() => 0);
     for (const { room, subs } of fx.removed) {
       try {
         for (const s of subs) {

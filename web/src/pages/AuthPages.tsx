@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { OAuthProviderPublic, OAuthProviderType } from '@shared/index';
 import { api, ApiError, errorMessage, getCredentials } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
-import { clearLogoutReason, LOGOUT_REASON_TEXT, peekLogoutReason } from '../lib/logoutReason';
+import { clearLogoutReason, LOGOUT_REASON_ICON, LOGOUT_REASON_TEXT, peekLogoutReason } from '../lib/logoutReason';
 import { login, loginWithOAuth, loginWithSaml } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
 import { BrandMark, ProviderIcon } from '../components/BrandIcons';
@@ -121,9 +121,10 @@ export function LoginPage() {
   const resetAvailable = useSetting<boolean>('Accounts_PasswordReset_Available') !== false;
   const [providers, setProviders] = useState<OAuthProviderPublic[]>([]);
   const next = safeNext(params.get('next'));
-  // Saída forçada com motivo (um administrador redefiniu a criptografia): o aviso fica até a pessoa entrar.
+  // Saída forçada com motivo (conta desativada, sessão encerrada, criptografia redefinida): o aviso fica até a pessoa
+  // entrar ou ir para outra tela. Apagar ao abrir perderia o aviso no recarregamento que vem logo depois da saída.
   const [reason] = useState(peekLogoutReason);
-  useEffect(() => clearLogoutReason(), []);
+  useEffect(() => clearLogoutReason, []);
 
   useEffect(() => {
     void api
@@ -179,7 +180,7 @@ export function LoginPage() {
       <form onSubmit={submit} className="form auth-form">
         {reason && !error && (
           <div className="callout info" role="status">
-            <Icon name="e2e-key" />
+            <Icon name={LOGOUT_REASON_ICON[reason]} />
             <span>{LOGOUT_REASON_TEXT[reason]}</span>
           </div>
         )}

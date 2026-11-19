@@ -133,7 +133,8 @@ async function request<T = any>(method: string, path: string, data?: Params | Fo
     // resposta sem corpo
   }
   if (!res.ok || json.success === false) {
-    if (res.status === 401 && path !== 'login') onUnauthorized?.();
+    // Sair com a sessão já encerrada não é uma saída forçada: logout() limpa o navegador sozinho.
+    if (res.status === 401 && path !== 'login' && path !== 'logout') onUnauthorized?.();
     if (res.status === 403 && (json.errorType === 'error-2fa-setup-required' || json.errorType === 'error-password-change-required')) setupRequired();
     throw new ApiError(res.status, json.errorType ?? 'error', readableError(res.status, json.errorType, json.error), json.details);
   }

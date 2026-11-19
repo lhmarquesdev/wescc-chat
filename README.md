@@ -1098,6 +1098,9 @@ como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os teste
 - Tokens de acesso pessoal: criar um pede a senha (e o código do 2FA, quando ligado). Redefinir a senha, a troca de
   senha pelo administrador e o "Encerrar sessões" do administrador revogam os tokens da pessoa; desativar a conta
   fecha as conexões abertas com eles.
+- Saída forçada (conta desativada, sessões encerradas pelo administrador ou em outro dispositivo, senha redefinida ou
+  trocada pelo administrador, sessão vencida): o token sai do navegador, a tela de entrar diz o motivo e, ao entrar de
+  novo, a pessoa volta para a tela em que estava.
 - Cadastro (`Accounts_RegistrationForm`): instalações novas começam com o cadastro desativado; as que já existiam
   mantêm a opção de antes (migração 046). Com o cadastro público e sem aprovação manual, Configurações › Contas avisa.
 - A API só aceita chamadas de outros sites com CORS ligado (Configurações › Segurança › CORS). O cookie de sessão vale

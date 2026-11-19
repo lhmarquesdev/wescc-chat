@@ -172,7 +172,7 @@ export function usersRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'sessions.logout.others', {}, async (_req, _rep, ctx) => {
     if (!getSetting('Device_Management_Allow_Logout_All')) throw forbidden();
-    return { removed: await revokeAllSessions(ctx.userId, ctx.sessionId) };
+    return { removed: await revokeAllSessions(ctx.userId, ctx.sessionId, 'session-revoked') };
   });
   route(app, 'GET', 'sessions.list.all', { permissions: ['view-device-management'] }, async (req) => {
     const query = q(req);
@@ -468,7 +468,7 @@ export function usersRoutes(app: FastifyInstance) {
     const userId = b(req).userId ?? ctx.userId;
     if (userId !== ctx.userId && !(await hasPermission(ctx.userId, 'logout-other-user'))) throw forbidden();
     if (userId !== ctx.userId) await assertCanManageUser(ctx, userId);
-    const n = await revokeAllSessions(userId);
+    const n = await revokeAllSessions(userId, undefined, userId !== ctx.userId ? 'admin-logout' : undefined);
     // Encerrar as sessões de outra pessoa (conta invadida, desligamento) também revoga os tokens de acesso dela.
     const tokens = userId !== ctx.userId ? await revokePersonalTokens(userId) : 0;
     await audit(actorOf(ctx), 'user.logout.all', { userId }, { sessions: n, tokens });
@@ -496,7 +496,7 @@ export function usersRoutes(app: FastifyInstance) {
     let sessions = 0;
     let tokens = 0;
     for (const t of targets) {
-      const n = await revokeAllSessions(t.id);
+      const n = await revokeAllSessions(t.id, undefined, 'admin-logout');
       const k = await revokePersonalTokens(t.id);
       await audit(actorOf(ctx), 'user.logout.all', { userId: t.id }, { sessions: n, tokens: k, bulk: true });
       sessions += n;

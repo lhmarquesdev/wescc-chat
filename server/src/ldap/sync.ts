@@ -222,7 +222,7 @@ async function deactivate(s: SyncScope, user: any, reason: 'removed' | 'disabled
     `UPDATE users SET active = false, ldap_deactivated_at = now(), ldap_deactivated_reason = $2, updated_at = now() WHERE id = $1 RETURNING *`,
     [user.id, reason],
   );
-  await revokeAllSessions(user.id);
+  await revokeAllSessions(user.id, undefined, 'deactivated');
   bus.publish({ all: true }, { type: 'user', action: 'updated', user: mapUser(row) });
   await audit(s.actor, 'ldap.user.deactivated', { userId: user.id, username: user.username }, { reason });
   s.log.counts.deactivated++;

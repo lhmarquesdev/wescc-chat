@@ -312,9 +312,9 @@ export async function resolveToken(userId: string | undefined, token: string) {
   return null;
 }
 
-export async function logout(sessionId: string) {
+export async function logout(sessionId: string, reason?: LogoutReason) {
   await query('DELETE FROM sessions WHERE id = $1', [sessionId]);
-  bus.forceLogout({ sessionIds: [sessionId] });
+  bus.forceLogout({ sessionIds: [sessionId], reason });
 }
 
 export async function listSessions(opts: { userId?: string; offset?: number; count?: number; search?: string }) {
@@ -345,7 +345,8 @@ export async function revokeSession(ctx: Ctx, sessionId: string, asAdmin: boolea
   const s = await one('SELECT * FROM sessions WHERE id = $1', [sessionId]);
   if (!s) throw notFound('error-session-not-found', 'Sessão não encontrada.');
   if (s.user_id !== ctx.userId && !asAdmin) throw forbidden();
-  await logout(sessionId);
+  // A tela de entrar do aparelho que saiu explica quem encerrou (a própria sessão atual sai sem aviso, como no Sair).
+  await logout(sessionId, s.user_id !== ctx.userId ? 'admin-logout' : sessionId !== ctx.sessionId ? 'session-revoked' : undefined);
   await audit(actorOf(ctx), 'session.revoked', { sessionId, userId: s.user_id });
 }
 
@@ -433,7 +434,7 @@ export async function resetPasswordWithToken(token: string, password: string, ip
   await query('DELETE FROM password_resets WHERE user_id = $1', [u.id]);
   await query('DELETE FROM login_attempts WHERE key = $1', [loginKey(`id:${u.id}`)]);
   // Quem estava com a senha antiga (inclusive um invasor) sai de todos os dispositivos e perde os tokens de acesso.
-  await revokeAllSessions(u.id);
+  await revokeAllSessions(u.id, undefined, 'password-changed');
   const tokens = await revokePersonalTokens(u.id);
   await audit({ id: u.id, username: u.username, ip }, 'user.password.reset', { userId: u.id }, { tokensRevoked: tokens });
   if (u.email) {
@@ -567,12 +568,12 @@ export async function updateUser(
   if (data.username && data.username !== u.username) await propagateUsername(userId, u.username, data.username);
   if (data.name !== undefined && data.name !== u.name) await query('UPDATE messages SET user_name = $2 WHERE user_id = $1', [userId, data.name]);
   if (data.active === false) {
-    await revokeAllSessions(userId);
+    await revokeAllSessions(userId, undefined, 'deactivated');
     // Também os sockets abertos com token de acesso pessoal (a API já recusa a conta desativada).
-    bus.forceLogout({ userId });
+    bus.forceLogout({ userId, reason: 'deactivated' });
   }
   if (data.password && !self) {
-    await revokeAllSessions(userId);
+    await revokeAllSessions(userId, undefined, 'password-changed');
     await revokePersonalTokens(userId);
   }
   if (!self || data.active !== undefined) {
