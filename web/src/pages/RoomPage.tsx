@@ -30,7 +30,7 @@ import { Empty, GroupAvatar, Menu, Skeleton, SkeletonMessages, UserAvatar, confi
 // Integrações (Jira)
 import { IntegrationModals } from '../components/integrations/IntegrationModals';
 // Criptografia de ponta a ponta
-import { contentOf, ensureRoom, rotateNow, useE2e } from '../lib/e2e/client';
+import { contentOf, E2E_UI, ensureRoom, rotateNow, useE2e } from '../lib/e2e/client';
 import { E2eBanner, useE2eBlock } from '../components/e2e/E2eBanner';
 import { openE2eDialog, requireE2eReady } from '../components/e2e/E2eDialogs';
 
@@ -550,7 +550,7 @@ export function RoomPage() {
     const ok = on
       ? await confirmDialog({
           title: 'Ligar a criptografia de ponta a ponta?',
-          body: 'As próximas mensagens e arquivos ficam cifrados: só quem participa consegue ler. Busca, prévias do Jira, figurinhas, bots e integrações deixam de funcionar aqui. As mensagens antigas continuam como estão.',
+          body: E2E_UI.turnOn,
           confirmLabel: 'Ligar criptografia',
         })
       : await confirmDialog({

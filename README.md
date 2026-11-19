@@ -855,7 +855,8 @@ Desligar depois só impede ligar de novo: as conversas já criptografadas contin
   escolhida (12 ou mais). Cada navegador pede uma vez; ao sair da conta, ele esquece. **O chat não guarda nem recupera
   essa senha.** Quem a esqueceu redefine a própria criptografia, ou um administrador redefine em Administração ›
   Usuários (`edit-other-user-e2ee`, que também encerra as sessões da pessoa): nos dois casos, as mensagens
-  criptografadas antigas ficam ilegíveis para ela.
+  criptografadas antigas ficam ilegíveis para ela (até ela criar a senha nova, cada uma avisa que é de antes da
+  redefinição).
 - **Quem entra** na conversa recebe a chave atual pelo navegador de quem já participa (com o chat aberto) e lê o
   histórico cifrado com essa chave, como no Rocket.Chat. **Gerar chave nova** (menu Mais, para quem pode ligar a
   criptografia) corta o histórico para quem entrar dali em diante.
@@ -882,8 +883,9 @@ Desligar depois só impede ligar de novo: as conversas já criptografadas contin
   entregou. Quem saiu sem deixar nada disso (removido sem mensagem, como nas outras salas do time ou pelo LDAP, e sem
   nunca ter escrito ou lido ali) volta como alguém novo.
 - Numa conversa criptografada **não funcionam**: busca no servidor (a busca da sala procura só nas mensagens já
-  carregadas), tradução, enquetes, envio agendado, mensagem de vídeo, figurinhas, encaminhar de ou para ela, prévias
-  do Jira, bots e integrações. Exportar mensagens e Meus dados trazem “Mensagem criptografada” no lugar do texto, e o
+  carregadas), tradução, enquetes, envio agendado (as mensagens que já estavam agendadas ali ficam como não enviadas),
+  mensagem de vídeo, figurinhas, encaminhar de ou para ela, prévias do Jira, bots e integrações. A confirmação de ligar
+  a criptografia lista tudo isso. Exportar mensagens e Meus dados trazem “Mensagem criptografada” no lugar do texto, e o
   push e o e-mail também (com o chat aberto, a notificação decifra no navegador). O rascunho não fica salvo no
   navegador.
 - **Chamadas de voz e vídeo não são cifradas de ponta a ponta**, mesmo numa conversa criptografada.

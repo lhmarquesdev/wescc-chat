@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { many, one, pool } from '../db/pool';
 import { badRequest, forbidden, notFound } from '../lib/errors';
 import { audit } from '../services/audit';
-import { fingerprintOf, hasUserKeys, resetUserKeys } from '../services/e2e';
+import { fingerprintOf, hasUserKeys, lastResetOf, resetUserKeys } from '../services/e2e';
 import { readDeviceId } from '../services/loginDevices';
 import { mapUser, visibleStatusCustom } from '../services/mappers';
 import { createCustomStatus, deleteCustomStatus, getCustomStatus, listCustomStatuses, updateCustomStatus } from '../services/userStatus';
@@ -46,6 +46,7 @@ import { b, bool, paging, parseCookies, q, route, str, strArray } from './http';
 async function meResponse(userId: string) {
   const u = await getUserById(userId);
   const roles = await getUserRoles(userId);
+  const e2eKeys = await fingerprintOf(userId);
   // O servidor também bloqueia o resto da API enquanto a troca de senha ou o 2FA estiverem pendentes (api/http.ts).
   return {
     ...mapUser(u, { full: true }),
@@ -53,8 +54,10 @@ async function meResponse(userId: string) {
     requirePasswordChange: u.require_password_change,
     require2faSetup: await needs2faSetup(u),
     // Criptografia de ponta a ponta: a impressão da chave pública (null sem chaves) e se um administrador redefiniu.
-    e2eKeys: await fingerprintOf(userId),
+    e2eKeys,
     e2eResetByAdmin: !!u.e2e_reset_at || undefined,
+    // Sem chaves depois de uma redefinição: quando foi (as mensagens cifradas de antes dela não abrem mais).
+    e2eResetAt: e2eKeys ? undefined : ((await lastResetOf(userId)) ?? undefined),
   };
 }
 
