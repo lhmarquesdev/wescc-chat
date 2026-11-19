@@ -756,6 +756,15 @@ describe('API da sincronização', () => {
     } finally {
       await settings({ LDAP_Login_Fallback: true });
     }
+    // Com a opção ligada (o padrão), a conta do AD sem senha no chat (a importada pela sincronização) também ouve que o
+    // AD não respondeu, sem contar tentativa.
+    await pool.query('UPDATE users SET password_hash = NULL WHERE id = $1', [u.userId]);
+    await pool.query('DELETE FROM login_attempts');
+    for (let i = 0; i < 3; i++) {
+      const down = await api('POST', 'login', { user: u.username, password: 'senha-forte-1' });
+      expect([down.status, down.errorType]).toEqual([503, 'error-ldap-unavailable']);
+    }
+    expect((await pool.query('SELECT 1 FROM login_attempts')).rowCount).toBe(0);
     const test = await api('POST', 'ldap.testMapping', { login: 'ana' }, A);
     expect(test).toMatchObject({ status: 400, errorType: 'error-ldap-connection' });
     expect(test.error).toContain('Falha na conexão: conexão recusada');

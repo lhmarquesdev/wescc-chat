@@ -1097,8 +1097,8 @@ como simular eventos: `POST /__fake/jira/issue-updated` muda uma issue. Os teste
   instâncias: Configurações › Contas › Sessão. O navegador em que a pessoa já entrou na conta (cookie `wescc_device`)
   conta as próprias falhas e não é barrado pelo bloqueio da conta nem do IP: quem erra a senha de um colega de outra
   máquina não o tira do chat (os aparelhos em que a conta nunca entrou ficam bloqueados e a tela diz para entrar por
-  um conhecido). Com o AD fora do ar (e sem `LDAP_Login_Fallback`), o login responde "O servidor de rede (AD) não
-  respondeu" e não conta tentativa.
+  um conhecido). Com o AD fora do ar e sem senha local para conferir (`LDAP_Login_Fallback` desligado, ou conta do AD
+  sem senha no chat), o login responde "O servidor de rede (AD) não respondeu" e não conta tentativa.
 - Cada código do aplicativo autenticador vale uma vez só. Os códigos de backup têm 10 letras e números sem os que se
   confundem (`XXXXX-XXXXX`), sem diferença de maiúsculas, espaços ou hífen. Desativar o 2FA pede a senha e um código;
   senha ou código errados contam para um bloqueio de alguns minutos, como no login.

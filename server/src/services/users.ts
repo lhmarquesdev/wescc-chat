@@ -259,11 +259,12 @@ export async function login(params: { user: string; password: string; code?: str
     if (r.status === 'ok') {
       user = r.user;
       ok = true;
-    } else if (r.status === 'unavailable' && user && getSetting('LDAP_Login_Fallback')) {
+    } else if (r.status === 'unavailable' && user?.password_hash && getSetting('LDAP_Login_Fallback')) {
       // Servidor fora do ar: vale a senha local. Recusa do diretório (senha errada, conta desativada) não cai aqui.
       ok = await verifyPassword(params.password, user.password_hash);
     } else if (r.status === 'unavailable') {
-      // Sem a senha local para conferir: a senha pode estar certa, então não conta como tentativa falha.
+      // Sem a senha local para conferir (opção desligada, ou conta do AD sem senha no chat, o caso comum): a senha pode
+      // estar certa, então não conta como tentativa falha.
       throw new ApiError(503, 'error-ldap-unavailable', 'O servidor de rede (AD) não respondeu. Tente de novo em alguns minutos.');
     }
   } else {
