@@ -6,7 +6,7 @@ import { EMOJI, emojiText } from '@shared/emoji';
 import { roleDisplayName, systemText as sharedSystemText } from '@shared/messageText';
 import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 import { listSettings } from '../src/services/settings';
-import { EMOJI as WEB_EMOJI } from '../../web/src/lib/emoji';
+import { EMOJI as WEB_EMOJI, searchEmoji } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
 import { authorName, continuesGroup, editableKind, editTextOf, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageHref, messageLink, pastTimeLimit, pollMeta, pollShares, unknownSlashCommand } from '../../web/src/lib/messageRules';
 import { EMAIL_SRC, ITALIC_SRC, URL_SRC } from '@shared/markdownTokens';
@@ -119,6 +119,18 @@ describe('itálico do markdown', () => {
     expect(italics('¯\\_(ツ)_/¯')).toEqual([]);
     expect(italics('isso é _importante_ hoje')).toEqual(['_importante_']);
     expect(italics('__muito__')).toEqual(['__muito__']);
+  });
+});
+
+describe('busca de emoji (seletor e atalho ":" do compositor)', () => {
+  it('acha pela palavra em português, com ou sem acento, e pelo código em inglês', () => {
+    expect(searchEmoji('coracao')).toContain('heart');
+    expect(searchEmoji('Coração')).toEqual(searchEmoji('coracao'));
+    expect(searchEmoji('feliz')).toContain('smile');
+    expect(searchEmoji('joinha')).toEqual(['+1']);
+    expect(searchEmoji('heart').length).toBe(10);
+    expect(searchEmoji('heart', Infinity).length).toBeGreaterThan(10);
+    expect(searchEmoji('  ')).toEqual([]);
   });
 });
 
