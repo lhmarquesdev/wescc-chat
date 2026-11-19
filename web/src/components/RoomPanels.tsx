@@ -8,7 +8,7 @@ import { partyOf, useDirect } from '../lib/direct';
 import { formatBytes, formatDateTime, formatRelative, formatWhen, plural, roleLabel, roomDisplayName, roomIconName, roomPath } from '../lib/format';
 import { useUserPresence } from '../lib/presence';
 import { renderMarkdown } from '../lib/markdown';
-import { authorName } from '../lib/messageRules';
+import { authorName, messageHref } from '../lib/messageRules';
 import { useNames } from '../lib/names';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { clearRoomError, resetTranslationViews, useLanguages, useMyLanguage, useRoomTranslate, useTranslations } from '../lib/translate';
@@ -184,7 +184,8 @@ function MessageResult({ m: raw }: { m: Message }) {
   const m = useE2eMessage(raw);
   const navigate = useNavigate();
   return (
-    <button type="button" className="result" onClick={() => navigate(`${location.pathname.split('/thread/')[0]}?msg=${m._id}`)}>
+    // Resposta de tópico: abre o tópico com ela destacada.
+    <button type="button" className="result" onClick={() => navigate(messageHref(location.pathname.split('/thread/')[0], m))}>
       <ResultHead m={m} />
       <div className="result-body">{m.sticker ? <StickerView sticker={m.sticker} size="small" /> : resultBody(m)}</div>
     </button>

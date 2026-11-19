@@ -3,7 +3,7 @@
 // (server/test/web-rules.test.ts).
 import type { Message } from '@shared/index';
 import type { MessageForward, MessagePoll } from '@shared/messages';
-import { encryptedContent, messageLink } from '@shared/messages';
+import { encryptedContent, messageHref, messageLink } from '@shared/messages';
 import { nameList } from './format';
 import { whenText } from './messageTimes';
 
@@ -14,8 +14,9 @@ export const editableKind = (m: Message) => !m.t && !m.sticker && !m.poll && !m.
 // também confere a sala; encryptedContent é o lugar único que o E2E ajusta).
 export const forwardableKind = (m: Message) => !m.t && !m.poll && !m.sticker?.removed && !encryptedContent(null, m);
 
-// /channel/<rid>?msg=<id>; resposta de tópico abre o tópico: /channel/<rid>/thread/<tmid>. O mesmo do push do lembrete.
-export { messageLink };
+// /channel/<rid>?msg=<id>; resposta de tópico abre o tópico com ela destacada: /channel/<rid>/thread/<tmid>?msg=<id>. O
+// mesmo do push do lembrete.
+export { messageHref, messageLink };
 
 // Rótulo e link da origem de uma encaminhada para quem vê. Nunca mostra o nome de um grupo privado nem quem está numa
 // DM a quem não participa dela.

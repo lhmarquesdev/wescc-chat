@@ -146,9 +146,13 @@ export function aheadError(iso: unknown, now: Date): string | null {
 
 // ---------- Links ----------
 
-// /channel/<rid>?msg=<id>; resposta de tópico abre o tópico: /channel/<rid>/thread/<tmid>. O mesmo caminho vai no push
-// do lembrete e no "Abrir" da web.
+// /channel/<rid>?msg=<id>; resposta de tópico abre o tópico com ela destacada: /channel/<rid>/thread/<tmid>?msg=<id>. O
+// mesmo caminho vai no push do lembrete e no "Abrir" da web.
 export function messageLink(p: { rid: string; t: string; mid: string; tmid?: string | null }): string {
-  const base = `/${p.t === 'd' ? 'direct' : p.t === 'p' ? 'group' : 'channel'}/${p.rid}`;
-  return p.tmid ? `${base}/thread/${p.tmid}` : `${base}?msg=${p.mid}`;
+  return messageHref(`/${p.t === 'd' ? 'direct' : p.t === 'p' ? 'group' : 'channel'}/${p.rid}`, { _id: p.mid, tmid: p.tmid });
+}
+
+// O mesmo a partir do caminho da sala (base), como a web monta a partir da sala aberta.
+export function messageHref(base: string, m: { _id: string; tmid?: string | null }): string {
+  return m.tmid ? `${base}/thread/${m.tmid}?msg=${m._id}` : `${base}?msg=${m._id}`;
 }

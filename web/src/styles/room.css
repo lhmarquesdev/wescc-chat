@@ -410,8 +410,22 @@
   margin-left: 6px;
 }
 .msg-thread-hint {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: var(--fs-12);
+  line-height: var(--lh-12);
   color: hsl(var(--muted-foreground));
+  text-align: left;
+  cursor: pointer;
+}
+/* Abre o tópico da resposta (com ela destacada) */
+.msg-thread-hint:hover {
+  color: hsl(var(--brand-ink-2));
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 /* Tradução pedida pelo menu: "Traduzida do inglês · Ver original" abaixo do corpo */
 .msg-translated {
@@ -476,10 +490,12 @@ button.msg-tr-mark:hover {
     padding: 14px 8px;
     margin: -14px -8px;
   }
-  button.msg-tr-mark {
+  button.msg-tr-mark,
+  .msg-thread-hint {
     position: relative;
   }
-  button.msg-tr-mark::after {
+  button.msg-tr-mark::after,
+  .msg-thread-hint::after {
     content: '';
     position: absolute;
     top: 50%;

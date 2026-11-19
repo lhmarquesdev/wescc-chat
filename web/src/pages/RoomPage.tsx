@@ -409,7 +409,8 @@ export function RoomPage() {
 
   const actions = useMemo(
     () => ({
-      onReplyThread: (m: Message) => threadsOn && navigate(`${roomPath({ _id: rid, t: room?.t ?? 'c' })}/thread/${m._id}`),
+      // Resposta que também aparece na sala (tshow): o tópico é o da raiz dela.
+      onReplyThread: (m: Message) => threadsOn && navigate(`${roomPath({ _id: rid, t: room?.t ?? 'c' })}/thread/${m.tmid ?? m._id}`),
       onEdit: (m: Message) => setEditing(m),
       onQuote: (m: Message) => setQuoting(m),
       onDiscussion: (m: Message) => setDiscussionFrom(m),
@@ -754,7 +755,15 @@ export function RoomPage() {
           {/* Chamadas em grupo: a faixa da chamada viva, depois da faixa de avisos e antes do anúncio. */}
           <CallBanner room={room} />
           {room.announcement && <Announcement text={room.announcement} />}
-          <MessageList key={rid} rid={rid} sub={sub} actions={actions} canModerate={canModerate} notice={room.notice ? { ack: room.noticeAck, canPost: canPostRO } : undefined} />
+          <MessageList
+            key={rid}
+            rid={rid}
+            sub={sub}
+            actions={actions}
+            canModerate={canModerate}
+            notice={room.notice ? { ack: room.noticeAck, canPost: canPostRO } : undefined}
+            threadOpen={!!tmid}
+          />
           <TypingIndicator id={rid} />
           {sub ? (
             <Composer

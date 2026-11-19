@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
 import { api, errorMessage } from '../lib/api';
 import { plural, roomDisplayName } from '../lib/format';
@@ -48,6 +49,12 @@ export function ThreadPanel({
   const ephSlots = useMemo(() => placeEphemeral(ephemeral, replies ?? []), [ephemeral, replies]);
   // Respostas seguidas da mesma pessoa se agrupam como na conversa (continuesGroup, com o mesmo intervalo).
   const groupingPeriod = useSetting<number>('Message_GroupingPeriod') ?? 300;
+  // Link para uma resposta (Copiar link, Fixadas, Favoritas, busca): /thread/<tmid>?msg=<id> a destaca.
+  const [params] = useSearchParams();
+  const target = params.get('msg');
+  const shown = useRef<string | null>(null);
+  const counts = useRef('');
+  const [flash, setFlash] = useState<string | null>(null);
 
   useEffect(() => {
     if (rootFromList) setRoot(rootFromList);
@@ -67,9 +74,25 @@ export function ThreadPanel({
   }, [tmid]);
 
   useLayoutEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+    const el = ref.current;
+    if (!el) return;
+    const key = `${replies?.length}:${ephemeral.length}`;
+    const grew = key !== counts.current;
+    counts.current = key;
+    // A resposta do link, uma vez, no meio do painel e destacada; depois, as novas respostas levam ao fim como sempre.
+    if (target && replies && shown.current !== target) {
+      shown.current = target;
+      const row = el.querySelector<HTMLElement>(`#msg-${CSS.escape(target)}`);
+      if (row) {
+        row.scrollIntoView({ block: 'center' });
+        setFlash(target);
+        setTimeout(() => setFlash((f) => (f === target ? null : f)), 2500);
+        return;
+      }
+    }
+    if (grew) el.scrollTop = el.scrollHeight;
     // Integrações (Jira): também quando chega uma resposta efêmera
-  }, [replies?.length, ephemeral.length]);
+  }, [replies?.length, ephemeral.length, target]);
 
   const actions = { onEdit: setEditing, onQuote: setQuoting, onUserClick };
   const name = roomDisplayName(sub, room);
@@ -131,6 +154,7 @@ export function ThreadPanel({
               actions={actions}
               inThread
               canModerate={canModerate}
+              highlight={flash === m._id}
             />,
           ])
           .concat(ephSlots.end.map((e) => <EphemeralRow key={`eph-${e._id}`} m={e} />))}

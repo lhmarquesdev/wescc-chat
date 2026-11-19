@@ -1,11 +1,11 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { Message, Subscription } from '@shared/index';
 import { watchAcks } from '../lib/acks';
-import { api } from '../lib/api';
+import { api, errorMessage } from '../lib/api';
 import { formatDateTime, formatDay, formatTime, nameList, plural, roomDisplayName, roomIconName } from '../lib/format';
 import { renderMarkdown } from '../lib/markdown';
-import { continuesGroup, joinsText } from '../lib/messageRules';
+import { continuesGroup, joinsText, messageHref } from '../lib/messageRules';
 import { rememberName, useNames } from '../lib/names';
 import { useSetting, useStore } from '../lib/store';
 import { AckBar } from './AckBar';
@@ -74,6 +74,7 @@ export function MessageList({
   actions,
   canModerate,
   notice,
+  threadOpen,
 }: {
   rid: string;
   sub?: Subscription;
@@ -81,6 +82,8 @@ export function MessageList({
   canModerate: boolean;
   // Canal de avisos: "Ciente" ligado e se quem vê publica aqui.
   notice?: { ack: boolean; canPost: boolean };
+  // Tópico aberto ao lado: o ?msg= é a resposta destacada no painel dele, não um destino desta lista.
+  threadOpen?: boolean;
 }) {
   const data = useStore((s) => s.messages[rid]);
   const meId = useStore((s) => s.me?._id);
@@ -110,7 +113,8 @@ export function MessageList({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [unreadSince] = useState(() => (sub && sub.unread > 0 ? sub.ls : null));
   const [params, setParams] = useSearchParams();
-  const jumpTo = params.get('msg');
+  const navigate = useNavigate();
+  const jumpTo = threadOpen ? null : params.get('msg');
   const jumpRef = useRef(jumpTo);
   jumpRef.current = jumpTo;
   const groupingPeriod = useSetting<number>('Message_GroupingPeriod') ?? 300;
@@ -143,8 +147,16 @@ export function MessageList({
   useEffect(() => {
     atBottom.current = !jumpTo;
     if (jumpTo) {
-      void api.get('chat.getMessagesAround', { msgId: jumpTo, count: 30 }).then((r) => {
+      void (async () => {
+        const r = await api.get('chat.getMessagesAround', { msgId: jumpTo, count: 30 });
         const msgs: Message[] = r.messages.slice().reverse();
+        const target = msgs.find((x) => x._id === jumpTo);
+        if (!target) {
+          // Resposta de um tópico (link antigo, Arquivos): abre o tópico com ela destacada.
+          const m: Message | undefined = (await api.get('chat.getMessage', { msgId: jumpTo })).message;
+          if (m?.tmid) return navigate(messageHref(location.pathname.split('/thread/')[0], m), { replace: true });
+        }
+        if (jumpRef.current !== jumpTo) return;
         seen.current = null;
         useStore.getState().setMessages(rid, msgs, true);
         requestAnimationFrame(() => {
@@ -153,6 +165,10 @@ export function MessageList({
           setFlash(jumpTo);
           setTimeout(() => setFlash((f) => (f === jumpTo ? null : f)), 2500);
         });
+      })().catch((e) => {
+        // Mensagem apagada (ou sem acesso): a sala abre nas últimas, com o motivo.
+        useStore.getState().toast(errorMessage(e), 'error');
+        if (jumpRef.current === jumpTo) leaveJump();
       });
     } else if (!data?.loaded) {
       void load();
@@ -248,8 +264,10 @@ export function MessageList({
   }, [rid]);
 
   const leaveJump = () => {
-    params.delete('msg');
-    setParams(params, { replace: true });
+    if (params.has('msg') && !threadOpen) {
+      params.delete('msg');
+      setParams(params, { replace: true });
+    }
     atBottom.current = true;
     void load();
   };

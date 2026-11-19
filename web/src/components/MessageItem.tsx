@@ -23,7 +23,7 @@ import { resolveEmoji } from '../lib/emoji';
 import { isEmojiOnly, renderMarkdown } from '../lib/markdown';
 import { useHighlights } from '../lib/presence';
 import { findHighlight } from '@shared/highlights';
-import { authorName, editableKind, forwardableKind } from '../lib/messageRules';
+import { authorName, editableKind, forwardableKind, messageHref } from '../lib/messageRules';
 import { canRemoveEverywhere, useStickers } from '../lib/stickers';
 import { useNames } from '../lib/names';
 import { avatarBust, useSetting, useStore } from '../lib/store';
@@ -981,8 +981,10 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
   const text = lifted ? lifted.rest : shownMsg;
   const starred = m.starred?.some((s) => s._id === me._id);
   const bot = !!m.alias || !!m.bot;
+  // Resposta de tópico: o link abre o tópico com ela destacada.
+  const roomBase = () => location.pathname.split('/thread/')[0];
   const copyLink = () => {
-    const url = `${location.origin}${location.pathname.split('/thread/')[0]}?msg=${m._id}`;
+    const url = `${location.origin}${messageHref(roomBase(), m)}`;
     copyText(url, 'Link copiado.');
   };
   const del = async () => {
@@ -1292,7 +1294,11 @@ function MessageView({ m: raw, grouped, actions, inThread, canModerate, arrive, 
             {receipt}
           </div>
         )}
-        {m.tmid && !inThread && m.tshow && <div className="muted small msg-thread-hint">respondeu em um tópico</div>}
+        {m.tmid && !inThread && m.tshow && (
+          <button type="button" className="msg-thread-hint" onClick={() => navigate(messageHref(roomBase(), m))}>
+            respondeu em um tópico
+          </button>
+        )}
         {notice ? (
           <div className="notice-card">
             <div className="notice-card-head">

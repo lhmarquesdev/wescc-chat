@@ -8,7 +8,7 @@ import { DEFAULT_PERMISSIONS } from '../src/services/permissions';
 import { listSettings } from '../src/services/settings';
 import { EMOJI as WEB_EMOJI } from '../../web/src/lib/emoji';
 import { systemText as webSystemText } from '../../web/src/lib/format';
-import { authorName, continuesGroup, editableKind, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageLink, pollMeta, pollShares } from '../../web/src/lib/messageRules';
+import { authorName, continuesGroup, editableKind, forwardableKind, forwardOrigin, joinsText, lastOwnEditable, mentionGroups, mentionSuggestions, messageHref, messageLink, pollMeta, pollShares } from '../../web/src/lib/messageRules';
 import { fromLocalInput, reminderPresets, schedulePresets, toLocalInput, whenText } from '../../web/src/lib/messageTimes';
 import { AHEAD_ERROR, aheadError, POLL_ERRORS, pollInputError, type MessageForward, type MessagePoll } from '@shared/messages';
 import { messagePreviewText } from '@shared/stickers';
@@ -578,7 +578,9 @@ describe('link de uma mensagem (messageLink)', () => {
     expect(messageLink({ rid: 'r1', t: 'c', mid: 'm1' })).toBe('/channel/r1?msg=m1');
     expect(messageLink({ rid: 'r2', t: 'p', mid: 'm2' })).toBe('/group/r2?msg=m2');
     expect(messageLink({ rid: 'r3', t: 'd', mid: 'm3', tmid: null })).toBe('/direct/r3?msg=m3');
-    expect(messageLink({ rid: 'r1', t: 'c', mid: 'm4', tmid: 'm1' })).toBe('/channel/r1/thread/m1');
+    expect(messageLink({ rid: 'r1', t: 'c', mid: 'm4', tmid: 'm1' })).toBe('/channel/r1/thread/m1?msg=m4');
+    expect(messageHref('/group/r2', { _id: 'm5', tmid: 'm2' })).toBe('/group/r2/thread/m2?msg=m5');
+    expect(messageHref('/group/r2', { _id: 'm2' })).toBe('/group/r2?msg=m2');
   });
 });
 
@@ -607,8 +609,8 @@ describe('origem da encaminhada (forwardOrigin)', () => {
   it('encaminhada de novo: "várias vezes"', () => {
     expect(forwardOrigin(f({ roomName: 'geral', hops: 2 }), {}).text).toBe('Encaminhada várias vezes de #geral');
   });
-  it('resposta de tópico: o link abre o tópico', () => {
-    expect(forwardOrigin(f({ roomName: 'geral', tmid: 'root' }), {}).link).toBe('/channel/r1/thread/root');
+  it('resposta de tópico: o link abre o tópico com ela destacada', () => {
+    expect(forwardOrigin(f({ roomName: 'geral', tmid: 'root' }), {}).link).toBe('/channel/r1/thread/root?msg=m1');
   });
 });
 
