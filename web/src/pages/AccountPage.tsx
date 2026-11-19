@@ -653,6 +653,9 @@ export function TwoFactorCard() {
   // Desativar pede também a senha (contas com senha do chat), como gerar um token.
   const needsPassword = !me.authSource || me.authSource === 'local';
   const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  // Celular e tablet: o QR code está na própria tela e não dá para escaneá-lo; o link abre o aplicativo autenticador.
+  const touch = useMedia('(pointer: coarse)');
   const site = useSetting<string>('Site_Name') || 'Wescc Chat';
   const codesText = () => `Códigos de backup do ${site} (@${me.username}). Cada um funciona uma vez.\n\n${codes!.join('\n')}\n`;
   const downloadCodes = () => {
@@ -660,6 +663,26 @@ export function TwoFactorCard() {
     const a = Object.assign(document.createElement('a'), { href: url, download: 'codigos-de-backup.txt' });
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const verify = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (code.length !== 6 || busy) return;
+    setBusy(true);
+    api
+      .post('users.2fa.verifyTotp', { code })
+      .then((r) => (setCodes(r.codes), setSetup(null), setCode(''), useStore.getState().setMe({ ...me, twoFactorEnabled: true })))
+      .catch(fail)
+      .finally(() => setBusy(false));
+  };
+  const disable = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!code || (needsPassword && !password) || busy) return;
+    setBusy(true);
+    api
+      .post('users.2fa.disableTotp', { code, password: needsPassword ? password : undefined })
+      .then(() => (useStore.getState().setMe({ ...me, twoFactorEnabled: false }), setCode(''), setPassword(''), ok('2FA desativado.')))
+      .catch(fail)
+      .finally(() => setBusy(false));
   };
   // Com o 2FA obrigatório pendente, o resto do chat só carrega depois que os códigos de backup forem vistos.
   const done = () => {
@@ -701,13 +724,13 @@ export function TwoFactorCard() {
               <Icon name="download" />
               Baixar .txt
             </button>
-            <button className="btn primary" onClick={done}>
+            <button type="button" className="btn primary" onClick={done}>
               Pronto
             </button>
           </div>
         </>
       ) : me.twoFactorEnabled ? (
-        <>
+        <form className="form" onSubmit={disable}>
           <div className="callout ok">
             <Icon name="success" />
             <span>Ativado com aplicativo autenticador.</span>
@@ -731,31 +754,50 @@ export function TwoFactorCard() {
             />
           </Field>
           <div className="form-actions">
-            <button
-              className="btn danger"
-              disabled={!code || (needsPassword && !password)}
-              onClick={() =>
-                api
-                  .post('users.2fa.disableTotp', { code, password: needsPassword ? password : undefined })
-                  .then(() => (useStore.getState().setMe({ ...me, twoFactorEnabled: false }), setCode(''), setPassword(''), ok('2FA desativado.')))
-                  .catch(fail)
-              }
-            >
+            <button type="submit" className="btn danger" aria-busy={busy || undefined} disabled={!code || (needsPassword && !password) || busy}>
               Desativar 2FA
             </button>
           </div>
-        </>
+        </form>
       ) : setup ? (
-        <>
+        <form className="form" onSubmit={verify}>
           <ol className="steps">
-            <li>Escaneie o QR code no seu aplicativo autenticador (Google Authenticator, Microsoft Authenticator, 1Password…).</li>
+            <li>
+              {touch
+                ? 'Toque em “Abrir no aplicativo autenticador” ou copie a chave e cole no aplicativo (Google Authenticator, Microsoft Authenticator, 1Password…). Em outro aparelho, escaneie o QR code.'
+                : 'Escaneie o QR code no seu aplicativo autenticador (Google Authenticator, Microsoft Authenticator, 1Password…).'}
+            </li>
             <li>Digite o código de 6 dígitos que ele mostrar.</li>
           </ol>
           <div className="qr-box">
             <QrCode text={setup.url} size={200} />
-            <p className="muted small">
-              Ou digite a chave manualmente: <code>{setup.secret}</code>
-            </p>
+            <div className="qr-key">
+              {/* Em grupos de 4 para ler e digitar (os aplicativos ignoram os espaços); "Copiar" leva a chave sem eles. */}
+              <p className="muted small">
+                Ou digite a chave manualmente: <code>{setup.secret.replace(/(.{4})(?=.)/g, '$1 ')}</code>
+              </p>
+              <div className="row-actions wrap">
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() =>
+                    navigator.clipboard
+                      .writeText(setup.secret)
+                      .then(() => ok('Chave copiada.'))
+                      .catch(fail)
+                  }
+                >
+                  <Icon name="copy" />
+                  Copiar chave
+                </button>
+                {touch && (
+                  <a className="btn small" href={setup.url}>
+                    <Icon name="open-external" />
+                    Abrir no aplicativo autenticador
+                  </a>
+                )}
+              </div>
+            </div>
           </div>
           <Field label="Código gerado pelo aplicativo">
             <input
@@ -770,19 +812,15 @@ export function TwoFactorCard() {
             />
           </Field>
           <div className="form-actions">
-            <button
-              className="btn primary"
-              onClick={() =>
-                api
-                  .post('users.2fa.verifyTotp', { code })
-                  .then((r) => (setCodes(r.codes), setSetup(null), setCode(''), useStore.getState().setMe({ ...me, twoFactorEnabled: true })))
-                  .catch(fail)
-              }
-            >
+            {/* Desistir no meio: o 2FA continua desligado e "Ativar 2FA" gera uma chave nova. */}
+            <button type="button" className="btn" onClick={() => (setSetup(null), setCode(''))}>
+              Cancelar
+            </button>
+            <button type="submit" className="btn primary" aria-busy={busy || undefined} disabled={code.length !== 6 || busy}>
               Verificar e ativar
             </button>
           </div>
-        </>
+        </form>
       ) : (
         <div className="form-actions">
           <button className="btn primary" onClick={() => api.post('users.2fa.enableTotp').then(setSetup).catch(fail)}>
