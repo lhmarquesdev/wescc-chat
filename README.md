@@ -243,10 +243,11 @@ vira um botão na tela de login.
 ## Esqueci minha senha
 
 A tela de login tem o link "Esqueci minha senha" (`Accounts_PasswordReset`). O chat envia por e-mail um link válido por
-1 hora, que só funciona uma vez; ao redefinir, todas as sessões da conta são encerradas e o 2FA continua sendo pedido.
-Para funcionar:
+1 hora, que só funciona uma vez; ao redefinir, todas as sessões da conta são encerradas, os tokens de acesso pessoal
+são revogados e o 2FA continua sendo pedido. Para funcionar:
 
-- configure o SMTP em Administração › Configurações › Email;
+- configure o SMTP em Administração › Configurações › Email (sem ele, a tela de login mostra "Esqueceu a senha? Fale
+  com o administrador." no lugar do link);
 - confira a URL do site em Configurações › Geral (ou a variável `SITE_URL`), que é usada no link.
 
 Contas LDAP e contas que só entram por SAML/OAuth seguem o provedor e não recebem o link.

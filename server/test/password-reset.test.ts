@@ -12,7 +12,7 @@ let A: Auth;
 beforeAll(async () => {
   await startServer();
   A = await admin();
-  await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: false, Site_Url: 'https://chat.empresa.com.br' } }, A);
+  await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: false, Site_Url: 'https://chat.empresa.com.br', SMTP_Host: 'smtp.empresa.test' } }, A);
 });
 afterAll(() => stopServer());
 beforeEach(() => {

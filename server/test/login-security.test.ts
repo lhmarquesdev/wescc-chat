@@ -156,3 +156,39 @@ describe('2FA', () => {
     await pool.query('DELETE FROM login_attempts');
   });
 });
+
+describe('troca de senha', () => {
+  it('a senha nova precisa ser diferente da atual (troca obrigatória e Minha conta); o administrador define qualquer uma', async () => {
+    const r = await api('POST', 'users.create', { username: `prov${Date.now()}`, name: 'Prov', email: `prov${Date.now()}@test.local`, password: 'Provisoria123', requirePasswordChange: true }, A);
+    const forced = await login(r.user.username, 'Provisoria123');
+    const same = await api('POST', 'users.updateOwnBasicInfo', { data: { newPassword: 'Provisoria123', currentPassword: '' } }, forced);
+    expect([same.status, same.errorType, same.error]).toEqual([400, 'error-password-same', 'A senha nova precisa ser diferente da atual.']);
+    expect((await api('GET', 'me', undefined, forced)).requirePasswordChange).toBe(true);
+    expect((await api('POST', 'users.updateOwnBasicInfo', { data: { newPassword: 'Definitiva123', currentPassword: '' } }, forced)).success).toBe(true);
+
+    const u = await newUser(A);
+    const mine = await api('POST', 'users.updateOwnBasicInfo', { data: { newPassword: PW, currentPassword: PW } }, u);
+    expect(mine.errorType).toBe('error-password-same');
+    expect((await api('POST', 'users.update', { userId: u.userId, data: { password: PW } }, A)).success).toBe(true);
+  });
+});
+
+describe('esqueci minha senha sem e-mail configurado', () => {
+  it('a tela de login sabe que não há envio, e o pedido diz o motivo em vez de prometer um e-mail', async () => {
+    const pub = async () => (await api('GET', 'settings.public')).settings.find((s: any) => s._id === 'Accounts_PasswordReset_Available')?.value;
+    expect(await pub()).toBe(true);
+    await api('POST', 'settings', { settings: { SMTP_Host: '' } }, A);
+    try {
+      expect(await pub()).toBe(false);
+      const u = await newUser(A);
+      const r = await api('POST', 'users.forgotPassword', { email: `${u.username}@test.local` });
+      expect([r.status, r.errorType, r.error]).toEqual([503, 'error-email-not-configured', 'O envio de e-mails não está configurado neste chat. Peça ao administrador para redefinir a sua senha.']);
+      expect((await api('POST', 'users.forgotPassword', { email: 'ninguem@test.local' })).status).toBe(503);
+    } finally {
+      await api('POST', 'settings', { settings: { SMTP_Host: 'smtp.empresa.test' } }, A);
+    }
+    await api('POST', 'settings', { settings: { Accounts_PasswordReset: false } }, A);
+    expect(await pub()).toBe(false);
+    await api('POST', 'settings', { settings: { Accounts_PasswordReset: true } }, A);
+  });
+});

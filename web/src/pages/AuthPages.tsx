@@ -117,6 +117,8 @@ export function LoginPage() {
   const samlLabel = useSetting<string>('SAML_Button_Label');
   const ldap = useSetting<boolean>('LDAP_Enable');
   const passwordReset = useSetting<boolean>('Accounts_PasswordReset');
+  // Sem o envio de e-mails configurado o link nunca chegaria (valor calculado pelo servidor).
+  const resetAvailable = useSetting<boolean>('Accounts_PasswordReset_Available') !== false;
   const [providers, setProviders] = useState<OAuthProviderPublic[]>([]);
   const next = safeNext(params.get('next'));
   // Saída forçada com motivo (um administrador redefiniu a criptografia): o aviso fica até a pessoa entrar.
@@ -191,9 +193,7 @@ export function LoginPage() {
               <PasswordInput autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </Field>
             {passwordReset && (
-              <div className="auth-row">
-                <Link to="/forgot-password">Esqueci minha senha</Link>
-              </div>
+              <div className="auth-row">{resetAvailable ? <Link to="/forgot-password">Esqueci minha senha</Link> : <span>Esqueceu a senha? Fale com o administrador.</span>}</div>
             )}
           </>
         ) : (
@@ -270,6 +270,7 @@ export function ForgotPasswordPage() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const available = useSetting<boolean>('Accounts_PasswordReset_Available') !== false;
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -290,6 +291,15 @@ export function ForgotPasswordPage() {
           <Icon name="success" />
           <span>Se houver uma conta com o e-mail {email.trim()}, você vai receber em instantes um link para criar uma senha nova. O link vale por 1 hora.</span>
         </div>
+        <Link className="btn lg full" to="/login">
+          <Icon name="back" />
+          Voltar ao login
+        </Link>
+      </AuthShell>
+    );
+  if (!available)
+    return (
+      <AuthShell title="Esqueci minha senha" subtitle="Este chat não envia e-mails. Peça ao administrador para redefinir a sua senha.">
         <Link className="btn lg full" to="/login">
           <Icon name="back" />
           Voltar ao login

@@ -376,6 +376,8 @@ const canResetPassword = (u: any) => u.active && u.type !== 'bot' && (u.auth_sou
 // Sempre responde do mesmo jeito, exista ou não a conta, para não revelar quem tem cadastro.
 export async function requestPasswordReset(email: string, ip?: string) {
   if (!getSetting('Accounts_PasswordReset')) throw forbidden('A redefinição de senha está desativada.');
+  // Sem SMTP o link nunca chegaria (o envio devolve false em silêncio): a pessoa fica sabendo na hora.
+  if (!getSetting('SMTP_Host')) throw new ApiError(503, 'error-email-not-configured', 'O envio de e-mails não está configurado neste chat. Peça ao administrador para redefinir a sua senha.');
   const u = await one('SELECT * FROM users WHERE lower(email) = lower($1)', [email.trim()]);
   if (!u || !canResetPassword(u)) return;
   // Um pedido a cada 2 minutos por conta; só o link mais recente vale.
@@ -545,6 +547,9 @@ export async function updateUser(
       if (u.password_hash && !(await verifyPassword(opts.currentPassword ?? '', u.password_hash))) throw badRequest('error-invalid-password', 'Senha atual incorreta.');
     }
     validatePassword(data.password);
+    // Na troca obrigatória, ficar com a senha provisória (que o administrador conhece) anularia a exigência.
+    if (!opts.asAdmin && u.password_hash && (await verifyPassword(data.password, u.password_hash)))
+      throw badRequest('error-password-same', 'A senha nova precisa ser diferente da atual.');
     sets.push(`password_hash = $${params.push(await hashPassword(data.password))}`, 'require_password_change = false');
   }
   if (opts.asAdmin) {

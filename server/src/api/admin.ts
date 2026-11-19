@@ -36,6 +36,8 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'GET', 'info', { auth: false }, async () => ({ info: { version: '0.1.0', product: 'Wescc Chat' } }));
   route(app, 'GET', 'settings.public', { auth: false }, async () => {
     const settings = listSettings({ publicOnly: true }).map((s) => ({ _id: s._id, value: s.value }));
+    // Calculado (não é configuração): "Esqueci minha senha" só funciona com o envio de e-mails configurado.
+    settings.push({ _id: 'Accounts_PasswordReset_Available', value: !!getSetting('Accounts_PasswordReset') && !!getSetting('SMTP_Host') });
     return { settings, count: settings.length, offset: 0, total: settings.length };
   });
 
