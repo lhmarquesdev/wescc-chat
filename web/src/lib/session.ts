@@ -12,6 +12,7 @@ import { clearEphemeral, pushEphemeral } from './ephemeral';
 import { loadIntegrationsMe, resetIntegrations } from './integrations';
 import { invalidateSlashCommands } from './commands';
 import { checkBuild } from './call/build';
+import { leaveDirectCallOnLogout } from './call/store';
 import { decryptNotification, forgetE2eRoom, handleE2eEvent, initE2e, resetE2e } from './e2e/client';
 
 export async function loadPublicSettings() {
@@ -190,6 +191,7 @@ export const loginWithOAuth = (credentialToken: string) => loginWithSso('oauth',
 
 export async function logout() {
   // Ao sair o servidor derruba o socket e o realtime iria para /login antes do endSession: a limpeza vem antes do pedido.
+  await leaveDirectCallOnLogout();
   realtime.stop();
   clearDrafts();
   resetStickers();

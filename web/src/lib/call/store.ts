@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import type { Call, CallJoin, CallKind, CallModerationAction, CallNotice, CallParticipant, CallRoomRef, CallsConfig, CallSource, Room, ServerEvent, UserRef } from '@shared/index';
 import { CALL_LIMITS, callEndedReasonText, callNamesLabel, callPeopleLabel, callUserLabel, formatCallDuration } from '@shared/calls';
 import { cameraLimitReached } from '@shared/call-layout';
-import { api, ApiError, errorMessage } from '../api';
+import { api, ApiError, errorMessage, postOnUnload } from '../api';
 import { roomDisplayName } from '../format';
 import { nameOf } from '../names';
 import { realtime } from '../realtime';
@@ -1055,6 +1055,11 @@ export async function leaveCall(): Promise<void> {
   await api.post('calls.leave', { callId: call._id }).catch(() => {});
 }
 
+// Sair da conta no meio da chamada a dois: desliga antes de o socket cair (sem a sessão, não há volta para esperar).
+export async function leaveDirectCallOnLogout(): Promise<void> {
+  if (get().call?.scope === 'direct' && isInCall()) await leaveCall();
+}
+
 export async function endForAll(): Promise<void> {
   const call = get().call;
   if (!call) return;
@@ -1599,6 +1604,13 @@ export function startCallStore() {
   useCallStore.subscribe((s, prev) => {
     const video = s.me.camera || s.me.screen || Object.values(s.peers).some((p) => p.camera || p.screen);
     if (s.phase !== prev.phase || s.peers !== prev.peers || s.me !== prev.me) keepAwake((s.phase === 'in-call' || s.phase === 'reconnecting') && video);
+  });
+  // Fechar ou recarregar a aba no meio da chamada a dois desliga na hora: a outra pessoa não fica esperando uma volta
+  // que não vem (a mídia morre com a página). Aba guardada no cache do navegador (persisted) ainda pode voltar.
+  addEventListener('pagehide', (e) => {
+    const s = get();
+    if (e.persisted || s.elsewhere || s.call?.scope !== 'direct' || s.call.status !== 'ongoing' || !isInCall(s.call._id)) return;
+    postOnUnload('calls.end', { callId: s.call._id });
   });
   if (useStore.getState().me) {
     // As outras abas respondem ao "quem está em chamada?" antes de oferecer o "Voltar".
