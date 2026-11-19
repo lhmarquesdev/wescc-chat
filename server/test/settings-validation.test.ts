@@ -153,4 +153,30 @@ describe('canais padrão', () => {
     expect((await api('POST', 'rooms.delete', { roomId: op.channel._id }, A)).success).toBe(true);
     expect(await setting()).toBe('geral');
   });
+
+  it('discussão marcada como padrão não quebra a sincronização e fica fora da lista', async () => {
+    const geral = (await api('GET', 'channels.info', { roomName: 'geral' }, A)).channel._id;
+    const d = await api('POST', 'rooms.createDiscussion', { prid: geral, t_name: 'Discussão padrão' }, A);
+    const did = d.discussion._id ?? d.discussion.rid;
+    // Antes: 500 (a configuração recusava o código da discussão) e a sala ficava marcada pela metade.
+    expect((await api('POST', 'rooms.saveRoomSettings', { rid: did, default: true }, A)).success).toBe(true);
+    expect(await setting()).toBe('geral');
+    expect((await api('POST', 'rooms.saveRoomSettings', { rid: geral, topic: 'Avisos gerais' }, A)).success).toBe(true);
+    // Gravar a lista não mexe na marca da discussão.
+    expect((await save({ Default_Channels: 'geral,privado' })).success).toBe(true);
+    expect((await pool.query('SELECT is_default FROM rooms WHERE id = $1', [did])).rows[0].is_default).toBe(true);
+    expect((await save({ Default_Channels: 'geral' })).success).toBe(true);
+    expect((await pool.query('SELECT is_default FROM rooms WHERE id = $1', [did])).rows[0].is_default).toBe(true);
+  });
+
+  it('no boot, a configuração passa a mostrar as salas marcadas, sem mudar nenhuma sala', async () => {
+    const { syncDefaultChannelsOnBoot } = await import('../src/services/rooms');
+    await api('POST', 'channels.create', { name: 'so-na-marca' }, A);
+    // Instalação antiga: a marca e a configuração divergiam (a configuração só valia no primeiro boot).
+    await pool.query(`UPDATE rooms SET is_default = true WHERE name = 'so-na-marca'`);
+    setSettingCache('Default_Channels', 'geral,naoexiste');
+    await syncDefaultChannelsOnBoot();
+    expect(await setting()).toBe('geral,so-na-marca');
+    expect((await pool.query(`SELECT name FROM rooms WHERE is_default AND prid IS NULL ORDER BY name`)).rows.map((r) => r.name)).toEqual(['geral', 'so-na-marca']);
+  });
 });

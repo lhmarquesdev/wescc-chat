@@ -246,20 +246,30 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
 
 // Canais padrão: Configurações › Geral e a marca "Padrão" de Administração › Salas são a mesma lista. Gravar a
 // configuração marca as salas da lista e desmarca as outras (antes ela só valia no primeiro boot, sem sala padrão);
-// marcar, desmarcar, renomear ou excluir uma sala padrão regrava a configuração.
+// marcar, desmarcar, renomear ou excluir uma sala padrão regrava a configuração. Discussões ficam fora da lista (a
+// marca delas continua só em Administração › Salas): o nome delas é um código e a configuração as recusava (erro 500).
 export async function applyDefaultChannels() {
   const names = String(getSetting('Default_Channels') ?? '').split(',').map((s) => s.trim().replace(/^#/, '').toLowerCase()).filter(Boolean);
   await query(
-    `UPDATE rooms SET is_default = (prid IS NULL AND lower(name) = ANY($1::text[])), updated_at = now()
-     WHERE t IN ('c','p') AND is_default IS DISTINCT FROM (prid IS NULL AND lower(name) = ANY($1::text[]))`,
+    `UPDATE rooms SET is_default = (lower(name) = ANY($1::text[])), updated_at = now()
+     WHERE t IN ('c','p') AND prid IS NULL AND is_default IS DISTINCT FROM (lower(name) = ANY($1::text[]))`,
     [names],
   );
 }
 
 async function syncDefaultChannelsSetting() {
-  const rows = await many(`SELECT name FROM rooms WHERE is_default AND t IN ('c','p') ORDER BY created_at`);
+  const rows = await many(`SELECT name FROM rooms WHERE is_default AND t IN ('c','p') AND prid IS NULL ORDER BY created_at`);
   const value = rows.map((r) => r.name).join(',');
   if (value !== String(getSetting('Default_Channels') ?? '')) await updateSettings({ Default_Channels: value });
+}
+
+// Boot: antes a configuração só valia no primeiro boot e podia ser diferente da marca "Padrão", que é o que vale para
+// quem entra. A configuração passa a mostrar as salas marcadas, sem mudar nenhuma sala (gravar a lista antiga
+// desmarcaria, sem aviso, as salas marcadas só em Administração › Salas).
+export async function syncDefaultChannelsOnBoot() {
+  const key = (v: string[]) => [...new Set(v.map((s) => s.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))].sort().join(',');
+  const rows = await many(`SELECT name FROM rooms WHERE is_default AND t IN ('c','p') AND prid IS NULL`);
+  if (key(rows.map((r) => r.name)) !== key(String(getSetting('Default_Channels') ?? '').split(','))) await syncDefaultChannelsSetting();
 }
 
 export async function joinDefaultChannels(userId: string) {
