@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
-import { useStore } from '../../lib/store';
+import { usePermission, useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, Modal, Pager, SkeletonList, SkeletonTable, Tabs, Toggle, confirmDialog, useAsync, ThLabel } from '../../components/ui';
 import { ActivePill, PageHead, RoomCell, TableWrap } from './parts';
@@ -155,10 +155,13 @@ export function AdminIntegrations() {
 
 function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose: () => void; onSaved: () => void }) {
   const incoming = initial.type === 'webhook-incoming';
+  // Sem "Gerenciar todas as integrações", a integração publica como a própria pessoa e só nas salas de que ela participa.
+  const all = usePermission('manage-integrations');
+  const me = useStore((s) => s.me);
   const [f, setF] = useState({
     name: initial.name ?? '',
     enabled: initial.enabled ?? true,
-    username: initial.username ?? 'admin',
+    username: (all ? initial.username : undefined) ?? me?.username ?? initial.username ?? '',
     channel: (initial.channel ?? []).join(', '),
     event: initial.event ?? 'sendMessage',
     urls: (initial.urls ?? []).join('\n'),
@@ -259,12 +262,21 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
         )}
         <Field
           label={incoming ? 'Canal de destino' : 'Canais observados (vazio = todos)'}
-          hint={incoming ? '#canal ou @usuário; vários separados por vírgula.' : '#canal, @usuário, all_public_channels, all_private_groups ou all_direct_messages.'}
+          hint={
+            incoming
+              ? '#canal ou @usuário; vários separados por vírgula.'
+              : all
+                ? '#canal, @usuário, all_public_channels, all_private_groups ou all_direct_messages.'
+                : '#canal ou @usuário de conversas de que você participa, ou all_public_channels. Vazio = todas as salas que você lê.'
+          }
         >
           <input value={f.channel} onChange={(e) => set({ channel: e.target.value })} />
         </Field>
-        <Field label="Publicar como (usuário)" hint="As mensagens aparecem com este usuário. Ele precisa participar dos canais privados.">
-          <input value={f.username} onChange={(e) => set({ username: e.target.value.replace(/^@/, '') })} />
+        <Field
+          label="Publicar como (usuário)"
+          hint={all ? 'As mensagens aparecem com este usuário. Ele precisa participar dos canais privados.' : 'As mensagens aparecem com o seu usuário. Só quem gerencia todas as integrações escolhe outro.'}
+        >
+          <input value={f.username} readOnly={!all} onChange={(e) => set({ username: e.target.value.replace(/^@/, '') })} />
         </Field>
         {!incoming && (
           <>
@@ -283,7 +295,7 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
             <Field label="Responder em outra sala (opcional)" hint="#canal ou @usuário. Vazio = responde na sala do evento.">
               <input value={f.targetRoom} onChange={(e) => set({ targetRoom: e.target.value })} />
             </Field>
-            <Toggle checked={f.impersonateUser} onChange={(v) => set({ impersonateUser: v })} label="Responder como o usuário que disparou" />
+            {(all || f.impersonateUser) && <Toggle checked={f.impersonateUser} onChange={(v) => set({ impersonateUser: v })} label="Responder como o usuário que disparou" />}
             <Toggle checked={f.retryFailedCalls} onChange={(v) => set({ retryFailedCalls: v })} label="Tentar de novo quando falhar" />
             {f.retryFailedCalls && (
               <div className="two-col">
@@ -312,7 +324,7 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
         <Field label="URL do avatar (opcional)">
           <input value={f.avatar} onChange={(e) => set({ avatar: e.target.value })} />
         </Field>
-        <Toggle checked={f.scriptEnabled} onChange={(v) => set({ scriptEnabled: v })} label="Usar script" />
+        {(all || f.scriptEnabled) && <Toggle checked={f.scriptEnabled} onChange={(v) => set({ scriptEnabled: v })} label="Usar script" />}
         {f.scriptEnabled && (
           <Field label="Script" hint="Só roda se a configuração Integrações › Permitir scripts estiver ligada.">
             <textarea className="mono" rows={12} value={f.script} onChange={(e) => set({ script: e.target.value })} />

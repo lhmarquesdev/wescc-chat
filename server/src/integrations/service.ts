@@ -7,7 +7,7 @@ import { audit } from '../services/audit';
 import { on } from '../services/hooks';
 import { sendMessage } from '../services/messages';
 import { hasPermission } from '../services/permissions';
-import { addUserToRoom, createDirect, getRoom, getRoomByName, getSubscriptionRow } from '../services/rooms';
+import { addUserToRoom, canAccessRoom, createDirect, getRoom, getRoomByName, getSubscriptionRow } from '../services/rooms';
 import { getSetting } from '../services/settings';
 import { actorOf, type Ctx } from '../services/users';
 
@@ -66,6 +66,31 @@ async function canManage(ctx: Ctx, row?: any) {
   return false;
 }
 
+// Quem só tem "Gerenciar as próprias integrações" (sem manage-integrations): a integração publica só como a própria
+// pessoa e se liga só às salas que ela já lê, sem responder como o autor e sem script (como no Rocket.Chat). Antes, um
+// webhook próprio recebia as DMs e os grupos privados de todos e publicava como o administrador.
+// Na hora de rodar vale o mesmo, por quem criou: pega as integrações gravadas antes da regra.
+async function restrictedRow(row: any) {
+  return !!row.created_by && !(await hasPermission(row.created_by, 'manage-integrations'));
+}
+
+const ALL_TARGETS = ['all_public_channels', 'all_private_groups', 'all_direct_messages'];
+
+async function assertOwnTarget(ctx: Ctx, target: string, outgoing: boolean) {
+  const c = target.trim();
+  if (outgoing && ALL_TARGETS.includes(c)) {
+    if (c === 'all_public_channels' && (await hasPermission(ctx.userId, 'view-c-room'))) return;
+    throw badRequest('error-invalid-channel', 'Você só pode observar as salas de que participa: escolha os canais (#canal) em vez de todos os grupos privados ou todas as mensagens diretas.');
+  }
+  if (c.startsWith('@')) {
+    if (!(await one('SELECT 1 FROM users WHERE lower(username) = lower($1) AND active', [c.slice(1)]))) throw badRequest('error-invalid-channel', `Usuário não encontrado: ${c}`);
+    return; // saída: só as conversas com essa pessoa de que quem criou participa (fireOutgoing); entrada: DM como si mesmo
+  }
+  const name = c.replace(/^#/, '');
+  const room = (await getRoom(name)) ?? (await getRoomByName(name));
+  if (!room || !(await canAccessRoom(ctx.userId, room))) throw badRequest('error-invalid-channel', `Canal não encontrado ou sem acesso: ${c}. Escolha uma sala de que você participa.`);
+}
+
 function normalizeChannels(v: unknown): string[] {
   const list = Array.isArray(v) ? v : String(v ?? '').split(',');
   return list.map((c) => String(c).trim()).filter(Boolean);
@@ -94,10 +119,15 @@ export interface IntegrationInput {
   script?: string;
 }
 
-async function validate(input: IntegrationInput) {
+async function validate(ctx: Ctx, input: IntegrationInput) {
   if (!['webhook-incoming', 'webhook-outgoing'].includes(input.type)) throw badRequest('error-invalid-type', 'Tipo de integração inválido.');
   if (!input.name?.trim()) throw badRequest('error-invalid-name', 'Informe um nome.');
-  const user = await one('SELECT id, username FROM users WHERE lower(username) = lower($1) AND active', [String(input.username ?? '').replace(/^@/, '')]);
+  const own = !(await hasPermission(ctx.userId, 'manage-integrations'));
+  const username = String(input.username ?? '').trim().replace(/^@/, '') || (own ? ctx.username : '');
+  if (own && username.toLowerCase() !== ctx.username.toLowerCase()) {
+    throw badRequest('error-invalid-user', `Você só pode criar integrações que publicam como você (@${ctx.username}).`);
+  }
+  const user = await one('SELECT id, username FROM users WHERE lower(username) = lower($1) AND active', [username]);
   if (!user) throw badRequest('error-invalid-user', 'Usuário para publicar não encontrado.');
   // Integração com o Jira: ninguém publica como o robô oficial do Jira por um webhook genérico.
   if (await one(`SELECT 1 FROM integration_state WHERE id = 'bot.jira' AND data->>'id' = $1`, [user.id])) {
@@ -118,13 +148,20 @@ async function validate(input: IntegrationInput) {
       }
     }
   }
+  if (own) {
+    const outgoing = input.type === 'webhook-outgoing';
+    for (const c of channels) await assertOwnTarget(ctx, c, outgoing);
+    if (outgoing && input.targetRoom?.trim()) await assertOwnTarget(ctx, input.targetRoom, false);
+    if (outgoing && input.impersonateUser) throw badRequest('error-not-allowed', 'Só quem gerencia todas as integrações pode responder como o usuário que disparou.');
+    if (input.scriptEnabled) throw badRequest('error-not-allowed', 'Só quem gerencia todas as integrações pode usar scripts.');
+  }
   if (input.script) compileScript(input.script); // erros de sintaxe voltam ao administrador
   return { user, channels };
 }
 
 export async function createIntegration(ctx: Ctx, input: IntegrationInput) {
   if (!(await canManage(ctx))) throw forbidden();
-  const { user, channels } = await validate(input);
+  const { user, channels } = await validate(ctx, input);
   const row = await one(
     `INSERT INTO integrations (id, type, name, enabled, token, user_id, username, channels, event, trigger_words, trigger_word_anywhere, urls,
        alias, avatar, emoji, impersonate_user, run_on_edits, retry_failed_calls, retry_count, retry_delay, target_room, script_enabled, script, created_by)
@@ -165,7 +202,7 @@ export async function updateIntegration(ctx: Ctx, id: string, input: Integration
   if (!cur) throw notFound('error-invalid-integration', 'Integração não encontrada.');
   refuseManaged(cur);
   if (!(await canManage(ctx, cur))) throw forbidden();
-  const { user, channels } = await validate({ ...input, type: cur.type });
+  const { user, channels } = await validate(ctx, { ...input, type: cur.type });
   const row = await one(
     `UPDATE integrations SET name=$2, enabled=$3, user_id=$4, username=$5, channels=$6, event=$7, trigger_words=$8, trigger_word_anywhere=$9, urls=$10,
        alias=$11, avatar=$12, emoji=$13, impersonate_user=$14, run_on_edits=$15, retry_failed_calls=$16, retry_count=$17, retry_delay=$18, target_room=$19,
@@ -337,6 +374,10 @@ interface PostContent {
 }
 
 async function postAs(row: any, content: PostContent, defaultChannels: string[], userOverride?: { id: string; username: string }) {
+  // Integração própria gravada antes da regra (ou alterada por um administrador) que publica como outra pessoa: parada.
+  if ((userOverride?.id ?? row.user_id) !== row.created_by && (await restrictedRow(row))) {
+    throw forbidden('Esta integração publica como outra pessoa e está bloqueada. Peça a um administrador para revisá-la.');
+  }
   const user = userOverride ?? (await one('SELECT id, username FROM users WHERE id = $1 AND active', [row.user_id]));
   if (!user) throw badRequest('error-invalid-user', 'Usuário da integração inválido ou desativado.');
   const targets = content.roomId ? [content.roomId] : content.channel ? normalizeChannels(content.channel) : defaultChannels;
@@ -388,7 +429,8 @@ export async function handleIncoming(id: string, token: string, req: { body: unk
     }
   }
   let content: PostContent = typeof body === 'object' ? body : { text: String(body) };
-  if (row.script_enabled) {
+  const restricted = await restrictedRow(row);
+  if (row.script_enabled && !restricted) {
     const r = runScript(row, 'process_incoming_request', { request: { url: { href: req.url, query: req.query }, headers: req.headers, content: body, content_raw: JSON.stringify(body) } });
     if (!r.ok) {
       await history(row.id, 'incoming', 'script-error', { data: body, error: r.error });
@@ -399,6 +441,13 @@ export async function handleIncoming(id: string, token: string, req: { body: unk
     if (r.result?.content) content = r.result.content;
   }
   if (!content.text && !content.msg && !content.attachments?.length) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  // Integração própria: o channel/roomId do payload só escolhe entre os canais configurados nela.
+  if (restricted && (content.roomId || content.channel)) {
+    const key = (c: string) => c.trim().replace(/^#/, '').toLowerCase();
+    const configured = new Set<string>(row.channels.map(key));
+    const asked = content.roomId ? [String(content.roomId)] : normalizeChannels(content.channel);
+    if (asked.some((c) => !configured.has(key(c)))) throw forbidden('Esta integração só publica nos canais configurados nela.');
+  }
   const messages = await postAs(row, content, row.channels);
   return { success: true, messages: messages.length };
 }
@@ -436,7 +485,8 @@ function triggerWordFor(row: any, text: string) {
 
 async function callOutgoing(row: any, event: OutgoingEvent, data: Record<string, unknown>, room: any | null, url: string, attempt = 0): Promise<void> {
   let request: any = { url, method: 'POST', headers: { 'content-type': 'application/json' }, data };
-  if (row.script_enabled) {
+  const own = await restrictedRow(row); // integração própria: sem script e sem responder como o autor
+  if (row.script_enabled && !own) {
     const r = runScript(row, 'prepare_outgoing_request', { request });
     if (!r.ok) return history(row.id, event, 'script-error', { url, data, error: r.error, finished: true });
     if (r.result === null) return history(row.id, event, 'skipped-by-script', { url, data, finished: true });
@@ -474,13 +524,13 @@ async function callOutgoing(row: any, event: OutgoingEvent, data: Record<string,
   } catch {
     reply = null;
   }
-  if (row.script_enabled) {
+  if (row.script_enabled && !own) {
     const r = runScript(row, 'process_outgoing_response', { request, response: { status_code: status, content: reply, content_raw: responseText } });
     if (r.ok && r.result !== undefined) reply = r.result?.content ?? r.result;
   }
   if (reply && typeof reply === 'object' && (reply.text || reply.attachments?.length)) {
     if (!row.target_room && !room) return;
-    const impersonated = row.impersonate_user && data.user_id ? await one('SELECT id, username FROM users WHERE id = $1', [data.user_id]) : null;
+    const impersonated = row.impersonate_user && !own && data.user_id ? await one('SELECT id, username FROM users WHERE id = $1', [data.user_id]) : null;
     const content = row.target_room ? { ...reply, roomId: undefined, channel: undefined } : { ...reply, roomId: room.id };
     await postAs(row, content, row.target_room ? [row.target_room] : [], impersonated ?? undefined).catch(() => {});
   }
@@ -493,13 +543,19 @@ async function fireOutgoing(event: OutgoingEvent, room: any | null, data: Record
     // Ignora mensagens da própria integração para evitar laços.
     if (opts.userId && opts.userId === row.user_id) continue;
     if (room && !matchesChannel(row, room, opts.username)) continue;
+    // Integração própria: só as salas que quem a criou pode ler, e o e-mail de quem chegou só com permissão para vê-lo.
+    let payloadData = data;
+    if (await restrictedRow(row)) {
+      if (room && !(await canAccessRoom(row.created_by, room))) continue;
+      if (!room && data.email !== undefined && !(await hasPermission(row.created_by, 'view-full-other-user-info'))) payloadData = { ...data, email: undefined };
+    }
     let triggerWord: string | undefined;
     if (event === 'sendMessage') {
       const t = triggerWordFor(row, opts.text ?? '');
       if (!t.ok) continue;
       triggerWord = t.word;
     }
-    const payload = { token: row.token, bot: false, trigger_word: triggerWord, siteUrl: getSetting('Site_Url'), ...data };
+    const payload = { token: row.token, bot: false, trigger_word: triggerWord, siteUrl: getSetting('Site_Url'), ...payloadData };
     for (const url of row.urls) void callOutgoing(row, event, payload, room, url).catch(() => {});
   }
 }
@@ -537,6 +593,7 @@ export function registerIntegrationHooks() {
     const editRows = await many(`SELECT * FROM integrations WHERE type='webhook-outgoing' AND enabled AND event='sendMessage' AND run_on_edits`);
     for (const row of editRows) {
       if (message.u?._id === row.user_id || !matchesChannel(row, room, message.u?.username)) continue;
+      if ((await restrictedRow(row)) && !(await canAccessRoom(row.created_by, room))) continue;
       const t = triggerWordFor(row, message.msg ?? '');
       if (!t.ok) continue;
       const payload = {
