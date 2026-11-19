@@ -736,6 +736,38 @@ arquivos e pastas com nome fora do UTF-8 ficam de fora, com um aviso só.
 Os downloads (URL, arquivos e fotos pendentes) recusam endereços da rede interna. Para liberar um servidor interno,
 inclua `host:porta` em `IMPORT_ALLOWED_HOSTS`.
 
+## Administração de usuários
+
+Em Administração › Usuários:
+
+- **Novo usuário**: o e-mail é opcional. Com senha definida por você, "Exigir troca de senha no primeiro login" vem
+  ligado; com e-mail, "Enviar link para a pessoa criar a senha" manda o link de "Esqueci minha senha" (vale 3 dias) e
+  dispensa a senha (pede "Esqueci minha senha" ligado e o e-mail configurado). No editor, **Enviar link para definir
+  a senha** faz o mesmo para uma conta que já existe, e a pessoa recebe um aviso quando um administrador troca a
+  senha dela.
+- **Aguardando aprovação**: com "Aprovar novos usuários manualmente", quem se cadastra pela tela de entrar aparece
+  com esse status e um filtro próprio (separado dos desativados). Quem pode ativar contas recebe um aviso na hora, no
+  chat e por e-mail, com o link para o filtro. **Aprovar cadastro** ativa a conta e avisa a pessoa por e-mail;
+  **Recusar cadastro** exclui o cadastro.
+- **Nome e nome de usuário**: o nome é obrigatório (até 100 caracteres) e a bio vai até 500. `all`, `here` e `system`
+  são nomes de usuário reservados (@all e @here avisam a sala inteira).
+- **Editor de usuário**: Redefinir 2FA e Remover avatar pedem confirmação; trocar o e-mail desmarca "E-mail
+  verificado" (a revisão mostra, e dá para manter marcado na aba Segurança); a sua própria senha você troca em Minha
+  conta › Segurança, com a senha atual. Sair com alterações não salvas, inclusive pelo Voltar do navegador ou do
+  celular, pergunta antes de descartar.
+- **Dispositivos**: a sua sessão aparece como "Esta sessão" (encerrá-la tira você da conta), e as sessões de quem tem
+  papel acima do seu ficam com cadeado.
+- **Desativar** impede o acesso e guarda tudo; ninguém desativa a própria conta, e o último administrador ativo não
+  é desativado.
+- **Excluir conta** não dá para desfazer: as mensagens da pessoa continuam nas salas e nas conversas em grupo (só ela
+  sai delas); cada conversa a dois fica arquivada, só para leitura da outra pessoa, com o nome "Fulano (conta
+  excluída)"; eventos e reuniões com convidados que ela organizava passam para um dos convidados.
+- **Ordenar**: clique em Nome, E-mail ou Último acesso para ordenar a lista (clicar de novo inverte). Em Último
+  acesso, do mais antigo, quem nunca entrou aparece primeiro. No celular a ordem fica num seletor ao lado do filtro de
+  papel. As pessoas vêm antes dos bots em qualquer ordem, e a exportação CSV segue a ordem da tela.
+- **Exportar CSV** neutraliza textos que começam com `=`, `+`, `-` ou `@` (a planilha não executa fórmulas vindas de
+  nomes).
+
 ## Papéis e permissões
 
 Em Administração › Papéis e permissões, três visões na mesma faixa:
@@ -763,6 +795,9 @@ Em Administração › Papéis e permissões, três visões na mesma faixa:
   agora se confunde com o de outro papel, a prévia avisa e pede outro nome para reverter.
 - Ninguém dá o que não tem: só as permissões e os papéis que cabem no que a pessoa tem (ou que o administrador
   delegou ao papel dela). Dar o papel Administrador pede `assign-admin-role`.
+- "Exigir 2FA" e "Restrito em conversas diretas" valem para todos que têm o papel: quem não é administrador só muda
+  essas opções num papel em que todas as pessoas são gerenciáveis por ele (o papel Usuário, que os administradores
+  também têm, fica travado com o motivo).
 - **Papéis em lote**, em Administração › Usuários: selecione as pessoas (até 500 por vez), escolha dar ou tirar papéis
   e veja a prévia (quem muda, quem já está assim e quem fica de fora, com o motivo) antes de aplicar. Quem está
   travado fica como estava.

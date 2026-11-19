@@ -22,6 +22,8 @@ export interface Grant {
   delegated: string[];
   roleLocks: Record<string, LockReason>;
   deleteLocks: Record<string, LockReason>;
+  // Papéis que também são de alguém acima do ator: 2FA obrigatório e Restrito ficam travados (HOLDERS_LOCK_TEXT).
+  holderLocks?: Record<string, LockReason>;
   canEditPermissions: boolean;
   canEditRoles: boolean;
   canAssignRoles: boolean;

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { many, one, pool } from '../db/pool';
-import { badRequest, forbidden, notFound } from '../lib/errors';
+import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { audit } from '../services/audit';
 import { fingerprintOf, hasUserKeys, resetUserKeys } from '../services/e2e';
 import { readDeviceId } from '../services/loginDevices';
@@ -29,6 +29,7 @@ import {
   login,
   logout,
   needs2faSetup,
+  normalizeEmail,
   normalizeName,
   registerUser,
   removePersonalToken,
@@ -37,6 +38,7 @@ import {
   resetAvatar,
   revokeAllSessions,
   revokeSession,
+  sendPasswordSetupEmail,
   setAvatar,
   setPreferences,
   setStatus,
@@ -67,6 +69,33 @@ export async function resolveUserParam(params: Record<string, any>) {
   const u = params.userId ? await getUserById(params.userId) : params.username ? await getUserByUsername(params.username) : null;
   if (!u) throw notFound('error-invalid-user', 'Usuário não encontrado.');
   return u;
+}
+
+// Ordenação de users.list, no formato do Rocket.Chat (sort={"lastLogin":-1}). O nome compara sem acento e sem
+// maiúsculas; quem nunca entrou conta como o acesso mais antigo; sem e-mail fica no fim. E-mail e último acesso só
+// para quem administra (os outros não veem esses campos). Pessoas continuam antes dos bots, e o nome de usuário
+// desempata em ordem alfabética (a paginação não repete nem pula ninguém).
+const USER_SORT: Record<string, { col: string; admin?: boolean; nulls?: (asc: boolean) => string }> = {
+  username: { col: 'lower(username)' },
+  name: { col: 'wescc_fold(name)' },
+  createdAt: { col: 'created_at' },
+  email: { col: 'lower(email)', admin: true, nulls: () => ' NULLS LAST' },
+  lastLogin: { col: 'last_login', admin: true, nulls: (asc) => (asc ? ' NULLS FIRST' : ' NULLS LAST') },
+};
+function userListOrder(raw: unknown, admin: boolean) {
+  if (raw === undefined || raw === '') return `(type = 'bot'), username`;
+  let s: unknown;
+  try {
+    s = typeof raw === 'string' ? JSON.parse(raw) : undefined;
+  } catch {
+    s = undefined;
+  }
+  const entries = s && typeof s === 'object' && !Array.isArray(s) ? Object.entries(s) : [];
+  const [key, dir] = entries.length === 1 ? entries[0] : [];
+  const sort = key && Object.hasOwn(USER_SORT, key) ? USER_SORT[key] : undefined;
+  if (!sort || (sort.admin && !admin) || (dir !== 1 && dir !== -1)) throw badRequest('error-invalid-params', 'Não dá para ordenar a lista de usuários por esse campo.');
+  const asc = dir === 1;
+  return `(type = 'bot'), ${sort.col} ${asc ? 'ASC' : 'DESC'}${sort.nulls?.(asc) ?? ''}, username`;
 }
 
 export function usersRoutes(app: FastifyInstance) {
@@ -177,10 +206,12 @@ export function usersRoutes(app: FastifyInstance) {
     if (!getSetting('Device_Management_Allow_Logout_All')) throw forbidden();
     return { removed: await revokeAllSessions(ctx.userId, ctx.sessionId) };
   });
-  route(app, 'GET', 'sessions.list.all', { permissions: ['view-device-management'] }, async (req) => {
+  route(app, 'GET', 'sessions.list.all', { permissions: ['view-device-management'] }, async (req, _rep, ctx) => {
     const query = q(req);
     const r = await listSessions({ ...paging(query), search: query.filter, userId: query.userId });
-    return { ...r, count: r.sessions.length, offset: paging(query).offset };
+    // current: a sessão de quem está vendo (encerrar é sair da conta); os papéis de cada dono dizem à tela quais
+    // sessões têm cadeado (dono com papel acima de quem vê), como na lista de usuários.
+    return { ...r, sessions: r.sessions.map((s) => ({ ...s, current: s._id === ctx.sessionId })), count: r.sessions.length, offset: paging(query).offset };
   });
   route(app, 'POST', 'sessions.logout', { permissions: ['view-device-management', 'logout-other-user'] }, async (req, _rep, ctx) => {
     const sid = str(b(req).sessionId, 'sessionId');
@@ -361,13 +392,27 @@ export function usersRoutes(app: FastifyInstance) {
     const params: unknown[] = [`%${query.filter ?? query.text ?? ''}%`];
     let w = '(username ILIKE $1 OR name ILIKE $1' + (admin ? ' OR email ILIKE $1)' : ')');
     if (!admin) w += ' AND active';
-    if (query.status === 'active') w += ' AND active';
-    if (query.status === 'deactivated') w += ' AND NOT active';
     if (query.role) w += ` AND $${params.push(query.role)} = ANY(roles)`;
     if (query.type) w += ` AND type = $${params.push(query.type)}`;
-    // Pessoas antes dos bots: a lista abre pelas contas que se administram de verdade.
-    const rows = await many(`SELECT *, count(*) OVER() AS total FROM users WHERE ${w} ORDER BY (type = 'bot'), username LIMIT ${count} OFFSET ${offset}`, params);
-    return { users: rows.map((r) => mapUser(r, { full: admin })), count: rows.length, offset, total: Number(rows[0]?.total ?? 0) };
+    const base = w;
+    if (query.status === 'active') w += ' AND active';
+    // Desativados não inclui quem aguarda aprovação: cada um tem o seu filtro.
+    if (query.status === 'deactivated') w += ' AND NOT active AND NOT pending_approval';
+    if (query.status === 'pending') w += ' AND NOT active AND pending_approval';
+    // Pessoas antes dos bots: a lista abre pelas contas que se administram de verdade. sort= ordena por uma coluna.
+    const order = userListOrder(query.sort, admin);
+    const rows = await many(`SELECT *, count(*) OVER() AS total FROM users WHERE ${w} ORDER BY ${order} LIMIT ${count} OFFSET ${offset}`, params);
+    // counts=true: os números de cada status (com a busca e o papel), na mesma chamada, para os filtros da tela.
+    const counts =
+      admin && query.counts === 'true'
+        ? await one(
+            `SELECT count(*)::int AS total, count(*) FILTER (WHERE active)::int AS active,
+                    count(*) FILTER (WHERE NOT active AND NOT pending_approval)::int AS deactivated, count(*) FILTER (WHERE NOT active AND pending_approval)::int AS pending
+               FROM users WHERE ${base}`,
+            params,
+          )
+        : undefined;
+    return { users: rows.map((r) => mapUser(r, { full: admin })), count: rows.length, offset, total: Number(rows[0]?.total ?? 0), ...(counts ? { counts } : {}) };
   });
   route(app, 'GET', 'users.autocomplete', {}, async (req, _rep, ctx) => {
     // selector (como no Rocket.Chat): JSON com term; quebrado é recusado com aviso, não com erro interno.
@@ -416,12 +461,22 @@ export function usersRoutes(app: FastifyInstance) {
     // Hierarquia de concessão: só dá papéis que cabem no que o ator tem (ou delegados a ele), inclusive o Usuário
     // que a conta recebe quando nenhum papel vem no pedido.
     await assertRoleChange(ctx, '', [], roles);
+    // "Enviar link para definir a senha": a senha fica opcional e a pessoa cria a dela pelo e-mail (o mesmo link de
+    // "Esqueci minha senha"). Sem o e-mail, sem a redefinição ligada ou sem SMTP a conta nem é criada.
+    const sendLink = !!bool(body.sendPasswordEmail);
+    if (sendLink) {
+      if (!normalizeEmail(body.email)) throw badRequest('error-invalid-params', 'Informe o e-mail para enviar o link de definir a senha.');
+      if (!getSetting('Accounts_PasswordReset'))
+        throw badRequest('error-password-reset-disabled', 'O link usa "Esqueci minha senha", que está desligado em Configurações › Contas. Ligue-o ou defina uma senha.');
+      const { mailStatus } = await import('../services/mailer');
+      if (!mailStatus().configured) throw badRequest('error-smtp-not-configured', 'O envio de e-mail não está configurado (Configurações › E-mail). Configure-o ou defina uma senha.');
+    }
     const row = await createUser(
       {
         username: str(body.username, 'username'),
         name: normalizeName(body.name),
         email: body.email,
-        password: str(body.password, 'password'),
+        password: sendLink && !body.password ? null : str(body.password, 'password'),
         roles,
         active: bool(body.active) ?? true,
         verified: bool(body.verified) ?? false,
@@ -432,7 +487,24 @@ export function usersRoutes(app: FastifyInstance) {
       actorOf(ctx),
     );
     if (strArray(body.roles).length) await recordHistory(pool, { entityType: 'user', entityId: row.id, entityLabel: row.username, action: 'create', actor: { id: ctx.userId, username: ctx.username }, changes: [{ field: 'roles', before: null, after: row.roles }] });
-    return { user: mapUser(row, { full: true }) };
+    // A conta fica criada mesmo se o envio falhar: a tela avisa e o editor tem "Enviar link para definir a senha".
+    const passwordEmailSent = sendLink ? await sendPasswordSetupEmail(row.id).catch(() => false) : undefined;
+    return { user: mapUser(row, { full: true }), ...(sendLink ? { passwordEmailSent } : {}) };
+  });
+  // Editor de usuário: manda por e-mail o link para a pessoa definir uma senha nova (a atual vale até ela trocar).
+  route(app, 'POST', 'users.sendPasswordLink', { permissions: ['edit-other-user-password'] }, async (req, _rep, ctx) => {
+    const userId = str(b(req).userId, 'userId');
+    await assertCanManageUser(ctx, userId);
+    const u = await getUserById(userId);
+    if (!u) throw notFound('error-invalid-user', 'Usuário não encontrado.');
+    if (!u.email) throw badRequest('error-invalid-email', 'Esta pessoa não tem e-mail. Cadastre um e-mail ou defina a senha aqui.');
+    if (!getSetting('Accounts_PasswordReset')) throw badRequest('error-password-reset-disabled', 'O link usa "Esqueci minha senha", que está desligado em Configurações › Contas.');
+    const { mailStatus } = await import('../services/mailer');
+    if (!mailStatus().configured) throw badRequest('error-smtp-not-configured', 'O envio de e-mail não está configurado (Configurações › E-mail).');
+    if (!u.active || u.type === 'bot' || u.auth_source === 'ldap') throw badRequest('error-action-not-allowed', 'Esta conta não entra com senha do chat (desativada, bot ou LDAP).');
+    if (!(await sendPasswordSetupEmail(userId, 'admin'))) throw badRequest('error-email-failed', 'Não foi possível enviar o e-mail. Confira Configurações › E-mail e tente de novo.');
+    await audit(actorOf(ctx), 'user.password.link.sent', { userId, username: u.username });
+    return { message: `Link enviado para ${u.email}.` };
   });
   // Dados e papéis têm chaves separadas: edit-other-user-info para nome, e-mail, bio e o resto; assign-roles para os
   // papéis. A tela manda só o que mudou, então quem só dá papéis salva sem esbarrar nos dados (e vice-versa).
@@ -465,6 +537,8 @@ export function usersRoutes(app: FastifyInstance) {
       await assertRoleChange(ctx, userId, current, roles);
     }
     if (d.password && !(await hasPermission(ctx.userId, 'edit-other-user-password'))) throw forbidden();
+    // A própria senha só muda com a senha atual (Minha conta): uma sessão esquecida aberta não tranca o dono para fora.
+    if (d.password && userId === ctx.userId) throw badRequest('error-action-not-allowed', 'Para trocar a sua própria senha, use Minha conta › Segurança (pede a senha atual).');
     let row = await updateUser(ctx, userId, d, { asAdmin: true });
     if (roles) {
       // Os papéis gravam com o histórico, na mesma transação dele.
@@ -502,15 +576,23 @@ export function usersRoutes(app: FastifyInstance) {
     const active = !!bool(body.activeStatus);
     const { targets, skipped } = await bulkAccountTargets(ctx, body.userIds);
     let users = 0;
+    let lastAdmin = 0;
     for (const t of targets) {
       if (t.active === active) {
         skipped.unchanged++;
         continue;
       }
-      await updateUser(ctx, t.id, { active }, { asAdmin: true });
+      try {
+        await updateUser(ctx, t.id, { active }, { asAdmin: true });
+      } catch (e) {
+        // O último administrador ativo fica de fora (updateUser recusa), e o resto do lote segue.
+        if (!(e instanceof ApiError && e.errorType === 'error-action-not-allowed')) throw e;
+        lastAdmin++;
+        continue;
+      }
       users++;
     }
-    return { users, skipped };
+    return { users, skipped: { ...skipped, ...(lastAdmin ? { lastAdmin } : {}) } };
   });
   route(app, 'POST', 'users.bulkLogout', { permissions: ['logout-other-user'] }, async (req, _rep, ctx) => {
     const { targets, skipped } = await bulkAccountTargets(ctx, b(req).userIds);
@@ -544,7 +626,7 @@ export function usersRoutes(app: FastifyInstance) {
     return {};
   });
   route(app, 'GET', 'users.listPendingApproval', { permissions: ['view-user-administration'] }, async () => {
-    const rows = await many(`SELECT * FROM users WHERE NOT active AND last_login IS NULL ORDER BY created_at DESC LIMIT 200`);
+    const rows = await many(`SELECT * FROM users WHERE NOT active AND pending_approval ORDER BY created_at DESC LIMIT 200`);
     return { users: rows.map((r) => mapUser(r, { full: true })) };
   });
 

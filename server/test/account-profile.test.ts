@@ -142,13 +142,13 @@ describe('contas LDAP e SSO', () => {
 describe('nome de usuário reservado', () => {
   it('all e here não servem como nome de usuário em nenhum caminho', async () => {
     const u = await newUser(A);
-    for (const name of ['here', 'ALL', 'Here']) expect(err(await profile(u, { username: name }))).toEqual([400, 'Esse nome de usuário é reservado.']);
+    for (const name of ['here', 'ALL', 'Here']) expect(err(await profile(u, { username: name }))).toEqual([400, 'Este nome de usuário é reservado. Escolha outro.']);
     // Apagar o nome de usuário não é ignorado com "Perfil atualizado".
     expect(await profile(u, { username: '' })).toMatchObject({ status: 400, errorType: 'error-invalid-username' });
     const created = await api('POST', 'users.create', { username: 'All', name: 'Todos', email: 'todos@test.local', password: PW }, A);
-    expect(err(created)).toEqual([400, 'Esse nome de usuário é reservado.']);
+    expect(err(created)).toEqual([400, 'Este nome de usuário é reservado. Escolha outro.']);
     const reg = await api('POST', 'users.register', { username: 'here', name: 'Aqui', email: 'aqui@test.local', pass: 'Senha-forte-123' });
-    expect(err(reg)).toEqual([400, 'Esse nome de usuário é reservado.']);
+    expect(err(reg)).toEqual([400, 'Este nome de usuário é reservado. Escolha outro.']);
   });
 });
 

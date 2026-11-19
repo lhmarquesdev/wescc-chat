@@ -14,6 +14,7 @@ import {
   createRole,
   deleteRole,
   grantContext,
+  holderLocks,
   publishUserRoles,
   rbacError,
   roleNameCheck,
@@ -91,6 +92,8 @@ export function registerRbac(app: FastifyInstance) {
       ...g,
       roleLocks: Object.fromEntries(infos.map((r) => [r.id, roleLock(g, r)])),
       deleteLocks: Object.fromEntries(infos.map((r) => [r.id, roleDeleteLock(g, r)])),
+      // 2FA obrigatório e Restrito: travados nos papéis que também são de alguém acima do ator.
+      holderLocks: await holderLocks(g),
       canEditPermissions: await hasPermission(ctx.userId, 'access-permissions'),
       canEditRoles: await hasAnyPermission(ctx.userId, RBAC_WRITE),
       canAssignRoles: await hasAnyPermission(ctx.userId, USER_ROLE_WRITE),

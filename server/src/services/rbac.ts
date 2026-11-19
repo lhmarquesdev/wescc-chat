@@ -4,6 +4,7 @@ import type pg from 'pg';
 import {
   applyDelta,
   grantContextFor,
+  HOLDERS_LOCK_TEXT,
   keysNotHeld,
   LOCK_TEXT,
   RBAC_KEYS,
@@ -17,7 +18,7 @@ import {
   type RoleInfo,
 } from '@shared/rbac';
 import { ROLE_LABEL, roleDisplayName } from '@shared/messageText';
-import { many, one, tx } from '../db/pool';
+import { many, one, pool, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
@@ -60,6 +61,27 @@ export async function assertCanManageUser(ctx: Ctx, targetId: string, opts: { al
   if (!target) return;
   const lock = userLock(g, targetId, target.roles, roleInfos());
   if (lock) throw lockError(lock, 'RBAC_TARGET_SUPERIOR', { userId: targetId });
+}
+
+// 2FA obrigatório e "Restrito em conversas diretas" valem para cada pessoa que tem o papel: quem não é administrador só
+// muda essas travas num papel cujas pessoas ele consegue gerenciar (alguém que também tem um papel acima do ator,
+// como um administrador com o papel Usuário, fica protegido como no editor de pessoas). Devolve o cadeado de cada
+// papel que tem alguém acima do ator (os outros ficam de fora).
+export async function holderLocks(g: GrantContext, roleIds?: string[], db: Queryable = pool): Promise<Record<string, LockReason>> {
+  if (g.root) return {};
+  const rows = await many<{ role: string; co: string[] }>(
+    `SELECT r1 AS role, array_agg(DISTINCT r2) AS co FROM users u, unnest(u.roles) r1, unnest(u.roles) r2
+      WHERE u.id <> $1 ${roleIds ? 'AND r1 = ANY($2)' : ''} GROUP BY r1`,
+    roleIds ? [g.userId, roleIds] : [g.userId],
+    db,
+  );
+  const infos = roleInfos();
+  const out: Record<string, LockReason> = {};
+  for (const r of rows) {
+    const lock = userLock(g, '', r.co, infos);
+    if (lock && lock !== 'self') out[r.role] = lock;
+  }
+  return out;
 }
 
 // Os papéis que a pessoa fica de fato: sem nenhum, writeUserRoles grava Usuário (e users.create também).
@@ -281,8 +303,18 @@ async function assertRoleName(id: string, description: string | undefined, isNew
   if (p) throw rbacError(400, p.code, p.error);
 }
 
+// Nome exibido: sem espaços nas pontas e com até 32 caracteres, como na tela (vazio mostra o identificador).
+const ROLE_LABEL_MAX = 32;
+function cleanRoleLabel(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  const s = String(v).trim();
+  if (s.length > ROLE_LABEL_MAX) throw rbacError(400, 'RBAC_INVALID_ROLE_LABEL', `O nome exibido pode ter até ${ROLE_LABEL_MAX} caracteres.`);
+  return s;
+}
+
 export async function createRole(ctx: Ctx, name: string, input: RoleInput, opts: { canEditPermissions: boolean; batchId?: string; revertsId?: number | null; action?: 'create' | 'rollback' }) {
-  await assertRoleName(name, input.description, true);
+  const description = cleanRoleLabel(input.description) ?? '';
+  await assertRoleName(name, description, true);
   if (await one('SELECT 1 FROM roles WHERE lower(id) = lower($1)', [name])) throw badRequest('error-duplicate-role-names-not-allowed', 'Já existe um papel com esse nome.');
   const scope = input.scope === 'Subscriptions' ? 'Subscriptions' : 'Users';
   const restrictDirect = !!input.restrictDirect;
@@ -304,7 +336,7 @@ export async function createRole(ctx: Ctx, name: string, input: RoleInput, opts:
     const row = (
       await c.query('INSERT INTO roles (id, description, purpose, scope, protected, mandatory_2fa, restrict_direct, delegable_roles) VALUES ($1,$2,$3,$4,false,$5,$6,$7) RETURNING *', [
         name,
-        String(input.description ?? ''),
+        description,
         String(input.purpose ?? '').slice(0, 200),
         scope,
         !!input.mandatory2fa,
@@ -359,7 +391,7 @@ export async function updateRole(ctx: Ctx, id: string, input: RoleInput, opts: {
     }
 
     const purpose = input.purpose === undefined ? undefined : String(input.purpose).slice(0, 200);
-    const meta = { description: input.description, purpose, mandatory2fa: input.mandatory2fa, scope: existing.protected ? undefined : input.scope, restrictDirect: input.restrictDirect };
+    const meta = { description: cleanRoleLabel(input.description), purpose, mandatory2fa: input.mandatory2fa, scope: existing.protected ? undefined : input.scope, restrictDirect: input.restrictDirect };
     const metaChanged =
       (meta.description !== undefined && meta.description !== existing.description) ||
       (meta.purpose !== undefined && meta.purpose !== (existing.purpose ?? '')) ||
@@ -367,6 +399,9 @@ export async function updateRole(ctx: Ctx, id: string, input: RoleInput, opts: {
       (meta.scope !== undefined && meta.scope !== existing.scope) ||
       (meta.restrictDirect !== undefined && meta.restrictDirect !== existing.restrict_direct);
     if (metaChanged && !opts.canEditRole) throw rbacError(403, 'error-not-allowed', 'Sem permissão para editar papéis.');
+    const securityChanged =
+      (meta.mandatory2fa !== undefined && meta.mandatory2fa !== existing.mandatory_2fa) || (meta.restrictDirect !== undefined && meta.restrictDirect !== existing.restrict_direct);
+    if (securityChanged && (await holderLocks(g, [id], c))[id]) throw rbacError(403, 'RBAC_HOLDER_SUPERIOR', HOLDERS_LOCK_TEXT, { roleId: id });
     if (meta.description !== undefined && meta.description !== existing.description) await assertRoleName(id, meta.description, false);
     const scope = meta.scope ?? existing.scope;
     if ((meta.restrictDirect ?? existing.restrict_direct) && scope !== 'Users') throw badRequest('error-invalid-params', RESTRICT_GLOBAL_ONLY);

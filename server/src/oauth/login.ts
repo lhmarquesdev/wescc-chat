@@ -249,6 +249,9 @@ export async function fetchIdentity(p: any, tokens: { accessToken: string; idTok
 // ---------- Usuário local ----------
 
 async function usernameTaken(username: string) {
+  // Nome reservado (all, here...) conta como ocupado: a conta nova fica com o nome seguido de número.
+  const { isReservedUsername } = await import('../services/users');
+  if (isReservedUsername(username)) return true;
   return !!(await one('SELECT 1 FROM users WHERE lower(username) = lower($1)', [username]));
 }
 

@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime, formatRelative, plural, roomIconName } from '../../lib/format';
 import { inviteStatusOf } from '../../lib/invites';
-import { useStore } from '../../lib/store';
+import { usePermission, useStore } from '../../lib/store';
 import { Icon } from '../../components/Icon';
 import { Empty, Field, FileButton, Modal, Pager, SearchInput, SkeletonList, SkeletonTable, confirmDialog, useAsync, ThLabel } from '../../components/ui';
 import { DeviceCell, NewDevicePill, PageHead, RoomCell, TableWrap, UserCell, deviceLabel, lastSeen } from './parts';
 // Figurinhas: a figurinha denunciada e "Remover figurinha de todas as conversas".
 import { ReportSticker } from './stickers';
+import { loadGrant, lockText, userLockOf } from './rbac/data';
+import { LockHint } from './rbac/shell';
 
 const fail = (e: unknown) => useStore.getState().toast(errorMessage(e), 'error');
 const ok = (t: string) => useStore.getState().toast(t);
@@ -17,13 +19,20 @@ export function AdminDevices() {
   const [offset, setOffset] = useState(0);
   const { data, loading, reload } = useAsync(() => api.get('sessions.list.all', { filter, offset, count: 50 }), [filter, offset]);
   const sessions: any[] = data?.sessions ?? [];
+  const me = useStore((s) => s.me)!;
+  const canLogout = usePermission('logout-other-user');
+  // Sessões de quem tem papel acima do seu ficam com cadeado (o servidor recusa), como na lista de usuários.
+  const grant = useAsync(loadGrant, []);
+  const lockOf = (s: any) => {
+    const l = grant.data ? userLockOf(grant.data, me._id, { _id: s.userId, roles: s.roles }) : null;
+    return l === 'self' ? null : l;
+  };
   const end = async (s: any) => {
-    const yes = await confirmDialog({
-      title: `Encerrar a sessão de @${s.username}?`,
-      body: `${deviceLabel(s.device)} sai da conta e precisa entrar de novo.`,
-      confirmLabel: 'Encerrar sessão',
-      danger: true,
-    });
+    const yes = await confirmDialog(
+      s.current
+        ? { title: 'Encerrar a sua sessão neste dispositivo?', body: 'É a sessão que você está usando agora: você sai da conta e volta para a tela de entrar.', confirmLabel: 'Sair deste dispositivo', danger: true }
+        : { title: `Encerrar a sessão de @${s.username}?`, body: `${deviceLabel(s.device)} sai da conta e precisa entrar de novo.`, confirmLabel: 'Encerrar sessão', danger: true },
+    );
     if (!yes) return;
     api.post('sessions.logout', { sessionId: s._id }).then(reload).catch(fail);
   };
@@ -67,7 +76,15 @@ export function AdminDevices() {
                     <UserCell username={s.username} name={s.name} />
                   </td>
                   <td data-label="Dispositivo">
-                    <DeviceCell device={s.device} tag={s.device?.newDevice && <NewDevicePill />} />
+                    <DeviceCell
+                      device={s.device}
+                      tag={
+                        <>
+                          {s.current && <span className="pill accent tag">Esta sessão</span>}
+                          {s.device?.newDevice && <NewDevicePill current={s.current} />}
+                        </>
+                      }
+                    />
                   </td>
                   <td className="muted nowrap col-xl" data-label="Login">
                     {formatDateTime(s.createdAt)}
@@ -76,12 +93,18 @@ export function AdminDevices() {
                     {lastSeen(s.lastActiveAt)}
                   </td>
                   <td className="actions-col">
-                    <div className="row-actions">
-                      <button className="btn small ghost danger" onClick={() => end(s)}>
-                        <Icon name="logout" />
-                        Encerrar
-                      </button>
-                    </div>
+                    {canLogout && (
+                      <div className="row-actions">
+                        {lockOf(s) ? (
+                          <LockHint text={lockText(lockOf(s))} />
+                        ) : (
+                          <button className="btn small ghost danger" onClick={() => end(s)}>
+                            <Icon name="logout" />
+                            Encerrar
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -111,6 +111,12 @@
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
+/* A faixa de Usuários e Papéis fica numa linha quando cabe; quando não cabe, as ações descem para a linha de baixo
+   em vez de ficarem fora da tela (Novo usuário, Novo papel). */
+.rbac-strip {
+  height: auto;
+  flex-wrap: wrap;
+}
 .page-head h1,
 .rbac-strip-title h1 {
   font-family: var(--font-display);
@@ -406,6 +412,40 @@
   height: 14px;
   flex: none;
   color: hsl(var(--muted-foreground) / 0.7);
+}
+/* Cabeçalho que ordena (SortTh): o rótulo vira botão, com a seta da ordem à direita (esmaecida até ser escolhida). */
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline: -6px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  text-transform: inherit;
+  white-space: nowrap;
+}
+.th-sort:hover,
+.table th[aria-sort] > .th-sort {
+  color: hsl(var(--foreground));
+}
+.th-sort:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+.th-sort > .th-sort-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  opacity: 0.45;
+}
+.th-sort:hover > .th-sort-icon {
+  opacity: 0.8;
+}
+.table th[aria-sort] > .th-sort > .th-sort-icon {
+  opacity: 1;
+  color: hsl(var(--brand-ink-2));
 }
 /* Datas e números: 12px tabulares e discretos. */
 .table td.num,
@@ -794,16 +834,35 @@
   }
 }
 
-/* Papéis: a faixa nunca quebra; o contador some antes de apertar as peças. */
+/* Papéis: o contador some antes de apertar as peças; sem espaço, as ações descem inteiras para a linha de baixo
+   (à direita) e, se ainda não couberem, quebram entre si. No celular valem as regras de rbac.css. */
 @media (max-width: 1640px) {
   .rbac-strip .rbac-count {
     display: none;
   }
 }
-.rbac-strip-actions {
+@media (min-width: 761px) {
+  .rbac-strip-actions {
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    min-width: 0;
+    margin-left: auto;
+  }
+}
+/* A trilha de filtros não passa da largura da faixa: sem espaço, ela rola de lado. */
+.rbac-strip-actions > .rbac-chips {
+  flex-shrink: 1;
   flex-wrap: nowrap;
-  flex: none;
-  margin-left: auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+@supports (animation-timeline: scroll()) {
+  .rbac-strip-actions > .rbac-chips {
+    animation: table-fade linear both;
+    animation-timeline: scroll(self inline);
+  }
 }
 .rbac-strip-select {
   height: 36px;

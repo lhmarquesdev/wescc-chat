@@ -33,6 +33,9 @@ export function mapUser(r: any, opts: { full?: boolean } = {}): User {
     u.twoFactorEnabled = r.totp_enabled;
     u.preferences = r.preferences;
     u.lastLogin = r.last_login;
+    u.requirePasswordChange = !!r.require_password_change;
+    // Aguardando aprovação só enquanto a conta não foi ativada (por qualquer caminho).
+    if (r.pending_approval && !r.active) u.pendingApproval = true;
   }
   return u;
 }
