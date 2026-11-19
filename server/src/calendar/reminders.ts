@@ -17,6 +17,8 @@ export async function sendDueReminders(): Promise<number> {
         SELECT id FROM calendar_events
          WHERE status = 'confirmed' AND reminded_at IS NULL AND reminder_minutes IS NOT NULL
            AND ${STARTS} - reminder_minutes * interval '1 minute' <= now() AND ${STARTS} > now() - $1 * interval '1 minute'
+           -- Limite pelo próprio starts_at (o dia inteiro fica a menos de 14 h dele) para o índice continuar valendo.
+           AND starts_at > now() - ($1 + 1440) * interval '1 minute'
          ORDER BY starts_at LIMIT 200 FOR UPDATE SKIP LOCKED)
       RETURNING id, owner_id, title, starts_at, all_day, is_meeting, meeting_code`,
     [LATE_MINUTES, CAL_TZ],
