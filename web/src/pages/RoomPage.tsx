@@ -134,9 +134,18 @@ function TypingIndicator({ id }: { id: string }) {
   // Todos gravando vídeo: "gravando vídeo…"; todos gravando (algum áudio): "gravando áudio…"; se alguém digita, vale o "digitando…".
   const allRecording = active.length > 0 && active.every(([u]) => recording?.[u]);
   const verb = !allRecording ? 'digitando' : active.every(([u]) => recording?.[u] === 'video') ? 'gravando vídeo' : 'gravando áudio';
+  // Com a linha à vista, a .room-main ganha data-typing e o fim da lista sobe a altura dela (panels.css).
+  const box = useRef<HTMLDivElement>(null);
+  const on = names.length > 0;
+  useLayoutEffect(() => {
+    const host = box.current?.parentElement;
+    if (!on || !host) return;
+    host.setAttribute('data-typing', '');
+    return () => host.removeAttribute('data-typing');
+  }, [on]);
   // A linha fica sobre o fim da lista: não ocupa espaço quando ninguém digita.
   return (
-    <div className="typing" aria-live="polite">
+    <div className="typing" ref={box} aria-live="polite">
       {names.length > 0 && (
         <div className="typing-row">
           <span className="dots" aria-hidden="true">

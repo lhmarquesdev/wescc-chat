@@ -3,6 +3,7 @@ import { AHEAD_ERROR, aheadError, encryptedContent, SCHEDULE_LATE_MINUTES, SCHED
 import { many, one, query, tx } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
+import { hasVisibleText } from '../lib/sanitize';
 import { bus } from '../realtime/bus';
 import { canPostInRoom, getMessageRow, MENTION_RE, sendMessage, withExtra } from './messages';
 import { getUserRoles, hasPermission, rolesHavePermission } from './permissions';
@@ -47,7 +48,7 @@ function publish(row: any, action: 'upserted' | 'removed', extra: { messageId?: 
 
 function cleanText(msg: unknown): string {
   const text = typeof msg === 'string' ? msg.trim() : '';
-  if (!text) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  if (!hasVisibleText(text)) throw badRequest('error-invalid-message', 'Mensagem vazia.');
   const max = getSetting<number>('Message_MaxAllowedSize');
   if (text.length > max) throw badRequest('error-message-size-exceeded', `A mensagem excede ${max} caracteres.`);
   if (text.startsWith('/')) throw badRequest('error-schedule-command', 'Comandos não podem ser agendados.');

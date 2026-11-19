@@ -388,7 +388,7 @@
     display: none;
   }
   /* Sem ações para trazer, a hora da linha em grupo fica no lugar ao passar o mouse. */
-  .call-list li:has(> .call-list-gap) .call-time {
+  .call-list li > .call-time:has(~ .call-list-gap) {
     visibility: visible;
   }
 }

@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { ApiError, errorMessage, getCredentials, syncCredentials } from './lib/api';
 import { loadPublicSettings, logout, requestNotificationPermission, signedOutElsewhere, startSession } from './lib/session';
@@ -16,14 +16,17 @@ import { ChangePasswordPage, ForgotPasswordPage, InvitePage, LoginPage, Register
 import { DirectoryPage, HomePage } from './pages/HomeDirectory';
 import { RoomPage } from './pages/RoomPage';
 import { AccountPage, applyTheme, TwoFactorCard } from './pages/AccountPage';
-import { AdminPage } from './pages/admin/AdminPage';
-import { CallsPage } from './pages/CallsPage';
-import { CalendarPage } from './pages/CalendarPage';
-import { FilesPage } from './pages/FilesPage'; // Arquivos (pastas compartilhadas)
-import { MeetPage } from './pages/MeetPage';
 import { CalendarNotices } from './components/calendar/CalendarNotices';
 import { MessageNotices } from './components/MessageNotices';
-import { RemindersPage } from './pages/RemindersPage';
+
+// Telas de uso eventual, cada uma no seu pedaço, baixado ao abrir: o primeiro acesso (login e conversas) não espera
+// pela Administração, que sozinha era quase um terço do app.
+const AdminPage = lazy(() => import('./pages/admin/AdminPage').then((m) => ({ default: m.AdminPage })));
+const CallsPage = lazy(() => import('./pages/CallsPage').then((m) => ({ default: m.CallsPage })));
+const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })));
+const FilesPage = lazy(() => import('./pages/FilesPage').then((m) => ({ default: m.FilesPage }))); // Arquivos (pastas compartilhadas)
+const MeetPage = lazy(() => import('./pages/MeetPage').then((m) => ({ default: m.MeetPage })));
+const RemindersPage = lazy(() => import('./pages/RemindersPage').then((m) => ({ default: m.RemindersPage })));
 
 function useCustomCss() {
   const css = useStore((s) => s.settings.Layout_Custom_CSS as string | undefined);
@@ -273,7 +276,15 @@ function Protected() {
         {!connected && <OfflineBar />}
         {!asList && (
           <ErrorBoundary resetKey={pathname}>
-            <Outlet />
+            <Suspense
+              fallback={
+                <div className="fullscreen-center">
+                  <Spinner />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
           </ErrorBoundary>
         )}
       </main>

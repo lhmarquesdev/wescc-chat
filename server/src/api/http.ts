@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ApiError, forbidden, unauthorized } from '../lib/errors';
+import { ApiError, badRequest, forbidden, unauthorized } from '../lib/errors';
 import { hasAnyPermission } from '../services/permissions';
 import { pendingSetup, resolveToken, type Ctx } from '../services/users';
 
@@ -83,6 +83,8 @@ export function route(app: FastifyInstance, method: 'GET' | 'POST' | 'PUT' | 'DE
       if (auth && !req.ctx) throw unauthorized();
       if (auth && req.ctx?.setup && !SETUP_ROUTES[req.ctx.setup].has(path)) throw setupRequired(req.ctx.setup);
       if (opts.permissions?.length && !(await hasAnyPermission(req.ctx!.userId, opts.permissions))) throw forbidden();
+      // Corpo que não é um objeto JSON (42, "texto", [...]): as rotas leem campos dele.
+      if (req.body != null && (typeof req.body !== 'object' || Array.isArray(req.body))) throw badRequest('error-invalid-params', 'O corpo da requisição deve ser um objeto JSON.');
       const out = await handler(req, reply, req.ctx as Ctx);
       if (reply.sent) return;
       if (out && typeof out === 'object' && 'success' in (out as any)) return out;
@@ -90,6 +92,64 @@ export function route(app: FastifyInstance, method: 'GET' | 'POST' | 'PUT' | 'DE
     },
   });
 }
+
+// Erros do Fastify sobre o formato da requisição, em português (a web mostra o texto); o errorType continua o código.
+const FASTIFY_ERRORS: Record<string, string> = {
+  FST_ERR_CTP_INVALID_JSON_BODY: 'O corpo da requisição não é um JSON válido.',
+  FST_ERR_CTP_EMPTY_JSON_BODY: 'O corpo da requisição está vazio.',
+  FST_ERR_CTP_INVALID_MEDIA_TYPE: 'Formato da requisição não aceito.',
+  FST_ERR_CTP_INVALID_CONTENT_LENGTH: 'Tamanho da requisição inválido.',
+  FST_INVALID_MULTIPART_CONTENT_TYPE: 'Envie o arquivo como formulário (multipart/form-data).',
+  FST_ERR_BAD_URL: 'Endereço inválido.',
+};
+
+const INVALID_PARAM = 'Um dos parâmetros enviados tem um valor inválido.';
+const INVALID_DATE = 'Data inválida.';
+// Valor que o PostgreSQL recusa (U+0000, data, número, texto longo): a entrada veio errada, não é falha do servidor.
+const DB_INPUT_ERRORS: Record<string, string> = {
+  '22021': 'O texto contém um caractere inválido.', // U+0000 em texto
+  '22P05': 'O texto contém um caractere inválido.', // U+0000 em jsonb
+  '22007': INVALID_DATE,
+  '22008': INVALID_DATE, // fora do intervalo
+  '22P02': INVALID_PARAM, // texto onde vai número, booleano...
+  '22003': INVALID_PARAM, // número fora do intervalo
+  '2201W': INVALID_PARAM, // LIMIT negativo
+  '2201X': INVALID_PARAM, // OFFSET negativo
+  '22001': 'Um dos textos enviados é longo demais.',
+};
+
+function inputError(err: any): string | undefined {
+  if (typeof err?.code === 'string' && !err.statusCode) {
+    if (DB_INPUT_ERRORS[err.code]) return DB_INPUT_ERRORS[err.code];
+    // LIMIT ${n} com n = NaN ou Infinity: o banco lê como a coluna "nan".
+    if (err.code === '42703' && /column "-?(nan|infinity)"/i.test(err.message ?? '')) return INVALID_PARAM;
+  }
+  if (err instanceof RangeError && err.message === 'Invalid time value') return INVALID_DATE; // toISOString()
+  // String() de um objeto do JSON com toString/valueOf que não é função ({ "toString": 1 }).
+  if (err instanceof TypeError && err.message === 'Cannot convert object to primitive value') return INVALID_PARAM;
+  return undefined;
+}
+
+const DATE_PARAM = /^(latest|oldest|lastUpdate|updatedSince|start|end|from|to|[a-z]+(Date|At))$/;
+
+// O parâmetro (da consulta ou do corpo) que trouxe o valor recusado, quando só um pode ter sido: o PostgreSQL cita o
+// valor entre aspas; numa data inválida (toISOString), o único parâmetro de data que não é uma data.
+function badParam(req: FastifyRequest, err: any): string | undefined {
+  const msg = typeof err?.code === 'string' ? String(err.message ?? '') : '';
+  const quoted = (/: "(.*)"$/s.exec(msg) ?? /^value "(.*)" is out of range/s.exec(msg))?.[1];
+  if (quoted === undefined && !(err instanceof RangeError)) return undefined;
+  const hits = new Set<string>();
+  for (const src of [req.query, req.body]) {
+    if (!src || typeof src !== 'object' || Array.isArray(src)) continue;
+    for (const [k, v] of Object.entries(src as Record<string, unknown>)) {
+      if ((typeof v !== 'string' && typeof v !== 'number') || v === '') continue;
+      if (quoted !== undefined ? String(v) === quoted : DATE_PARAM.test(k) && Number.isNaN(Date.parse(String(v)))) hits.add(k);
+    }
+  }
+  return hits.size === 1 ? [...hits][0] : undefined;
+}
+
+const fmtLimit = (n: number) => (n >= 1024 * 1024 ? `${Math.round(n / (1024 * 1024))} MB` : `${Math.round(n / 1024)} KB`);
 
 export function errorHandler(err: any, req: FastifyRequest, reply: FastifyReply) {
   // Integrações (Jira): o banco recusa excluir o robô de uma regra (gatilho integration_bot_guard).
@@ -102,8 +162,23 @@ export function errorHandler(err: any, req: FastifyRequest, reply: FastifyReply)
   if (err.validation || err.code === 'FST_ERR_VALIDATION') {
     return reply.status(400).send({ success: false, error: err.message, errorType: 'invalid-params' });
   }
+  if (err.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+    const limit = req.routeOptions?.bodyLimit ?? 2 * 1024 * 1024;
+    return reply.status(413).send({ success: false, error: `O conteúdo enviado é grande demais (máx. ${fmtLimit(limit)}).`, errorType: err.code });
+  }
   if (err.statusCode && err.statusCode < 500) {
-    return reply.status(err.statusCode).send({ success: false, error: err.message, errorType: err.code ?? 'error' });
+    // Os textos do Fastify e dos plugins vêm em inglês.
+    const fst = typeof err.code === 'string' && err.code.startsWith('FST_');
+    const error = fst ? (FASTIFY_ERRORS[err.code] ?? 'Requisição inválida.') : err.message;
+    return reply.status(err.statusCode).send({ success: false, error, errorType: err.code ?? 'error' });
+  }
+  const invalid = inputError(err);
+  if (invalid) {
+    // Fica no log como aviso, com a pilha, para achar a rota que deixou o valor passar.
+    req.log.warn(err);
+    const name = invalid === INVALID_DATE || invalid === INVALID_PARAM ? badParam(req, err) : undefined;
+    const error = !name ? invalid : invalid === INVALID_DATE ? `O parâmetro "${name}" deve ser uma data.` : `O parâmetro "${name}" tem um valor inválido.`;
+    return reply.status(400).send({ success: false, error, errorType: 'error-invalid-params' });
   }
   req.log.error(err);
   return reply.status(500).send({ success: false, error: 'Erro interno do servidor.', errorType: 'error-internal' });

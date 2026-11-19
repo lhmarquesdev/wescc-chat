@@ -8,6 +8,7 @@ import { escapeLike } from '@shared/search';
 import { many, one, query } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors';
 import { newId } from '../lib/ids';
+import { hasVisibleText } from '../lib/sanitize';
 import { trimEndChars, truncate } from '../lib/text';
 import { bus } from '../realtime/bus';
 import { audit } from './audit';
@@ -280,7 +281,8 @@ export async function sendMessage(
   const rich = opts.integration && (input.jira || input.meeting);
   const forward = opts.forward ? input.forward : undefined;
   const poll = opts.poll ? input.poll : undefined;
-  if (!msg && !attachments.length && !input.files?.length && !sticker && !rich && !forward && !poll && !e2e) throw badRequest('error-invalid-message', 'Mensagem vazia.');
+  // Só espaços de largura zero (U+200B) também é vazia: viraria um balão em branco.
+  if (!hasVisibleText(msg) && !attachments.length && !input.files?.length && !sticker && !rich && !forward && !poll && !e2e) throw badRequest('error-invalid-message', 'Mensagem vazia.');
   if (sticker && (msg || input.ackRequired)) throw badRequest('error-invalid-message', 'Figurinha não leva texto nem pede “Ciente”.');
   if (input.ackRequired && (!room.notice || !room.notice_ack || input.tmid)) {
     throw badRequest('error-ack-not-allowed', 'Só avisos de um canal de avisos com “Ciente” ativado podem pedir confirmação.');
@@ -1049,6 +1051,7 @@ export async function cleanHistory(
   opts: { latest: string; oldest: string; inclusive?: boolean; excludePinned?: boolean; filesOnly?: boolean; users?: string[]; limit?: number },
 ) {
   if (!(await hasPermission(ctx.userId, 'clean-channel-history', rid))) throw forbidden();
+  for (const k of ['latest', 'oldest'] as const) if (Number.isNaN(Date.parse(opts[k]))) throw badRequest('error-invalid-params', `O parâmetro "${k}" deve ser uma data.`);
   const { pruneMessages } = await import('./retention');
   const n = await pruneMessages(rid, opts);
   await audit(actorOf(ctx), 'room.history.cleaned', { rid }, { ...opts, count: n });

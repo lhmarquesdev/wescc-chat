@@ -2257,8 +2257,10 @@
 
 /* ---------- Responsivo ---------- */
 @media (max-width: 760px) {
-  /* A pílula da chamada fica sob a barra de status: a tela desce para ela não cobrir o cabeçalho. */
-  .layout:has(> :where(.call-root) :is(.call-pill, .call-note)) {
+  /* A pílula da chamada fica sob a barra de status: a tela desce para ela não cobrir o cabeçalho. Só filhos diretos
+     (a pílula e o aviso são filhos da .call-root): com descendentes no :has(), cada tecla digitada no compositor fazia
+     o navegador recalcular a lista de mensagens inteira. */
+  .layout:has(> :where(.call-root) > :is(.call-pill, .call-note)) {
     padding-top: calc(env(safe-area-inset-top) + max(56px, var(--call-note-h, 0px) + 8px));
   }
   .call-history {

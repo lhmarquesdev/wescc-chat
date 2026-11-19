@@ -307,7 +307,7 @@
 }
 /* Com opacidade (e não visibility) a hora recebe o foco das setas da lista. */
 .msg:hover .msg-time-hover,
-.msg:has(:focus-visible) .msg-time-hover {
+.msg[data-focus-in] .msg-time-hover {
   opacity: 1;
 }
 .msg-gutter-receipt {
@@ -318,7 +318,7 @@
   height: 22px;
 }
 .msg:hover .msg-gutter-receipt,
-.msg:has(:focus-visible) .msg-gutter-receipt {
+.msg[data-focus-in] .msg-gutter-receipt {
   visibility: hidden;
 }
 .msg-main {
@@ -582,7 +582,7 @@ button.msg-tr-mark:hover {
     visibility 0s linear var(--dur-1);
 }
 .msg:hover .msg-toolbar,
-.msg:has(:focus-visible) .msg-toolbar,
+.msg[data-focus-in] .msg-toolbar,
 .msg:focus-visible .msg-toolbar,
 .msg.menu-open .msg-toolbar {
   visibility: visible;

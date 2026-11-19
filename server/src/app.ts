@@ -18,6 +18,8 @@ import { chatRoutes } from './api/chat';
 import { e2eRoutes } from './api/e2e';
 import { messageToolsRoutes } from './api/messageTools';
 import { authenticate, errorHandler } from './api/http';
+import { cleanInput } from './lib/sanitize';
+import { assetCacheHeaders, compressJson } from './lib/compress';
 import { roomsRoutes } from './api/rooms';
 import { usersRoutes } from './api/users';
 import { ApiError } from './lib/errors';
@@ -74,6 +76,14 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
   app.addHook('onRequest', async (req) => {
     if (req.url.startsWith('/api/') || req.url.startsWith('/file-upload/') || req.url.startsWith('/avatar/') || req.url.startsWith('/sticker/')) await authenticate(req);
   });
+  // Corpo, consulta e parâmetros sem U+0000; nomes e tópicos sem controles de direção (lib/sanitize.ts). Corpo cru
+  // (texto ou bytes de webhooks com assinatura) fica como veio.
+  app.addHook('preValidation', async (req) => {
+    if (req.body && typeof req.body === 'object') cleanInput(req.body);
+    cleanInput(req.query);
+    cleanInput(req.params);
+  });
+  app.addHook('onSend', compressJson); // JSON da API comprimido (lib/compress.ts)
   app.setErrorHandler(errorHandler);
   // Cabeçalhos de segurança em toda resposta: o navegador não adivinha o tipo (nosniff), o endereço completo não vai para
   // outro site e nenhuma página do chat abre dentro de outro site (clickjacking). Quem define os seus (arquivos) fica com eles.
@@ -136,11 +146,14 @@ export async function buildApp(opts: { logger?: boolean; https?: https.ServerOpt
       }
       return cached;
     };
+    // preCompressed: as cópias .br/.gz que o build do web grava ao lado de cada arquivo (web/vite.config.ts).
     await app.register(fastifyStatic, {
       root: webDist,
       wildcard: false,
       index: false,
+      preCompressed: true,
       setHeaders: (reply, file) => {
+        assetCacheHeaders(reply, path.relative(webDist, file));
         if (file.endsWith('.html')) reply.header('Content-Security-Policy', indexHtml().csp);
       },
     });

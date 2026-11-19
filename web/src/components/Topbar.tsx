@@ -58,8 +58,9 @@ export function ThemeToggle() {
 
 /** Duas letras para o avatar da marca (nome e sobrenome, ou as duas primeiras do usuário). */
 function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const two = parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : (parts[0] ?? '').slice(0, 2);
+  // Letras e algarismos de cada parte: um emoji no começo do nome não vira meio caractere ("�").
+  const parts = name.trim().split(/\s+/).map((p) => p.match(/[\p{L}\p{N}]/gu) ?? []).filter((p) => p.length);
+  const two = parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : parts.length ? parts[0].slice(0, 2).join('') : (Array.from(name.trim())[0] ?? '');
   return two.toUpperCase();
 }
 
