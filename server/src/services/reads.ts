@@ -28,16 +28,23 @@ export async function markReadInternal(userId: string, rid: string) {
   await settleRoomReads(rid);
 }
 
-// Resposta só na thread: lê aquela thread (sai das não lidas de thread), e a conversa principal fica como estava.
+// Resposta só na thread: lê aquela thread (sai das não lidas de thread), e a conversa principal fica como estava. Sem
+// nada novo na conversa principal, a leitura dela avança junto: a própria resposta conta como lida por quem a enviou na
+// confirmação de leitura, sem marcar como lida nenhuma mensagem que a pessoa não viu.
 export async function markThreadReadInternal(userId: string, rid: string, tmid: string) {
   const row = await one(
-    `UPDATE subscriptions SET tunread = array_remove(tunread, $3), updated_at = now() WHERE room_id = $1 AND user_id = $2 AND $3 = ANY(tunread) RETURNING *`,
+    `WITH old AS (SELECT id, $3 = ANY(tunread) AS had FROM subscriptions WHERE room_id = $1 AND user_id = $2)
+     UPDATE subscriptions s SET tunread = array_remove(s.tunread, $3),
+       ls = CASE WHEN s.unread = 0 AND s.user_mentions = 0 AND s.group_mentions = 0 THEN now() ELSE s.ls END,
+       updated_at = CASE WHEN old.had THEN now() ELSE s.updated_at END
+     FROM old WHERE s.id = old.id RETURNING s.*, old.had`,
     [rid, userId, tmid],
   );
-  if (row) {
+  if (row?.had) {
     const { notifySubscription } = await import('./rooms');
     await notifySubscription(userId, rid, 'updated', row);
   }
+  await settleRoomReads(rid);
 }
 
 export async function recordReads(userId: string, rid: string, prevLs: string | null) {
