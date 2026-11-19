@@ -180,14 +180,17 @@
   color: hsl(var(--on-color));
   box-shadow: none;
 }
+/* Erro e avisos: cartão sólido, como os avisos do Atendeti (o branco translúcido sobre o azul ficava em 2,6:1). */
 .auth-main .form-error,
 .auth-main .callout {
-  border-color: hsl(0 0% 100% / 0.35);
-  background: hsl(0 0% 100% / 0.16);
-  color: hsl(var(--on-color));
+  border-color: transparent;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  box-shadow: 0 10px 24px -12px hsl(var(--brand-h) var(--brand-s) 15% / 0.45);
 }
-.auth-main .callout > .icon:first-child {
-  color: hsl(var(--on-color));
+.auth-main .form-error {
+  color: hsl(var(--st-red));
+  font-weight: var(--fw-medium);
 }
 .auth-main .muted {
   color: hsl(0 0% 100% / 0.8);
