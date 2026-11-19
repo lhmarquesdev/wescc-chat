@@ -108,6 +108,8 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [needCode, setNeedCode] = useState(false);
+  // Código de backup tem letras: o campo troca o teclado numérico do celular pelo de texto.
+  const [backupCode, setBackupCode] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const registration = useSetting<string>('Accounts_RegistrationForm');
@@ -170,7 +172,7 @@ export function LoginPage() {
   return (
     <AuthShell
       title={needCode ? 'Verificação em duas etapas' : 'Bem-vindo de volta'}
-      subtitle={needCode ? 'Digite o código do seu aplicativo autenticador.' : ldap ? 'Use seu usuário de rede ou e-mail corporativo.' : 'Use seu usuário ou e-mail corporativo.'}
+      subtitle={needCode ? (backupCode ? 'Digite um dos códigos de backup que você guardou.' : 'Digite o código do seu aplicativo autenticador.') : ldap ? 'Use seu usuário de rede ou e-mail corporativo.' : 'Use seu usuário ou e-mail corporativo.'}
     >
       <form onSubmit={submit} className="form auth-form">
         {reason && !error && (
@@ -195,16 +197,36 @@ export function LoginPage() {
             )}
           </>
         ) : (
-          <Field label="Código de verificação" hint="O código de 6 dígitos do aplicativo autenticador ou um código de backup.">
-            <input autoFocus inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
-          </Field>
+          <>
+            <Field
+              label={backupCode ? 'Código de backup' : 'Código de verificação'}
+              hint={backupCode ? 'Cada código vale uma vez. Maiúsculas, espaços e hífen não importam.' : 'O código de 6 dígitos do aplicativo autenticador.'}
+            >
+              <input
+                key={backupCode ? 'backup' : 'app'}
+                autoFocus
+                inputMode={backupCode ? 'text' : 'numeric'}
+                autoComplete="one-time-code"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              />
+            </Field>
+            <div className="auth-row">
+              <button type="button" className="link" onClick={() => (setBackupCode(!backupCode), setCode(''))}>
+                {backupCode ? 'Usar o código do aplicativo' : 'Usar um código de backup'}
+              </button>
+            </div>
+          </>
         )}
         <button type="submit" className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !user || !password}>
           {busy && <span className="spinner sm" aria-hidden="true" />}
           {needCode ? 'Verificar' : 'Entrar'}
         </button>
         {needCode && (
-          <button type="button" className="btn ghost full" onClick={() => (setNeedCode(false), setCode(''), setError(''))}>
+          <button type="button" className="btn ghost full" onClick={() => (setNeedCode(false), setCode(''), setBackupCode(false), setError(''))}>
             <Icon name="back" />
             Voltar
           </button>

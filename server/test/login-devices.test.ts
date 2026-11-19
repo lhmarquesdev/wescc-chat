@@ -202,7 +202,7 @@ describe('login em dispositivo novo', () => {
     await settle();
     expect(await devices(u.id)).toHaveLength(1);
     expect(outbox).toHaveLength(0);
-    const ok = await browserLogin(u.username, { code: totpCode(secret) });
+    const ok = await browserLogin(u.username, { code: totpCode(secret, Date.now() + 30_000) }); // o da ativação já foi usado
     expect(ok.auth).toBeTruthy();
     await announced(u.id, 1);
     expect(outbox).toHaveLength(1);

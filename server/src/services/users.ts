@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { normalizeHighlights } from '@shared/highlights';
 import type { LogoutReason, UserPreferences, UserStatus } from '@shared/index';
 import { LANG_RE, normalizeLang } from '@shared/translate';
@@ -5,7 +6,7 @@ import { many, one, query, tx, type Queryable } from '../db/pool';
 import { ApiError, badRequest, forbidden, notFound, unauthorized } from '../lib/errors';
 import { newId, randomToken, sha256 } from '../lib/ids';
 import { hashPassword, verifyPassword } from '../lib/password';
-import { generateSecret, otpauthUrl, verifyTotp } from '../lib/totp';
+import { generateSecret, otpauthUrl, totpStep } from '../lib/totp';
 import { bus } from '../realtime/bus';
 import { audit, type Actor } from './audit';
 import { announceNewDevice, deviceCookieHeader, rememberLoginDevice } from './loginDevices';
@@ -238,7 +239,7 @@ export async function login(params: { user: string; password: string; code?: str
       // Código errado conta como tentativa falha (senão o código de 6 dígitos poderia ser adivinhado).
       await recordFailedAttempt(attemptLogin, params.device.ip);
       await audit({ id: user.id, username: user.username, ip: params.device.ip }, 'auth.login.failed', { login: params.user, reason: 'totp' });
-      throw unauthorized('Código de verificação inválido.');
+      throw unauthorized('Código de verificação inválido ou já usado.');
     }
   }
   await clearFailedAttempts(attemptLogin);
@@ -247,12 +248,29 @@ export async function login(params: { user: string; password: string; code?: str
   return { user, ...s };
 }
 
+// Código de backup como a pessoa digita: sem diferença de maiúsculas, espaços ou hífen.
+const normalizeBackupCode = (code: string) => code.toUpperCase().replace(/[\s-]/g, '');
+
+// 10 caracteres sem os que se confundem (0/O, 1/I/L), mostrados como XXXXX-XXXXX.
+const BACKUP_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+function newBackupCode() {
+  let s = '';
+  for (let i = 0; i < 10; i++) s += BACKUP_ALPHABET[randomInt(BACKUP_ALPHABET.length)];
+  return `${s.slice(0, 5)}-${s.slice(5)}`;
+}
+
 export async function check2fa(user: any, code: string) {
-  if (user.totp_secret && verifyTotp(user.totp_secret, code)) return true;
-  const hashed = sha256(code.trim());
-  if (user.backup_codes.includes(hashed)) {
-    await query('UPDATE users SET backup_codes = array_remove(backup_codes, $2) WHERE id = $1', [user.id, hashed]);
-    return true;
+  // Cada código do aplicativo vale uma vez (o mesmo código visto ou capturado não abre outro login): o UPDATE só passa
+  // com um passo depois do último aceito, também quando dois pedidos chegam juntos.
+  const step = user.totp_secret ? totpStep(user.totp_secret, code) : null;
+  if (step !== null) {
+    return !!(await one('UPDATE users SET totp_last_step = $2 WHERE id = $1 AND (totp_last_step IS NULL OR totp_last_step < $2) RETURNING id', [user.id, step]));
+  }
+  // Códigos de backup de antes da 046 (base64, com maiúsculas e minúsculas) valem como foram mostrados.
+  for (const hashed of [sha256(normalizeBackupCode(code)), sha256(code.trim())]) {
+    if (user.backup_codes.includes(hashed)) {
+      return !!(await one('UPDATE users SET backup_codes = array_remove(backup_codes, $2) WHERE id = $1 AND $2 = ANY(backup_codes) RETURNING id', [user.id, hashed]));
+    }
   }
   return false;
 }
@@ -457,15 +475,17 @@ export async function enableTotp(ctx: Ctx) {
   // Gerar uma chave nova desligaria o 2FA atual sem pedir código: é preciso desativar antes (com código).
   if (u?.totp_enabled) throw badRequest('totp-already-enabled', 'O 2FA já está ativo. Desative-o com um código antes de configurar outro aplicativo.');
   const secret = generateSecret();
-  await query('UPDATE users SET totp_secret = $2, totp_enabled = false WHERE id = $1', [ctx.userId, secret]);
+  await query('UPDATE users SET totp_secret = $2, totp_enabled = false, totp_last_step = NULL WHERE id = $1', [ctx.userId, secret]);
   return { secret, url: otpauthUrl(secret, ctx.username, getSetting<string>('Site_Name')) };
 }
 
 export async function verifyAndEnableTotp(ctx: Ctx, code: string) {
   const u = await getUserById(ctx.userId);
-  if (!u?.totp_secret || !verifyTotp(u.totp_secret, code)) throw badRequest('invalid-totp', 'Código inválido.');
-  const codes = Array.from({ length: 12 }, () => randomToken(6).slice(0, 8));
-  await query('UPDATE users SET totp_enabled = true, backup_codes = $2 WHERE id = $1', [ctx.userId, codes.map(sha256)]);
+  const step = u?.totp_secret ? totpStep(u.totp_secret, code) : null;
+  if (step === null) throw badRequest('invalid-totp', 'Código inválido.');
+  const codes = Array.from({ length: 12 }, newBackupCode);
+  // O código da ativação também já foi usado: não serve para entrar logo em seguida.
+  await query('UPDATE users SET totp_enabled = true, backup_codes = $2, totp_last_step = $3 WHERE id = $1', [ctx.userId, codes.map((c) => sha256(normalizeBackupCode(c))), step]);
   await audit(actorOf(ctx), 'user.2fa.enabled', { userId: ctx.userId });
   return { codes };
 }
@@ -473,8 +493,8 @@ export async function verifyAndEnableTotp(ctx: Ctx, code: string) {
 export async function disableTotp(ctx: Ctx, code: string) {
   const u = await getUserById(ctx.userId);
   if (!u?.totp_enabled) return;
-  if (!(await check2fa(u, code))) throw badRequest('invalid-totp', 'Código inválido.');
-  await query("UPDATE users SET totp_enabled = false, totp_secret = NULL, backup_codes = '{}' WHERE id = $1", [ctx.userId]);
+  if (!(await check2fa(u, code))) throw badRequest('invalid-totp', 'Código inválido ou já usado.');
+  await query("UPDATE users SET totp_enabled = false, totp_secret = NULL, backup_codes = '{}', totp_last_step = NULL WHERE id = $1", [ctx.userId]);
   await audit(actorOf(ctx), 'user.2fa.disabled', { userId: ctx.userId });
 }
 

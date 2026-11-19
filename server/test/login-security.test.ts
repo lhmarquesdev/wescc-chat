@@ -97,3 +97,36 @@ describe('tokens de acesso pessoal', () => {
     expect(await closed2).toBe(4003);
   });
 });
+
+describe('2FA', () => {
+  it('o mesmo código do aplicativo não vale duas vezes, nem o da ativação; dois pedidos juntos: só um entra', async () => {
+    const u = await newUser(A);
+    const en = await api('POST', 'users.2fa.enableTotp', {}, u);
+    const activation = totpCode(en.secret);
+    expect((await api('POST', 'users.2fa.verifyTotp', { code: activation }, u)).codes).toHaveLength(12);
+    const reuse = await api('POST', 'login', { user: u.username, password: PW, code: activation });
+    expect([reuse.status, reuse.error]).toEqual([401, 'Código de verificação inválido ou já usado.']);
+
+    const next = totpCode(en.secret, Date.now() + 30_000);
+    const [a, b] = await Promise.all([api('POST', 'login', { user: u.username, password: PW, code: next }), api('POST', 'login', { user: u.username, password: PW, code: next })]);
+    expect([!!a.data?.authToken, !!b.data?.authToken].sort()).toEqual([false, true]);
+    expect((await api('POST', 'login', { user: u.username, password: PW, code: next })).status).toBe(401);
+    await pool.query('DELETE FROM login_attempts');
+  });
+
+  it('códigos de backup: sem letras que se confundem, sem diferença de maiúsculas, espaço ou hífen; os antigos continuam valendo', async () => {
+    const u = await newUser(A);
+    const en = await api('POST', 'users.2fa.enableTotp', {}, u);
+    const codes: string[] = (await api('POST', 'users.2fa.verifyTotp', { code: totpCode(en.secret) }, u)).codes;
+    for (const c of codes) expect(c).toMatch(/^[2-9A-HJ-NP-Z]{5}-[2-9A-HJ-NP-Z]{5}$/);
+    const typed = ` ${codes[0].slice(0, 5).toLowerCase()} ${codes[0].slice(6)} `;
+    expect((await api('POST', 'login', { user: u.username, password: PW, code: typed })).data?.userId).toBe(u.userId);
+    expect((await api('POST', 'login', { user: u.username, password: PW, code: codes[0] })).status).toBe(401); // uso único
+    expect((await api('POST', 'login', { user: u.username, password: PW, code: codes[1].replace('-', '') })).data?.userId).toBe(u.userId);
+
+    // Código gerado antes da mudança (base64url, com maiúsculas e minúsculas): vale como foi mostrado.
+    await pool.query('UPDATE users SET backup_codes = array_append(backup_codes, $2) WHERE id = $1', [u.userId, sha256('aB-c_9xY')]);
+    expect((await api('POST', 'login', { user: u.username, password: PW, code: 'aB-c_9xY' })).data?.userId).toBe(u.userId);
+    await pool.query('DELETE FROM login_attempts');
+  });
+});

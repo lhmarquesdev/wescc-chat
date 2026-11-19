@@ -646,6 +646,14 @@ export function TwoFactorCard() {
   const [setup, setSetup] = useState<{ secret: string; url: string } | null>(null);
   const [code, setCode] = useState('');
   const [codes, setCodes] = useState<string[] | null>(null);
+  const site = useSetting<string>('Site_Name') || 'Wescc Chat';
+  const codesText = () => `Códigos de backup do ${site} (@${me.username}). Cada um funciona uma vez.\n\n${codes!.join('\n')}\n`;
+  const downloadCodes = () => {
+    const url = URL.createObjectURL(new Blob([codesText()], { type: 'text/plain;charset=utf-8' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: 'codigos-de-backup.txt' });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   // Com o 2FA obrigatório pendente, o resto do chat só carrega depois que os códigos de backup forem vistos.
   const done = () => {
     setCodes(null);
@@ -667,7 +675,25 @@ export function TwoFactorCard() {
             <span>2FA ativado. Guarde estes códigos de backup em local seguro; cada um funciona uma vez:</span>
           </div>
           <pre className="codes">{codes.join('\n')}</pre>
+          {/* Os códigos aparecem uma vez só: copiar ou baixar antes de sair da tela. */}
           <div className="form-actions">
+            <button
+              type="button"
+              className="btn"
+              onClick={() =>
+                navigator.clipboard
+                  .writeText(codesText())
+                  .then(() => ok('Códigos copiados.'))
+                  .catch(fail)
+              }
+            >
+              <Icon name="copy" />
+              Copiar códigos
+            </button>
+            <button type="button" className="btn" onClick={downloadCodes}>
+              <Icon name="download" />
+              Baixar .txt
+            </button>
             <button className="btn primary" onClick={done}>
               Pronto
             </button>
@@ -679,14 +705,14 @@ export function TwoFactorCard() {
             <Icon name="success" />
             <span>Ativado com aplicativo autenticador.</span>
           </div>
-          {/* Aceita também um código de backup (8 letras e números): sem o teclado só numérico. */}
+          {/* Aceita também um código de backup (XXXXX-XXXXX, letras e números): sem o teclado só numérico. */}
           <Field label="Código atual para desativar" hint="O código do aplicativo ou um dos códigos de backup.">
             <input
               className="otp-input"
               autoComplete="one-time-code"
               autoCapitalize="off"
               spellCheck={false}
-              maxLength={8}
+              maxLength={11}
               placeholder="000000"
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\s/g, ''))}
