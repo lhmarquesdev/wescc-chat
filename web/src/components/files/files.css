@@ -57,6 +57,10 @@
 .fl-layout.with-details {
   grid-template-columns: 248px minmax(0, 1fr) 360px;
 }
+/* Aba desligada ou sem acesso: sem a navegação de pastas, só o aviso. */
+.fl-layout.no-nav {
+  grid-template-columns: minmax(0, 1fr);
+}
 
 /* ---------- Navegação ---------- */
 

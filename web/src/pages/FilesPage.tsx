@@ -80,12 +80,16 @@ export function FilesPage() {
   const phone = useIsPhone();
   const toast = useStore((s) => s.toast);
   const enabled = useSetting<boolean>('Drive_Enabled') !== false;
+  // Sem view-files (ex.: Convidado que abre /files pelo link): a tela explica, sem pedir nada ao servidor.
+  const allowed = usePermission(['view-files', 'manage-all-files']);
+  const usable = enabled && allowed;
   const trash = location.pathname === '/files/trash';
   const [view, setViewState] = useState<ViewMode>(readView);
   const [search, setSearch] = useState('');
   const [home, setHome] = useState<Awaited<ReturnType<typeof filesApi.home>> | null>(null);
   const [data, setData] = useState<DriveFolderView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [homeError, setHomeError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ kind: 'file'; file: DriveFile } | { kind: 'folder'; folder: DriveFolder } | null>(null);
   const [dialog, setDialog] = useState<ReactNode>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -105,18 +109,19 @@ export function FilesPage() {
   };
 
   useEffect(() => {
+    if (!usable) return;
     let alive = true;
     filesApi
       .home()
-      .then((h) => alive && setHome(h))
-      .catch((e) => alive && setError(errorMessage(e)));
+      .then((h) => alive && (setHome(h), setHomeError(null)))
+      .catch((e) => alive && setHomeError(errorMessage(e)));
     return () => {
       alive = false;
     };
-  }, [tick]);
+  }, [tick, usable]);
 
   useEffect(() => {
-    if (!folderId) {
+    if (!folderId || !usable) {
       setData(null);
       return;
     }
@@ -129,11 +134,12 @@ export function FilesPage() {
         setData(d);
         setSelected((s) => (s?.kind === 'file' ? (d.files.find((f) => f._id === s.file._id) ? { kind: 'file', file: d.files.find((f) => f._id === s.file._id)! } : null) : s));
       })
-      .catch((e) => alive && (setError(errorMessage(e)), setData(null)));
+      // Sem acesso (tirado agora há pouco, pasta apagada): o painel do arquivo fecha junto.
+      .catch((e) => alive && (setError(errorMessage(e)), setData(null), setSelected(null)));
     return () => {
       alive = false;
     };
-  }, [folderId, tick]);
+  }, [folderId, tick, usable]);
 
   useEffect(() => setSelected(null), [folderId, trash]);
   useEffect(() => setNavOpen(false), [location.pathname]);
@@ -220,6 +226,7 @@ export function FilesPage() {
 
   let body: ReactNode;
   if (!enabled) body = <Empty icon="files-folder" title="A aba Arquivos está desligada">Um administrador pode ligá-la em Administração › Configurações › Arquivos.</Empty>;
+  else if (!allowed) body = <Empty icon="files-locked" title="Você não tem acesso à aba Arquivos">Peça a um administrador para liberar a aba Arquivos para você.</Empty>;
   else if (trash) body = <TrashView tick={tick} onChanged={reload} />;
   else if (search.trim().length >= 2) body = <SearchResults text={search.trim()} view={view} onOpenFile={(f) => setSelected({ kind: 'file', file: f })} />;
   else if (folderId && error) body = <Empty icon="files-locked" title="Não deu para abrir esta pasta" tone="danger" action={<Link className="btn" to="/files">Voltar para Arquivos</Link>}>{error}</Empty>;
@@ -241,7 +248,7 @@ export function FilesPage() {
     body = (
       <HomeView
         home={home}
-        error={error}
+        error={homeError}
         view={view}
         onOpenFolder={(f) => navigate(`/files/f/${f._id}`)}
         onSelectFile={(f) => setSelected({ kind: 'file', file: f })}
@@ -262,9 +269,9 @@ export function FilesPage() {
     <div className="page fl-page" onDragOver={(e) => canEdit && (e.preventDefault(), setDragOver(true))} onDragLeave={(e) => e.currentTarget === e.target && setDragOver(false)} onDrop={onDrop}>
       <header className="page-head fl-head">
         <h1 data-eyebrow="Pastas compartilhadas">Arquivos</h1>
-        {!phone && <SearchInput className="fl-search" value={search} onChange={setSearch} placeholder="Buscar em todas as pastas" />}
+        {!phone && usable && <SearchInput className="fl-search" value={search} onChange={setSearch} placeholder="Buscar em todas as pastas" />}
         <div className="fl-head-actions">
-          {!phone && (
+          {!phone && usable && (
             <button type="button" className="icon-btn fl-nav-toggle" aria-label="Pastas" title="Pastas" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}>
               <Icon name="files-all" />
             </button>
@@ -283,16 +290,16 @@ export function FilesPage() {
           )}
         </div>
       </header>
-      {phone && (
+      {phone && usable && (
         <div className="fl-phone-search">
           <SearchInput value={search} onChange={setSearch} placeholder="Buscar em todas as pastas" />
         </div>
       )}
-      <div className={details && !phone ? 'fl-layout with-details' : 'fl-layout'}>
-        {!phone && <FilesNav home={home} currentId={folderId ?? null} path={data?.path ?? []} trash={trash} tick={tick} open={navOpen} onClose={() => setNavOpen(false)} />}
+      <div className={!usable ? 'fl-layout no-nav' : details && !phone ? 'fl-layout with-details' : 'fl-layout'}>
+        {!phone && usable && <FilesNav home={home} error={homeError} currentId={folderId ?? null} path={data?.path ?? []} trash={trash} tick={tick} open={navOpen} onClose={() => setNavOpen(false)} />}
         {!phone && navOpen && <div className="fl-nav-backdrop" onClick={() => setNavOpen(false)} />}
         <main className="fl-main" aria-label={title}>
-          {!trash && !search && folderId && <Breadcrumb data={data} />}
+          {!trash && !search && folderId && usable && !error && <Breadcrumb data={data} />}
           {!trash && !(search.trim().length >= 2) && (folderId ? data : home) && (
             <div className="fl-toolbar">
               {folder ? (
@@ -362,7 +369,7 @@ export function FilesPage() {
           {details}
         </Modal>
       )}
-      {phone && trash === false && !folderId && (
+      {phone && usable && trash === false && !folderId && (
         <Link to="/files/trash" className="fl-phone-trash">
           <Icon name="files-trash" size={16} />
           Lixeira
@@ -396,6 +403,7 @@ export function FilesPage() {
 
 function FilesNav({
   home,
+  error,
   currentId,
   path,
   trash,
@@ -404,6 +412,7 @@ function FilesNav({
   onClose,
 }: {
   home: Awaited<ReturnType<typeof filesApi.home>> | null;
+  error: string | null;
   currentId: string | null;
   path: { _id: string; name: string }[];
   trash: boolean;
@@ -419,7 +428,9 @@ function FilesNav({
         Início
       </Link>
       <div className="fl-nav-label">Pastas</div>
-      {!home ? (
+      {!home && error ? (
+        <p className="muted fl-nav-empty">{error}</p>
+      ) : !home ? (
         <div className="fl-nav-skel">
           <Skeleton height={14} />
           <Skeleton height={14} width="70%" />
