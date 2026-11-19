@@ -9,6 +9,7 @@ import { createCustomStatus, deleteCustomStatus, getCustomStatus, listCustomStat
 import { getUserRoles, hasPermission, permissionsForRoles, roleInfos } from '../services/permissions';
 import { getSetting } from '../services/settings';
 import { userLock } from '@shared/rbac';
+import { escapeLike } from '@shared/search';
 import { bus } from '../realtime/bus';
 import { assertCanManageUser, assertRoleChange, effectiveRoles, grantContext, writeUserRoles } from '../services/rbac';
 import { recordHistory } from '../services/rbacHistory';
@@ -363,9 +364,9 @@ export function usersRoutes(app: FastifyInstance) {
     }
     const rows = await many(
       `SELECT id, username, name, status, avatar_etag, roles ${rid ? ', EXISTS (SELECT 1 FROM subscriptions s WHERE s.room_id = $4 AND s.user_id = users.id) AS in_room' : ''}
-       FROM users WHERE active AND (username ILIKE $1 OR name ILIKE $1) AND NOT (username = ANY($2))
+       FROM users WHERE active AND (wescc_fold(username) LIKE wescc_fold($1) OR wescc_fold(name) LIKE wescc_fold($1)) AND NOT (username = ANY($2))
        ORDER BY ${rid ? 'in_room DESC, ' : ''}(lower(username) = lower($3)) DESC, username LIMIT 15`,
-      rid ? [`${term}%`, exclude, term, rid] : [`${term}%`, exclude, term],
+      rid ? [`${escapeLike(term)}%`, exclude, term, rid] : [`${escapeLike(term)}%`, exclude, term],
     );
     // roles (globais): a web decide antes do clique se dá para abrir uma conversa direta.
     return { items: rows.map((r) => ({ _id: r.id, username: r.username, name: r.name, status: r.status, avatarETag: r.avatar_etag, roles: r.roles, inRoom: r.in_room })) };
