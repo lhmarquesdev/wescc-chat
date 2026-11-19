@@ -74,7 +74,7 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
       .get('users.info', { userId: id })
       .then((r) => {
         const u = r.user;
-        const form: Form = { name: u.name ?? '', username: u.username, email: u.email ?? '', bio: u.bio ?? '', password: '', roles: u.roles ?? [], active: u.active, verified: !!u.emailVerified, requirePasswordChange: false };
+        const form: Form = { name: u.name ?? '', username: u.username, email: u.email ?? '', bio: u.bio ?? '', password: '', roles: u.roles ?? [], active: u.active, verified: !!u.emailVerified, requirePasswordChange: !!u.requirePasswordChange };
         setUser(u);
         setF(form);
         setInitial(form);
@@ -166,7 +166,7 @@ export function UserEditor({ id, onSaved }: { id: string; onSaved?: () => void }
           Administrador
         </span>
       )}
-      <span className={`rbac-status${initial.active ? ' ok' : ' off'}`}>{initial.active ? 'Ativo' : 'Desativado'}</span>
+      <span className={`rbac-status${initial.active ? ' ok' : ' off'}`}>{initial.active ? 'Ativo' : user.pendingApproval ? 'Aguardando aprovação' : 'Desativado'}</span>
     </>
   );
   const tabs: EditorTab<Tab>[] = [
@@ -333,7 +333,15 @@ function Security({
                 disabled={readOnly || self || !can.active}
                 onChange={(v) => set({ active: v })}
                 label="Ativo"
-                description={self ? 'Você não pode desativar a própria conta.' : f.active ? 'A pessoa consegue entrar no chat.' : 'Desligado, a pessoa não consegue entrar.'}
+                description={
+                  self
+                    ? 'Você não pode desativar a própria conta.'
+                    : f.active
+                      ? 'A pessoa consegue entrar no chat.'
+                      : user.pendingApproval
+                        ? 'Cadastro aguardando aprovação: ligue e salve para aprovar.'
+                        : 'Desligado, a pessoa não consegue entrar.'
+                }
               />
               {hidden ? (
                 <p className="field-hint">E-mail verificado: oculto. Ver pede a permissão Ver dados completos de outras pessoas.</p>
@@ -354,6 +362,23 @@ function Security({
               <Icon name="image-remove" />
               Remover avatar
             </button>
+            {/* A pessoa esqueceu a senha ou a conta foi criada sem uma: o link de "Esqueci minha senha", pelo e-mail dela. */}
+            {!self && can.password && user.type !== 'bot' && (
+              <button
+                className="btn small"
+                disabled={readOnly || hidden || !user.email}
+                title={!user.email && !hidden ? 'A pessoa não tem e-mail cadastrado.' : undefined}
+                onClick={() =>
+                  api
+                    .post('users.sendPasswordLink', { userId: id })
+                    .then((r) => rbacOk(r.message))
+                    .catch(fail)
+                }
+              >
+                <Icon name="email" />
+                Enviar link para definir a senha
+              </button>
+            )}
             {/* Criptografia de ponta a ponta: a pessoa esqueceu a senha e não consegue redefinir sozinha. */}
             {can.e2e && !self && (
               <button

@@ -46,6 +46,8 @@ export interface User {
   preferences?: UserPreferences;
   createdAt: string;
   lastLogin?: string | null;
+  requirePasswordChange?: boolean; // dados completos: troca de senha exigida no próximo login
+  pendingApproval?: boolean; // dados completos: cadastro pela tela de entrar aguardando a aprovação de um administrador
 }
 
 // Motivo de uma saída forçada que a tela de entrar explica (e2e-reset: um administrador redefiniu a criptografia).

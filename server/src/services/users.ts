@@ -129,6 +129,8 @@ export async function registerUser(input: { username: string; name: string; emai
     throw badRequest('error-invalid-domain', 'Domínio de e-mail não permitido.');
   const manual = getSetting<boolean>('Accounts_ManuallyApproveNewUsers');
   const row = await createUser({ username: input.username, name: input.name, email: input.email, password: input.pass, active: !manual });
+  // Aprovação manual: a administração vê a conta como "Aguardando aprovação" (não como uma conta desativada).
+  if (manual) await query('UPDATE users SET pending_approval = true WHERE id = $1', [row.id]);
   await audit({ id: row.id, username: row.username, ip }, 'user.registered', { userId: row.id });
   return row;
 }
@@ -375,7 +377,9 @@ export async function requestPasswordReset(email: string, ip?: string) {
 // 2 minutos e com prazo maior, porque a pessoa pode demorar a ver o convite.
 const SETUP_TTL_MIN = 3 * 24 * 60;
 
-export async function sendPasswordSetupEmail(userId: string) {
+// Também na criação pela administração ("Enviar link para definir a senha") e no editor (reason 'admin': o
+// administrador pediu uma senha nova; a atual continua valendo até a pessoa trocar).
+export async function sendPasswordSetupEmail(userId: string, reason: 'created' | 'admin' = 'created') {
   // O link usa a tela de redefinição, que não funciona com ela desativada.
   if (!getSetting('Accounts_PasswordReset')) return false;
   const u = await getUserById(userId);
@@ -387,8 +391,10 @@ export async function sendPasswordSetupEmail(userId: string) {
   const { sendMail } = await import('./mailer');
   const site = getSetting<string>('Site_Name');
   const link = `${siteUrl()}/reset-password#token=${token}`;
-  const text = `Olá, ${u.name || u.username}.\n\nSua conta no ${site} foi criada com o nome de usuário "${u.username}". Para definir a sua senha, abra o link abaixo em até 3 dias:\n\n${link}\n\nDepois desse prazo, use "Esqueci minha senha" na tela de login.`;
-  const html = `<p>Olá, ${escapeHtml(u.name || u.username)}.</p><p>Sua conta no ${escapeHtml(site)} foi criada com o nome de usuário <b>${escapeHtml(u.username)}</b>. Para definir a sua senha, clique no botão abaixo em até 3 dias:</p><p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#1d74f5;color:#fff;border-radius:6px;text-decoration:none">Definir senha</a></p><p style="color:#6c727a">Depois desse prazo, use "Esqueci minha senha" na tela de login.</p>`;
+  const intro = (s: string, user: string) =>
+    reason === 'admin' ? `Um administrador do ${s} pediu que você defina uma senha nova para a conta ${user}.` : `Sua conta no ${s} foi criada com o nome de usuário ${user}.`;
+  const text = `Olá, ${u.name || u.username}.\n\n${intro(site, `"${u.username}"`)} Para definir a sua senha, abra o link abaixo em até 3 dias:\n\n${link}\n\nDepois desse prazo, use "Esqueci minha senha" na tela de login.`;
+  const html = `<p>Olá, ${escapeHtml(u.name || u.username)}.</p><p>${intro(escapeHtml(site), `<b>${escapeHtml(u.username)}</b>`)} Para definir a sua senha, clique no botão abaixo em até 3 dias:</p><p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#1d74f5;color:#fff;border-radius:6px;text-decoration:none">Definir senha</a></p><p style="color:#6c727a">Depois desse prazo, use "Esqueci minha senha" na tela de login.</p>`;
   return sendMail({ to: u.email, subject: `Defina sua senha no ${site}`, text, html });
 }
 
@@ -520,7 +526,9 @@ export async function updateUser(
       if (u.password_hash && !(await verifyPassword(opts.currentPassword ?? '', u.password_hash))) throw badRequest('error-invalid-password', 'Senha atual incorreta.');
     }
     validatePassword(data.password);
-    sets.push(`password_hash = $${params.push(await hashPassword(data.password))}`, 'require_password_change = false');
+    sets.push(`password_hash = $${params.push(await hashPassword(data.password))}`);
+    // Senha provisória com "Exigir troca de senha" na mesma gravação: vale o que a administração pediu.
+    if (!(opts.asAdmin && data.requirePasswordChange !== undefined)) sets.push('require_password_change = false');
   }
   if (opts.asAdmin) {
     if (data.active === false && u.active) {
@@ -535,6 +543,8 @@ export async function updateUser(
     }
     if (data.active !== undefined) {
       sets.push(`active = $${params.push(data.active)}`);
+      // Ativar um cadastro que aguardava aprovação é aprovar.
+      if (data.active && u.pending_approval) sets.push('pending_approval = false');
       // "Ativo" mudado à mão é decisão do administrador: a sincronização do LDAP só reativa o que ela mesma desativou.
       if (data.active !== u.active) sets.push('ldap_deactivated_at = NULL', 'ldap_deactivated_reason = NULL');
     }
@@ -551,7 +561,30 @@ export async function updateUser(
   if (data.active === false) {
     await revokeAllSessions(userId);
   }
-  if (data.password && !self) await revokeAllSessions(userId);
+  if (data.active && u.pending_approval && !u.active && row.email) {
+    // Cadastro aprovado: a pessoa que se cadastrou fica sabendo que já pode entrar.
+    const { sendMail } = await import('./mailer');
+    const { siteUrl } = await import('./sso');
+    const site = getSetting<string>('Site_Name');
+    void sendMail({
+      to: row.email,
+      subject: `[${site}] Cadastro aprovado`,
+      text: `Olá, ${row.name || row.username}.\n\nSeu cadastro no ${site} foi aprovado. Você já pode entrar com o nome de usuário "${row.username}" e a senha que escolheu:\n\n${siteUrl()}/login`,
+    });
+  }
+  if (data.password && !self) {
+    await revokeAllSessions(userId);
+    // A pessoa fica sabendo que a senha mudou (e por quem), como na redefinição por e-mail.
+    if (row.email) {
+      const { sendMail } = await import('./mailer');
+      const site = getSetting<string>('Site_Name');
+      void sendMail({
+        to: row.email,
+        subject: `[${site}] Sua senha foi alterada`,
+        text: `Olá, ${row.name || row.username}.\n\nUm administrador trocou a senha da sua conta no ${site} e as sessões abertas foram encerradas. Peça a senha nova a quem administra o chat. Se você não esperava por isso, avise o administrador.`,
+      });
+    }
+  }
   if (!self || data.active !== undefined) {
     await audit(actorOf(actor), 'user.updated', { userId, username: row.username }, { fields: Object.keys(data).filter((k) => k !== 'password'), passwordChanged: !!data.password });
   }

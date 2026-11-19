@@ -27,6 +27,7 @@ import {
   login,
   logout,
   needs2faSetup,
+  normalizeEmail,
   registerUser,
   removePersonalToken,
   requestPasswordReset,
@@ -34,6 +35,7 @@ import {
   resetAvatar,
   revokeAllSessions,
   revokeSession,
+  sendPasswordSetupEmail,
   setAvatar,
   setPreferences,
   setStatus,
@@ -342,13 +344,26 @@ export function usersRoutes(app: FastifyInstance) {
     const params: unknown[] = [`%${query.filter ?? query.text ?? ''}%`];
     let w = '(username ILIKE $1 OR name ILIKE $1' + (admin ? ' OR email ILIKE $1)' : ')');
     if (!admin) w += ' AND active';
-    if (query.status === 'active') w += ' AND active';
-    if (query.status === 'deactivated') w += ' AND NOT active';
     if (query.role) w += ` AND $${params.push(query.role)} = ANY(roles)`;
     if (query.type) w += ` AND type = $${params.push(query.type)}`;
+    const base = w;
+    if (query.status === 'active') w += ' AND active';
+    // Desativados não inclui quem aguarda aprovação: cada um tem o seu filtro.
+    if (query.status === 'deactivated') w += ' AND NOT active AND NOT pending_approval';
+    if (query.status === 'pending') w += ' AND NOT active AND pending_approval';
     // Pessoas antes dos bots: a lista abre pelas contas que se administram de verdade.
     const rows = await many(`SELECT *, count(*) OVER() AS total FROM users WHERE ${w} ORDER BY (type = 'bot'), username LIMIT ${count} OFFSET ${offset}`, params);
-    return { users: rows.map((r) => mapUser(r, { full: admin })), count: rows.length, offset, total: Number(rows[0]?.total ?? 0) };
+    // counts=true: os números de cada status (com a busca e o papel), na mesma chamada, para os filtros da tela.
+    const counts =
+      admin && query.counts === 'true'
+        ? await one(
+            `SELECT count(*)::int AS total, count(*) FILTER (WHERE active)::int AS active,
+                    count(*) FILTER (WHERE NOT active AND NOT pending_approval)::int AS deactivated, count(*) FILTER (WHERE NOT active AND pending_approval)::int AS pending
+               FROM users WHERE ${base}`,
+            params,
+          )
+        : undefined;
+    return { users: rows.map((r) => mapUser(r, { full: admin })), count: rows.length, offset, total: Number(rows[0]?.total ?? 0), ...(counts ? { counts } : {}) };
   });
   route(app, 'GET', 'users.autocomplete', {}, async (req, _rep, ctx) => {
     const term = String(q(req).selector ? JSON.parse(q(req).selector).term ?? '' : q(req).term ?? '');
@@ -389,12 +404,22 @@ export function usersRoutes(app: FastifyInstance) {
     // Hierarquia de concessão: só dá papéis que cabem no que o ator tem (ou delegados a ele), inclusive o Usuário
     // que a conta recebe quando nenhum papel vem no pedido.
     await assertRoleChange(ctx, '', [], roles);
+    // "Enviar link para definir a senha": a senha fica opcional e a pessoa cria a dela pelo e-mail (o mesmo link de
+    // "Esqueci minha senha"). Sem o e-mail, sem a redefinição ligada ou sem SMTP a conta nem é criada.
+    const sendLink = !!bool(body.sendPasswordEmail);
+    if (sendLink) {
+      if (!normalizeEmail(body.email)) throw badRequest('error-invalid-params', 'Informe o e-mail para enviar o link de definir a senha.');
+      if (!getSetting('Accounts_PasswordReset'))
+        throw badRequest('error-password-reset-disabled', 'O link usa "Esqueci minha senha", que está desligado em Configurações › Contas. Ligue-o ou defina uma senha.');
+      const { mailStatus } = await import('../services/mailer');
+      if (!mailStatus().configured) throw badRequest('error-smtp-not-configured', 'O envio de e-mail não está configurado (Configurações › E-mail). Configure-o ou defina uma senha.');
+    }
     const row = await createUser(
       {
         username: str(body.username, 'username'),
         name: str(body.name, 'name'),
         email: body.email,
-        password: str(body.password, 'password'),
+        password: sendLink && !body.password ? null : str(body.password, 'password'),
         roles,
         active: bool(body.active) ?? true,
         verified: bool(body.verified) ?? false,
@@ -405,7 +430,24 @@ export function usersRoutes(app: FastifyInstance) {
       actorOf(ctx),
     );
     if (strArray(body.roles).length) await recordHistory(pool, { entityType: 'user', entityId: row.id, entityLabel: row.username, action: 'create', actor: { id: ctx.userId, username: ctx.username }, changes: [{ field: 'roles', before: null, after: row.roles }] });
-    return { user: mapUser(row, { full: true }) };
+    // A conta fica criada mesmo se o envio falhar: a tela avisa e o editor tem "Enviar link para definir a senha".
+    const passwordEmailSent = sendLink ? await sendPasswordSetupEmail(row.id).catch(() => false) : undefined;
+    return { user: mapUser(row, { full: true }), ...(sendLink ? { passwordEmailSent } : {}) };
+  });
+  // Editor de usuário: manda por e-mail o link para a pessoa definir uma senha nova (a atual vale até ela trocar).
+  route(app, 'POST', 'users.sendPasswordLink', { permissions: ['edit-other-user-password'] }, async (req, _rep, ctx) => {
+    const userId = str(b(req).userId, 'userId');
+    await assertCanManageUser(ctx, userId);
+    const u = await getUserById(userId);
+    if (!u) throw notFound('error-invalid-user', 'Usuário não encontrado.');
+    if (!u.email) throw badRequest('error-invalid-email', 'Esta pessoa não tem e-mail. Cadastre um e-mail ou defina a senha aqui.');
+    if (!getSetting('Accounts_PasswordReset')) throw badRequest('error-password-reset-disabled', 'O link usa "Esqueci minha senha", que está desligado em Configurações › Contas.');
+    const { mailStatus } = await import('../services/mailer');
+    if (!mailStatus().configured) throw badRequest('error-smtp-not-configured', 'O envio de e-mail não está configurado (Configurações › E-mail).');
+    if (!u.active || u.type === 'bot' || u.auth_source === 'ldap') throw badRequest('error-action-not-allowed', 'Esta conta não entra com senha do chat (desativada, bot ou LDAP).');
+    if (!(await sendPasswordSetupEmail(userId, 'admin'))) throw badRequest('error-email-failed', 'Não foi possível enviar o e-mail. Confira Configurações › E-mail e tente de novo.');
+    await audit(actorOf(ctx), 'user.password.link.sent', { userId, username: u.username });
+    return { message: `Link enviado para ${u.email}.` };
   });
   // Dados e papéis têm chaves separadas: edit-other-user-info para nome, e-mail, bio e o resto; assign-roles para os
   // papéis. A tela manda só o que mudou, então quem só dá papéis salva sem esbarrar nos dados (e vice-versa).
@@ -525,7 +567,7 @@ export function usersRoutes(app: FastifyInstance) {
     return {};
   });
   route(app, 'GET', 'users.listPendingApproval', { permissions: ['view-user-administration'] }, async () => {
-    const rows = await many(`SELECT * FROM users WHERE NOT active AND last_login IS NULL ORDER BY created_at DESC LIMIT 200`);
+    const rows = await many(`SELECT * FROM users WHERE NOT active AND pending_approval ORDER BY created_at DESC LIMIT 200`);
     return { users: rows.map((r) => mapUser(r, { full: true })) };
   });
 

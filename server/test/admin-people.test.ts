@@ -1,15 +1,27 @@
 // Administração de pessoas: cadastro sem e-mail, excluir sem levar as conversas dos outros, o último administrador
 // ativo, as restrições de segurança de papéis com gente acima de quem edita e o que o editor de usuário mostra.
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pool } from '../src/db/pool';
-import { admin, api, login, newUser, startServer, stopServer, type Auth } from './helpers';
+import { admin, api, login, newUser, sleep, startServer, stopServer, type Auth } from './helpers';
+
+// Os e-mails ficam numa caixa de saída em memória; "SMTP configurado" é ligado e desligado pelo teste.
+const mail = vi.hoisted(() => ({ configured: true, outbox: [] as { to: string; subject: string; text: string; html?: string }[] }));
+vi.mock('../src/services/mailer', () => ({
+  sendMail: async (m: { to: string; subject: string; text: string; html?: string }) => (mail.outbox.push(m), true),
+  mailStatus: () => ({ configured: mail.configured, lastSuccessAt: null, lastFailure: null }),
+}));
 
 let A: Auth;
 beforeAll(async () => {
   await startServer();
   A = await admin();
+  await api('POST', 'settings', { settings: { API_Enable_Rate_Limiter: false, Site_Url: 'https://chat.empresa.com.br' } }, A);
 });
 afterAll(() => stopServer());
+beforeEach(() => {
+  mail.outbox.length = 0;
+  mail.configured = true;
+});
 
 const send = (auth: Auth, rid: string, msg: string) => api('POST', 'chat.sendMessage', { message: { rid, msg } }, auth);
 
@@ -163,5 +175,86 @@ describe('papéis: travas de segurança com pessoas acima de quem edita', () => 
     // O administrador continua mudando.
     expect((await api('POST', 'rbac.roles.update', { roleId: 'user', restrictDirect: false, mandatory2fa: false }, A)).success).toBe(true);
     expect((await api('GET', 'rbac.grantContext', undefined, A)).holderLocks).toEqual({});
+  });
+});
+
+describe('senha: criar com troca obrigatória ou com link, e o editor mostra o que vale', () => {
+  it('"Exigir troca de senha" aparece no users.info e grava junto com uma senha nova', async () => {
+    const u = await newUser(A);
+    expect((await api('GET', 'users.info', { userId: u.userId }, A)).user.requirePasswordChange).toBe(false);
+    expect((await api('POST', 'users.update', { userId: u.userId, data: { requirePasswordChange: true } }, A)).success).toBe(true);
+    expect((await api('GET', 'users.info', { userId: u.userId }, A)).user.requirePasswordChange).toBe(true);
+    expect((await api('POST', 'users.update', { userId: u.userId, data: { requirePasswordChange: false } }, A)).success).toBe(true);
+    expect((await api('GET', 'users.info', { userId: u.userId }, A)).user.requirePasswordChange).toBe(false);
+    // Senha provisória e troca obrigatória na mesma gravação (antes: erro de SQL).
+    const r = await api('POST', 'users.update', { userId: u.userId, data: { password: 'provisoria-123', requirePasswordChange: true } }, A);
+    expect(r.success).toBe(true);
+    expect((await api('GET', 'users.info', { userId: u.userId }, A)).user.requirePasswordChange).toBe(true);
+    // A pessoa fica sabendo por e-mail que a senha foi trocada por um administrador.
+    await sleep(50);
+    expect(mail.outbox.find((m) => m.to === `${u.username}@test.local`)?.text).toMatch(/Um administrador trocou a senha/);
+  });
+
+  it('criar com "Enviar link": sem senha, o e-mail leva o link; sem e-mail ou sem SMTP a conta não é criada', async () => {
+    const noEmail = await api('POST', 'users.create', { username: 'link.sem', name: 'Sem', email: '', sendPasswordEmail: true }, A);
+    expect(noEmail.status).toBe(400);
+    expect(noEmail.error).toMatch(/Informe o e-mail/);
+    mail.configured = false;
+    const noSmtp = await api('POST', 'users.create', { username: 'link.smtp', name: 'Smtp', email: 'link.smtp@test.local', sendPasswordEmail: true }, A);
+    expect(noSmtp.status).toBe(400);
+    expect(noSmtp.errorType).toBe('error-smtp-not-configured');
+    expect((await pool.query(`SELECT 1 FROM users WHERE username IN ('link.sem', 'link.smtp')`)).rowCount).toBe(0);
+    mail.configured = true;
+    const r = await api('POST', 'users.create', { username: 'link.ok', name: 'Lia Link', email: 'lia@test.local', sendPasswordEmail: true }, A);
+    expect(r.success).toBe(true);
+    expect(r.passwordEmailSent).toBe(true);
+    const sent = mail.outbox.find((m) => m.to === 'lia@test.local')!;
+    expect(sent.text).toMatch(/foi criada com o nome de usuário "link.ok"/);
+    const token = /reset-password#token=([A-Za-z0-9_-]+)/.exec(sent.text)![1];
+    expect((await api('POST', 'users.resetPassword', { token, password: 'senha-da-lia-1' })).success).toBe(true);
+    expect((await login('link.ok', 'senha-da-lia-1')).username).toBe('link.ok');
+    // Sem a opção, a senha continua obrigatória.
+    expect((await api('POST', 'users.create', { username: 'sem.senha', name: 'S', email: 's@test.local' }, A)).status).toBe(400);
+  });
+
+  it('o editor manda o link de definir a senha por e-mail (com a permissão e a hierarquia)', async () => {
+    const u = await newUser(A);
+    const r = await api('POST', 'users.sendPasswordLink', { userId: u.userId }, A);
+    expect(r.success).toBe(true);
+    expect(mail.outbox[0].text).toMatch(/Um administrador do .* pediu que você defina uma senha nova/);
+    const plain = await newUser(A);
+    expect((await api('POST', 'users.sendPasswordLink', { userId: u.userId }, plain)).status).toBe(403);
+    await pool.query('UPDATE users SET email = NULL WHERE id = $1', [u.userId]);
+    expect((await api('POST', 'users.sendPasswordLink', { userId: u.userId }, A)).error).toMatch(/não tem e-mail/);
+  });
+});
+
+describe('cadastros aguardando aprovação', () => {
+  it('aparecem com filtro e contagem próprios, e Ativar aprova (com aviso por e-mail)', async () => {
+    await api('POST', 'settings', { settings: { Accounts_RegistrationForm: 'Public', Accounts_ManuallyApproveNewUsers: true } }, A);
+    const reg = await api('POST', 'users.register', { username: 'novato', name: 'Novato', email: 'novato@test.local', pass: 'senha-forte-1' });
+    expect(reg.success).toBe(true);
+    const off = await newUser(A);
+    await api('POST', 'users.setActiveStatus', { userId: off.userId, activeStatus: false }, A);
+
+    const pending = await api('GET', 'users.list', { status: 'pending', counts: 'true' }, A);
+    expect(pending.users.map((u: any) => u.username)).toEqual(['novato']);
+    expect(pending.users[0].pendingApproval).toBe(true);
+    expect(pending.counts.pending).toBe(1);
+    const deact = await api('GET', 'users.list', { status: 'deactivated' }, A);
+    expect(deact.users.map((u: any) => u.username)).toContain(off.username);
+    expect(deact.users.map((u: any) => u.username)).not.toContain('novato');
+    expect((await api('GET', 'users.listPendingApproval', undefined, A)).users.map((u: any) => u.username)).toEqual(['novato']);
+    // Sem counts=true a lista não calcula as contagens.
+    expect(pending.counts && (await api('GET', 'users.list', { status: 'pending' }, A)).counts).toBeUndefined();
+
+    expect((await api('POST', 'users.setActiveStatus', { userId: reg.user._id, activeStatus: true }, A)).success).toBe(true);
+    await sleep(50);
+    expect(mail.outbox.find((m) => m.to === 'novato@test.local')?.subject).toMatch(/Cadastro aprovado/);
+    const after = await api('GET', 'users.list', { status: 'pending', counts: 'true' }, A);
+    expect(after.users).toHaveLength(0);
+    expect(after.counts.pending).toBe(0);
+    expect((await login('novato', 'senha-forte-1')).username).toBe('novato');
+    await api('POST', 'settings', { settings: { Accounts_ManuallyApproveNewUsers: false } }, A);
   });
 });
