@@ -1362,6 +1362,13 @@ describe('criptografia: redefinir e excluir', () => {
       ws.close();
       wsAna.close();
     }
+    // Sem chaves, o /me diz quando foi a redefinição (a web avisa que as mensagens de antes não abrem mais); com as
+    // chaves novas, não vai mais.
+    const at = (await pool.query('SELECT reset_at FROM e2e_room_resets WHERE room_id = $1 AND user_id = $2', [room.rid, bruno.userId])).rows[0].reset_at;
+    expect((await api('GET', 'me', {}, bruno)).e2eResetAt).toBe(new Date(at).toISOString());
+    expect((await api('GET', 'me', {}, ana)).e2eResetAt).toBeUndefined();
+    await withKeys(bruno);
+    expect((await api('GET', 'me', {}, bruno)).e2eResetAt).toBeUndefined();
   });
 
   it('32. administrador redefine: exige a permissão, encerra as sessões; sem chaves é recusado', async () => {

@@ -6,7 +6,7 @@ import { partyOf, useDirect, type DirectState } from '../lib/direct';
 import { roomPath } from '../lib/format';
 import { ROOM_NAME_MAX, roomNameProblem, roomTextProblem } from '@shared/roomName';
 import { usePermission, useSetting, useStore } from '../lib/store';
-import { sendEncrypted } from '../lib/e2e/client';
+import { E2E_UI, sendEncrypted } from '../lib/e2e/client';
 import { requireE2eReady } from './e2e/E2eDialogs';
 import { Icon } from './Icon';
 import { RoomPicker, UserPicker, type PickedRoom, type PickedUser } from './Pickers';
@@ -178,7 +178,7 @@ export function CreateModal({ kind, onClose, parent, pmid }: { kind: CreateKind;
                 checked={encrypted}
                 onChange={setEncrypted}
                 label="Criptografar de ponta a ponta"
-                description="Só quem participa lê. Busca, figurinhas, bots e integrações deixam de funcionar."
+                description={E2E_UI.turnOnShort}
               />
             )}
           </>

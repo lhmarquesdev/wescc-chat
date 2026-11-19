@@ -712,6 +712,7 @@ const E2E_ICON: Record<Exclude<E2eViewState, 'ok'>, IconName> = {
   unsupported: 'e2e-warning',
   locked: 'encrypted',
   'old-key': 'encrypted',
+  reset: 'encrypted',
   failed: 'e2e-warning',
 };
 function E2ePlaceholder({ state }: { state: Exclude<E2eViewState, 'ok'> }) {

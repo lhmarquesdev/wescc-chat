@@ -467,7 +467,8 @@ export type ServerEvent =
   | { type: 'userStatus.changed'; statuses: CustomUserStatus[] }
   // Mensagens: os próprios votos (outras abas), "Lembrar-me" e envios agendados (só para a pessoa)
   | { type: 'poll.myVotes'; rid: string; messageId: string; optionIds: string[] }
-  | { type: 'message.reminder'; action: 'upserted' | 'fired' | 'removed'; reminder: MessageReminder }
+  // reason: o lembrete saiu sozinho (a mensagem foi apagada ou a pessoa perdeu o acesso à conversa); sem ele, a pessoa tirou
+  | { type: 'message.reminder'; action: 'upserted' | 'fired' | 'removed'; reminder: MessageReminder; reason?: 'message-deleted' | 'no-access' }
   | { type: 'message.scheduled'; action: 'upserted' | 'removed'; scheduled: ScheduledMessage; messageId?: string; notify?: boolean }
   // Criptografia de ponta a ponta
   | { type: 'e2e.keyRequest'; rid: string; keyID: string } // alguém da sala precisa da chave atual

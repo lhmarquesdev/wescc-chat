@@ -64,6 +64,29 @@ function countForward(userId: string) {
   if (forwardHits.size > 10_000) for (const [k, v] of forwardHits) if (!v.some((t) => now - t < 60_000)) forwardHits.delete(k);
 }
 
+// Para a janela de encaminhar: por que a pessoa não pode enviar em cada conversa (o mesmo motivo que o envio daria),
+// antes de enviar. Só as regras da conversa (inscrição, criptografia, arquivada, somente leitura, aviso, silêncio, DM
+// restrita); as do conteúdo (arquivo, figurinha) ficam para o envio. Sem motivo: dá para enviar.
+export const FORWARD_CHECK_MAX = 50;
+export async function forwardTargetReasons(ctx: Ctx, rids: string[]): Promise<{ rid: string; reason?: string }[]> {
+  if (!(await hasPermission(ctx.userId, 'forward-message'))) throw forbidden('Você não tem permissão para encaminhar mensagens.');
+  const out: { rid: string; reason?: string }[] = [];
+  for (const rid of [...new Set(rids)].slice(0, FORWARD_CHECK_MAX)) {
+    try {
+      const room = await getRoom(rid);
+      // Sem inscrição (ou sala que não existe): o mesmo texto, sem dizer nada da sala.
+      if (!room || !(await getSubscriptionRow(room.id, ctx.userId))) throw forbidden('Você precisa entrar na sala para enviar mensagens.');
+      if (encryptedContent(room)) throw badRequest('error-forward-encrypted-target', 'Não dá para encaminhar para uma sala criptografada.');
+      await canPostInRoom(ctx, room);
+      out.push({ rid });
+    } catch (e) {
+      if (!(e instanceof ApiError)) throw e;
+      out.push({ rid, reason: e.message });
+    }
+  }
+  return out;
+}
+
 const fileIdOf = (a: Attachment) => (a.title_link ? FILE_LINK_RE.exec(a.title_link)?.[1] ?? null : null);
 const isFileAttachment = (a: Attachment) => a.type === 'file' || !!a.title_link?.startsWith('/file-upload/');
 

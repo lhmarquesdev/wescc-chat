@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { badRequest } from '../lib/errors';
-import { forwardMessage } from '../services/forward';
+import { FORWARD_CHECK_MAX, forwardMessage, forwardTargetReasons } from '../services/forward';
 import { closePoll, createPoll, myVotes, pollVoters, vote } from '../services/polls';
 import { deleteReminder, listReminders, setReminder } from '../services/reminders';
 import { cancelScheduled, listScheduled, scheduleMessage, sendScheduledNow, updateScheduled } from '../services/scheduled';
@@ -19,6 +19,12 @@ export function messageToolsRoutes(app: FastifyInstance) {
   route(app, 'POST', 'chat.forwardMessage', {}, async (req, _rep, ctx) => {
     const body = b(req);
     return forwardMessage(ctx, { messageId: str(body.messageId, 'messageId'), targets: list(body.targets), comment: body.comment });
+  });
+  // Próprio do Wescc: a janela de encaminhar desativa, com o motivo, as conversas em que a pessoa não pode enviar.
+  route(app, 'GET', 'chat.forwardTargets', {}, async (req, _rep, ctx) => {
+    const rids = strArray(q(req).rids);
+    if (rids.length > FORWARD_CHECK_MAX) throw badRequest('error-invalid-params', 'Parâmetros inválidos.');
+    return { targets: await forwardTargetReasons(ctx, rids) };
   });
 
   // ---------- Enquetes ----------
@@ -73,11 +79,15 @@ export function messageToolsRoutes(app: FastifyInstance) {
   route(app, 'GET', 'chat.getScheduledMessages', {}, async (req, _rep, ctx) => ({ scheduled: await listScheduled(ctx, str(q(req).roomId, 'roomId', { optional: true }) ?? null) }));
   route(app, 'POST', 'chat.updateScheduledMessage', {}, async (req, _rep, ctx) => {
     const body = b(req);
-    return { scheduled: await updateScheduled(ctx, str(body.scheduledId, 'scheduledId'), { msg: body.msg, sendAt: body.sendAt }) };
+    // tmid: null tira a resposta do tópico (só null vale aqui).
+    return { scheduled: await updateScheduled(ctx, str(body.scheduledId, 'scheduledId'), { msg: body.msg, sendAt: body.sendAt, ...(body.tmid === null ? { tmid: null } : {}) }) };
   });
   route(app, 'POST', 'chat.cancelScheduledMessage', {}, async (req, _rep, ctx) => {
     await cancelScheduled(ctx, str(b(req).scheduledId, 'scheduledId'));
     return {};
   });
-  route(app, 'POST', 'chat.sendScheduledMessageNow', {}, async (req, _rep, ctx) => ({ message: await sendScheduledNow(ctx, str(b(req).scheduledId, 'scheduledId')) }));
+  route(app, 'POST', 'chat.sendScheduledMessageNow', {}, async (req, _rep, ctx) => {
+    const body = b(req);
+    return { message: await sendScheduledNow(ctx, str(body.scheduledId, 'scheduledId'), { inRoom: bool(body.inRoom) ?? false }) };
+  });
 }

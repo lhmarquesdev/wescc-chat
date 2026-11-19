@@ -14,9 +14,10 @@ export interface ToastItem {
 }
 
 // e2eKeys: impressão da chave pública da criptografia de ponta a ponta (null sem chaves). e2eResetByAdmin: um
-// administrador redefiniu a criptografia e a pessoa ainda não criou a senha nova.
+// administrador redefiniu a criptografia e a pessoa ainda não criou a senha nova. e2eResetAt: sem chaves, a hora da
+// última redefinição (a própria ou pelo administrador).
 // hasPassword: a conta tem senha do chat (contas só de SAML/OAuth não têm).
-export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean; e2eKeys?: string | null; e2eResetByAdmin?: boolean; hasPassword?: boolean };
+export type Me = User & { permissions: string[]; requirePasswordChange?: boolean; require2faSetup?: boolean; e2eKeys?: string | null; e2eResetByAdmin?: boolean; hasPassword?: boolean; e2eResetAt?: string };
 
 interface RoomMessages {
   list: Message[];
@@ -337,8 +338,17 @@ export function applyEvent(ev: ServerEvent) {
       st.setPollVotes({ [ev.messageId]: ev.optionIds });
       break;
     case 'message.reminder':
-      if (ev.action === 'removed') st.removeReminder(ev.reminder._id);
-      else st.upsertReminder(ev.reminder);
+      if (ev.action === 'removed') {
+        st.removeReminder(ev.reminder._id);
+        // Saiu sem a pessoa pedir: ela fica sabendo, para não perder o que queria lembrar.
+        if (ev.reason === 'no-access') st.toast('Um lembrete foi removido porque você não tem mais acesso à conversa.', 'info', { icon: 'remind', duration: 8000, key: 'reminder-removed' });
+        else if (ev.reason === 'message-deleted') {
+          const sub = st.subscriptions[ev.reminder.rid];
+          const label = sub ? sub.fname || sub.name : '';
+          const where = !label ? '' : sub!.t === 'd' ? ` da conversa com ${label}` : ` de ${sub!.t === 'c' ? '#' : ''}${label}`;
+          st.toast(`Um lembrete${where} foi removido porque a mensagem foi apagada.`, 'info', { icon: 'remind', duration: 8000, key: 'reminder-removed' });
+        }
+      } else st.upsertReminder(ev.reminder);
       break;
     case 'message.scheduled':
       if (ev.action === 'removed') st.removeScheduled(ev.scheduled._id);

@@ -27,7 +27,7 @@ import { Avatar, Empty, Field, GroupAvatar, Menu, Segmented, SearchInput, Skelet
 import { InCallBadge } from './call/LiveIndicators';
 // Criptografia de ponta a ponta
 import { foldText } from '@shared/search';
-import { contentOf, E2E_PLACEHOLDER, plainOf, useE2e } from '../lib/e2e/client';
+import { contentOf, E2E_PLACEHOLDER, E2E_UI, plainOf, useE2e } from '../lib/e2e/client';
 import { useE2eMessage } from '../lib/e2e/hooks';
 import { openE2eDialog, requireE2eReady } from './e2e/E2eDialogs';
 // Permissões do canal: quem fala e o que cada pessoa pode fazer nele.
@@ -289,7 +289,7 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
           body.encrypted
             ? {
                 title: 'Ligar a criptografia de ponta a ponta?',
-                body: 'As próximas mensagens e arquivos ficam cifrados: só quem participa consegue ler. Busca, prévias do Jira, figurinhas, bots e integrações deixam de funcionar aqui. As mensagens antigas continuam como estão.',
+                body: E2E_UI.turnOn,
                 confirmLabel: 'Ligar criptografia',
               }
             : { title: 'Desligar a criptografia?', body: 'As próximas mensagens ficam legíveis no servidor. As mensagens criptografadas continuam cifradas.', confirmLabel: 'Desligar', danger: true },
@@ -377,7 +377,7 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
                 checked={f.encrypted}
                 onChange={(v) => setF({ ...f, encrypted: v })}
                 label="Criptografia de ponta a ponta"
-                description="Só quem participa lê. Busca, figurinhas, bots e integrações deixam de funcionar."
+                description={E2E_UI.turnOnShort}
               />
             )}
             {f.roomType === 'c' && (

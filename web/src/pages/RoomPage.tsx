@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Message, Room } from '@shared/index';
 import { encryptedContent } from '@shared/messages';
 import { e2eToggleVerdict } from '@shared/e2e';
@@ -32,7 +32,7 @@ import { Empty, GroupAvatar, Menu, Skeleton, SkeletonMessages, UserAvatar, confi
 // Integrações (Jira)
 import { IntegrationModals } from '../components/integrations/IntegrationModals';
 // Criptografia de ponta a ponta
-import { contentOf, ensureRoom, rotateNow, useE2e } from '../lib/e2e/client';
+import { contentOf, E2E_UI, ensureRoom, rotateNow, useE2e } from '../lib/e2e/client';
 import { E2eBanner, useE2eBlock } from '../components/e2e/E2eBanner';
 import { openE2eDialog, requireE2eReady } from '../components/e2e/E2eDialogs';
 
@@ -202,10 +202,11 @@ function Announcement({ text }: { text: string }) {
   );
 }
 
-const BackButton = ({ onClick }: { onClick: () => void }) => (
-  <button type="button" className="icon-btn mobile-only room-back" title="Voltar" aria-label="Voltar" onClick={onClick}>
+// Um link (não um botão): com uma gravação de áudio travada, sair pergunta antes de descartar (VoiceRecorder).
+const BackButton = () => (
+  <Link to="/home" className="icon-btn mobile-only room-back" title="Voltar" aria-label="Voltar">
     <Icon name="back" size={20} />
-  </button>
+  </Link>
 );
 
 function RoomLoading() {
@@ -577,7 +578,7 @@ export function RoomPage() {
     const ok = on
       ? await confirmDialog({
           title: 'Ligar a criptografia de ponta a ponta?',
-          body: 'As próximas mensagens e arquivos ficam cifrados: só quem participa consegue ler. Busca, prévias do Jira, figurinhas, bots e integrações deixam de funcionar aqui. As mensagens antigas continuam como estão.',
+          body: E2E_UI.turnOn,
           confirmLabel: 'Ligar criptografia',
         })
       : await confirmDialog({
@@ -619,7 +620,7 @@ export function RoomPage() {
       <div className={`room ${openPanel || tmid ? 'with-panel' : ''}`}>
         <div className="room-main">
           <header className="room-header" ref={setHeader}>
-            <BackButton onClick={() => navigate('/home')} />
+            <BackButton />
             {dmUser ? (
               <UserAvatar username={dmUser} size={32} />
             ) : groupDm ? (

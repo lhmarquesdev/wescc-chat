@@ -28,7 +28,8 @@ import { clearKeystore, deleteKey, loadKey, saveKey } from './keystore';
 
 export type E2eStatus = 'loading' | 'unsupported' | 'none' | 'locked' | 'ready';
 export type E2eRoomState = 'ready' | 'creating' | 'waiting' | 'rotating' | 'error';
-export type E2eViewState = 'ok' | 'pending' | 'waiting' | 'none' | 'unsupported' | 'locked' | 'failed' | 'old-key';
+// reset: sem chaves, e a mensagem é de antes da redefinição da criptografia da pessoa (não abre mais, nem configurando).
+export type E2eViewState = 'ok' | 'pending' | 'waiting' | 'none' | 'unsupported' | 'locked' | 'failed' | 'old-key' | 'reset';
 export interface E2eView {
   state: E2eViewState;
   content?: E2EContent;
@@ -62,6 +63,13 @@ export const E2E_UI = {
   asked: 'Pedido enviado',
   // Um administrador redefiniu a criptografia da pessoa (me.e2eResetByAdmin, até ela criar a senha nova).
   resetByAdmin: 'Um administrador redefiniu sua criptografia. Configure uma senha nova; as mensagens criptografadas antigas não podem mais ser lidas.',
+  // A própria pessoa redefiniu (me.e2eResetAt, até ela criar a senha nova).
+  resetBySelf: 'Você redefiniu sua criptografia. Configure uma senha nova para ler e escrever as próximas mensagens; as de antes não podem mais ser lidas.',
+  // Ligar a criptografia (menu da conversa, Editar sala, Criar): o que deixa de funcionar, como no README
+  // ("Criptografia de ponta a ponta"). Mudou a lista lá, muda aqui.
+  turnOn:
+    'As próximas mensagens e arquivos ficam cifrados: só quem participa consegue ler. Deixam de funcionar aqui: busca, tradução, enquetes, envio agendado, mensagens de vídeo, figurinhas, encaminhar, prévias do Jira, bots e integrações. Mensagens já agendadas não serão enviadas. As mensagens antigas continuam como estão.',
+  turnOnShort: 'Só quem participa lê. Deixam de funcionar: busca, tradução, enquetes, envio agendado, mensagens de vídeo, figurinhas, encaminhar, prévias do Jira, bots e integrações.',
 } as const;
 
 // Muitas senhas erradas: quanto falta para tentar de novo.
@@ -75,6 +83,7 @@ export const E2E_PLACEHOLDER: Record<Exclude<E2eViewState, 'ok'>, string> = {
   locked: 'Mensagem criptografada. Desbloqueie para ler.',
   'old-key': 'Mensagem criptografada com uma chave que você não tem.',
   failed: 'Não foi possível decifrar esta mensagem.',
+  reset: 'Mensagem de antes da redefinição da sua criptografia: não pode mais ser lida.',
 };
 
 // ---------- Estado da página (nunca sai da memória) ----------
@@ -197,6 +206,7 @@ function tabs(): BroadcastChannel | null {
       forgetMemory();
       patchMe(null);
       useE2e.setState({ status: 'none' });
+      void refreshMe(); // a hora da redefinição (me.e2eResetAt)
     }
   };
   return channel;
@@ -355,6 +365,9 @@ async function localReset() {
   patchMe(null);
   useE2e.setState({ status: 'none' });
   tell('reset');
+  // A hora da redefinição vem do servidor (me.e2eResetAt): as mensagens de antes dela dizem que não abrem mais.
+  await refreshMe();
+  bump();
 }
 
 // ---------- Chaves das conversas ----------
@@ -704,6 +717,7 @@ export function viewOf(m: Message): E2eView | null {
   const st = status();
   if (st === 'loading') return { state: 'pending' };
   // Sem configurar não há o que desbloquear: o aviso diz o mesmo que a faixa da conversa.
+  if (st === 'none' && beforeReset(m)) return { state: 'reset' };
   if (st === 'none' || st === 'unsupported') return { state: st };
   if (st !== 'ready') return { state: 'locked' };
   if (!signerOk(m, env)) return { state: 'failed' };
@@ -736,6 +750,14 @@ export function viewOf(m: Message): E2eView | null {
   if (loading.has(m.rid)) return { state: 'pending' };
   // A geração atual é de antes da volta: ela não vem, como uma chave antiga.
   return { state: env.kid === known.keyID && !known.beforeReturn ? 'waiting' : 'old-key' };
+}
+
+// Sem chaves depois de redefinir a criptografia: a mensagem (ou a última edição) de antes da redefinição não abre mais.
+function beforeReset(m: Message) {
+  const at = useStore.getState().me?.e2eResetAt;
+  if (!at) return false;
+  const last = Math.max(new Date(m.ts).getTime(), m.editedAt ? new Date(m.editedAt).getTime() : 0);
+  return last < new Date(at).getTime();
 }
 
 // Texto para editar, copiar e citar: o decifrado, ou o msg do servidor quando a mensagem não é cifrada.
