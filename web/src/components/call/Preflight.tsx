@@ -70,6 +70,7 @@ export function Preflight() {
   const [mic, setMic] = useState<MediaStreamTrack | null>(null);
   const [cam, setCam] = useState<MediaStreamTrack | null>(null);
   const [problem, setProblem] = useState<MediaProblem | null>(null);
+  const [opened, setOpened] = useState(false); // a primeira abertura dos aparelhos já respondeu
   const [unsupported, setUnsupported] = useState(false);
   const [busy, setBusy] = useState(false);
   const [test, setTest] = useState(false);
@@ -167,6 +168,7 @@ export function Preflight() {
       tracks.current.cam?.stop();
       keep(m.audio, m.video);
       setProblem(m.problem);
+      setOpened(true);
       if (camWant.current && !m.video && m.problem) setCamOn(false);
       else syncCam();
     });
@@ -271,9 +273,12 @@ export function Preflight() {
   // O título segue o botão da câmera: desligou a câmera, a chamada que vai começar é de voz.
   const title = pf.mode === 'join' ? 'Entrar na chamada' : camOn ? 'Iniciar chamada de vídeo' : 'Iniciar chamada de voz';
   const note = pf.mode === 'start' ? (multiDm ? 'Todos desta conversa vão receber a chamada.' : 'Ninguém será chamado: os membros veem a chamada na sala e entram quando quiserem.') : null;
-  const primaryLabel = pf.mode === 'join' ? 'Entrar agora' : 'Iniciar chamada';
   const inCall = isInCall();
   const otherDevice = !inCall && (info?.mine?.state === 'joined' || info?.mine?.state === 'joining');
+  // Sem microfone (bloqueado, ausente ou em uso): o botão aparece desligado e a entrada diz que vai sem ele. A escolha
+  // do botão volta a valer quando um microfone abre (Tentar de novo ou outro aparelho).
+  const noMic = opened && !mic;
+  const primaryLabel = noMic && !blocked ? (pf.mode === 'join' ? 'Entrar sem microfone' : 'Iniciar sem microfone') : pf.mode === 'join' ? 'Entrar agora' : 'Iniciar chamada';
   const problemText = unsupported ? PROBLEM_TEXT.unsupported : problem ? PROBLEM_TEXT[problem] : null;
 
   return (
@@ -294,7 +299,13 @@ export function Preflight() {
             </div>
           )}
           <div className="call-preflight-toggles">
-            <CallButton icon={micOn ? 'mic' : 'mic-off'} title={micOn ? 'Desligar microfone' : 'Ligar microfone'} className={micOn ? '' : 'off'} onClick={() => setMicOn(!micOn)} />
+            <CallButton
+              icon={micOn && !noMic ? 'mic' : 'mic-off'}
+              title={noMic ? 'Microfone indisponível' : micOn ? 'Desligar microfone' : 'Ligar microfone'}
+              className={micOn && !noMic ? '' : 'off'}
+              blocked={noMic ? (problemText ? 'Microfone indisponível. Veja o aviso abaixo.' : 'Microfone indisponível.') : null}
+              onClick={() => setMicOn(!micOn)}
+            />
             <CallButton
               icon={camOn ? 'cam' : 'cam-off'}
               title={camOn ? 'Desligar câmera' : 'Ligar câmera'}
@@ -319,7 +330,7 @@ export function Preflight() {
                 Tentar de novo
               </button>
             )}
-            {problem === 'no-mic' && (
+            {problem === 'no-mic' && !noMic && (
               <button type="button" className="btn small" onClick={() => void join(false)}>
                 Entrar sem microfone
               </button>
