@@ -561,14 +561,14 @@ function ReportModal({ m, onClose }: { m: Message; onClose: () => void }) {
           <button type="button" className="btn ghost" onClick={onClose}>
             Cancelar
           </button>
-          <button type="button" className="btn danger solid" disabled={busy} onClick={send}>
+          <button type="button" className="btn danger solid" disabled={busy || text.trim().length < 3} onClick={send}>
             Denunciar
           </button>
         </>
       }
     >
-      <Field label="Motivo" hint={encrypted ? 'Esta conversa é criptografada: a moderação não vê a mensagem. Descreva o problema no motivo.' : undefined}>
-        <textarea rows={4} placeholder="Descreva o motivo" value={text} onChange={(e) => setText(e.target.value)} />
+      <Field label="Motivo" hint={encrypted ? 'Esta conversa é criptografada: a moderação não vê a mensagem. Descreva o problema no motivo.' : 'Obrigatório: conte aos moderadores o que há de errado.'}>
+        <textarea rows={4} placeholder="Descreva o motivo" value={text} maxLength={1000} onChange={(e) => setText(e.target.value)} />
       </Field>
     </Modal>
   );

@@ -38,6 +38,13 @@ const EMOJI_NAME = /^[a-z0-9_+-]{1,40}$/;
 const EMOJI_MAX_KB = 256;
 const EMOJI_MAX_ALIASES = 10;
 
+// O motivo da denúncia é obrigatório (a moderação precisa saber o que houve).
+function reportReason(v: unknown) {
+  const text = String(v ?? '').trim();
+  if (text.length < 3) throw badRequest('error-report-reason', 'Informe o motivo da denúncia.');
+  return text.slice(0, 1000);
+}
+
 export function chatRoutes(app: FastifyInstance) {
   route(app, 'POST', 'chat.sendMessage', {}, async (req, _rep, ctx) => {
     const m = b(req).message ?? {};
@@ -190,24 +197,29 @@ export function chatRoutes(app: FastifyInstance) {
     const m = await getMessageRow(str(body.messageId, 'messageId'));
     if (!m) throw badRequest('error-message-not-found', 'Mensagem não encontrada.');
     await loadRoomForUser(ctx, m.room_id);
-    await query('INSERT INTO moderation_reports (id, message_id, room_id, reported_user_id, reporter_id, description) VALUES ($1,$2,$3,$4,$5,$6)', [
-      newId(),
-      m.id,
-      m.room_id,
-      m.user_id,
-      ctx.userId,
-      String(body.description ?? '').slice(0, 1000),
-    ]);
+    const description = reportReason(body.description);
+    if (m.user_id === ctx.userId) throw badRequest('error-report-own', 'Você não pode denunciar a sua própria mensagem.');
+    // Uma denúncia aberta por pessoa e mensagem (índice único da migração 042): repetir não infla a contagem.
+    const row = await one(
+      `INSERT INTO moderation_reports (id, message_id, room_id, reported_user_id, reporter_id, description) VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (message_id, reporter_id) WHERE NOT resolved AND message_id IS NOT NULL DO NOTHING RETURNING id`,
+      [newId(), m.id, m.room_id, m.user_id, ctx.userId, description],
+    );
+    if (!row) throw badRequest('error-report-exists', 'Você já denunciou esta mensagem. A moderação vai analisar.');
     return {};
   });
   route(app, 'POST', 'moderation.reportUser', {}, async (req, _rep, ctx) => {
     const body = b(req);
-    await query('INSERT INTO moderation_reports (id, reported_user_id, reporter_id, description) VALUES ($1,$2,$3,$4)', [
-      newId(),
-      str(body.userId, 'userId'),
-      ctx.userId,
-      String(body.description ?? '').slice(0, 1000),
-    ]);
+    const user = await one<{ id: string }>('SELECT id FROM users WHERE id = $1', [str(body.userId, 'userId')]);
+    if (!user) throw notFound('error-user-not-found', 'Usuário não encontrado.');
+    if (user.id === ctx.userId) throw badRequest('error-report-own', 'Você não pode denunciar a si mesmo.');
+    const description = reportReason(body.description);
+    const row = await one(
+      `INSERT INTO moderation_reports (id, reported_user_id, reporter_id, description) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (reported_user_id, reporter_id) WHERE NOT resolved AND message_id IS NULL DO NOTHING RETURNING id`,
+      [newId(), user.id, ctx.userId, description],
+    );
+    if (!row) throw badRequest('error-report-exists', 'Você já denunciou esta pessoa. A moderação vai analisar.');
     return {};
   });
 
