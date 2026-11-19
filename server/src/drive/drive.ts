@@ -597,6 +597,7 @@ async function needFile(acc: Access, fileId: unknown, min: 1 | 2 | 3, opts: { al
 export async function fileForDownload(ctx: Ctx | null, fileId: string, logDownload: boolean) {
   if (!ctx) throw forbidden();
   if (!(await hasAnyPermission(ctx.userId, ['view-files', 'manage-all-files']))) throw forbidden();
+  assertDriveOn();
   const acc = await loadAccess(ctx);
   const r = await needFile(acc, fileId, 1);
   if (logDownload) await logActivity(ctx, r.folder_id, r.id, 'file.download', { name: r.name });

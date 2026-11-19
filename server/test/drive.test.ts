@@ -235,6 +235,34 @@ describe('arquivos', () => {
     expect((await api('POST', 'files.purge', { folderIds: [b._id] }, ana)).success).toBe(true);
   });
 
+  it('com a aba desligada nada responde, nem o download', async () => {
+    const f = (await up(root, 'aba-desligada.txt', 'x', bruno)).file;
+    await api('POST', 'settings', { settings: { Drive_Enabled: false } }, A);
+    try {
+      for (const [method, path, body] of [
+        ['GET', 'files.home', undefined],
+        ['GET', 'files.folder', { folderId: root }],
+        ['GET', 'files.search', { text: 'aba' }],
+        ['GET', 'files.recent', undefined],
+        ['GET', 'files.trash.list', undefined],
+        ['POST', 'files.rename', { fileId: f._id, name: 'outro.txt' }],
+        ['POST', 'files.trash', { fileIds: [f._id] }],
+        ['POST', 'files.folder.share', { folderId: root, entries: [] }],
+      ] as const) {
+        const r = await api(method, path, body, bruno);
+        expect(r.status, path).toBe(403);
+        expect(r.error, path).toBe('A aba Arquivos está desligada.');
+      }
+      const dl = await raw(`${f.url}?download`, bruno);
+      expect(dl.status).toBe(403);
+      // O administrador também não: a aba está desligada para todos.
+      expect((await api('GET', 'files.folder', { folderId: root }, A)).status).toBe(403);
+    } finally {
+      await api('POST', 'settings', { settings: { Drive_Enabled: true } }, A);
+    }
+    expect((await api('GET', 'files.folder', { folderId: root }, bruno)).files.map((x: any) => x.name)).toContain('aba-desligada.txt');
+  });
+
   it('cota cheia recusa o envio com aviso claro', async () => {
     await api('POST', 'settings', { settings: { Drive_Quota_GB: 1 } }, A);
     await query("INSERT INTO drive_files (id, folder_id, name, type, size, storage_path) VALUES ('grandeAAAAAAAAAAA', $1, 'grande.bin', 'application/octet-stream', $2, '2026/01/grandeAAAAAAAAAAA')", [root, 1024 ** 3]);
