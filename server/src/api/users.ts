@@ -313,9 +313,11 @@ export function usersRoutes(app: FastifyInstance) {
       if (target === ctx.userId && !getSetting('Accounts_AllowUserAvatarChange')) throw forbidden('Alteração de avatar desativada.');
     };
     if (req.isMultipart()) {
-      // A permissão é conferida antes de ler o arquivo (com o userId que veio antes dele) e de novo depois.
+      // A permissão é conferida antes de ler o arquivo (com o userId que veio antes dele) e de novo depois. Sem userId
+      // antes do arquivo ele ainda pode vir depois (curl -F image=@... -F userId=...): aí vale só a conferência de baixo.
       const r = await readAvatarUpload(req, async (fields) => {
-        if (fields.userId) target = fields.userId;
+        if (!fields.userId) return;
+        target = fields.userId;
         await allowed();
       });
       if (r.fields.userId) target = r.fields.userId;

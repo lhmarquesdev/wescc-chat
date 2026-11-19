@@ -143,6 +143,8 @@ describe('nome de usuário reservado', () => {
   it('all e here não servem como nome de usuário em nenhum caminho', async () => {
     const u = await newUser(A);
     for (const name of ['here', 'ALL', 'Here']) expect(err(await profile(u, { username: name }))).toEqual([400, 'Esse nome de usuário é reservado.']);
+    // Apagar o nome de usuário não é ignorado com "Perfil atualizado".
+    expect(await profile(u, { username: '' })).toMatchObject({ status: 400, errorType: 'error-invalid-username' });
     const created = await api('POST', 'users.create', { username: 'All', name: 'Todos', email: 'todos@test.local', password: PW }, A);
     expect(err(created)).toEqual([400, 'Esse nome de usuário é reservado.']);
     const reg = await api('POST', 'users.register', { username: 'here', name: 'Aqui', email: 'aqui@test.local', pass: 'Senha-forte-123' });
@@ -158,6 +160,9 @@ describe('nome e Sobre', () => {
     expect(err(await profile(u, { name: '   ' }))).toEqual(noName);
     expect(err(await profile(u, { name: '\u200B\u200B\u202E' }))).toEqual(noName);
     expect(err(await profile(u, { name: '...' }))).toEqual(noName);
+    // O preenchimento coreano conta como letra, mas não aparece; caracteres de controle também não.
+    expect(err(await profile(u, { name: '\u3164\u3164' }))).toEqual(noName);
+    expect(err(await profile(u, { name: '\u0000\u0007' }))).toEqual(noName);
     expect(err(await profile(u, { name: 'N'.repeat(101) }))).toEqual([400, 'O nome pode ter no máximo 100 caracteres.']);
     expect(err(await profile(u, { name: 123 }))).toEqual([400, 'O campo Nome deve ser um texto.']);
     expect(err(await profile(u, { bio: { a: 1 } }))).toEqual([400, 'O campo Sobre deve ser um texto.']);
@@ -165,8 +170,8 @@ describe('nome e Sobre', () => {
     expect(err(await profile(u, { bio: 'x'.repeat(501) }))).toEqual([400, 'O campo Sobre pode ter no máximo 500 caracteres.']);
     const dm = await api('POST', 'im.create', { username: 'admin' }, u);
     await api('POST', 'chat.sendMessage', { message: { rid: dm.room._id, msg: 'oi' } }, u);
-    expect((await profile(u, { name: '  Ana \u200B  Souza\n', bio: '  Sobre mim  ' })).success).toBe(true);
-    expect(await row(u.userId)).toMatchObject({ name: 'Ana Souza', bio: 'Sobre mim' });
+    expect((await profile(u, { name: '  Ana \u200B  Sou\u0007za\n', bio: '  Sobre mim\nlinha 2\u0000  ' })).success).toBe(true);
+    expect(await row(u.userId)).toMatchObject({ name: 'Ana Souza', bio: 'Sobre mim\nlinha 2' });
     // As mensagens levam o nome já arrumado.
     const msgs = await pool.query('SELECT DISTINCT user_name FROM messages WHERE user_id = $1', [u.userId]);
     expect(msgs.rows).toEqual([{ user_name: 'Ana Souza' }]);
@@ -231,6 +236,23 @@ describe('foto do perfil e da sala', () => {
     expect(res.headers.get('content-type')).toBe('image/png');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
     expect((await raw(`/avatar/uid/${u.userId}`, u)).headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('a administração troca a foto de outra pessoa com o userId depois do arquivo, mesmo com a troca própria desligada', async () => {
+    const u = await newUser(A);
+    await settings({ Accounts_AllowUserAvatarChange: false });
+    try {
+      const fd = new FormData();
+      fd.append('image', png(1000), 'foto.png');
+      fd.append('userId', u.userId);
+      expect((await api('POST', 'users.setAvatar', fd, A)).success).toBe(true);
+      expect((await row(u.userId)).avatar_etag).toBeTruthy();
+      const own = new FormData();
+      own.append('image', png(1000), 'foto.png');
+      expect(err(await api('POST', 'users.setAvatar', own, u))).toEqual([403, 'Alteração de avatar desativada.']);
+    } finally {
+      await settings({ Accounts_AllowUserAvatarChange: true });
+    }
   });
 
   it('foto da sala: sem permissão é recusada antes de ler o arquivo; acima de 5 MB também', async () => {

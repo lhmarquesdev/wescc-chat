@@ -35,10 +35,11 @@ export function validateUsername(username: string) {
 }
 
 // Nome de exibição: espaços juntados, sem caracteres invisíveis (espaço de largura zero, controles de direção do
-// texto) e com alguma letra ou número; senão a pessoa aparece sem nome nas listas e nas mensagens.
+// texto, caracteres de controle, o "preenchimento" coreano que conta como letra) e com alguma letra ou número; senão a
+// pessoa aparece sem nome nas listas e nas mensagens.
 export const NAME_MAX = 100;
 export const BIO_MAX = 500;
-const INVISIBLE_RE = /[\u00AD\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
+const INVISIBLE_RE = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u115F\u1160\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u3164\uFEFF\uFFA0]/g;
 
 export function normalizeName(v: unknown) {
   if (v !== undefined && v !== null && typeof v !== 'string') throw badRequest('error-invalid-name', 'O nome deve ser um texto.');
@@ -518,6 +519,7 @@ export async function updateUser(
   }
   // Só conta o que muda de fato: a tela pode mandar os campos como estavam (e uma conta antiga pode ter um valor fora
   // das regras de hoje). As travas do perfil, do LDAP e da senha atual valem para essas mudanças.
+  // Nome de usuário vazio também é mudança: cai na validação, em vez de ser ignorado com "Perfil atualizado".
   const username = data.username != null && data.username !== u.username ? data.username : undefined;
   let name = data.name != null && data.name !== u.name ? normalizeName(data.name) : undefined;
   if (name === u.name) name = undefined;
@@ -530,14 +532,14 @@ export async function updateUser(
   const emailChanged = email !== undefined && email !== (u.email || null);
   if (!opts.asAdmin) {
     // "Permitir alterar perfil" vale para os dados do perfil; a senha segue só "Permitir alterar senha".
-    if ((username || name !== undefined || bio !== undefined || statusChanged || emailChanged) && !getSetting('Accounts_AllowUserProfileChange'))
+    if ((username !== undefined || name !== undefined || bio !== undefined || statusChanged || emailChanged) && !getSetting('Accounts_AllowUserProfileChange'))
       throw forbidden('Alteração de perfil desativada.');
     // Conta do LDAP: nome, nome de usuário e e-mail vêm do diretório (a sincronização grava por cima).
-    if (u.auth_source === 'ldap' && (username || name !== undefined || emailChanged))
+    if (u.auth_source === 'ldap' && (username !== undefined || name !== undefined || emailChanged))
       throw forbidden('Nome, nome de usuário e e-mail da sua conta vêm do diretório da empresa (LDAP) e são atualizados por lá.');
   }
 
-  if (username) {
+  if (username !== undefined) {
     if (!opts.asAdmin && !getSetting('Accounts_AllowUsernameChange')) throw forbidden('Alteração de nome de usuário desativada.');
     validateUsername(username);
     const other = await getUserByUsername(username);
