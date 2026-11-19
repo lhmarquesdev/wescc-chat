@@ -2459,8 +2459,11 @@ h4 .head-count {
   td.role-desc.empty {
     display: none;
   }
+  /* No cartão o valor longo (link do convite, e-mail) quebra linha em vez de ser cortado na borda. */
   .stack td.ellipsis-cell {
     max-width: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   /* Matriz no celular: quem rola é a .matrix-wrap, então a tabela volta a ser tabela; a coluna presa
      encolhe e quebra linha para deixar ao menos um papel à vista. */
