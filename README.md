@@ -274,6 +274,10 @@ para atender só com áudio, desligar o microfone ou a câmera, compartilhar a t
 registrada na conversa e no histórico em 📞 Chamadas, na barra lateral.
 
 - O áudio e o vídeo vão direto entre os navegadores (WebRTC); o servidor só repassa a sinalização e guarda o histórico.
+- Uma queda curta da conexão com o servidor (rede instável, notebook que dormiu, servidor reiniciado) não derruba a
+  chamada: o navegador se reconecta sozinho e a chamada segue. Quem não volta em 30 s encerra a chamada como queda, com
+  a duração até a queda, e a outra pessoa é avisada do motivo. Recarregar a página no meio da chamada encerra a chamada,
+  com o aviso nos dois lados.
 - Na mesma rede isso funciona sem configuração. Para chamadas entre redes diferentes (casa e escritório, 4G), configure
   um servidor TURN (por exemplo o coturn) em Administração › Configurações › Videoconferência.
 - Fora de `localhost`, o navegador só libera câmera e microfone com o site em HTTPS (veja HTTPS e serviço do

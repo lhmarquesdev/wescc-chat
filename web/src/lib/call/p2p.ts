@@ -26,6 +26,8 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
   let cameraOn = false;
   let remote: MediaStream | null = null;
   let connected = false;
+  let lost = false; // a conexão direta oscilou ('disconnected'): reconectando
+  let lostTimer = 0;
   let closed = false;
   let joinedAt = Date.now();
   let speaking: string[] = [];
@@ -120,12 +122,26 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
     conn.onicecandidate = (e) => signal({ candidate: e.candidate ? (e.candidate.toJSON() as Record<string, unknown>) : null });
     conn.onconnectionstatechange = () => {
       if (pc !== conn) return;
-      if (conn.connectionState === 'connected' && !connected) {
+      const state = conn.connectionState;
+      if (state === 'connected' && (!connected || lost)) {
         connected = true;
+        lost = false;
+        clearTimeout(lostTimer);
         ev.emit({ type: 'state', state: 'connected' });
         batch.schedule();
       }
-      if (conn.connectionState === 'failed') ev.emit({ type: 'state', state: 'disconnected', reason: 'failed' });
+      // Oscilou: a janela mostra "Reconectando…". Sem voltar em 10 s, o áudio já não passa: conta como queda.
+      if (state === 'disconnected' && connected && !lost) {
+        lost = true;
+        ev.emit({ type: 'state', state: 'reconnecting' });
+        lostTimer = window.setTimeout(() => {
+          if (pc === conn && lost) ev.emit({ type: 'state', state: 'disconnected', reason: 'failed' });
+        }, 10_000);
+      }
+      if (state === 'failed') {
+        clearTimeout(lostTimer);
+        ev.emit({ type: 'state', state: 'disconnected', reason: 'failed' });
+      }
     };
     startSpeaking();
     return conn;
@@ -223,6 +239,7 @@ export function createP2pEngine(ctx: EngineContext): CallEngine {
     },
     async disconnect() {
       closed = true;
+      clearTimeout(lostTimer);
       off();
       batch.cancel();
       clearInterval(poll);

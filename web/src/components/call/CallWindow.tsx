@@ -222,7 +222,7 @@ function DirectWindow({ call, me }: { call: Call; me: UserRef }) {
   const hasLocalVideo = local.camera || sharing;
   const muted = !local.mic;
   const cameraOff = !local.camera;
-  const status = ringing ? 'Chamando…' : !connected ? 'Conectando…' : elapsed;
+  const status = ringing ? 'Chamando…' : phase === 'reconnecting' ? 'Reconectando…' : !connected ? 'Conectando…' : elapsed;
   const canShare = connected && canShareScreen();
   const idle = useIdle(ref, big && connected && (hasRemoteVideo || hasLocalVideo));
 

@@ -21,6 +21,7 @@ import {
   listCalls,
   markSeen,
   missedCount,
+  reattachCall,
   roomCallState,
   startCall,
   type CallListFilter,
@@ -67,7 +68,15 @@ export function callsRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', 'calls.decline', {}, async (req, _rep, ctx) => ({ call: await declineCall(ctx, callIdOf(b(req))) }));
   route(app, 'POST', 'calls.leave', {}, async (req, _rep, ctx) => ({ call: await leave(ctx, callIdOf(b(req))) }));
-  route(app, 'POST', 'calls.end', {}, async (req, _rep, ctx) => ({ call: await endCall(ctx, callIdOf(b(req))) }));
+  route(app, 'POST', 'calls.end', {}, async (req, _rep, ctx) => {
+    const body = b(req);
+    return { call: await endCall(ctx, callIdOf(body), { dropped: !!bool(body.dropped) }) };
+  });
+  // A conexão em tempo real voltou: a chamada a dois passa a usar a nova (ou a web fica sabendo que ela acabou).
+  route(app, 'POST', 'calls.reattach', {}, async (req, _rep, ctx) => {
+    const body = b(req);
+    return { call: await reattachCall(ctx, callIdOf(body), body.connectionId) };
+  });
 
   route(app, 'POST', 'calls.ring', {}, async (req, _rep, ctx) => {
     const body = b(req);

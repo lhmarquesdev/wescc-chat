@@ -127,6 +127,7 @@ const ENDED_TEXT: Record<string, string> = {
   canceled: 'Chamada cancelada.',
   ended: 'Chamada encerrada.',
 };
+const LOST_LINK = 'A chamada caiu porque a sua conexão com o servidor foi perdida.';
 const NO_MIC = 'Não foi possível usar o microfone. Confira a permissão do navegador.';
 const NO_LINK = 'Sem conexão com o servidor. Tente de novo em instantes.';
 const JOIN_FAILED = 'Não foi possível entrar na chamada.';
@@ -548,8 +549,12 @@ function onEngineState(state: 'connecting' | 'connected' | 'reconnecting' | 'dis
   // Desconectado.
   if (s.call?.scope === 'direct') {
     if (reason === 'failed') {
+      // A conexão direta entre os navegadores caiu: o outro lado fica sabendo que foi queda, não que desliguei.
+      const callId = s.call._id;
       toast('A conexão da chamada caiu.', 'error');
-      void leaveCall();
+      teardown();
+      set({ ...callIdle });
+      void api.post('calls.end', { callId, dropped: true }).catch(() => {});
     }
     return;
   }
@@ -776,7 +781,7 @@ async function begin(call: Call, join: CallJoin | undefined, o: { mic: boolean; 
   joinedAtLocal = Date.now();
   awayAt = 0;
   stopAway();
-  if (call.scope === 'group') markLive(call._id);
+  markLive(call._id);
   refusedOnce = false;
   retryStep = 0;
   settled = false;
@@ -1271,7 +1276,43 @@ function onDirectCall(call: Call) {
     teardown();
     set({ ...callIdle });
     // Fim de chamada não é um aviso genérico: o ícone é o do telefone.
-    toast(ENDED_TEXT[call.status] ?? 'Chamada encerrada.', 'info', { icon: call.status === 'missed' || call.status === 'busy' ? 'call-missed' : 'call-hangup' });
+    toast(directEndedText(call), 'info', { icon: call.status === 'missed' || call.status === 'busy' ? 'call-missed' : 'call-hangup' });
+  }
+}
+
+// Por que a chamada a dois terminou, do meu lado.
+function directEndedText(call: Call): string {
+  if (call.endedReason === 'dropped') {
+    if (!call.endedBy) return 'A chamada caiu: a conexão entre vocês foi perdida.';
+    if (call.endedBy === meRef()?._id) return LOST_LINK;
+    const other = call.endedBy === call.caller._id ? call.caller : call.callee;
+    return `A chamada caiu: ${other ? callUserLabel(other) : 'a outra pessoa'} perdeu a conexão.`;
+  }
+  return ENDED_TEXT[call.status] ?? 'Chamada encerrada.';
+}
+
+// A conexão em tempo real voltou (queda curta da rede, notebook que acordou, servidor reiniciado): a chamada a dois
+// passa a usar a conexão nova para a sinalização. Se ela acabou enquanto eu estava sem conexão, fecha aqui também, com
+// o motivo (nada de chamada fantasma).
+async function reattachDirect() {
+  const s = get();
+  const call = s.call;
+  if (!call || call.scope !== 'direct' || !isInCall(call._id) || !realtime.connectionId) return;
+  const g = gen;
+  try {
+    const r = (await api.post('calls.reattach', { callId: call._id, connectionId: realtime.connectionId })) as { call: Call };
+    if (g !== gen || get().call?._id !== call._id) return;
+    if (r.call.status === 'ongoing' || r.call.status === 'ringing') return void set({ call: { ...get().call!, ...r.call } });
+    teardown();
+    set({ ...callIdle });
+    // Eu não desliguei daqui: se o fim ficou no meu nome, foi a minha queda.
+    toast(r.call.endedBy === meRef()?._id ? LOST_LINK : directEndedText(r.call), 'info', { icon: 'call-hangup' });
+  } catch (e) {
+    // Sem rede ou servidor ocupado: tenta de novo na próxima reconexão (e a varredura do servidor resolve o resto).
+    if (g !== gen || !(e instanceof ApiError) || !e.status || e.status >= 500 || e.status === 429) return;
+    teardown();
+    set({ ...callIdle });
+    toast(LOST_LINK, 'info', { icon: 'call-hangup' });
   }
 }
 
@@ -1387,9 +1428,23 @@ async function loadActive() {
     let rejoin: Call | null = null;
     let other: Call | null = null;
     let awayLive = false;
+    // Esta aba estava numa chamada antes de recarregar e ela já acabou: avisa, em vez de não dizer nada.
+    if (here && !isInCall() && !r.calls.some((c) => c._id === here)) {
+      markLive(null);
+      toast('A chamada terminou enquanto a página recarregava.', 'info', { icon: 'call-hangup' });
+    }
     for (const c of r.calls) {
       const mine = c.mine;
       if (c.status !== 'ongoing' && c.status !== 'ringing') continue;
+      // Chamada a dois desta aba, antes de recarregar: a conexão direta com a outra pessoa não volta. Encerra já (o
+      // outro lado fica sabendo que caiu) em vez de deixar os dois esperando.
+      if (c.scope === 'direct' && here === c._id && !isInCall()) {
+        markLive(null);
+        void api.post('calls.end', { callId: c._id, dropped: true }).catch(() => {});
+        const o = c.caller._id === me ? c.callee : c.caller;
+        toast(`A chamada${o ? ` com ${callUserLabel(o)}` : ''} terminou porque a página foi recarregada.`, 'info', { icon: 'call-hangup' });
+        continue;
+      }
       if (c.scope === 'group' && mine?.state === 'ringing' && !s.incoming.some((x) => x._id === c._id) && !isInCall(c._id)) pushIncoming(c);
       if (c.scope === 'direct' && c.status === 'ringing' && c.callee?._id === me) onDirectCall(c);
       const present = (mine?.state === 'joined' || mine?.state === 'joining') && c.scope === 'group';
@@ -1414,6 +1469,7 @@ function onEvent(ev: ServerEvent) {
   switch (ev.type) {
     case 'connected':
       if (!started) return;
+      void reattachDirect();
       void loadActive();
       clearTimeout(configTimer);
       configTimer = window.setTimeout(() => void loadConfig(), 500);
