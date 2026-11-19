@@ -552,9 +552,8 @@
 .call-note,
 .call-layer,
 .call-version {
-  /* Cor da marca "cheia" dos botões de ação, barras e seleção (BRAND.md: 35% de luz; 28% no hover). Em 33%, o
-     texto branco dos botões tem 4,5:1 ou mais (em 35% ficava com 4,3:1). */
-  --brand-fill: var(--brand-h) var(--brand-s) 33%;
+  /* Cor da marca "cheia" dos botões de ação, barras e seleção (BRAND.md: 35% de luz; 28% no hover). */
+  --brand-fill: var(--brand-h) var(--brand-s) 35%;
   --brand-fill-hover: var(--brand-h) var(--brand-s) 28%;
 
   --shadow-1: 0 1px 2px hsl(var(--shadow-color) / calc(0.04 * var(--shadow-k)));
