@@ -256,6 +256,10 @@ Contas LDAP e contas que só entram por SAML/OAuth seguem o provedor e não rece
 O cliente web é um PWA: no Chrome ou no Edge use "Instalar app" na barra de endereço; no celular, "Adicionar à tela
 inicial" (no iPhone, as notificações só funcionam com o app adicionado à tela inicial).
 
+O app não fica guardado no navegador (precisa do servidor e nunca abre uma versão velha). Se o servidor não responder
+ao abrir o app ou recarregar a página, aparece a tela "Sem conexão com o servidor do chat", que tenta de novo a cada
+5 s e abre o chat sozinha quando o servidor volta.
+
 Com a permissão de notificações dada, o navegador se inscreve para push e recebe menções e DMs mesmo com o chat
 fechado. O push só é enviado para quem não está com o chat aberto em nenhum lugar, e cada pessoa pode desligá-lo por
 dispositivo em Minha conta › Preferências.

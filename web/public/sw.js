@@ -1,8 +1,49 @@
 // Service worker do Wescc Chat: deixa o app instalável e mostra as notificações push com o chat fechado.
-// Não guarda páginas em cache (o app precisa do servidor para funcionar e assim nunca fica com versão velha).
+// Não guarda o app em cache (ele precisa do servidor para funcionar e assim nunca fica com versão velha). Guarda só
+// a página offline.html, mostrada quando o servidor não responde ao abrir o app ou recarregar a página.
 
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+const OFFLINE_CACHE = 'wescc-offline-v1'; // mudou a offline.html? troque o número para os navegadores buscarem de novo
+const OFFLINE_URL = '/offline.html';
+
+// Sem a página guardada (servidor fora na instalação) o service worker instala do mesmo jeito: o push não depende dela.
+const cacheOffline = () =>
+  caches
+    .open(OFFLINE_CACHE)
+    .then((cache) => cache.add(new Request(OFFLINE_URL, { cache: 'reload' })))
+    .catch(() => {});
+
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  event.waitUntil(cacheOffline());
+});
+self.addEventListener('activate', (event) =>
+  event.waitUntil(
+    (async () => {
+      for (const key of await caches.keys()) if (key.startsWith('wescc-offline-') && key !== OFFLINE_CACHE) await caches.delete(key);
+      if (!(await caches.match(OFFLINE_URL))) await cacheOffline();
+      // A abertura da página não espera o service worker acordar (o pedido vai à rede ao mesmo tempo).
+      if (self.registration.navigationPreload) await self.registration.navigationPreload.enable().catch(() => {});
+      await self.clients.claim();
+    })(),
+  ),
+);
+
+// Só a abertura de páginas (GET): se a rede falhar, a página offline no lugar do erro do navegador.
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.mode !== 'navigate' || req.method !== 'GET') return;
+  event.respondWith(
+    (async () => {
+      try {
+        const preload = await event.preloadResponse;
+        if (preload) return preload;
+        return await fetch(req);
+      } catch {
+        return (await caches.match(OFFLINE_URL)) || Response.error();
+      }
+    })(),
+  );
+});
 
 self.addEventListener('push', (event) => {
   let data = {};
