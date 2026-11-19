@@ -284,6 +284,11 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
     if (opts.by && opts.by.id !== userId) await sendSystemMessage(rid, 'ru', opts.by, user.username);
     else await sendSystemMessage(rid, 'ul', { id: user.id, username: user.username }, user.username);
   }
+  // Sala de reunião da Agenda: quem foi tirado por outra pessoa deixa de ser convidado (não volta pelo link).
+  if (opts.by && opts.by.id !== userId) {
+    const { dropMeetingInvite } = await import('../calendar/events');
+    await dropMeetingInvite(rid, userId, opts.by).catch(() => {});
+  }
   if (user) emit('room.left', { room, user: { _id: user.id, username: user.username } });
 }
 
@@ -643,11 +648,12 @@ export async function saveRoomSettings(ctx: Ctx, rid: string, s: RoomSettings) {
   return getRoom(rid);
 }
 
-export async function setArchived(ctx: Ctx, rid: string, archived: boolean) {
+// skipPermission: o próprio chat arquiva (sala de uma reunião cancelada pelo organizador).
+export async function setArchived(ctx: Ctx, rid: string, archived: boolean, opts: { skipPermission?: boolean } = {}) {
   const room = await getRoom(rid);
   if (!room) throw notFound('error-room-not-found', 'Sala não encontrada.');
   if (room.t === 'd') throw badRequest('error-not-allowed', 'DMs não podem ser arquivadas.');
-  if (!(await hasPermission(ctx.userId, archived ? 'archive-room' : 'unarchive-room', rid))) throw forbidden();
+  if (!opts.skipPermission && !(await hasPermission(ctx.userId, archived ? 'archive-room' : 'unarchive-room', rid))) throw forbidden();
   await query('UPDATE rooms SET archived = $2, updated_at = now() WHERE id = $1', [rid, archived]);
   await sendSystemMessage(rid, archived ? 'room-archived' : 'room-unarchived', { id: ctx.userId, username: ctx.username }, '');
   await audit(actorOf(ctx), archived ? 'room.archived' : 'room.unarchived', { rid, name: room.name });

@@ -9,10 +9,10 @@ import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from '../services/audit';
 import { assertCanBringIn } from '../services/direct';
-import { sendMessage } from '../services/messages';
+import { sendMessage, withExtra } from '../services/messages';
 import { hasPermission } from '../services/permissions';
 import { sendPush } from '../services/push';
-import { addUserToRoom, createRoom, getRoom, notifyRoomUpdated, removeUserFromRoom } from '../services/rooms';
+import { addUserToRoom, createRoom, getRoom, notifyRoomUpdated, removeUserFromRoom, republishSubscriptions, setArchived } from '../services/rooms';
 import { getSetting } from '../services/settings';
 import { siteUrl } from '../services/sso';
 import { actorOf, type Ctx } from '../services/users';
@@ -30,8 +30,10 @@ export const CAL_TEXT = {
   start: 'Informe a data e a hora de início.',
   end: 'O fim precisa ser depois do início.',
   tooLong: 'Um evento pode durar até 31 dias.',
+  dateRange: 'Escolha uma data entre um ano atrás e cinco anos à frente.',
   attendees: 'Convide até 200 pessoas por evento.',
   badAttendee: 'Uma das pessoas convidadas não existe ou está desativada.',
+  inactiveAttendee: (username: string) => `@${username} está desativado. Tire da lista de convidados.`,
   reminder: 'Escolha um lembrete entre 0 minutos e 7 dias antes.',
   response: 'Resposta inválida.',
   notInvited: 'Você não está entre os convidados deste evento.',
@@ -42,9 +44,12 @@ export const CAL_TEXT = {
   range: 'Escolha um período de até 400 dias.',
   card: (title: string, url: string) => `Reunião: [${title}](${url})`,
   cardText: 'Reunião do chat',
+  canceledTopic: 'Reunião cancelada',
   canceledMsg: (title: string) => `A reunião **${title}** foi cancelada.`,
   movedMsg: (title: string, when: string) => `A reunião **${title}** mudou de horário: ${when}.`,
   invitePush: (by: string) => `${by} convidou você`,
+  movedPush: (by: string) => `${by} mudou o horário`,
+  removedPush: (by: string) => `${by} tirou você da lista de convidados.`,
 };
 
 const MAX_ATTENDEES = 200;
@@ -141,17 +146,19 @@ function rangeOf(fromRaw: unknown, toRaw: unknown): { from: Date; to: Date } {
 }
 
 // Eventos da pessoa que tocam o período [from, to): os dela (do chat e trazidos) e os que a convidaram, sem os que recusou
-// quando pedir (hideDeclined). Cancelados não aparecem.
-export async function listEvents(ctx: Ctx, input: { from?: unknown; to?: unknown; hideDeclined?: boolean }): Promise<CalendarEvent[]> {
+// quando pedir (hideDeclined). Com pending, só os convites ainda sem resposta (o cartão "Convites sem resposta" não
+// depende do período na tela). Cancelados não aparecem.
+export async function listEvents(ctx: Ctx, input: { from?: unknown; to?: unknown; hideDeclined?: boolean; pending?: boolean }): Promise<CalendarEvent[]> {
   assertCalendar();
   const { from, to } = rangeOf(input.from, input.to);
   const rows = await many(
     `SELECT e.* FROM calendar_events e
       WHERE e.status = 'confirmed' AND e.starts_at < $3 AND e.ends_at > $2
-        AND (e.owner_id = $1 OR EXISTS (
-          SELECT 1 FROM calendar_attendees a WHERE a.event_id = e.id AND a.user_id = $1 AND ($4::boolean IS NOT TRUE OR a.response <> 'declined')))
+        AND (($5::boolean IS NOT TRUE AND e.owner_id = $1) OR EXISTS (
+          SELECT 1 FROM calendar_attendees a WHERE a.event_id = e.id AND a.user_id = $1 AND ($4::boolean IS NOT TRUE OR a.response <> 'declined')
+            AND ($5::boolean IS NOT TRUE OR a.response = 'pending')))
       ORDER BY e.starts_at, e.id LIMIT 2000`,
-    [ctx.userId, from, to, input.hideDeclined === true],
+    [ctx.userId, from, to, input.hideDeclined === true, input.pending === true],
   );
   return hydrate(rows, ctx);
 }
@@ -197,9 +204,11 @@ const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 // Dia inteiro: datas AAAA-MM-DD com o último dia incluído; grava 00:00 UTC do primeiro dia até 00:00 UTC do dia seguinte.
+// A data precisa existir: 2026-02-30 é recusada (não vira 02/03).
 function utcDay(v: string): Date {
-  const d = new Date(`${v.slice(0, 10)}T00:00:00.000Z`);
-  if (!DATE_ONLY.test(v.slice(0, 10)) || Number.isNaN(d.getTime())) throw badRequest('error-invalid-params', CAL_TEXT.start);
+  const day = v.slice(0, 10);
+  const d = new Date(`${day}T00:00:00.000Z`);
+  if (!DATE_ONLY.test(day) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== day) throw badRequest('error-invalid-params', CAL_TEXT.start);
   return d;
 }
 
@@ -231,14 +240,26 @@ async function clean(ctx: Ctx, input: Partial<CalendarEventInput>, prev?: any): 
   }
   if (endsAt.getTime() <= startsAt.getTime()) throw badRequest('error-invalid-params', CAL_TEXT.end);
   if (endsAt.getTime() - startsAt.getTime() > 31 * DAY) throw badRequest('error-invalid-params', CAL_TEXT.tooLong);
+  // Data absurda (campo de data apagado vira 1900, ano digitado errado): de um ano atrás até cinco anos à frente. Um
+  // evento antigo que não muda de horário continua editável.
+  if (!prev || startsAt.getTime() !== new Date(prev.starts_at).getTime()) {
+    const now = Date.now();
+    if (startsAt.getTime() < now - 366 * DAY || startsAt.getTime() > now + 5 * 366 * DAY) throw badRequest('error-invalid-params', CAL_TEXT.dateRange);
+  }
 
   let attendeeIds: string[] | undefined;
   if (input.attendeeIds !== undefined) {
     if (!Array.isArray(input.attendeeIds)) throw badRequest('error-invalid-params', CAL_TEXT.badAttendee);
     const ids = [...new Set(input.attendeeIds.filter((x): x is string => typeof x === 'string' && !!x))].filter((id) => id !== (prev?.owner_id ?? ctx.userId));
     if (ids.length > MAX_ATTENDEES) throw badRequest('error-invalid-params', CAL_TEXT.attendees);
-    const found = ids.length ? await many(`SELECT id FROM users WHERE id = ANY($1) AND active AND type = 'user'`, [ids]) : [];
-    if (found.length !== ids.length) throw badRequest('error-invalid-params', CAL_TEXT.badAttendee);
+    // Quem já era convidado continua na lista mesmo desativado (alguém que saiu da empresa não trava a edição); só quem
+    // entra agora precisa estar ativo.
+    const kept = prev ? new Set((await many(`SELECT user_id FROM calendar_attendees WHERE event_id = $1`, [prev.id])).map((r) => r.user_id as string)) : new Set<string>();
+    const fresh = ids.filter((id) => !kept.has(id));
+    const found = fresh.length ? await many(`SELECT id, username, active FROM users WHERE id = ANY($1) AND type = 'user'`, [fresh]) : [];
+    if (found.length !== fresh.length) throw badRequest('error-invalid-params', CAL_TEXT.badAttendee);
+    const off = found.find((u) => !u.active);
+    if (off) throw badRequest('error-invalid-params', CAL_TEXT.inactiveAttendee(off.username));
     attendeeIds = ids;
   }
   let reminderMinutes: number | null = prev ? (prev.reminder_minutes ?? null) : 10;
@@ -269,17 +290,29 @@ export async function changed(userIds: string[]) {
   bus.publish({ users: ids }, { type: 'calendar.changed' });
 }
 
-const whenFmt = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: process.env.TZ || 'America/Sao_Paulo' });
+// Fuso da empresa: horários nos textos do servidor (notas na sala, push) e começo do dia dos eventos de dia inteiro.
+export const CAL_TZ = process.env.TZ || 'America/Sao_Paulo';
+const whenFmt = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: CAL_TZ });
+const zoneFmt = new Intl.DateTimeFormat('pt-BR', { timeZone: CAL_TZ, timeZoneName: 'long' });
 const dayFmt = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeZone: 'UTC' });
+// O texto vai igual para todos (nota na sala, push): o horário diz o fuso, "18/12/2026, 15:00 (horário de Brasília)".
+function zoneLabel(d: Date): string {
+  const name = zoneFmt.formatToParts(d).find((p) => p.type === 'timeZoneName')?.value ?? '';
+  return name ? ` (${name.replace(' Padrão', '').replace(/^H/, 'h')})` : '';
+}
 export function whenText(e: { allDay: boolean; startsAt: string | Date }) {
   const d = new Date(e.startsAt);
-  return e.allDay ? `${dayFmt.format(d)} (dia inteiro)` : whenFmt.format(d);
+  return e.allDay ? `${dayFmt.format(d)} (dia inteiro)` : `${whenFmt.format(d)}${zoneLabel(d)}`;
+}
+
+async function actorRef(actor: { userId: string; username: string }) {
+  const by = await one('SELECT id, username, name FROM users WHERE id = $1', [actor.userId]);
+  return { _id: actor.userId, username: String(by?.username ?? actor.username), name: String(by?.name ?? '') };
 }
 
 async function announceInvites(ctx: Ctx, eventId: string, userIds: string[]) {
   if (!userIds.length) return;
-  const by = await one('SELECT id, username, name FROM users WHERE id = $1', [ctx.userId]);
-  const byRef = { _id: ctx.userId, username: String(by?.username ?? ctx.username), name: String(by?.name ?? '') };
+  const byRef = await actorRef(ctx);
   for (const uid of userIds) {
     const ev = await eventFor(eventId, uid);
     if (ev) bus.publish({ user: uid }, { type: 'calendar.invite', event: ev, by: byRef });
@@ -292,6 +325,28 @@ async function announceInvites(ctx: Ctx, eventId: string, userIds: string[]) {
     url: `/calendar?evento=${encodeURIComponent(eventId)}`,
     tag: `calendar-${eventId}`,
   }).catch(() => {});
+}
+
+// Mudança de horário, cancelamento e saída da lista de convidados: aviso na tela (como o do convite) e push para os
+// envolvidos, menos quem fez a mudança.
+type ChangeKind = 'moved' | 'canceled' | 'removed';
+async function announceChange(actor: { userId: string; username: string }, eventId: string, userIds: string[], kind: ChangeKind) {
+  const others = [...new Set(userIds)].filter((u) => u !== actor.userId);
+  if (!others.length) return;
+  const by = await actorRef(actor);
+  for (const uid of others) {
+    const event = await eventFor(eventId, uid);
+    if (!event) continue;
+    if (kind === 'moved') bus.publish({ user: uid }, { type: 'calendar.updated', event, by, moved: true });
+    else if (kind === 'canceled') bus.publish({ user: uid }, { type: 'calendar.canceled', event, by });
+    else bus.publish({ user: uid }, { type: 'calendar.removed', event, by });
+  }
+  const ev = await eventFor(eventId, actor.userId);
+  if (!ev) return;
+  const name = by.name || by.username;
+  const body = kind === 'moved' ? `${CAL_TEXT.movedPush(name)} · ${whenText(ev)}` : kind === 'canceled' ? CAL_TEXT.canceled : CAL_TEXT.removedPush(name);
+  const url = kind === 'removed' ? '/calendar' : `/calendar?evento=${encodeURIComponent(eventId)}`;
+  void sendPush(others, { title: ev.title, body, url, tag: `calendar-${eventId}` }).catch(() => {});
 }
 
 // ---------- Reunião: sala e cartão ----------
@@ -333,6 +388,19 @@ async function postMeetingCard(ctx: Ctx, rid: string, eventId: string, code: str
   ).catch(() => {});
 }
 
+// O cartão da reunião (com o botão Entrar) acompanha o título e o horário atuais, sem marcar a mensagem como editada.
+async function refreshMeetingCard(rid: string, eventId: string, c: { title: string; startsAt: Date; endsAt: Date }) {
+  const row = await one(`SELECT * FROM messages WHERE room_id = $1 AND extra->'meeting'->>'meetingId' = $2 ORDER BY created_at LIMIT 1`, [rid, eventId]);
+  if (!row) return;
+  const meeting: MessageMeeting = { ...row.extra.meeting, subject: c.title, startsAt: c.startsAt.toISOString(), endsAt: c.endsAt.toISOString() };
+  const attachments = (Array.isArray(row.attachments) ? row.attachments : []).map((a: any) => (a?.type === 'meeting' ? { ...a, title: c.title } : a));
+  const upd = await one(
+    `UPDATE messages SET msg = $2, extra = jsonb_set(extra, '{meeting}', $3::jsonb), attachments = $4::jsonb, updated_at = now() WHERE id = $1 RETURNING *`,
+    [row.id, CAL_TEXT.card(linkLabel(c.title), meeting.joinUrl), JSON.stringify(meeting), JSON.stringify(attachments)],
+  );
+  if (upd) bus.publish({ room: rid }, { type: 'message', action: 'updated', message: withExtra(upd) });
+}
+
 async function roomNote(ctx: Ctx, rid: string | null, msg: string) {
   if (!rid) return;
   await sendMessage(ctx, { rid, msg }, { skipCommands: true, integration: true, ignoreReadOnly: true }).catch(() => {});
@@ -345,7 +413,7 @@ export async function createEvent(ctx: Ctx, input: Partial<CalendarEventInput>):
   const c = await clean(ctx, input);
   if (c.isMeeting && !(await hasPermission(ctx.userId, 'create-calendar-meeting'))) throw forbidden(CAL_TEXT.meetingPermission);
   // Restrição de conversas (papel Operação): convidar é levar a pessoa para uma conversa privada, como numa sala.
-  if (c.attendeeIds?.length) await assertCanBringIn(ctx.userId, { t: 'p' }, c.attendeeIds);
+  if (c.attendeeIds?.length) await assertCanBringIn(ctx.userId, { t: 'p' }, c.attendeeIds, { calendar: true });
   const id = newId();
   const code = c.isMeeting ? meetingCode() : null;
   await query(
@@ -385,7 +453,7 @@ export async function updateEvent(ctx: Ctx, id: string, input: Partial<CalendarE
   const added = next.filter((u) => !before.includes(u));
   const removed = before.filter((u) => !next.includes(u));
   if (c.isMeeting && !prev.is_meeting && !(await hasPermission(ctx.userId, 'create-calendar-meeting'))) throw forbidden(CAL_TEXT.meetingPermission);
-  if (added.length) await assertCanBringIn(ctx.userId, prev.room_id ? { id: prev.room_id, t: 'p' } : { t: 'p' }, added);
+  if (added.length) await assertCanBringIn(ctx.userId, prev.room_id ? { id: prev.room_id, t: 'p' } : { t: 'p' }, added, { calendar: true });
   const moved = c.startsAt.getTime() !== new Date(prev.starts_at).getTime() || c.endsAt.getTime() !== new Date(prev.ends_at).getTime() || c.allDay !== prev.all_day;
   const code = c.isMeeting ? (prev.meeting_code ?? meetingCode()) : null;
   await query(
@@ -406,15 +474,20 @@ export async function updateEvent(ctx: Ctx, id: string, input: Partial<CalendarE
     if (c.title !== prev.title) {
       await query(`UPDATE rooms SET fname = $2, updated_at = now() WHERE id = $1`, [rid, c.title]);
       await notifyRoomUpdated(rid);
+      // A barra lateral mostra o nome guardado na inscrição de cada membro.
+      await republishSubscriptions(rid);
     }
     const me = { id: ctx.userId, username: ctx.username };
     for (const uid of added) await addUserToRoom(rid, uid, { inviter: me }).catch(() => {});
     for (const uid of removed) await removeUserFromRoom(rid, uid, { by: me }).catch(() => {});
+    if (moved || c.title !== prev.title) await refreshMeetingCard(rid, id, c);
     if (moved) await roomNote(ctx, rid, CAL_TEXT.movedMsg(c.title, whenText({ allDay: c.allDay, startsAt: c.startsAt })));
   }
   await audit(actorOf(ctx), 'calendar.event.updated', { eventId: id }, { added: added.length, removed: removed.length, moved });
   await changed([ctx.userId, ...before, ...added]);
   await announceInvites(ctx, id, added);
+  if (moved) await announceChange(ctx, id, next.filter((u) => before.includes(u)), 'moved');
+  if (removed.length) await announceChange(ctx, id, removed, 'removed');
   return (await eventFor(id, ctx.userId))!;
 }
 
@@ -424,12 +497,16 @@ export async function cancelEvent(ctx: Ctx, id: string): Promise<void> {
   const people = await involved(id, row.owner_id);
   await query(`UPDATE calendar_events SET status = 'canceled', canceled_at = now(), updated_at = now() WHERE id = $1`, [id]);
   if (row.is_meeting) await roomNote(ctx, row.room_id, CAL_TEXT.canceledMsg(row.title));
-  const others = people.filter((u) => u !== ctx.userId);
-  if (others.length) {
-    void sendPush(others, { title: row.title, body: CAL_TEXT.canceled, url: '/calendar', tag: `calendar-${id}` }).catch(() => {});
+  // A sala da reunião cancelada fica arquivada (ninguém escreve nem liga; o histórico continua) com o tópico
+  // "Reunião cancelada", para não se confundir com as reuniões que vão acontecer.
+  const room = row.is_meeting && row.room_id ? await getRoom(row.room_id) : null;
+  if (room && !room.archived) {
+    await query(`UPDATE rooms SET topic = $2, updated_at = now() WHERE id = $1`, [room.id, CAL_TEXT.canceledTopic]);
+    await setArchived(ctx, room.id, true, { skipPermission: true }).catch(() => {});
   }
   await audit(actorOf(ctx), 'calendar.event.canceled', { eventId: id }, {});
   await changed(people);
+  await announceChange(ctx, id, people, 'canceled');
 }
 
 export async function respond(ctx: Ctx, id: string, response: unknown): Promise<CalendarEvent> {
@@ -492,6 +569,20 @@ export async function joinMeeting(ctx: Ctx, code: unknown): Promise<{ rid: strin
   }
   await addUserToRoom(row.room_id, ctx.userId);
   return { rid: row.room_id, event: (await eventFor(row.id, ctx.userId))! };
+}
+
+// Alguém tirou a pessoa da sala de uma reunião (Remover da sala): ela deixa de ser convidada e não volta pelo link
+// "Só convidados" até ser convidada de novo. Quem sai da sala por conta própria continua convidado.
+export async function dropMeetingInvite(rid: string, userId: string, by: { id: string; username: string }) {
+  const rows = await many(
+    `DELETE FROM calendar_attendees a USING calendar_events e
+      WHERE e.id = a.event_id AND e.room_id = $1 AND e.is_meeting AND a.user_id = $2 RETURNING e.id, e.owner_id`,
+    [rid, userId],
+  );
+  for (const r of rows) {
+    await changed([userId, ...(await involved(r.id, r.owner_id))]);
+    await announceChange({ userId: by.id, username: by.username }, r.id, [userId], 'removed');
+  }
 }
 
 // Reunião ligada a uma sala (cabeçalho da sala da reunião).

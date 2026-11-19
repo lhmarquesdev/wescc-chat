@@ -52,15 +52,18 @@ export function onDay(e: CalendarEvent, d: Date): boolean {
 const pad = (n: number) => String(n).padStart(2, '0');
 export const dateInput = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 export const timeInput = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+// Data vazia ou incompleta (campo apagado) vira data inválida, e não 01/01/1900.
 export function fromInputs(date: string, time: string): Date {
   const [y, m, dd] = date.split('-').map(Number);
   const [h, mi] = (time || '00:00').split(':').map(Number);
-  return new Date(y, (m || 1) - 1, dd || 1, h || 0, mi || 0);
+  if (!y || !m || !dd || Number.isNaN(h) || Number.isNaN(mi)) return new Date(Number.NaN);
+  return new Date(y, m - 1, dd, h, mi);
 }
 
 const timeFmt = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const dayFmt = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
 const shortDayFmt = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' });
+const shortDayYearFmt = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 export const monthFmt = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' });
 export const weekdayShort = new Intl.DateTimeFormat('pt-BR', { weekday: 'short' });
 
@@ -68,11 +71,12 @@ export const fmtTime = (d: Date | string) => timeFmt.format(new Date(d));
 export const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 export const fmtDay = (d: Date) => cap(dayFmt.format(d));
 
-// "Hoje, 14:00–15:00", "Amanhã, dia inteiro", "Qui., 30 de out., 09:00–10:30".
+// "Hoje, 14:00–15:00", "Amanhã, dia inteiro", "Qui., 30 de out., 09:00–10:30" (com o ano quando não é o atual).
 export function whenLabel(e: Pick<CalendarEvent, 'allDay' | 'startsAt' | 'endsAt'>): string {
   const { start, end } = eventDays(e);
   const today = startOfDay(new Date());
-  const dayName = (d: Date) => (sameDay(d, today) ? 'Hoje' : sameDay(d, addDays(today, 1)) ? 'Amanhã' : sameDay(d, addDays(today, -1)) ? 'Ontem' : cap(shortDayFmt.format(d)));
+  const dayName = (d: Date) =>
+    sameDay(d, today) ? 'Hoje' : sameDay(d, addDays(today, 1)) ? 'Amanhã' : sameDay(d, addDays(today, -1)) ? 'Ontem' : cap((d.getFullYear() === today.getFullYear() ? shortDayFmt : shortDayYearFmt).format(d));
   if (e.allDay) {
     const last = addDays(end, -1);
     return sameDay(start, last) || last < start ? `${dayName(start)}, dia inteiro` : `${dayName(start)} a ${dayName(last)}, dia inteiro`;
@@ -80,6 +84,26 @@ export function whenLabel(e: Pick<CalendarEvent, 'allDay' | 'startsAt' | 'endsAt
   if (sameDay(start, end) || (end.getTime() - start.getTime() < DAY_MS && end.getHours() === 0 && end.getMinutes() === 0))
     return `${dayName(start)}, ${fmtTime(start)}–${fmtTime(end)}`;
   return `${dayName(start)}, ${fmtTime(start)} – ${dayName(end)}, ${fmtTime(end)}`;
+}
+
+// A Lista mostra 45 dias; Anterior e Próximo andam o mesmo tanto.
+export const LIST_DAYS = 45;
+const monthShort = new Intl.DateTimeFormat('pt-BR', { month: 'short' });
+
+// Título da Lista fora de hoje: o período na tela, como o da Semana ("20 out. – 3 dez. de 2026").
+export function listRange(from: Date): string {
+  const to = addDays(from, LIST_DAYS - 1);
+  const d = (x: Date) => `${x.getDate()} ${monthShort.format(x)}`;
+  return `${d(from)} – ${d(to)} de ${to.getFullYear()}`;
+}
+
+// Hora de um evento com horário num dia (Mês e Lista): o início no primeiro dia, "até 06:00" no dia em que termina e nada
+// nos dias do meio. ends: no primeiro dia, quantos dias depois ele termina (0 no mesmo dia; fim às 00:00 conta no anterior).
+export function dayTimes(e: Pick<CalendarEvent, 'startsAt' | 'endsAt'>, d: Date): { label: string; ends: number } {
+  const s = new Date(e.startsAt);
+  const last = startOfDay(new Date(new Date(e.endsAt).getTime() - 1));
+  if (sameDay(s, d)) return { label: fmtTime(s), ends: Math.round((last.getTime() - startOfDay(s).getTime()) / DAY_MS) };
+  return { label: sameDay(last, d) ? `até ${fmtTime(e.endsAt)}` : '', ends: 0 };
 }
 
 export function reminderLabel(m: number | null): string {
@@ -94,7 +118,9 @@ export function reminderLabel(m: number | null): string {
 // ---------- API ----------
 
 export const calendarApi = {
-  list: (from: Date, to: Date) => api.get<{ events: CalendarEvent[] }>('calendar.events', { from: from.toISOString(), to: to.toISOString() }).then((r) => r.events),
+  // pending: só os convites ainda sem resposta.
+  list: (from: Date, to: Date, pending?: boolean) =>
+    api.get<{ events: CalendarEvent[] }>('calendar.events', { from: from.toISOString(), to: to.toISOString(), ...(pending ? { pending: true } : {}) }).then((r) => r.events),
   get: (eventId: string) => api.get<{ event: CalendarEvent }>('calendar.event', { eventId }).then((r) => r.event),
   create: (input: CalendarEventInput) => api.post<{ event: CalendarEvent }>('calendar.create', input as any).then((r) => r.event),
   update: (eventId: string, input: Partial<CalendarEventInput>) => api.post<{ event: CalendarEvent }>('calendar.update', { eventId, ...input }).then((r) => r.event),
@@ -107,9 +133,9 @@ export const calendarApi = {
   byRoom: (roomId: string) => api.get<{ event: CalendarEvent | null }>('calendar.meeting.byRoom', { roomId }).then((r) => r.event),
 };
 
-// Eventos de [from, to). Volta a buscar quando a agenda muda (evento, convite, resposta), com 300 ms de
-// folga para juntar vários avisos seguidos. A lista anterior fica na tela enquanto a nova chega.
-export function useCalendarEvents(from: Date, to: Date) {
+// Eventos de [from, to) (com pending, só os convites sem resposta). Volta a buscar quando a agenda muda (evento, convite,
+// resposta), com 300 ms de folga para juntar vários avisos seguidos. A lista anterior fica na tela enquanto a nova chega.
+export function useCalendarEvents(from: Date, to: Date, pending?: boolean) {
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -117,7 +143,7 @@ export function useCalendarEvents(from: Date, to: Date) {
   useEffect(() => {
     let alive = true;
     calendarApi
-      .list(from, to)
+      .list(from, to, pending)
       .then((list) => alive && (setEvents(list), setError(null)))
       .catch((e) => alive && setError(e?.message ?? 'Não foi possível carregar a agenda.'));
     return () => {
@@ -153,14 +179,15 @@ export interface Placed {
 export function layoutDay(events: CalendarEvent[], day: Date): Placed[] {
   const d0 = startOfDay(day).getTime();
   const d1 = addDays(startOfDay(day), 1).getTime();
+  // Confere o dia pelo horário real antes de cortar nas bordas do dia e de dar a altura mínima: um evento que acabou
+  // antes de 00:00 (ou exatamente às 00:00) não aparece neste dia.
   const items = events
-    .filter((e) => !e.allDay)
+    .filter((e) => !e.allDay && new Date(e.startsAt).getTime() < d1 && new Date(e.endsAt).getTime() > d0)
     .map((e) => {
       const s = Math.max(new Date(e.startsAt).getTime(), d0);
       const en = Math.min(new Date(e.endsAt).getTime(), d1);
       return { e, s, en: Math.max(en, s + 15 * 60_000) };
     })
-    .filter((x) => x.s < d1 && x.en > d0)
     .sort((a, b) => a.s - b.s || b.en - a.en);
   const out: Placed[] = [];
   let group: { item: (typeof items)[number]; col: number }[] = [];

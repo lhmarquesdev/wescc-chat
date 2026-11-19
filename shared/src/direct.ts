@@ -92,6 +92,7 @@ export function directBlockMessage(v: DirectVerdict, viewer: string): string {
 export interface BringInMode {
   joinerId?: string; // link de convite: quem entra (quem convida é quem criou o link)
   privatize?: boolean; // a sala vai virar privada com quem já está nela
+  calendar?: boolean; // convite para um evento ou reunião da Agenda
 }
 
 export function bringInBlockMessage(x: DirectParty, y: DirectParty, inviter: DirectParty, mode: BringInMode = {}): string {
@@ -105,6 +106,11 @@ export function bringInBlockMessage(x: DirectParty, y: DirectParty, inviter: Dir
     return withInviter
       ? `Você não pode tornar esta sala privada: conversas particulares entre você e @${x.username} estão bloqueadas pela política da empresa.`
       : `Você não pode tornar esta sala privada: @${x.username} e @${y.username} não podem conversar em particular.`;
+  }
+  if (mode.calendar) {
+    return withInviter
+      ? `Você não pode convidar @${x.username}: conversas particulares entre vocês estão bloqueadas pela política da empresa. Peça a um supervisor para marcar.`
+      : `Você não pode convidar @${x.username} junto com @${y.username}: os dois não podem conversar em particular. Peça a um supervisor para marcar.`;
   }
   return withInviter
     ? `Você não pode adicionar @${x.username} a uma sala privada: conversas particulares entre vocês estão bloqueadas pela política da empresa. Peça a um supervisor para adicionar.`

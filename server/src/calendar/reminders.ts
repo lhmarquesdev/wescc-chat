@@ -1,11 +1,13 @@
 // Lembretes da Agenda: reminder_minutes antes do início, para o dono e os convidados que não recusaram (aviso na tela e
-// push). Cada evento avisa uma vez por horário (mudar o horário zera reminded_at).
+// push). Cada evento avisa uma vez por horário (mudar o horário zera reminded_at). Dia inteiro começa às 00:00 no fuso
+// da empresa (é gravado às 00:00 UTC, que no Brasil ainda é a noite anterior).
 import { many } from '../db/pool';
 import { bus } from '../realtime/bus';
 import { sendPush } from '../services/push';
-import { calendarOn, eventFor, whenText } from './events';
+import { CAL_TZ, calendarOn, eventFor, whenText } from './events';
 
 const LATE_MINUTES = 10; // o servidor esteve parado: lembrete de evento que começou há mais que isso não sai
+const STARTS = `(CASE WHEN all_day THEN ((starts_at AT TIME ZONE 'UTC')::date::timestamp AT TIME ZONE $2) ELSE starts_at END)`;
 
 export async function sendDueReminders(): Promise<number> {
   if (!calendarOn()) return 0;
@@ -14,10 +16,12 @@ export async function sendDueReminders(): Promise<number> {
       WHERE id IN (
         SELECT id FROM calendar_events
          WHERE status = 'confirmed' AND reminded_at IS NULL AND reminder_minutes IS NOT NULL
-           AND starts_at - reminder_minutes * interval '1 minute' <= now() AND starts_at > now() - $1 * interval '1 minute'
+           AND ${STARTS} - reminder_minutes * interval '1 minute' <= now() AND ${STARTS} > now() - $1 * interval '1 minute'
+           -- Limite pelo próprio starts_at (o dia inteiro fica a menos de 14 h dele) para o índice continuar valendo.
+           AND starts_at > now() - ($1 + 1440) * interval '1 minute'
          ORDER BY starts_at LIMIT 200 FOR UPDATE SKIP LOCKED)
       RETURNING id, owner_id, title, starts_at, all_day, is_meeting, meeting_code`,
-    [LATE_MINUTES],
+    [LATE_MINUTES, CAL_TZ],
   );
   for (const e of due) {
     const people = [

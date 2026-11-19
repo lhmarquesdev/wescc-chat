@@ -6,6 +6,7 @@ import { RESPONSE_LABEL } from '@shared/calendar';
 import { errorMessage } from '../../lib/api';
 import { calendarApi, reminderLabel, whenLabel } from '../../lib/calendar';
 import { useCallStore } from '../../lib/call/store';
+import { linkify } from '../../lib/markdown';
 import { useStore } from '../../lib/store';
 import { Icon, type IconName } from '../Icon';
 import { confirmDialog, Modal, UserAvatar } from '../ui';
@@ -71,7 +72,8 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
     }
   };
 
-  const canRespond = event.myResponse !== 'organizer';
+  const canceled = event.status === 'canceled';
+  const canRespond = event.myResponse !== 'organizer' && !canceled;
   const meetPath = event.meeting ? `/meet/${event.meeting.code}` : null;
   // Sem chamadas em grupo (servidor de chamadas não configurado), a reunião é só a conversa: "Abrir", não "Entrar".
   const groupOn = useCallStore((s) => s.config?.groupEnabled) !== false;
@@ -83,7 +85,7 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
       className="cal-details"
       description={event.meeting ? 'Reunião do chat' : undefined}
       footer={
-        event.canEdit ? (
+        event.canEdit && !canceled ? (
           <>
             <button type="button" className="btn ghost danger" disabled={!!busy} aria-busy={busy === 'cancel' || undefined} onClick={() => void cancel()}>
               {event.meeting ? 'Cancelar reunião' : 'Cancelar evento'}
@@ -97,12 +99,18 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
       }
     >
       <div className="cal-detail">
+        {canceled && (
+          <div className="callout warn" role="status">
+            <Icon name="cal-canceled" />
+            <span>{event.meeting ? 'Esta reunião foi cancelada.' : 'Este evento foi cancelado.'}</span>
+          </div>
+        )}
         <Row icon="cal-time">
           <strong>{whenLabel(event)}</strong>
           {event.reminderMinutes !== null && <small className="muted">Lembrete: {reminderLabel(event.reminderMinutes)}</small>}
         </Row>
 
-        {event.meeting && (
+        {event.meeting && !canceled && (
           <div className="cal-meet-box">
             <div className="cal-meet-link">
               <Icon name="cal-meeting" size={18} />
@@ -123,7 +131,7 @@ export function EventDetails({ event, onClose, onEdit, onChanged }: { event: Cal
         {event.location && <Row icon="cal-location">{event.location}</Row>}
         {event.description && (
           <Row icon="info">
-            <p className="cal-desc">{event.description}</p>
+            <p className="cal-desc">{linkify(event.description)}</p>
           </Row>
         )}
 

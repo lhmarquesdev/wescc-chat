@@ -1148,6 +1148,17 @@ com link pede a permissão `create-calendar-meeting` (papéis `admin` e `user`).
 sem ele, a página da reunião oferece só "Abrir o chat da reunião" e avisa que a chamada de vídeo ainda não está
 disponível.
 
+Os convidados recebem um aviso na tela (e push) no convite, quando o horário muda, quando o evento é cancelado e quando
+saem da lista de convidados. Quem é tirado da sala de uma reunião por outra pessoa deixa de ser convidado e não volta
+pelo link "Só convidados" até ser convidado de novo (quem sai por conta própria continua convidado). O lembrete de um
+evento de dia inteiro conta a partir de 00:00 no fuso da empresa (variável `TZ` do servidor, padrão
+`America/Sao_Paulo`), e os horários escritos pelo servidor (nota na sala da reunião, push) dizem o fuso, por exemplo
+"15:00 (horário de Brasília)". A data de início de um evento vai de um ano atrás até cinco anos à frente.
+
+Cancelar uma reunião arquiva a sala dela, com o tópico "Reunião cancelada": o histórico continua disponível, mas
+ninguém escreve nem liga mais por ali. O cartão **Convites sem resposta** reúne todos os convites ainda sem resposta,
+de agora até um ano à frente, em qualquer visão (no celular ele fica acima da agenda e abre com um toque).
+
 ### Só agenda interna
 
 A Agenda é só do chat: não se conecta ao Google Agenda nem ao Outlook. Para ligar ou desligar a Agenda, use

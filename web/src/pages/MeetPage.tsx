@@ -7,6 +7,7 @@ import { api, ApiError, errorMessage } from '../lib/api';
 import { calendarApi, whenLabel } from '../lib/calendar';
 import { openCall, openJoin, useCallStore } from '../lib/call/store';
 import { roomPath } from '../lib/format';
+import { linkify } from '../lib/markdown';
 import { explainCall } from '../lib/roomcall';
 import { useSetting } from '../lib/store';
 import { Icon } from '../components/Icon';
@@ -33,6 +34,7 @@ export function MeetPage() {
       }),
     [code],
   );
+  const calendarOn = useSetting<boolean>('Calendar_Enabled') !== false;
   const [busy, setBusy] = useState<'video' | 'chat' | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
 
@@ -57,7 +59,13 @@ export function MeetPage() {
   };
 
   let body;
-  if (error)
+  if (!calendarOn)
+    body = (
+      <Empty icon="nav-calendar" title="A Agenda está desativada">
+        A Agenda e as reuniões estão desativadas neste chat. Fale com o administrador.
+      </Empty>
+    );
+  else if (error)
     body = (
       <Empty
         icon="cal-canceled"
@@ -98,7 +106,7 @@ export function MeetPage() {
           <UserAvatar username={e.owner.username} size={20} />
           Organizada por {e.owner.name || e.owner.username}
         </p>
-        {e.description && <p className="meet-desc">{e.description}</p>}
+        {e.description && <p className="meet-desc">{linkify(e.description)}</p>}
         {canceled ? (
           <div className="callout warn">
             <Icon name="cal-canceled" />
@@ -153,7 +161,7 @@ export function MeetPage() {
     <div className="page meet-page">
       <div className="meet-wrap">
         {body}
-        {error && retryable && (
+        {error && retryable && calendarOn && (
           <button type="button" className="btn ghost small" onClick={reload}>
             Tentar de novo
           </button>

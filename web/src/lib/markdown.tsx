@@ -189,6 +189,26 @@ export function renderMarkdown(text: string, o: Opts = {}): ReactNode {
   });
 }
 
+// Texto simples (descrição de um evento da Agenda) com os endereços clicáveis, abrindo em outra aba: nada de markdown,
+// e as quebras de linha ficam como estão.
+const URL_ONLY = new RegExp(URL_SRC, 'g');
+export function linkify(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(URL_ONLY)) {
+    const idx = m.index ?? 0;
+    if (idx > last) out.push(text.slice(last, idx));
+    out.push(
+      <a key={idx} href={safeUrl(m[0])} target="_blank" rel="noopener noreferrer">
+        {m[0]}
+      </a>,
+    );
+    last = idx + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
 // Mensagem só com emojis aparece maior.
 export function isEmojiOnly(text: string) {
   const t = text.trim();
