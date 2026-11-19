@@ -146,7 +146,34 @@ export async function registerUser(input: { username: string; name: string; emai
   // Aprovação manual: a administração vê a conta como "Aguardando aprovação" (não como uma conta desativada).
   if (manual) await query('UPDATE users SET pending_approval = true WHERE id = $1', [row.id]);
   await audit({ id: row.id, username: row.username, ip }, 'user.registered', { userId: row.id });
+  if (manual) void notifyPendingApproval(row).catch(() => {});
   return row;
+}
+
+// Cadastro aguardando aprovação: quem pode aprovar (ativar contas) fica sabendo na hora, no chat e por e-mail, com o
+// link para o filtro "Aguardando aprovação" de Administração › Usuários.
+async function notifyPendingApproval(u: { id: string; username: string; name: string; email: string | null }) {
+  const { rolesWithPermission } = await import('./permissions');
+  const roles = rolesWithPermission('edit-other-user-active-status');
+  if (!roles.length) return;
+  const people = await many<{ id: string; email: string | null }>(`SELECT id, email FROM users WHERE active AND type = 'user' AND roles && $1::text[]`, [roles]);
+  if (!people.length) return;
+  const who = `${u.name || u.username} (@${u.username}${u.email ? `, ${u.email}` : ''})`;
+  bus.publish(
+    { users: people.map((p) => p.id) },
+    { type: 'notification', rid: '', title: 'Cadastro aguardando aprovação', text: `${who} se cadastrou e aguarda aprovação em Administração › Usuários.`, messageId: '', sender: { _id: 'system', username: 'system' } },
+  );
+  const { sendMail } = await import('./mailer');
+  const { siteUrl } = await import('./sso');
+  const site = getSetting<string>('Site_Name');
+  for (const p of people) {
+    if (!p.email) continue;
+    await sendMail({
+      to: p.email,
+      subject: `[${site}] Cadastro aguardando aprovação`,
+      text: `Olá.\n\n${who} se cadastrou no ${site} e aguarda a aprovação de um administrador para entrar.\n\nPara aprovar ou recusar o cadastro, abra:\n${siteUrl()}/admin/users?status=pending`,
+    });
+  }
 }
 
 // ---------- Login e sessões ----------

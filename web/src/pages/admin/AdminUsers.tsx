@@ -63,7 +63,8 @@ function UserList() {
   // O campo de busca responde na hora; a lista só pesquisa quando a pessoa para de digitar.
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('');
-  const [status, setStatus] = useState<Status>('');
+  // ?status=pending: o link do aviso de cadastro aguardando aprovação abre a lista já no filtro.
+  const [status, setStatus] = useState<Status>(() => (['active', 'deactivated', 'pending'].includes(params.get('status') ?? '') ? (params.get('status') as Status) : ''));
   const [role, setRole] = useState(params.get('role') ?? '');
   const [offset, setOffset] = useState(0);
   const [count, setCount] = useState(25);

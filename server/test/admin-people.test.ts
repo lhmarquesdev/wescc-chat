@@ -2,7 +2,7 @@
 // ativo, as restrições de segurança de papéis com gente acima de quem edita e o que o editor de usuário mostra.
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pool } from '../src/db/pool';
-import { admin, api, login, newUser, sleep, startServer, stopServer, type Auth } from './helpers';
+import { admin, api, connectWs, login, newUser, sleep, startServer, stopServer, type Auth } from './helpers';
 
 // Os e-mails ficam numa caixa de saída em memória; "SMTP configurado" é ligado e desligado pelo teste.
 const mail = vi.hoisted(() => ({ configured: true, outbox: [] as { to: string; subject: string; text: string; html?: string }[] }));
@@ -256,6 +256,38 @@ describe('cadastros aguardando aprovação', () => {
     expect(after.counts.pending).toBe(0);
     expect((await login('novato', 'senha-forte-1')).username).toBe('novato');
     await api('POST', 'settings', { settings: { Accounts_ManuallyApproveNewUsers: false } }, A);
+  });
+});
+
+describe('cadastro aguardando aprovação avisa quem aprova', () => {
+  it('quem pode ativar contas recebe o aviso no chat e por e-mail, com o link do filtro', async () => {
+    const keys = ['view-user-administration', 'edit-other-user-active-status'];
+    expect((await api('POST', 'rbac.roles.create', { name: 'aprovador', description: 'Aprovador', scope: 'Users', permissions: keys }, A)).success).toBe(true);
+    const aprovador = await newUser(A, { roles: ['user', 'aprovador'] });
+    const comum = await newUser(A);
+    const wsA = connectWs(aprovador);
+    const wsC = connectWs(comum);
+    await Promise.all([wsA.ready, wsC.ready]);
+    await api('POST', 'settings', { settings: { Accounts_RegistrationForm: 'Public', Accounts_ManuallyApproveNewUsers: true } }, A);
+    const reg = await api('POST', 'users.register', { username: 'espera.aprov', name: 'Edu Espera', email: 'edu@test.local', pass: 'senha-forte-1' });
+    expect(reg.success).toBe(true);
+    const ev = await wsA.waitFor((e) => e.type === 'notification' && e.title === 'Cadastro aguardando aprovação');
+    expect(ev.text).toMatch(/Edu Espera \(@espera\.aprov, edu@test\.local\) se cadastrou/);
+    await sleep(100);
+    expect(wsC.events.some((e) => e.type === 'notification' && e.title === 'Cadastro aguardando aprovação')).toBe(false);
+    const adminEmail = (await pool.query(`SELECT email FROM users WHERE username = 'admin'`)).rows[0].email;
+    const to = mail.outbox.filter((m) => m.subject.includes('Cadastro aguardando aprovação')).map((m) => m.to);
+    expect(to).toEqual(expect.arrayContaining([adminEmail, `${aprovador.username}@test.local`]));
+    expect(to).not.toContain(`${comum.username}@test.local`);
+    expect(mail.outbox.find((m) => m.to === adminEmail && m.subject.includes('aguardando'))!.text).toMatch(/https:\/\/chat\.empresa\.com\.br\/admin\/users\?status=pending/);
+    // Sem aprovação manual, ninguém é avisado.
+    mail.outbox.length = 0;
+    await api('POST', 'settings', { settings: { Accounts_ManuallyApproveNewUsers: false } }, A);
+    expect((await api('POST', 'users.register', { username: 'livre.entra', name: 'Livre', email: 'livre@test.local', pass: 'senha-forte-1' })).success).toBe(true);
+    await sleep(100);
+    expect(mail.outbox.filter((m) => m.subject.includes('aguardando'))).toHaveLength(0);
+    wsA.close();
+    wsC.close();
   });
 });
 

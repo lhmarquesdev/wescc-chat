@@ -735,8 +735,9 @@ Em Administração › Usuários:
   a senha** faz o mesmo para uma conta que já existe, e a pessoa recebe um aviso quando um administrador troca a
   senha dela.
 - **Aguardando aprovação**: com "Aprovar novos usuários manualmente", quem se cadastra pela tela de entrar aparece
-  com esse status e um filtro próprio (separado dos desativados). **Aprovar cadastro** ativa a conta e avisa a pessoa
-  por e-mail; **Recusar cadastro** exclui o cadastro.
+  com esse status e um filtro próprio (separado dos desativados). Quem pode ativar contas recebe um aviso na hora, no
+  chat e por e-mail, com o link para o filtro. **Aprovar cadastro** ativa a conta e avisa a pessoa por e-mail;
+  **Recusar cadastro** exclui o cadastro.
 - **Nome e nome de usuário**: o nome é obrigatório (até 100 caracteres) e a bio vai até 500. `all`, `here` e `system`
   são nomes de usuário reservados (@all e @here avisam a sala inteira).
 - **Editor de usuário**: Redefinir 2FA e Remover avatar pedem confirmação; trocar o e-mail desmarca "E-mail
