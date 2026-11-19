@@ -215,6 +215,7 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
     if (!yes) return;
     try {
       await api.post('integrations.remove', { type: initial.type, integrationId: initial._id });
+      ok('Integração excluída.');
       onSaved();
       onClose();
     } catch (e) {
@@ -355,13 +356,23 @@ function IntegrationForm({ initial, onClose, onSaved }: { initial: any; onClose:
 function History({ integration, onClose }: { integration: any; onClose: () => void }) {
   const [offset, setOffset] = useState(0);
   const { data, loading, reload } = useAsync(() => api.get('integrations.history', { id: integration._id, offset, count: 25 }), [offset]);
+  const clear = async () => {
+    const yes = await confirmDialog({
+      title: 'Limpar o histórico?',
+      body: `Todas as chamadas registradas de ${integration.name} saem da lista. Não dá para desfazer.`,
+      confirmLabel: 'Limpar histórico',
+      danger: true,
+    });
+    if (!yes) return;
+    api.post('integrations.clearHistory', { integrationId: integration._id }).then(() => (ok('Histórico limpo.'), setOffset(0), reload())).catch(fail);
+  };
   return (
     <Modal
       wide
       title={`Histórico: ${integration.name}`}
       onClose={onClose}
       footer={
-        <button className="btn" disabled={!data?.history.length} onClick={() => api.post('integrations.clearHistory', { integrationId: integration._id }).then(reload).catch(fail)}>
+        <button className="btn" disabled={!data?.history.length} onClick={clear}>
           Limpar histórico
         </button>
       }

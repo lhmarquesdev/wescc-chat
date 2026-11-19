@@ -404,7 +404,9 @@ export function roomsRoutes(app: FastifyInstance) {
   route(app, 'GET', 'rooms.adminRooms.getRoom', { permissions: ['view-room-administration'] }, async (req) => {
     const room = await getRoom(str(q(req).rid, 'rid'));
     if (!room) throw notFound('error-room-not-found');
-    return mapRoom(room);
+    // owners: os donos da sala (Administração › Salas troca o dono sem precisar ser membro).
+    const owners = await many(`SELECT u.id AS _id, u.username, u.name FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.room_id = $1 AND 'owner' = ANY(s.roles) ORDER BY u.username`, [room.id]);
+    return { ...mapRoom(room), owners };
   });
   // Ver a administração de salas não basta para pôr gente nelas: canal pede add-user-to-any-c-room e grupo privado
   // add-user-to-any-p-room, como no resto do chat. A regra da Operação vale dentro de addUserToRoom (assertCanBringIn).
