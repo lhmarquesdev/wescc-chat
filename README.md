@@ -254,7 +254,8 @@ são revogados e o 2FA continua sendo pedido. Para funcionar:
   com o administrador." no lugar do link);
 - confira a URL do site em Configurações › Geral (ou a variável `SITE_URL`), que é usada no link.
 
-Contas LDAP e contas que só entram por SAML/OAuth seguem o provedor e não recebem o link.
+Contas LDAP e contas que só entram por SAML/OAuth seguem o provedor e não recebem o link (com o LDAP ligado, a tela
+"Esqueci minha senha" lembra que a senha de rede se troca pelo procedimento da TI).
 
 ## App instalável e notificações push
 

@@ -266,7 +266,19 @@ export function LoginPage() {
   );
 }
 
+// Com o AD ligado, o link vale só para contas com senha do chat (as de rede trocam a senha pelo procedimento da TI).
+// Não diz se o e-mail digitado é de uma conta de rede.
+function LdapResetNote() {
+  return (
+    <div className="callout info">
+      <Icon name="info" />
+      <span>Se você entra com o usuário de rede (AD), troque a senha pelo procedimento da TI: a redefinição por aqui vale só para contas do chat.</span>
+    </div>
+  );
+}
+
 export function ForgotPasswordPage() {
+  const ldap = useSetting<boolean>('LDAP_Enable');
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
@@ -292,6 +304,7 @@ export function ForgotPasswordPage() {
           <Icon name="success" />
           <span>Se houver uma conta com o e-mail {email.trim()}, você vai receber em instantes um link para criar uma senha nova. O link vale por 1 hora.</span>
         </div>
+        {ldap && <LdapResetNote />}
         <Link className="btn lg full" to="/login">
           <Icon name="back" />
           Voltar ao login
@@ -301,6 +314,7 @@ export function ForgotPasswordPage() {
   if (!available)
     return (
       <AuthShell title="Esqueci minha senha" subtitle="Este chat não envia e-mails. Peça ao administrador para redefinir a sua senha.">
+        {ldap && <LdapResetNote />}
         <Link className="btn lg full" to="/login">
           <Icon name="back" />
           Voltar ao login
@@ -317,6 +331,7 @@ export function ForgotPasswordPage() {
         <button className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !email.trim()}>
           Enviar link
         </button>
+        {ldap && <LdapResetNote />}
         <div className="auth-alt">
           <Link to="/login">Voltar ao login</Link>
         </div>
