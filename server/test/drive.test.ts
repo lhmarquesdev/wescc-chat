@@ -439,6 +439,28 @@ describe('nomes, avisos e limites', () => {
     await share(hidden, [{ type: 'user', id: carla.userId, level: 3 }], A, false);
   });
 
+  it('nome longo é cortado sem perder a extensão nem partir um emoji; ".." tem aviso próprio', async () => {
+    const long = `${'Relatório trimestral de indicadores '.repeat(7)}.xlsx`;
+    const f = (await up(eq, long, 'x', bruno, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')).file;
+    expect(f.name.endsWith('.xlsx')).toBe(true);
+    expect(Array.from(f.name).length).toBeLessThanOrEqual(200);
+    // De novo: o "(2)" cabe no limite (antes estourava o limite do banco e dava erro 500).
+    const again = await up(eq, long, 'y', bruno, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect(again.success, JSON.stringify(again)).toBe(true);
+    expect(again.file.name.endsWith(' (2).xlsx')).toBe(true);
+    expect(Array.from(again.file.name).length).toBeLessThanOrEqual(200);
+    const emo = (await api('POST', 'files.folder.create', { name: `${'a'.repeat(119)}📁`, parentId: eq }, bruno)).folder;
+    expect(emo.name).toBe(`${'a'.repeat(119)}📁`); // 120 caracteres: cabe inteiro (antes virava "a…a\ufffd")
+    const thumb = (await api('POST', 'files.folder.create', { name: `${'b'.repeat(119)}👍🏽`, parentId: eq }, bruno)).folder;
+    expect(thumb.name).toBe('b'.repeat(119)); // não cabe: sai o emoji inteiro, sem sobrar meio emoji
+    expect((await api('POST', 'files.folder.create', { name: 'c'.repeat(150), parentId: eq }, bruno)).folder.name).toBe('c'.repeat(120));
+    const dots = await api('POST', 'files.folder.create', { name: '..', parentId: eq }, bruno);
+    expect(dots.errorType).toBe('error-invalid-name');
+    expect(dots.error).toBe('Nome inválido: use letras ou números.');
+    expect((await api('POST', 'files.folder.create', { name: '  ', parentId: eq }, bruno)).error).toBe('Dê um nome à pasta.');
+    expect((await api('POST', 'files.rename', { fileId: f._id, name: '...' }, bruno)).error).toBe('Nome inválido: use letras ou números.');
+  });
+
   it('"na lixeira" conta os arquivos de dentro de uma pasta mandada para a lixeira', async () => {
     const s0 = (await api('GET', 'files.storage', undefined, A)).storage;
     const lixo = (await api('POST', 'files.folder.create', { name: 'Lixo', parentId: eq }, bruno)).folder;

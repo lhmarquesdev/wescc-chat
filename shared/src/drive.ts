@@ -109,29 +109,61 @@ export const INVISIBLE_NAME_CHARS = /[\u061c\u200b\u200e\u200f\u202a-\u202e\u206
 
 // Nome de pasta ou arquivo: sem barras, controle, caracteres invisíveis ou só pontos; espaços nas pontas saem.
 export function cleanDriveName(raw: unknown, max: number): string | null {
-  const s = String(raw ?? '')
-    .replace(/[\u0000-\u001f\u007f]/g, '')
-    .replace(INVISIBLE_NAME_CHARS, '')
-    .replace(/[\\/]/g, '-')
-    .trim()
-    .slice(0, max)
-    .trim();
+  const s = clipDriveName(
+    String(raw ?? '')
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .replace(INVISIBLE_NAME_CHARS, '')
+      .replace(/[\\/]/g, '-')
+      .trim(),
+    max,
+  ).trim();
   if (!s || /^\.+$/.test(s)) return null;
   return s;
 }
 
-// "relatório.pdf" ocupado → "relatório (2).pdf", "relatório (3).pdf"...
-export function nextFreeName(name: string, taken: Set<string>): string {
+// Limites do banco (length() conta caracteres, não unidades UTF-16).
+export const DRIVE_FOLDER_NAME_MAX = 120;
+export const DRIVE_FILE_NAME_MAX = 200;
+
+let graphemes: Intl.Segmenter | null = null;
+
+// Corta em até max caracteres sem partir um emoji ao meio e, se houver extensão, sem perdê-la ("Relatório tri….xlsx"
+// vira "Relatório tri.xlsx", não "Relatório tri").
+export function clipDriveName(s: string, max: number): string {
+  if (Array.from(s).length <= max) return s;
+  const dot = s.lastIndexOf('.');
+  const ext = dot > 0 && Array.from(s.slice(dot)).length <= 16 && /^\.[^\s.]+$/.test(s.slice(dot)) ? s.slice(dot) : '';
+  const room = max - Array.from(ext).length;
+  let base = '';
+  let used = 0;
+  graphemes ??= new Intl.Segmenter('pt-BR', { granularity: 'grapheme' });
+  for (const { segment } of graphemes.segment(ext ? s.slice(0, dot) : s)) {
+    const n = Array.from(segment).length;
+    if (used + n > room) break;
+    base += segment;
+    used += n;
+  }
+  return base.trimEnd() + ext;
+}
+
+// "relatório.pdf" ocupado → "relatório (2).pdf", "relatório (3).pdf"... Com max, encurta o nome para caber o "(2)".
+export function nextFreeName(name: string, taken: Set<string>, max?: number): string {
   const lower = (x: string) => x.toLowerCase();
   if (!taken.has(lower(name))) return name;
   const dot = name.lastIndexOf('.');
   const base = dot > 0 ? name.slice(0, dot) : name;
   const ext = dot > 0 ? name.slice(dot) : '';
+  const fit = (suffix: string) => (max ? clipDriveName(`${base}${ext}`, max - Array.from(suffix).length) : `${base}${ext}`);
+  const make = (suffix: string) => {
+    const short = fit(suffix);
+    const d = ext && short.endsWith(ext) ? short.length - ext.length : short.length;
+    return `${short.slice(0, d).trimEnd()}${suffix}${short.slice(d)}`;
+  };
   for (let i = 2; i < 10_000; i++) {
-    const n = `${base} (${i})${ext}`;
+    const n = make(` (${i})`);
     if (!taken.has(lower(n))) return n;
   }
-  return `${base} (${Date.now()})${ext}`;
+  return make(` (${Date.now()})`);
 }
 
 export const FOLDER_COLORS = ['blue', 'green', 'amber', 'red', 'purple', 'teal', 'gray'] as const;

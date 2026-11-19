@@ -1,12 +1,22 @@
 // Arquivos: pastas compartilhadas com permissão por pasta. Início (pastas e recentes), pasta, busca e lixeira.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { FOLDER_COLORS, driveLevelLabel, type DriveActivity, type DriveFile, type DriveFolder, type DriveFolderView, type DriveStorage } from '@shared/drive';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import {
+  DRIVE_FILE_NAME_MAX,
+  DRIVE_FOLDER_NAME_MAX,
+  FOLDER_COLORS,
+  driveLevelLabel,
+  type DriveActivity,
+  type DriveFile,
+  type DriveFolder,
+  type DriveFolderView,
+  type DriveStorage,
+} from '@shared/drive';
 import { errorMessage } from '../lib/api';
-import { cancelUpload, clearFinishedUploads, enqueueUploads, filesApi, useUploads } from '../lib/files';
-import { formatBytes, formatRelative, formatWhen, plural } from '../lib/format';
+import { cancelUpload, clearFinishedUploads, enqueueUploads, filesApi, useUploads, type UploadJob } from '../lib/files';
+import { formatBytes, formatRelative, formatWhen, nameList, plural } from '../lib/format';
 import { realtime } from '../lib/realtime';
-import { useSetting, useStore } from '../lib/store';
+import { usePermission, useSetting, useStore } from '../lib/store';
 import { fileKind } from '../components/MessageItem';
 import { Icon } from '../components/Icon';
 import type { IconName } from '../components/icons';
@@ -177,6 +187,7 @@ export function FilesPage() {
         description={folder ? 'Ela começa com o mesmo acesso desta pasta.' : 'Só você terá acesso até compartilhar.'}
         confirm="Criar pasta"
         withColor
+        maxLength={DRIVE_FOLDER_NAME_MAX}
         onClose={() => setDialog(null)}
         onSave={async (name, color) => {
           const f = await filesApi.createFolder({ name, color, parentId: folder?._id ?? null });
@@ -1387,6 +1398,7 @@ function useItemActions(opts: {
                       initial={f.name}
                       confirm="Renomear"
                       selectBase
+                      maxLength={DRIVE_FILE_NAME_MAX}
                       onClose={() => setDialog(null)}
                       onSave={async (name) => {
                         await filesApi.rename(f._id, name);
@@ -1449,6 +1461,7 @@ function useItemActions(opts: {
                     withColor
                     nameLocked={canRenameFolder(f) ? undefined : 'Só quem gerencia a pasta muda o nome dela.'}
                     confirm="Salvar"
+                    maxLength={DRIVE_FOLDER_NAME_MAX}
                     onClose={() => setDialog(null)}
                     onSave={async (name, color) => {
                       await filesApi.updateFolder(f._id, canRenameFolder(f) ? { name, color } : { color });
@@ -1510,6 +1523,7 @@ function NameDialog({
   withColor,
   selectBase,
   nameLocked,
+  maxLength = DRIVE_FILE_NAME_MAX,
   confirm,
   onClose,
   onSave,
@@ -1522,6 +1536,8 @@ function NameDialog({
   selectBase?: boolean;
   // O nome não pode mudar (o motivo aparece embaixo do campo): só a cor.
   nameLocked?: string;
+  // O mesmo limite do servidor: pasta até 120 caracteres, arquivo até 200.
+  maxLength?: number;
   confirm: string;
   onClose: () => void;
   onSave: (name: string, color: string | null) => Promise<void>;
@@ -1541,6 +1557,7 @@ function NameDialog({
   }, [initial, selectBase]);
   const submit = async () => {
     if (!name.trim()) return setErr('Dê um nome.');
+    if (/^\.+$/.test(name.trim())) return setErr('Nome inválido: use letras ou números.');
     setBusy(true);
     setErr(null);
     try {
@@ -1578,7 +1595,7 @@ function NameDialog({
       >
         <label className="field">
           <span className="field-label">Nome</span>
-          <input ref={ref} className="input" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} aria-invalid={!!err} disabled={!!nameLocked} />
+          <input ref={ref} className="input" value={name} maxLength={maxLength} onChange={(e) => setName(e.target.value)} aria-invalid={!!err} disabled={!!nameLocked} />
           {nameLocked && <span className="field-hint">{nameLocked}</span>}
           {err && <span className="field-error">{err}</span>}
         </label>

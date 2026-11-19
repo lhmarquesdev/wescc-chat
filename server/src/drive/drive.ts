@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import {
+  DRIVE_FILE_NAME_MAX,
+  DRIVE_FOLDER_NAME_MAX,
   FOLDER_COLORS,
   cleanDriveName,
   nextFreeName,
@@ -307,9 +309,12 @@ export async function activity(ctx: Ctx, folderId: unknown, opts: { offset?: num
 
 // ---------- Pastas ----------
 
+// Vazio pede um nome; só pontos ("..") ou só caracteres invisíveis não é nome.
+const invalidName = (raw: unknown, empty: string) => badRequest('error-invalid-name', String(raw ?? '').trim() ? 'Nome inválido: use letras ou números.' : empty);
+
 const folderName = (raw: unknown) => {
-  const n = cleanDriveName(raw, 120);
-  if (!n) throw badRequest('error-invalid-name', 'Dê um nome à pasta.');
+  const n = cleanDriveName(raw, DRIVE_FOLDER_NAME_MAX);
+  if (!n) throw invalidName(raw, 'Dê um nome à pasta.');
   return n;
 };
 
@@ -554,7 +559,7 @@ export async function uploadFile(ctx: Ctx, folderId: unknown, req: any) {
       const rel = newStoredRel(id);
       const abs = storedPath(rel);
       await fs.promises.mkdir(path.dirname(abs), { recursive: true });
-      stored = { id, rel, name: cleanDriveName(part.filename, 200) ?? 'arquivo', type, size: 0 };
+      stored = { id, rel, name: cleanDriveName(part.filename, DRIVE_FILE_NAME_MAX) ?? 'arquivo', type, size: 0 };
       await pipeline(part.file, fs.createWriteStream(abs));
       if (part.file.truncated) throw new ApiError(413, 'error-file-too-large', `Arquivo maior que o permitido (${fmtSize(max)}).`);
       stored.size = (await fs.promises.stat(abs)).size;
@@ -563,7 +568,7 @@ export async function uploadFile(ctx: Ctx, folderId: unknown, req: any) {
     // Dois envios ao mesmo tempo podem passar da cota juntos: confere de novo com o tamanho real.
     const s = await storage();
     if (s.quota && s.used + stored.size > s.quota) throw new ApiError(507, 'error-quota-exceeded', 'O espaço da aba Arquivos acabou. Esvazie a lixeira ou peça para aumentar a cota.');
-    let name = nextFreeName(stored.name, await takenFileNames(f.id));
+    let name = nextFreeName(stored.name, await takenFileNames(f.id), DRIVE_FILE_NAME_MAX);
     for (let attempt = 0; ; attempt++) {
       try {
         await query('INSERT INTO drive_files (id, folder_id, name, type, size, storage_path, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7)', [
@@ -578,7 +583,7 @@ export async function uploadFile(ctx: Ctx, folderId: unknown, req: any) {
         break;
       } catch (e) {
         if (!uniqueViolation(e) || attempt > 3) throw e;
-        name = nextFreeName(stored.name, await takenFileNames(f.id));
+        name = nextFreeName(stored.name, await takenFileNames(f.id), DRIVE_FILE_NAME_MAX);
       }
     }
     stored.name = name;
@@ -620,8 +625,8 @@ export async function fileForDownload(ctx: Ctx | null, fileId: string, opts: { d
 export async function renameFile(ctx: Ctx, fileId: unknown, rawName: unknown) {
   const acc = await loadAccess(ctx);
   const r = await needFile(acc, fileId, 2);
-  const name = cleanDriveName(rawName, 200);
-  if (!name) throw badRequest('error-invalid-name', 'Dê um nome ao arquivo.');
+  const name = cleanDriveName(rawName, DRIVE_FILE_NAME_MAX);
+  if (!name) throw invalidName(rawName, 'Dê um nome ao arquivo.');
   if (name === r.name) return {};
   if (name.toLowerCase() !== r.name.toLowerCase() && (await takenFileNames(r.folder_id, r.id)).has(name.toLowerCase()))
     throw badRequest('error-name-taken', 'Já existe um arquivo com esse nome nesta pasta.');
