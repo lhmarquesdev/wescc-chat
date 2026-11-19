@@ -419,19 +419,49 @@ function RichAttachment({ a, m }: { a: Attachment; m?: Message }) {
   );
 }
 
+// Mensagem citada (?msg=<id>) ou fixada (/msg/<id>).
+const quotedId = (link?: string) => link?.match(/(?:\/msg\/|[?&]msg=)([A-Za-z0-9]{10,24})/)?.[1];
+
+// Abre a original com ela destacada: na sala dela (a citação pode ser de outra sala) ou no tópico, se for resposta.
+async function openQuoted(id: string, navigate: (to: string) => void) {
+  try {
+    const m: Message = (await api.get('chat.getMessage', { msgId: id })).message;
+    const st = useStore.getState();
+    navigate(messageHref(roomPath({ _id: m.rid, t: st.rooms[m.rid]?.t ?? st.subscriptions[m.rid]?.t ?? 'c' }), m));
+  } catch (e) {
+    useStore.getState().toast(errorMessage(e), 'error');
+  }
+}
+
 // Citação: o servidor manda o @usuário do autor; aparece o nome, e a data no formato curto ("Ontem 10:24").
 // Mensagem com apelido (webhooks): o nome é o apelido, com o avatar da conta que publicou.
+// Clicar na citação (ou na nota "fixou uma mensagem") leva à original; no teclado, a data é o botão.
 function QuoteAttachment({ a }: { a: Attachment }) {
   const nameOf = useNames();
+  const navigate = useNavigate();
+  const target = a.removed ? undefined : quotedId(a.message_link);
+  const go = () => target && void openQuoted(target, navigate);
+  // Link, menção ou texto selecionado dentro da citação ficam com o próprio clique.
+  const onClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('a, button, .mention') || window.getSelection()?.toString()) return;
+    go();
+  };
+  const when = a.ts && (
+    <time className="muted" dateTime={a.ts} title={formatDateTime(a.ts)}>
+      {formatWhen(a.ts)}
+    </time>
+  );
   return (
-    <div className="quote-att">
+    <div className={target ? 'quote-att linked' : 'quote-att'} onClick={target ? onClick : undefined} title={target ? 'Ir para a mensagem original' : undefined}>
       <div className="quote-head">
         {a.author_name && <Avatar username={a.author_name} size={16} />}
         <strong>{a.author_alias || (a.author_name ? nameOf(a.author_name) : '')}</strong>
-        {a.ts && (
-          <time className="muted" dateTime={a.ts} title={formatDateTime(a.ts)}>
-            {formatWhen(a.ts)}
-          </time>
+        {target ? (
+          <button type="button" className="quote-jump" onClick={go} aria-label={`Ir para a mensagem original${a.ts ? `, de ${formatDateTime(a.ts)}` : ''}`}>
+            {when || 'Ir para a mensagem'}
+          </button>
+        ) : (
+          when
         )}
       </div>
       {/* A original foi apagada: o servidor tirou o texto da cópia. */}
