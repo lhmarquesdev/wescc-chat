@@ -156,3 +156,44 @@ describe('leitura de quem envia', () => {
     expect((await sub(rid, ana)).unread).toBe(0);
   });
 });
+
+describe('membros ao vivo', () => {
+  it('entrar e sair de uma sala avisa quem está nela (número de membros)', async () => {
+    const g = await api('POST', 'groups.create', { name: uniq('ao-vivo'), members: [bia.username] }, ana);
+    const rid = g.group._id;
+    const ws = connectWs(ana);
+    await ws.ready;
+    await api('POST', 'groups.invite', { roomId: rid, userId: caio.userId }, ana);
+    const up = await ws.waitFor((e) => e.type === 'room' && e.action === 'updated' && e.room._id === rid && e.room.usersCount === 3);
+    expect(up.room.usersCount).toBe(3);
+    await api('POST', 'groups.kick', { roomId: rid, userId: bia.userId }, ana);
+    await ws.waitFor((e) => e.type === 'room' && e.action === 'updated' && e.room._id === rid && e.room.usersCount === 2);
+    ws.close();
+  });
+
+  it('a lista de membros diz quantos estão online no total, e filtra por status', async () => {
+    const c = await api('POST', 'channels.create', { name: uniq('lista'), members: [bia.username, caio.username] }, ana);
+    const rid = c.channel._id;
+    const all = await api('GET', 'rooms.membersOrderedByRole', { roomId: rid, count: 1 }, ana);
+    expect(all.total).toBe(3);
+    expect(all.members).toHaveLength(1);
+    expect(typeof all.online).toBe('number');
+    const on = await api('GET', 'rooms.membersOrderedByRole', { roomId: rid, status: 'online,away,busy' }, ana);
+    expect(on.total).toBe(all.online);
+    expect(on.members.every((m: any) => m.status !== 'offline')).toBe(true);
+  });
+
+  it('grupo privado excluído: só quem participava recebe o aviso', async () => {
+    const g = await api('POST', 'groups.create', { name: uniq('apagar'), members: [bia.username] }, ana);
+    const rid = g.group._id;
+    const wsBia = connectWs(bia);
+    const wsCaio = connectWs(caio);
+    await Promise.all([wsBia.ready, wsCaio.ready]);
+    expect((await api('POST', 'groups.delete', { roomId: rid }, ana)).success).toBe(true);
+    await wsBia.waitFor((e) => e.type === 'room' && e.action === 'removed' && e.room._id === rid);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(wsCaio.events.some((e) => e.type === 'room' && e.room?._id === rid)).toBe(false);
+    wsBia.close();
+    wsCaio.close();
+  });
+});

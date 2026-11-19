@@ -99,6 +99,19 @@ export async function notifyRoomUpdated(rid: string) {
   if (room.t === 'c') bus.publish({ all: true }, { type: 'room', action: 'updated', room: mapRoom(room) });
 }
 
+// Entradas e saídas mudam o número de membros (cabeçalho e painel Membros): um aviso por sala, juntando os que chegam em
+// rajada (o time inteiro entrando numa sala padrão, uma sala criada com muitas pessoas).
+const membersChanged = new Map<string, NodeJS.Timeout>();
+function notifyMembersChanged(rid: string) {
+  if (membersChanged.has(rid)) return;
+  const t = setTimeout(() => {
+    membersChanged.delete(rid);
+    void notifyRoomUpdated(rid).catch(() => {});
+  }, 150);
+  t.unref?.();
+  membersChanged.set(rid, t);
+}
+
 // A sala mudou algo que a inscrição de cada membro mostra (nome, tipo, canal de avisos, sala principal de time):
 // cada membro recebe a inscrição de novo.
 export async function republishSubscriptions(rid: string) {
@@ -193,6 +206,7 @@ export async function addUserToRoom(
     await query(`INSERT INTO team_members (team_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [room.team_id, userId], opts.db);
   }
   bus.joinRoom(userId, rid);
+  notifyMembersChanged(rid);
   const after = async () => {
     await notifySubscription(userId, rid, 'inserted', sub);
     if (!opts.silent && room.t !== 'd') {
@@ -233,6 +247,7 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
     await query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [room.team_id, userId]);
   }
   bus.leaveRoom(userId, rid);
+  notifyMembersChanged(rid);
   bus.publish({ user: userId }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(sub, room) });
   // Criptografia: quem fica gera uma chave nova (ela não lê o que vier depois). O aviso sai depois de tirar a pessoa da
   // sala: o pedido de chave nova não chega para ela.
@@ -255,7 +270,8 @@ export async function listMembers(rid: string, opts: { offset?: number; count?: 
   if (opts.filter) w += ` AND (u.username ILIKE $${params.push(`%${opts.filter}%`)} OR u.name ILIKE $${params.length})`;
   if (opts.status?.length) w += ` AND u.status = ANY($${params.push(opts.status)})`;
   const rows = await many(
-    `SELECT u.id, u.username, u.name, u.status, u.status_text, u.status_custom, u.avatar_etag, s.roles AS room_roles, count(*) OVER() AS total
+    `SELECT u.id, u.username, u.name, u.status, u.status_text, u.status_custom, u.avatar_etag, s.roles AS room_roles, count(*) OVER() AS total,
+       count(*) FILTER (WHERE coalesce(u.status, 'offline') <> 'offline') OVER() AS online_total
      FROM subscriptions s JOIN users u ON u.id = s.user_id WHERE s.room_id = $1 ${w}
      ORDER BY ${opts.orderByRole ? `CASE WHEN 'owner' = ANY(s.roles) THEN 0 WHEN 'moderator' = ANY(s.roles) THEN 1 WHEN 'leader' = ANY(s.roles) THEN 2 WHEN 'publisher' = ANY(s.roles) THEN 3 ELSE 4 END,` : ''}
        (u.status <> 'offline') DESC, u.username LIMIT ${Math.min(opts.count ?? 50, 500)} OFFSET ${Number(opts.offset ?? 0)}`,
@@ -263,6 +279,8 @@ export async function listMembers(rid: string, opts: { offset?: number; count?: 
   );
   return {
     total: Number(rows[0]?.total ?? 0),
+    // Quantos dos encontrados estão online (o painel Membros mostra o total de cada grupo, não só o da página).
+    online: Number(rows[0]?.online_total ?? 0),
     members: rows.map((r) => ({
       _id: r.id,
       username: r.username,
@@ -637,7 +655,11 @@ export async function deleteRoom(ctx: Ctx, rid: string) {
     bus.leaveRoom(s.user_id, rid);
     bus.publish({ user: s.user_id }, { type: 'subscription', action: 'removed', subscription: await buildSubscription(s, room) });
   }
-  bus.publish({ all: true }, { type: 'room', action: 'removed', room: mapRoom(room) });
+  // Canal público: todos sabem que saiu (diretório, quem está vendo a prévia). Grupo privado e DM: só quem participava (o
+  // evento traz o nome e a última mensagem).
+  const removed = { type: 'room', action: 'removed', room: mapRoom(room) } as const;
+  if (room.t === 'c') bus.publish({ all: true }, removed);
+  else for (const s of subs) bus.publish({ user: s.user_id }, removed);
   await audit(actorOf(ctx), 'room.deleted', { rid, name: room.name, t: room.t });
 }
 

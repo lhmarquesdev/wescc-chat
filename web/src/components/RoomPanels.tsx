@@ -810,9 +810,14 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
   const [adding, setAdding] = useState<PickedUser[]>([]);
   // "Ocultar a lista de membros": sem view-broadcast-member-list o servidor recusa a lista.
   const hidden = !!room.broadcast && !hasPerm('view-broadcast-member-list', roles);
+  // Mostra de 100 em 100 ("Mostrar mais"); trocar de sala, filtro ou "Somente online" volta para os primeiros. Entrou ou
+  // saiu alguém (o número de membros mudou), a lista recarrega sozinha.
+  const listKey = `${room._id}|${filter}|${onlineOnly}`;
+  const [more, setMore] = useState({ key: listKey, n: MEMBERS_PAGE });
+  const shown = more.key === listKey ? more.n : MEMBERS_PAGE;
   const { data, error, loading, reload } = useAsync(
-    () => (hidden ? Promise.resolve(null) : api.get('rooms.membersOrderedByRole', { roomId: room._id, filter, count: 200 })),
-    [room._id, filter, hidden],
+    () => (hidden ? Promise.resolve(null) : loadMembers(room._id, filter, onlineOnly, shown)),
+    [room._id, filter, hidden, onlineOnly, shown, room.usersCount],
   );
   const canAdd = hasPerm('add-user-to-joined-room', roles);
   const direct = useDirect();
@@ -821,6 +826,8 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
   const all: any[] = data?.members ?? [];
   const online = all.filter((m) => m.status && m.status !== 'offline');
   const offline = onlineOnly ? [] : all.filter((m) => !m.status || m.status === 'offline');
+  const total: number = data?.total ?? all.length;
+  const onlineTotal: number = data?.online ?? online.length;
   if (hidden)
     return (
       <Empty icon="panel-members" title="Lista de membros oculta">
@@ -833,13 +840,14 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
         room.teamMain ? 'teams.addMembers' : room.t === 'p' ? 'groups.invite' : 'channels.invite',
         room.teamMain ? { teamId: room.teamId, members: adding.map((u) => ({ userId: u._id })) } : { roomId: room._id, userIds: adding.map((u) => u._id) },
       )
-      .then(() => (setAdding([]), setPicking(false), reload()))
+      .then(() => (ok(adding.length > 1 ? `${adding.length} pessoas adicionadas.` : 'Pessoa adicionada.'), setAdding([]), setPicking(false), reload()))
       .catch(fail);
-  const group = (title: string, list: any[]) =>
+  // O número do grupo é o total da sala (o servidor conta), não só o que já apareceu na lista.
+  const group = (title: string, list: any[], count: number) =>
     list.length > 0 && (
       <div className="member-group" role="group" aria-label={title}>
         <h4 className="group-label">
-          {title} · {list.length.toLocaleString('pt-BR')}
+          {title} · {count.toLocaleString('pt-BR')}
         </h4>
         {list.map((m) => (
           <MemberRow key={m._id} m={m} muted={!!room.muted?.includes(m.username)} onClick={() => onUserClick(m.username)} />
@@ -889,12 +897,37 @@ function MembersPanel({ room, roles, onUserClick }: Props) {
         </Empty>
       ) : (
         <>
-          {group('Online', online)}
-          {group('Offline', offline)}
+          {group('Online', online, onlineTotal)}
+          {group('Offline', offline, Math.max(total - onlineTotal, offline.length))}
+          {all.length < total && (
+            <div className="members-more">
+              <p className="access-hint">
+                Mostrando {all.length.toLocaleString('pt-BR')} de {total.toLocaleString('pt-BR')}. Busque pelo nome ou veja mais.
+              </p>
+              <button type="button" className="btn" disabled={loading} aria-busy={loading || undefined} onClick={() => setMore({ key: listKey, n: shown + MEMBERS_PAGE })}>
+                Mostrar mais
+              </button>
+            </div>
+          )}
         </>
       )}
     </>
   );
+}
+
+const MEMBERS_PAGE = 100;
+
+// Membros da sala até n (o servidor entrega no máximo 500 por vez): por papel, online primeiro.
+async function loadMembers(roomId: string, filter: string, onlineOnly: boolean, n: number) {
+  const params = { roomId, filter, ...(onlineOnly ? { status: 'online,away,busy' } : {}) };
+  const first = await api.get('rooms.membersOrderedByRole', { ...params, count: Math.min(n, 500) });
+  const members: any[] = [...first.members];
+  while (members.length < Math.min(n, first.total)) {
+    const r = await api.get('rooms.membersOrderedByRole', { ...params, count: Math.min(n - members.length, 500), offset: members.length });
+    if (!r.members.length) break;
+    members.push(...r.members);
+  }
+  return { ...first, members };
 }
 
 // Termos a destacar nos resultados: sem operadores (from:, has:…) nem /regex/; aspas viram uma frase.

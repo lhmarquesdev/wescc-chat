@@ -134,7 +134,7 @@ export function roomsRoutes(app: FastifyInstance) {
   route(app, 'GET', 'rooms.membersOrderedByRole', {}, async (req, _rep, ctx) => {
     const room = await loadRoomForUser(ctx, str(q(req).roomId, 'roomId'));
     if (room.broadcast && !(await hasPermission(ctx.userId, 'view-broadcast-member-list', room.id))) throw forbidden();
-    return listMembers(room.id, { ...paging(q(req)), filter: q(req).filter, orderByRole: true });
+    return listMembers(room.id, { ...paging(q(req)), filter: q(req).filter, status: strArray(q(req).status), orderByRole: true });
   });
   route(app, 'POST', 'rooms.saveRoomSettings', {}, async (req, _rep, ctx) => {
     const body = b(req);

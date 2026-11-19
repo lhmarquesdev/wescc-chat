@@ -160,7 +160,11 @@ function UserCardBody({ username, rid, roomRoles, onClose }: { username: string;
       .catch(fail);
   const kick = async () => {
     const ok = await confirmDialog({ title: `Remover @${username} da sala?`, body: 'A pessoa deixa de ver as mensagens novas desta sala.', confirmLabel: 'Remover da sala', danger: true });
-    if (ok) api.post(`${path}.kick`, { roomId: rid, userId: data.u._id }).then(onClose).catch(fail);
+    if (ok)
+      api
+        .post(`${path}.kick`, { roomId: rid, userId: data.u._id })
+        .then(() => (useStore.getState().toast(`@${username} não está mais na sala.`, 'success'), onClose()))
+        .catch(fail);
   };
 
   const self = data.u._id === me._id;
