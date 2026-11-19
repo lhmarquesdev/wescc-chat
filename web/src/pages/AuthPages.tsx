@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { OAuthProviderPublic, OAuthProviderType } from '@shared/index';
 import { api, ApiError, errorMessage, getCredentials } from '../lib/api';
 import { renderMarkdown } from '../lib/markdown';
+import { usePasswordHint } from '../lib/passwordPolicy';
 import { clearLogoutReason, LOGOUT_REASON_ICON, LOGOUT_REASON_TEXT, peekLogoutReason } from '../lib/logoutReason';
 import { login, loginWithOAuth, loginWithSaml, logout } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
@@ -76,13 +77,14 @@ function FormError({ children }: { children: ReactNode }) {
   );
 }
 
-// Senha com o botão de mostrar/ocultar dentro do campo.
+// Senha com o botão de mostrar/ocultar dentro do campo. Mostrada, ela vira campo de texto: sem maiúscula automática,
+// corretor nem verificação ortográfica, que mudariam a senha ou a mandariam para o serviço de ortografia.
 function PasswordInput(props: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
   const [show, setShow] = useState(false);
   const label = show ? 'Ocultar senha' : 'Mostrar senha';
   return (
     <span className="password-field">
-      <input {...props} type={show ? 'text' : 'password'} />
+      <input {...props} type={show ? 'text' : 'password'} autoCapitalize="none" autoCorrect="off" spellCheck={false} />
       <button type="button" className="icon-btn" title={label} aria-label={label} aria-pressed={show} onClick={() => setShow(!show)}>
         <Icon name={show ? 'hide' : 'show'} />
       </button>
@@ -222,7 +224,7 @@ export function LoginPage() {
             </div>
           </>
         )}
-        <button type="submit" className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !user || !password}>
+        <button type="submit" className="btn primary lg full block" aria-busy={busy || undefined} disabled={busy || !user || !password || (needCode && !code.trim())}>
           {busy && <span className="spinner sm" aria-hidden="true" />}
           {needCode ? 'Verificar' : 'Entrar'}
         </button>
@@ -370,7 +372,7 @@ export function ResetPasswordPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-  const minLen = useSetting<number>('Accounts_Password_Policy_MinLength');
+  const passwordHint = usePasswordHint();
   // Tira o token da barra de endereço (histórico e capturas de tela).
   useEffect(() => {
     if (location.hash) history.replaceState(null, '', location.pathname);
@@ -430,7 +432,7 @@ export function ResetPasswordPage() {
     <AuthShell title="Nova senha" subtitle="Crie uma senha nova para a sua conta.">
       <form onSubmit={submit} className="form auth-form">
         {error && <FormError>{error}</FormError>}
-        <Field label="Nova senha" hint={`Mínimo de ${minLen} caracteres.`}>
+        <Field label="Nova senha" hint={passwordHint}>
           <PasswordInput autoFocus autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} />
         </Field>
         <Field label="Confirmar nova senha">
@@ -473,7 +475,7 @@ export function RegisterPage() {
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-  const minLen = useSetting<number>('Accounts_Password_Policy_MinLength');
+  const passwordHint = usePasswordHint();
   const registration = useSetting<string>('Accounts_RegistrationForm');
   const errs = tried ? registerErrors(f) : {};
 
@@ -556,7 +558,7 @@ export function RegisterPage() {
         <Field label="E-mail" error={errs.email}>
           <input name="email" type="email" required autoComplete="email" autoCapitalize="none" spellCheck={false} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
         </Field>
-        <Field label="Senha" hint={errs.pass ? undefined : `Mínimo de ${minLen} caracteres.`} error={errs.pass}>
+        <Field label="Senha" hint={errs.pass ? undefined : passwordHint} error={errs.pass}>
           <PasswordInput name="pass" required autoComplete="new-password" value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />
         </Field>
         <Field label="Confirmar senha" error={errs.confirm}>
@@ -626,6 +628,7 @@ export function ChangePasswordPage({ onDone }: { onDone: () => void }) {
   const [p2, setP2] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const passwordHint = usePasswordHint();
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!p1) return setError('Digite a nova senha.');
@@ -645,7 +648,7 @@ export function ChangePasswordPage({ onDone }: { onDone: () => void }) {
     <AuthShell title="Defina uma nova senha" subtitle="O administrador pediu que você troque a sua senha antes de continuar.">
       <form className="form auth-form" onSubmit={submit}>
         {error && <FormError>{error}</FormError>}
-        <Field label="Nova senha">
+        <Field label="Nova senha" hint={passwordHint}>
           <PasswordInput autoFocus autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} />
         </Field>
         <Field label="Confirmar nova senha">

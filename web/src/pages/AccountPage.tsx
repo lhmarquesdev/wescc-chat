@@ -4,6 +4,7 @@ import { api, errorMessage } from '../lib/api';
 import { normalizeHighlights } from '@shared/highlights';
 import { formatDateTime, plural } from '../lib/format';
 import { disablePushHere, enablePushHere, pushEnabledHere, pushSupported, syncPushSubscription } from '../lib/push';
+import { usePasswordHint } from '../lib/passwordPolicy';
 import { endSession, startSession } from '../lib/session';
 import { useSetting, useStore } from '../lib/store';
 import { useLanguages, useTranslateAllowed } from '../lib/translate';
@@ -589,7 +590,9 @@ function Security() {
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
   const mismatch = !!p2 && p1 !== p2;
-  const changePw = async () => {
+  const passwordHint = usePasswordHint();
+  const changePw = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (p1 !== p2) return fail(new Error('As senhas não conferem.'));
     try {
       await api.post('users.updateOwnBasicInfo', { data: { currentPassword: cur, newPassword: p1 } });
@@ -613,12 +616,13 @@ function Security() {
                 <p className="card-desc">Depois de trocar, as outras sessões continuam abertas; encerre-as em Dispositivos se precisar.</p>
               </div>
             </div>
-            <div className="form">
+            {/* Formulário: Enter em qualquer campo troca a senha. */}
+            <form className="form" onSubmit={changePw}>
               <Field label="Senha atual">
                 <input type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" />
               </Field>
               <div className="two-col">
-                <Field label="Nova senha">
+                <Field label="Nova senha" hint={passwordHint}>
                   <input type="password" value={p1} onChange={(e) => setP1(e.target.value)} autoComplete="new-password" />
                 </Field>
                 <Field label="Confirmar nova senha" error={mismatch ? 'As senhas não conferem.' : undefined}>
@@ -626,11 +630,11 @@ function Security() {
                 </Field>
               </div>
               <div className="form-actions">
-                <button className="btn primary" onClick={changePw} disabled={!p1 || mismatch}>
+                <button type="submit" className="btn primary" disabled={!p1 || mismatch}>
                   Alterar senha
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         )}
         {twoFA && <TwoFactorCard />}
