@@ -340,7 +340,7 @@
   border: 0;
   border-radius: 999px;
   background: hsl(var(--muted-foreground) / 0.12);
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--text-2)); /* número pequeno: o cinza de apoio ficava abaixo de 4,5:1 sobre o trilho */
   font-size: 10px;
   line-height: 1;
   font-weight: 600;

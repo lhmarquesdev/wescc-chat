@@ -823,7 +823,6 @@
 .rbac-chip-count {
   font-size: var(--fs-12);
   font-variant-numeric: tabular-nums;
-  opacity: 0.75;
 }
 .rbac-list-body {
   flex: 1;

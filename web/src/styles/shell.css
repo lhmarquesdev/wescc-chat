@@ -663,7 +663,7 @@ a.crumb:hover {
   font-size: var(--fs-12);
   line-height: var(--lh-12);
   font-weight: var(--fw-medium);
-  color: hsl(var(--sidebar-foreground) / 0.7);
+  color: hsl(var(--sidebar-foreground) / 0.85); /* 4,9:1 sobre o azul da lateral */
 }
 
 /* Navegação principal: botões de 48px, ícone de 24px. */
@@ -804,7 +804,7 @@ button.side-item {
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
-  color: hsl(var(--sidebar-foreground) / 0.7);
+  color: hsl(var(--sidebar-foreground) / 0.85);
   font: var(--fw-medium) var(--fs-12) / var(--lh-12) var(--font-sans);
   text-align: left;
   cursor: pointer;
@@ -1186,7 +1186,7 @@ button.side-item {
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   font-weight: var(--fw-semibold);
-  color: hsl(var(--sidebar-foreground) / 0.7);
+  color: hsl(var(--sidebar-foreground) / 0.85);
 }
 .for-you-scroll {
   display: flex;
@@ -1519,7 +1519,7 @@ button.side-item {
   line-height: var(--lh-12);
   font-weight: var(--fw-medium);
   letter-spacing: 0;
-  color: hsl(var(--sidebar-foreground) / 0.7);
+  color: hsl(var(--sidebar-foreground) / 0.85);
   flex-shrink: 0;
 }
 .page-nav a:where(:not(.side-brand)) {
@@ -2234,7 +2234,7 @@ button.side-item {
   white-space: nowrap;
   font-size: var(--fs-12);
   line-height: var(--lh-12);
-  color: hsl(var(--sidebar-foreground) / 0.7);
+  color: hsl(var(--sidebar-foreground) / 0.85);
 }
 /* Resultado do servidor: o nome em cima e o detalhe (@usuário, time e membros, "Sem conversa direta") embaixo, cada
    um com a largura toda da linha. Lado a lado, na barra de 272px o detalhe virava "c…" ou sumia; o title da linha
@@ -2271,7 +2271,7 @@ button.side-item {
 }
 @media (hover: hover) {
   .side-group-title.static:hover {
-    color: hsl(var(--sidebar-foreground) / 0.7);
+    color: hsl(var(--sidebar-foreground) / 0.85);
   }
 }
 /* Pessoa sem conversa direta: nome apagado e a pílula com o motivo na segunda linha (o @usuário fica no title). */
