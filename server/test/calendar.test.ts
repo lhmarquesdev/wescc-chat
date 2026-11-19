@@ -228,6 +228,43 @@ describe('reuniões', () => {
     expect((await api('GET', 'calendar.meeting', { code: c.event.meeting.code }, carla)).canJoin).toBe(false);
   });
 
+  it('quem é tirado da sala da reunião deixa de ser convidado e não volta pelo link', async () => {
+    const c = await api('POST', 'calendar.create', { title: 'Fechada', startsAt: at(DAY), endsAt: at(DAY + H), attendeeIds: [bruno.userId, carla.userId], isMeeting: true }, ana);
+    const { rid, code } = c.event.meeting;
+    const ws = connectWs(bruno);
+    await ws.ready;
+    const k = await api('POST', 'groups.kick', { roomId: rid, userId: bruno.userId }, ana);
+    expect(k.success, JSON.stringify(k)).toBe(true);
+    await ws.waitFor((e) => e.type === 'calendar.removed' && e.event._id === c.event._id);
+    ws.close();
+    expect((await api('POST', 'calendar.meeting.join', { code }, bruno)).error).toBe(CAL_TEXT.invitedOnly);
+    expect((await api('GET', 'calendar.event', { eventId: c.event._id }, bruno)).status).toBe(404);
+    // Quem sai por conta própria continua convidado e volta pelo link.
+    expect((await api('POST', 'rooms.leave', { roomId: rid }, carla)).success).toBe(true);
+    expect((await api('POST', 'calendar.meeting.join', { code }, carla)).rid).toBe(rid);
+  });
+
+  it('renomear e mudar o horário atualizam a barra lateral e o cartão da reunião; a nota diz o fuso', async () => {
+    const c = await api('POST', 'calendar.create', { title: 'Nome antigo', startsAt: at(DAY), endsAt: at(DAY + H), attendeeIds: [bruno.userId], isMeeting: true }, ana);
+    const rid = c.event.meeting.rid;
+    const ws = connectWs(bruno);
+    await ws.ready;
+    const [start, end] = [at(2 * DAY), at(2 * DAY + H)];
+    expect((await api('POST', 'calendar.update', { eventId: c.event._id, title: 'Nome novo', startsAt: start, endsAt: end }, ana)).success).toBe(true);
+    const sub = await ws.waitFor((e) => e.type === 'subscription' && e.subscription.rid === rid && e.subscription.fname === 'Nome novo');
+    expect(sub.action).toBe('updated');
+    const upd = await ws.waitFor((e) => e.type === 'message' && e.action === 'updated' && e.message.meeting?.meetingId === c.event._id);
+    expect(upd.message.meeting).toMatchObject({ subject: 'Nome novo', startsAt: start, endsAt: end });
+    expect(upd.message.msg).toBe(CAL_TEXT.card('Nome novo', c.event.meeting.url));
+    ws.close();
+    const card = await one(`SELECT * FROM messages WHERE room_id = $1 AND extra ? 'meeting'`, [rid]);
+    expect(card.attachments[0].title).toBe('Nome novo');
+    expect(card.edited_at).toBeNull();
+    const note = await one(`SELECT msg FROM messages WHERE room_id = $1 ORDER BY created_at DESC LIMIT 1`, [rid]);
+    expect(note.msg).toMatch(/^A reunião \*\*Nome novo\*\* mudou de horário: .+ \(horário [^)]+\)\.$/);
+    if (CAL_TZ === 'America/Sao_Paulo') expect(note.msg).toContain('(horário de Brasília)');
+  });
+
   it('sem a permissão create-calendar-meeting não cria reunião, mas cria evento', async () => {
     const { loadPermissions } = await import('../src/services/permissions');
     await query(`UPDATE permissions SET roles = array_remove(roles, 'user') WHERE id = 'create-calendar-meeting'`);

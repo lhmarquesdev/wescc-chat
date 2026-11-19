@@ -9,10 +9,10 @@ import { newId } from '../lib/ids';
 import { bus } from '../realtime/bus';
 import { audit } from '../services/audit';
 import { assertCanBringIn } from '../services/direct';
-import { sendMessage } from '../services/messages';
+import { sendMessage, withExtra } from '../services/messages';
 import { hasPermission } from '../services/permissions';
 import { sendPush } from '../services/push';
-import { addUserToRoom, createRoom, getRoom, notifyRoomUpdated, removeUserFromRoom } from '../services/rooms';
+import { addUserToRoom, createRoom, getRoom, notifyRoomUpdated, removeUserFromRoom, republishSubscriptions } from '../services/rooms';
 import { getSetting } from '../services/settings';
 import { siteUrl } from '../services/sso';
 import { actorOf, type Ctx } from '../services/users';
@@ -384,6 +384,19 @@ async function postMeetingCard(ctx: Ctx, rid: string, eventId: string, code: str
   ).catch(() => {});
 }
 
+// O cartão da reunião (com o botão Entrar) acompanha o título e o horário atuais, sem marcar a mensagem como editada.
+async function refreshMeetingCard(rid: string, eventId: string, c: { title: string; startsAt: Date; endsAt: Date }) {
+  const row = await one(`SELECT * FROM messages WHERE room_id = $1 AND extra->'meeting'->>'meetingId' = $2 ORDER BY created_at LIMIT 1`, [rid, eventId]);
+  if (!row) return;
+  const meeting: MessageMeeting = { ...row.extra.meeting, subject: c.title, startsAt: c.startsAt.toISOString(), endsAt: c.endsAt.toISOString() };
+  const attachments = (Array.isArray(row.attachments) ? row.attachments : []).map((a: any) => (a?.type === 'meeting' ? { ...a, title: c.title } : a));
+  const upd = await one(
+    `UPDATE messages SET msg = $2, extra = jsonb_set(extra, '{meeting}', $3::jsonb), attachments = $4::jsonb, updated_at = now() WHERE id = $1 RETURNING *`,
+    [row.id, CAL_TEXT.card(linkLabel(c.title), meeting.joinUrl), JSON.stringify(meeting), JSON.stringify(attachments)],
+  );
+  if (upd) bus.publish({ room: rid }, { type: 'message', action: 'updated', message: withExtra(upd) });
+}
+
 async function roomNote(ctx: Ctx, rid: string | null, msg: string) {
   if (!rid) return;
   await sendMessage(ctx, { rid, msg }, { skipCommands: true, integration: true, ignoreReadOnly: true }).catch(() => {});
@@ -457,10 +470,13 @@ export async function updateEvent(ctx: Ctx, id: string, input: Partial<CalendarE
     if (c.title !== prev.title) {
       await query(`UPDATE rooms SET fname = $2, updated_at = now() WHERE id = $1`, [rid, c.title]);
       await notifyRoomUpdated(rid);
+      // A barra lateral mostra o nome guardado na inscrição de cada membro.
+      await republishSubscriptions(rid);
     }
     const me = { id: ctx.userId, username: ctx.username };
     for (const uid of added) await addUserToRoom(rid, uid, { inviter: me }).catch(() => {});
     for (const uid of removed) await removeUserFromRoom(rid, uid, { by: me }).catch(() => {});
+    if (moved || c.title !== prev.title) await refreshMeetingCard(rid, id, c);
     if (moved) await roomNote(ctx, rid, CAL_TEXT.movedMsg(c.title, whenText({ allDay: c.allDay, startsAt: c.startsAt })));
   }
   await audit(actorOf(ctx), 'calendar.event.updated', { eventId: id }, { added: added.length, removed: removed.length, moved });
@@ -534,6 +550,20 @@ export async function joinMeeting(ctx: Ctx, code: unknown): Promise<{ rid: strin
   }
   await addUserToRoom(row.room_id, ctx.userId);
   return { rid: row.room_id, event: (await eventFor(row.id, ctx.userId))! };
+}
+
+// Alguém tirou a pessoa da sala de uma reunião (Remover da sala): ela deixa de ser convidada e não volta pelo link
+// "Só convidados" até ser convidada de novo. Quem sai da sala por conta própria continua convidado.
+export async function dropMeetingInvite(rid: string, userId: string, by: { id: string; username: string }) {
+  const rows = await many(
+    `DELETE FROM calendar_attendees a USING calendar_events e
+      WHERE e.id = a.event_id AND e.room_id = $1 AND e.is_meeting AND a.user_id = $2 RETURNING e.id, e.owner_id`,
+    [rid, userId],
+  );
+  for (const r of rows) {
+    await changed([userId, ...(await involved(r.id, r.owner_id))]);
+    await announceChange({ userId: by.id, username: by.username }, r.id, [userId], 'removed');
+  }
 }
 
 // Reunião ligada a uma sala (cabeçalho da sala da reunião).

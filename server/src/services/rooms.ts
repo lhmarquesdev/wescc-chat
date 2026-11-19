@@ -241,6 +241,11 @@ export async function removeUserFromRoom(rid: string, userId: string, opts: { by
     if (opts.by && opts.by.id !== userId) await sendSystemMessage(rid, 'ru', opts.by, user.username);
     else await sendSystemMessage(rid, 'ul', { id: user.id, username: user.username }, user.username);
   }
+  // Sala de reunião da Agenda: quem foi tirado por outra pessoa deixa de ser convidado (não volta pelo link).
+  if (opts.by && opts.by.id !== userId) {
+    const { dropMeetingInvite } = await import('../calendar/events');
+    await dropMeetingInvite(rid, userId, opts.by).catch(() => {});
+  }
   if (user) emit('room.left', { room, user: { _id: user.id, username: user.username } });
 }
 
