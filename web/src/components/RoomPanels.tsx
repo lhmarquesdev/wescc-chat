@@ -207,6 +207,8 @@ function roomForm(room: Room & Record<string, any>) {
     default: room.default,
     featured: room.featured,
     encrypted: room.encrypted,
+    // O código em si o servidor não devolve: só se a sala exige um. Vazio com "Exigir" ligado mantém o código atual.
+    joinCodeRequired: !!room.joinCodeRequired,
     joinCode: '',
     retention: room.retention ?? { enabled: false, overrideGlobal: false, maxAgeDays: 30, filesOnly: false, excludePinned: true },
   };
@@ -222,6 +224,8 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   const navigate = useNavigate();
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState<any>({});
+  // Valores da sala quando a edição abriu: o salvar manda só o que a pessoa mudou em relação a eles.
+  const [base, setBase] = useState<Record<string, any>>({});
   const imageRef = useRef<HTMLInputElement>(null);
   const canEdit = hasPerm('edit-room', roles);
   const canSetRO = hasPerm('set-readonly', roles);
@@ -230,14 +234,18 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   const canRetention = useStore((s) => s.me?.permissions.includes('edit-room-retention-policy'));
   const canToggleE2e = hasPerm('toggle-room-e2e-encryption', roles);
   const e2eSetting = !!useSetting<boolean>('E2E_Enable');
-  useEffect(() => {
-    setF(roomForm(room));
-  }, [room, edit]);
+  // O formulário nasce ao abrir a edição. A sala muda a cada mensagem nova (o evento da sala chega sempre): recarregar o
+  // formulário ali apagaria o que a pessoa está digitando.
+  const startEdit = () => {
+    const v = roomForm(room);
+    setF(v);
+    setBase(v);
+    setEdit(true);
+  };
 
   const save = async () => {
     try {
       // Só o que mudou: quem não tem set-readonly (moderador) salva o resto sem 403 e sem mensagens de sistema à toa.
-      const base: Record<string, any> = roomForm(room);
       const body: any = { rid: room._id };
       for (const [k, v] of Object.entries(f)) if (JSON.stringify(v) !== JSON.stringify(base[k])) body[k] = v;
       // Canal de avisos é sempre somente leitura: o servidor cuida de ro.
@@ -247,7 +255,14 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
         delete body.default;
         delete body.featured;
       }
-      if (!body.joinCode) delete body.joinCode;
+      // Código de acesso: desligar "Exigir" apaga o código (o servidor guarda vazio); ligado, um código novo troca o atual.
+      delete body.joinCodeRequired;
+      if (f.roomType === 'c' && f.joinCodeRequired && !f.joinCode.trim()) {
+        if (!base.joinCodeRequired || base.roomType !== 'c') return fail(new Error('Digite o código de acesso ou desligue “Exigir código de acesso”.'));
+        delete body.joinCode;
+      } else if (f.roomType === 'c' && !f.joinCodeRequired && base.joinCodeRequired) body.joinCode = '';
+      else if (f.roomType === 'c' && f.joinCodeRequired) body.joinCode = f.joinCode.trim();
+      else delete body.joinCode;
       // Ligar ou desligar a criptografia pede a mesma confirmação do menu da conversa (e a senha, para ligar).
       if ('encrypted' in body) {
         if (body.encrypted && !(await requireE2eReady())) return;
@@ -345,9 +360,19 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
               />
             )}
             {f.roomType === 'c' && (
-              <Field label="Código de acesso" hint="Deixe vazio para não exigir código.">
-                <input value={f.joinCode} onChange={(e) => setF({ ...f, joinCode: e.target.value })} placeholder="(sem alteração)" />
-              </Field>
+              <>
+                <Toggle
+                  checked={f.joinCodeRequired}
+                  onChange={(v) => setF({ ...f, joinCodeRequired: v, joinCode: v ? f.joinCode : '' })}
+                  label="Exigir código de acesso"
+                  description={base.joinCodeRequired && base.roomType === 'c' ? 'Este canal já exige um código para entrar.' : 'Quem entra no canal precisa digitar o código.'}
+                />
+                {f.joinCodeRequired && (
+                  <Field label={base.joinCodeRequired && base.roomType === 'c' ? 'Novo código de acesso' : 'Código de acesso'} hint={base.joinCodeRequired && base.roomType === 'c' ? 'Deixe vazio para manter o código atual.' : undefined}>
+                    <input value={f.joinCode} onChange={(e) => setF({ ...f, joinCode: e.target.value })} autoComplete="off" />
+                  </Field>
+                )}
+              </>
             )}
             {isAdmin && (
               <>
@@ -410,6 +435,20 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
   const toTeam = room.t !== 'd' && !room.teamMain && !room.prid && !room.teamId && hasPerm('create-team', roles) && canEdit;
   const toChannel = room.teamMain && hasPerm('edit-team', roles);
   const canArchive = room.t !== 'd' && hasPerm('archive-room', roles);
+  const canUnarchive = room.t !== 'd' && hasPerm('unarchive-room', roles);
+  const archive = async () => {
+    const yes = await confirmDialog({
+      title: `Arquivar ${room.prid ? name : `#${name}`}?`,
+      body: `Ninguém poderá enviar mensagens; o histórico continua visível. ${canUnarchive ? 'Dá para desarquivar depois.' : 'Depois, só um administrador consegue desarquivar.'}`,
+      confirmLabel: 'Arquivar',
+      danger: true,
+    });
+    if (!yes) return;
+    api
+      .post('channels.archive', { roomId: room._id })
+      .then(() => (ok('Sala arquivada.'), onChanged()))
+      .catch(fail);
+  };
   const convert = async (team: boolean) => {
     const yes = await confirmDialog(
       team
@@ -499,10 +538,10 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
           </p>
         )}
       </section>
-      {(canEdit && room.t !== 'd') || toTeam || toChannel || canArchive ? (
+      {(canEdit && room.t !== 'd') || toTeam || toChannel || canArchive || (room.archived && canUnarchive) ? (
         <div className="info-actions">
           {canEdit && room.t !== 'd' && (
-            <button type="button" className="btn ghost" onClick={() => setEdit(true)}>
+            <button type="button" className="btn ghost" onClick={startEdit}>
               <Icon name="edit" />
               Editar
             </button>
@@ -519,12 +558,31 @@ function InfoPanel({ room, sub, roles, available, onPanel, onChanged }: Props) {
               Converter em canal
             </button>
           )}
-          {canArchive && (
-            <button type="button" className="btn ghost" onClick={() => api.post(room.archived ? 'channels.unarchive' : 'channels.archive', { roomId: room._id }).then(onChanged).catch(fail)}>
-              <Icon name={room.archived ? 'unarchive' : 'archive'} />
-              {room.archived ? 'Desarquivar' : 'Arquivar'}
+          {canArchive && !room.archived && (
+            <button type="button" className="btn ghost" onClick={() => void archive()}>
+              <Icon name="archive" />
+              Arquivar
             </button>
           )}
+          {/* Desarquivar é outra permissão (por padrão só do administrador): quem não tem fica sabendo a quem pedir. */}
+          {room.archived &&
+            (canUnarchive ? (
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() =>
+                  api
+                    .post('channels.unarchive', { roomId: room._id })
+                    .then(() => (ok('Sala desarquivada.'), onChanged()))
+                    .catch(fail)
+                }
+              >
+                <Icon name="unarchive" />
+                Desarquivar
+              </button>
+            ) : (
+              canArchive && <p className="info-hint">Sala arquivada. Para desarquivar, peça a um administrador.</p>
+            ))}
         </div>
       ) : null}
       {canDelete && (

@@ -999,6 +999,14 @@
 .info-actions .icon {
   color: hsl(var(--muted-foreground));
 }
+/* "Sala arquivada. Para desarquivar, peça a um administrador." no lugar do botão. */
+.info-hint {
+  margin: 0;
+  padding: var(--space-2) 10px;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: hsl(var(--muted-foreground));
+}
 .info-image {
   display: flex;
 }
