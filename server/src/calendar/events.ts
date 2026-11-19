@@ -42,6 +42,7 @@ export const CAL_TEXT = {
   invitedOnly: 'Só os convidados entram nesta reunião. Peça a quem organizou para convidar você.',
   invitedOnlyBy: (owner: string) => `Só os convidados entram nesta reunião. Peça a ${owner} para convidar você.`,
   range: 'Escolha um período de até 400 dias.',
+  badDate: 'Data inválida.',
   card: (title: string, url: string) => `Reunião: [${title}](${url})`,
   cardText: 'Reunião do chat',
   canceledTopic: 'Reunião cancelada',
@@ -139,9 +140,9 @@ export async function getEvent(ctx: Ctx, id: string): Promise<CalendarEvent> {
 function rangeOf(fromRaw: unknown, toRaw: unknown): { from: Date; to: Date } {
   const from = new Date(String(fromRaw ?? ''));
   const to = new Date(String(toRaw ?? ''));
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from || to.getTime() - from.getTime() > 400 * DAY) {
-    throw badRequest('error-invalid-params', CAL_TEXT.range);
-  }
+  // Data que não se lê não é questão de tamanho do período (antes respondia "até 400 dias").
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) throw badRequest('error-invalid-date', CAL_TEXT.badDate);
+  if (to <= from || to.getTime() - from.getTime() > 400 * DAY) throw badRequest('error-invalid-params', CAL_TEXT.range);
   return { from, to };
 }
 

@@ -147,6 +147,8 @@ describe('nome de usuário reservado', () => {
     expect(await profile(u, { username: '' })).toMatchObject({ status: 400, errorType: 'error-invalid-username' });
     const created = await api('POST', 'users.create', { username: 'All', name: 'Todos', email: 'todos@test.local', password: PW }, A);
     expect(err(created)).toEqual([400, 'Este nome de usuário é reservado. Escolha outro.']);
+    // Instalação nova começa com o cadastro desativado: liga para conferir o nome no cadastro também.
+    await api('POST', 'settings', { settings: { Accounts_RegistrationForm: 'Public' } }, A);
     const reg = await api('POST', 'users.register', { username: 'here', name: 'Aqui', email: 'aqui@test.local', pass: 'Senha-forte-123' });
     expect(err(reg)).toEqual([400, 'Este nome de usuário é reservado. Escolha outro.']);
   });
@@ -181,6 +183,7 @@ describe('nome e Sobre', () => {
     // A administração e o cadastro seguem as mesmas regras.
     expect(err(await api('POST', 'users.create', { username: 'nome.vazio', name: '  ', email: 'nv@test.local', password: PW }, A))).toEqual(noName);
     expect(err(await api('POST', 'users.update', { userId: u.userId, data: { name: '\u200B' } }, A))).toEqual(noName);
+    await api('POST', 'settings', { settings: { Accounts_RegistrationForm: 'Public' } }, A);
     expect(err(await api('POST', 'users.register', { username: 'sem.nome', name: ' ', email: 'sn@test.local', pass: 'Senha-forte-123' }))).toEqual(noName);
   });
 });
@@ -349,7 +352,8 @@ describe('troca de senha em Minha conta', () => {
 describe('tokens de acesso', () => {
   it('nome obrigatório sem os espaços sobrando e único sem diferenciar maiúsculas', async () => {
     const u = await newUser(A);
-    const gen = (tokenName: string) => api('POST', 'users.generatePersonalAccessToken', { tokenName }, u);
+    // Criar um token pede a senha (contas com senha do chat).
+    const gen = (tokenName: string) => api('POST', 'users.generatePersonalAccessToken', { tokenName, password: PW }, u);
     expect(err(await gen('   '))).toEqual([400, 'Informe o nome do token.']);
     expect((await gen('  Relatório   diário ')).success).toBe(true);
     const dup = [400, 'Já existe um token com esse nome.'];

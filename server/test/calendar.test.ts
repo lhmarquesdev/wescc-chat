@@ -64,6 +64,7 @@ describe('eventos', () => {
     expect((await api('POST', 'calendar.create', { ...base, attendeeIds: ['nao-existe'] }, ana)).error).toBe(CAL_TEXT.badAttendee);
     expect((await api('POST', 'calendar.create', { ...base, reminderMinutes: -1 }, ana)).error).toBe(CAL_TEXT.reminder);
     expect((await api('GET', 'calendar.events', { from: range.to, to: range.from }, ana)).error).toBe(CAL_TEXT.range);
+    expect((await api('GET', 'calendar.events', { from: 'abc', to: range.to }, ana)).error).toBe(CAL_TEXT.badDate);
   });
 
   it('recusa fim igual ao início, data que não existe e datas absurdas', async () => {

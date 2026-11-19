@@ -253,7 +253,7 @@ export function usersRoutes(app: FastifyInstance) {
     if (logoutOthers && !getSetting('Device_Management_Allow_Logout_All')) throw forbidden('Encerrar todas as outras sessões está desativado.');
     // Na troca de senha obrigatória só a senha pode ser alterada (e vazia não é resposta: antes saía 200 sem mudar nada).
     if (ctx.setup === 'password' && (typeof d.newPassword !== 'string' || !d.newPassword)) throw badRequest('error-invalid-params', 'Digite a nova senha.');
-    const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: typeof d.statusText === 'string' && d.statusText !== '' ? clampStatusText(d.statusText) : (d.statusText ?? undefined) };
+    const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: typeof d.statusText === 'string' && d.statusText !== '' ? clampStatusText(d.statusText.trim()) : (d.statusText ?? undefined) };
     const row = await updateUser(
       ctx,
       ctx.userId,
@@ -278,7 +278,8 @@ export function usersRoutes(app: FastifyInstance) {
       await assertCanManageUser(ctx, target);
     }
     // Texto (vazio limpa a mensagem); outro tipo é recusado em vez de virar "[object Object]".
-    const message = body.message === undefined || body.message === null ? undefined : body.message === '' ? '' : str(body.message, 'message');
+    // Só espaços também limpa (antes gravava os espaços como mensagem).
+    const message = body.message === undefined || body.message === null ? undefined : body.message === '' ? '' : str(body.message, 'message').trim();
     // Status personalizado: vale o tipo dele e ganha de status. Sem statusId, um status de base limpa o personalizado.
     let status: string | undefined = body.status;
     let customId: string | null = null;

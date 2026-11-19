@@ -69,7 +69,7 @@ function assertAllowedDomain(email: string) {
 }
 
 export function validatePassword(password: string) {
-  if (password && !password.trim()) throw badRequest('error-password-policy-not-met', 'A senha não pode ter só espaços.');
+  if (password && !password.trim()) throw badRequest('error-password-policy-not-met', 'A senha não pode ser só espaços.');
   const min = getSetting<number>('Accounts_Password_Policy_MinLength');
   const errs: string[] = [];
   if (password.length < min) errs.push(`mínimo de ${min} caracteres`);

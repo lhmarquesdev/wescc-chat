@@ -562,8 +562,7 @@ export async function updateSettings(values: Record<string, unknown>) {
     if (def.type === 'password' && raw === '********') continue;
     const value = coerce(def, raw);
     const err = await def.validate?.(value);
-    // O que vem entre parênteses no fim do rótulo explica o campo; no erro fica só o nome dele.
-    if (err) throw new Error(`${(def.label ?? id).replace(/ \(.*\)$/, '')}: ${err}`);
+    if (err) throw new Error(`${def.label}: ${err}`);
     accepted.push([id, value]);
   }
   const changed: { _id: string; value: unknown }[] = [];

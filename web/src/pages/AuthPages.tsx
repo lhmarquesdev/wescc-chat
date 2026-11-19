@@ -475,7 +475,7 @@ function registerErrors(f: RegisterForm): Partial<Record<keyof RegisterForm, str
   // A mesma regra do servidor (EMAIL_RE).
   else if (!/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)*$/.test(f.email.trim())) e.email = 'Digite um e-mail válido, como nome@empresa.com.br.';
   if (!f.pass) e.pass = 'Crie uma senha.';
-  else if (!f.pass.trim()) e.pass = 'A senha não pode ter só espaços.';
+  else if (!f.pass.trim()) e.pass = 'A senha não pode ser só espaços.';
   if (f.pass && f.confirm !== f.pass) e.confirm = 'As senhas não conferem.';
   return e;
 }

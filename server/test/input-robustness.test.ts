@@ -66,7 +66,8 @@ describe('formato da requisição (erros do Fastify) em português', () => {
     const big = await post('users.updateOwnBasicInfo', JSON.stringify({ data: { bio: 'x'.repeat(2.2 * 1024 * 1024) } }), user);
     expect(big).toMatchObject({ status: 413, errorType: 'FST_ERR_CTP_BODY_TOO_LARGE', error: 'O conteúdo enviado é grande demais (máx. 2 MB).' });
     const notMultipart = await post('emoji-custom.create', '{}', A);
-    expect(notMultipart).toMatchObject({ status: 406, errorType: 'FST_INVALID_MULTIPART_CONTENT_TYPE', error: 'Envie o arquivo como formulário (multipart/form-data).' });
+    // O cadastro de emoji confere antes e diz o que mandar.
+    expect(notMultipart).toMatchObject({ status: 400, error: 'Envie o emoji como multipart/form-data.' });
     const xml = await post('chat.sendMessage', '<a/>', user, 'application/xml');
     expect(xml).toMatchObject({ status: 415, error: 'Formato da requisição não aceito.' });
     for (const raw of ['42', '"texto"', '[1,2]']) {

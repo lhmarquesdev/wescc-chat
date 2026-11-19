@@ -244,7 +244,7 @@ describe('troca de senha', () => {
     const empty = await api('POST', 'users.updateOwnBasicInfo', { data: { newPassword: '', currentPassword: '' } }, forced);
     expect([empty.status, empty.error]).toEqual([400, 'Digite a nova senha.']);
     const spaces = await api('POST', 'users.updateOwnBasicInfo', { data: { newPassword: '          ', currentPassword: '' } }, forced);
-    expect([spaces.status, spaces.error]).toEqual([400, 'A senha não pode ter só espaços.']);
+    expect([spaces.status, spaces.error]).toEqual([400, 'A senha não pode ser só espaços.']);
     const same = await api('POST', 'users.updateOwnBasicInfo', { data: { newPassword: 'Provisoria123', currentPassword: '' } }, forced);
     expect([same.status, same.errorType, same.error]).toEqual([400, 'error-password-same', 'A senha nova precisa ser diferente da atual.']);
     expect((await api('GET', 'me', undefined, forced)).requirePasswordChange).toBe(true);
@@ -313,7 +313,7 @@ describe('cadastro', () => {
       expect((await reg({ name: 'N'.repeat(101) })).error).toBe('O nome pode ter no máximo 100 caracteres.');
       expect((await reg({ email: ' ' })).error).toBe('Informe o e-mail.');
       expect((await reg({ pass: '' })).error).toBe('Informe a senha.');
-      expect((await reg({ pass: '          ' })).error).toBe('A senha não pode ter só espaços.');
+      expect((await reg({ pass: '          ' })).error).toBe('A senha não pode ser só espaços.');
       // Espaços nas pontas do nome saem.
       const ok = await reg({ name: '  Fulana de Tal  ' });
       expect(ok.user.name).toBe('Fulana de Tal');

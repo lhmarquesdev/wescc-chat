@@ -309,6 +309,11 @@ describe('status: nome invisível e mensagem', () => {
     // Vazio limpa; o perfil (updateOwnBasicInfo) corta do mesmo jeito.
     expect((await pick(u, { message: '' })).success).toBe(true);
     expect(await text()).toBe('');
+    // Só espaços também limpa; espaços nas pontas saem.
+    expect((await pick(u, { message: '  Em reunião  ' })).success).toBe(true);
+    expect(await text()).toBe('Em reunião');
+    expect((await pick(u, { message: '   ' })).success).toBe(true);
+    expect(await text()).toBe('');
     expect((await api('POST', 'users.updateOwnBasicInfo', { data: { statusText: `${'b'.repeat(119)}😀` } }, u)).success).toBe(true);
     expect(await text()).toBe('b'.repeat(119));
     // statusText que não é texto: aviso, não erro interno; null não muda nada.
