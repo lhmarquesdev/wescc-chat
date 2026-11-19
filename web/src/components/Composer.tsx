@@ -15,6 +15,7 @@ import { realtime } from '../lib/realtime';
 import { registerComposer, useStickers } from '../lib/stickers';
 import { canWithRoles, useSetting, useStore } from '../lib/store';
 import { namesIn, useNames } from '../lib/names';
+import { voiceFileType } from '../lib/voice';
 import { Icon, type IconName } from './Icon';
 import { fileIconName, FileTile, setEditingMessage } from './MessageItem';
 import { Portal, Sheet, useAnchored, useIsPhone, useMedia } from './overlay';
@@ -38,6 +39,8 @@ interface Suggestion {
 
 // No canal de avisos a faixa do topo já explica quem publica: aqui basta uma linha curta.
 const disabledText = (reason?: string) => (!reason ? 'Você não pode enviar mensagens aqui.' : /canal de avisos/i.test(reason) ? 'Só os publicadores enviam aqui.' : reason);
+
+const VOICE_BLOCKED = 'O administrador não permite enviar áudio.';
 
 const SECTION: Record<string, string> = { '@': 'Pessoas', '#': 'Canais', ':': 'Emojis', '/': 'Comandos' };
 
@@ -479,6 +482,7 @@ function ComposerView({
   };
 
   const voice = useVoiceRecorder({
+    scope: `${rid}:${tmid ?? ''}`,
     onActivity: sendRecording,
     onSend: (r) => void doUpload([r.file], '', { voice: '1', duration: r.duration.toFixed(1), waveform: r.waveform.join(',') }, 'mensagem de voz'),
   });
@@ -486,6 +490,9 @@ function ComposerView({
   const uploadsHere = !!uploadsOn && !(room?.t === 'd' && uploadsInDirect === false);
   // Caixa vazia: o botão Enviar vira o microfone (como no WhatsApp).
   const micOn = uploadsHere && !editing && !text.trim() && !pending.length;
+  // O tipo do áudio fora da lista de tipos permitidos: o microfone aparece desativado, com o motivo (a gravação seria
+  // recusada só no envio).
+  const voiceBlocked = micOn && !voice.active && !mediaTypeAllowed(voiceFileType(), whiteList, blackList);
   // Itens do "+": vídeo (upload permitido e o tipo aceito), enquete (create-poll). Sala criptografada: nenhum dos dois
   // (o servidor não lê o conteúdo), nem agendar.
   const roles = [...me.roles, ...(sub?.roles ?? [])];
@@ -904,6 +911,17 @@ function ComposerView({
               Salvar
             </button>
           </span>
+        ) : voiceBlocked ? (
+          <button
+            type="button"
+            className="btn primary send mic"
+            aria-disabled="true"
+            title={VOICE_BLOCKED}
+            aria-label={`Gravar mensagem de voz. ${VOICE_BLOCKED}`}
+            onClick={() => useStore.getState().toast(VOICE_BLOCKED, 'info')}
+          >
+            <Icon name="mic" size={18} />
+          </button>
         ) : micOn || voice.active ? (
           // O mesmo botão grava (segurando) e, com a gravação travada, envia: ele não sai de baixo do dedo.
           <button

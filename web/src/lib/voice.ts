@@ -17,6 +17,13 @@ function pickMime() {
   return '';
 }
 
+// O tipo do arquivo que a gravação vai gerar neste navegador (sem os codecs), para conferir com a lista de tipos
+// permitidos antes de gravar.
+export function voiceFileType(): string {
+  if (typeof MediaRecorder === 'undefined') return 'audio/webm';
+  return (pickMime() || 'audio/webm').split(';')[0];
+}
+
 export interface VoiceResult {
   file: File;
   duration: number;

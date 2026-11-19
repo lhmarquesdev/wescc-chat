@@ -912,7 +912,10 @@ texto. Por isso a proteção depende de o servidor do chat ser o original e de o
   opções, com escolha múltipla, voto anônimo (ninguém vê quem votou, nem quem criou) e prazo opcional (de 5 minutos a
   90 dias). Votar não depende da permissão; encerrar antes do prazo, só quem criou ou um moderador da sala.
 - **Mensagens de vídeo** (botão + › Gravar vídeo): até 2 minutos, pela câmera do aparelho. Seguem as regras de upload
-  (Configurações › Upload de arquivos; o tipo `video/webm` ou `video/mp4` precisa ser aceito) e pedem HTTPS.
+  (Configurações › Upload de arquivos; o tipo `video/webm` ou `video/mp4` precisa ser aceito) e pedem HTTPS. As
+  mensagens de voz (o microfone no lugar de Enviar) também: com o tipo do áudio recusado, o microfone aparece
+  desativado, com o motivo. Sair da conversa no meio de uma gravação travada de 3 segundos ou mais pergunta antes de
+  descartar.
 - **Lembrar-me** (menu da mensagem): a pessoa escolhe quando quer ser lembrada (até 200 lembretes); na hora chegam o
   aviso no chat e o push, e o lembrete fica em **Lembretes**, na barra lateral, até ela concluir ou adiar. Só a
   própria pessoa vê os seus.
