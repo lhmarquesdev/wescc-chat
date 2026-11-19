@@ -314,7 +314,7 @@ describe('status: nome invisível e mensagem', () => {
     // statusText que não é texto: aviso, não erro interno; null não muda nada.
     for (const statusText of [{ a: 1 }, 42, true]) {
       const r = await api('POST', 'users.updateOwnBasicInfo', { data: { statusText } }, u);
-      expect([r.status, r.error], JSON.stringify(statusText)).toEqual([400, 'O parâmetro "statusText" deve ser texto.']);
+      expect([r.status, r.error], JSON.stringify(statusText)).toEqual([400, 'O campo Mensagem de status deve ser um texto.']);
     }
     expect((await api('POST', 'users.updateOwnBasicInfo', { data: { statusText: null } }, u)).success).toBe(true);
     expect(await text()).toBe('b'.repeat(119));

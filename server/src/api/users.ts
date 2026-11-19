@@ -209,7 +209,7 @@ export function usersRoutes(app: FastifyInstance) {
     const logoutOthers = !!d.newPassword && bool(d.logoutOthers) === true;
     if (logoutOthers && !getSetting('Device_Management_Allow_Logout_All')) throw forbidden('Encerrar todas as outras sessões está desativado.');
     // Na troca de senha obrigatória só a senha pode ser alterada.
-    const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: d.statusText == null || d.statusText === '' ? (d.statusText ?? undefined) : clampStatusText(str(d.statusText, 'statusText')) };
+    const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: typeof d.statusText === 'string' && d.statusText !== '' ? clampStatusText(d.statusText) : (d.statusText ?? undefined) };
     const row = await updateUser(
       ctx,
       ctx.userId,
