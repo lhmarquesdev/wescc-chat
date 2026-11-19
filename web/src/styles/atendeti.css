@@ -886,7 +886,9 @@
 }
 .auth-main .btn.primary {
   border-radius: 12px;
-  color: hsl(var(--primary));
+  /* Tom de texto da marca (32%, o --brand-ink-2 do claro) fixo nos dois temas: o botão é sempre branco, e o ciano
+     cheio sobre o branco ficava em 2,5:1. */
+  color: hsl(var(--brand-h) var(--brand-s) 32%);
   font-size: 14px;
   font-weight: 600;
 }
