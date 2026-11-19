@@ -3,7 +3,7 @@ import { bus } from '../realtime/bus';
 import { audit } from './audit';
 import { getSetting } from './settings';
 import { deleteFilesWhere, removeFiles } from './uploads';
-import { withExtra } from './messages';
+import { refreshMessageCopies, withExtra } from './messages';
 
 export interface PruneOptions {
   latest: string;
@@ -49,6 +49,8 @@ export async function pruneMessages(rid: string, o: PruneOptions): Promise<numbe
   const { removeRemindersOfMessage } = await import('./reminders');
   await removeRemindersOfMessage(ids);
   await query('DELETE FROM messages WHERE id = ANY($1)', [ids]);
+  // A nota de fixação e as citações das que saíram não guardam mais o texto.
+  await refreshMessageCopies(rid, ids);
   // Recalcula contadores de threads afetadas e a última mensagem.
   await query(
     `UPDATE messages p SET tcount = (SELECT count(*) FROM messages c WHERE c.tmid = p.id) WHERE p.room_id = $1 AND p.tcount > 0`,

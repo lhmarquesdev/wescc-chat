@@ -428,7 +428,8 @@ function QuoteAttachment({ a }: { a: Attachment }) {
           </time>
         )}
       </div>
-      <div className="quote-body">{renderMarkdown(a.text ?? '')}</div>
+      {/* A original foi apagada: o servidor tirou o texto da cópia. */}
+      <div className="quote-body">{a.removed ? <em className="muted">Mensagem removida</em> : renderMarkdown(a.text ?? '')}</div>
     </div>
   );
 }

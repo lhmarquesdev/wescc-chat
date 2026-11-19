@@ -183,6 +183,45 @@ async function quoteAttachment(ctx: Ctx, link: string): Promise<Attachment | nul
   return { text: rowPreview({ ...m, files }, { withName: false }), author_name: m.username, ...aliasOf(m), ts: m.created_at, message_link: `?msg=${m.id}` };
 }
 
+// A nota "fixou uma mensagem" (na sala da mensagem) e as citações (em qualquer sala; índice messages_quote_links_idx)
+// guardam uma cópia do texto. Quem apaga uma mensagem para tirar um dado sensível não pode deixá-lo nas cópias: com a
+// original apagada (ids), a cópia vira "Mensagem removida"; editada (edited, a linha nova), recebe o texto novo.
+export async function refreshMessageCopies(rid: string, ids: string[], edited?: any) {
+  if (!ids.length) return;
+  const set = new Set(ids);
+  const swap = (list: unknown, pin: boolean) => {
+    let changed = false;
+    const out = (Array.isArray(list) ? list : []).map((a: any) => {
+      const target = a?.message_link ? quotedMessageId(String(a.message_link)) : null;
+      if (!target || !set.has(target)) return a;
+      changed = true;
+      if (!edited) return { ...a, text: 'Mensagem removida', removed: true };
+      // Cifrada: a nota fica sem texto e a web decifra a original (pinnedMessageId), como ao fixar.
+      const files = (edited.files ?? []) as MessageFile[];
+      return { ...a, text: pin && edited.e2e ? '' : rowPreview({ ...edited, files }, { withName: false }) };
+    });
+    return changed ? out : null;
+  };
+  const pins = await many(
+    `SELECT * FROM messages WHERE room_id = $1 AND t = 'message_pinned'
+       AND (extra->>'pinnedMessageId' = ANY($2) OR jsonb_path_query_array(extra->'attachments', '$[*].message_link') ?| $3)`,
+    [rid, ids, ids.map((id) => `/msg/${id}`)],
+  );
+  for (const p of pins) {
+    const next = swap(p.extra?.attachments, true);
+    if (!next) continue;
+    const row = await one(`UPDATE messages SET extra = jsonb_set(extra, '{attachments}', $2::jsonb), updated_at = now() WHERE id = $1 RETURNING *`, [p.id, JSON.stringify(next)]);
+    if (row) bus.publish({ room: row.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
+  }
+  const quotes = await many(`SELECT * FROM messages WHERE jsonb_path_query_array(attachments, '$[*].message_link') ?| $1`, [ids.map((id) => `?msg=${id}`)]);
+  for (const q of quotes) {
+    const next = swap(q.attachments, false);
+    if (!next) continue;
+    const row = await one('UPDATE messages SET attachments = $2, updated_at = now() WHERE id = $1 RETURNING *', [q.id, JSON.stringify(next)]);
+    if (row) bus.publish({ room: row.room_id }, { type: 'message', action: 'updated', message: withExtra(row) });
+  }
+}
+
 export async function sanitizeAttachments(ctx: Ctx, list: unknown): Promise<Attachment[]> {
   if (!Array.isArray(list)) return [];
   const out: Attachment[] = [];
@@ -535,6 +574,8 @@ export async function updateMessage(ctx: Ctx, msgId: string, text: string, rid?:
   );
   // Tradução: a do texto antigo não vale mais (quem está com a mensagem na tela pede de novo pelo editedAt).
   await forgetMessageTranslations(m.id);
+  // A nota de fixação e as citações mostram o texto novo, não o que a pessoa tirou.
+  await refreshMessageCopies(m.room_id, [m.id], row);
   // Prévia da sala: o texto novo. Editada cifrada, "Mensagem criptografada", também quando a mensagem era aberta (de
   // antes de ligar a criptografia): o texto antigo não fica na lista de conversas.
   if (room.last_message?._id === m.id) {
@@ -604,6 +645,7 @@ export async function removeMessageRow(m: any) {
     );
     if (parent) bus.publish({ room: m.room_id }, { type: 'message', action: 'updated', message: withExtra(parent) });
   }
+  await refreshMessageCopies(m.room_id, [m.id]);
   // Recalcula a última mensagem da sala, se necessário.
   const room = await getRoom(m.room_id);
   if (room?.last_message?._id === m.id) {

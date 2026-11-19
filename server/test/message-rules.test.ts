@@ -101,3 +101,36 @@ describe('versões anteriores de uma mensagem editada', () => {
     expect((await pool.query('SELECT count(*)::int AS n FROM message_history WHERE message_id = $1', [root._id])).rows[0].n).toBe(0);
   });
 });
+
+describe('cópias do texto (fixação e citações)', () => {
+  const pinNoteOf = async (rid: string, mid: string) => (await api('GET', 'channels.history', { roomId: rid, count: 50 }, A)).messages.find((x: any) => x.t === 'message_pinned' && x.pinnedMessageId === mid);
+
+  it('apagar a original tira o texto da nota de fixação e das citações, em qualquer sala', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `copias-${uniq()}` }, A)).channel;
+    const other = (await api('POST', 'channels.create', { name: `outra-${uniq()}` }, A)).channel;
+    const m = (await send(A, ch._id, 'A senha do wifi é Segredo#2026')).message;
+    await api('POST', 'chat.pinMessage', { messageId: m._id }, A);
+    expect((await pinNoteOf(ch._id, m._id)).attachments[0].text).toBe('A senha do wifi é Segredo#2026');
+    const q1 = (await send(A, ch._id, 'citando aqui', { attachments: [{ message_link: `?msg=${m._id}` }] })).message;
+    const q2 = (await send(A, other._id, 'citando em outra sala', { attachments: [{ message_link: `?msg=${m._id}` }] })).message;
+    expect(q2.attachments[0].text).toBe('A senha do wifi é Segredo#2026');
+
+    await api('POST', 'chat.delete', { roomId: ch._id, msgId: m._id }, A);
+    expect((await pinNoteOf(ch._id, m._id)).attachments[0]).toMatchObject({ text: 'Mensagem removida', removed: true });
+    for (const q of [q1, q2]) {
+      const got = (await api('GET', 'chat.getMessage', { msgId: q._id }, A)).message;
+      expect(got.attachments[0]).toMatchObject({ text: 'Mensagem removida', removed: true, message_link: `?msg=${m._id}` });
+      expect(got.msg).toBe(q.msg);
+    }
+  });
+
+  it('editar a original atualiza a nota de fixação e as citações', async () => {
+    const ch = (await api('POST', 'channels.create', { name: `edita-copia-${uniq()}` }, A)).channel;
+    const m = (await send(A, ch._id, 'meu CPF é 123.456.789-00')).message;
+    await api('POST', 'chat.pinMessage', { messageId: m._id }, A);
+    const q = (await send(A, ch._id, 'citação', { attachments: [{ message_link: `?msg=${m._id}` }] })).message;
+    await api('POST', 'chat.update', { roomId: ch._id, msgId: m._id, text: 'meu CPF está no cadastro' }, A);
+    expect((await pinNoteOf(ch._id, m._id)).attachments[0].text).toBe('meu CPF está no cadastro');
+    expect((await api('GET', 'chat.getMessage', { msgId: q._id }, A)).message.attachments[0].text).toBe('meu CPF está no cadastro');
+  });
+});
