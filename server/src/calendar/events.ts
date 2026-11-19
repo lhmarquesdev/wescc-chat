@@ -12,7 +12,7 @@ import { assertCanBringIn } from '../services/direct';
 import { sendMessage, withExtra } from '../services/messages';
 import { hasPermission } from '../services/permissions';
 import { sendPush } from '../services/push';
-import { addUserToRoom, createRoom, getRoom, notifyRoomUpdated, removeUserFromRoom, republishSubscriptions } from '../services/rooms';
+import { addUserToRoom, createRoom, getRoom, notifyRoomUpdated, removeUserFromRoom, republishSubscriptions, setArchived } from '../services/rooms';
 import { getSetting } from '../services/settings';
 import { siteUrl } from '../services/sso';
 import { actorOf, type Ctx } from '../services/users';
@@ -43,6 +43,7 @@ export const CAL_TEXT = {
   range: 'Escolha um período de até 400 dias.',
   card: (title: string, url: string) => `Reunião: [${title}](${url})`,
   cardText: 'Reunião do chat',
+  canceledTopic: 'Reunião cancelada',
   canceledMsg: (title: string) => `A reunião **${title}** foi cancelada.`,
   movedMsg: (title: string, when: string) => `A reunião **${title}** mudou de horário: ${when}.`,
   invitePush: (by: string) => `${by} convidou você`,
@@ -493,6 +494,13 @@ export async function cancelEvent(ctx: Ctx, id: string): Promise<void> {
   const people = await involved(id, row.owner_id);
   await query(`UPDATE calendar_events SET status = 'canceled', canceled_at = now(), updated_at = now() WHERE id = $1`, [id]);
   if (row.is_meeting) await roomNote(ctx, row.room_id, CAL_TEXT.canceledMsg(row.title));
+  // A sala da reunião cancelada fica arquivada (ninguém escreve nem liga; o histórico continua) com o tópico
+  // "Reunião cancelada", para não se confundir com as reuniões que vão acontecer.
+  const room = row.is_meeting && row.room_id ? await getRoom(row.room_id) : null;
+  if (room && !room.archived) {
+    await query(`UPDATE rooms SET topic = $2, updated_at = now() WHERE id = $1`, [room.id, CAL_TEXT.canceledTopic]);
+    await setArchived(ctx, room.id, true, { skipPermission: true }).catch(() => {});
+  }
   await audit(actorOf(ctx), 'calendar.event.canceled', { eventId: id }, {});
   await changed(people);
   await announceChange(ctx, id, people, 'canceled');

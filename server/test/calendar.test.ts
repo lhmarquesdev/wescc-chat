@@ -223,9 +223,13 @@ describe('reuniões', () => {
     expect((await one('SELECT fname FROM rooms WHERE id = $1', [rid])).fname).toBe('Sync semanal');
     expect((await api('POST', 'calendar.update', { eventId: c.event._id, isMeeting: false }, ana)).error).toBe(CAL_TEXT.meetingOff);
     await api('POST', 'calendar.cancel', { eventId: c.event._id }, ana);
-    const last = await one(`SELECT msg FROM messages WHERE room_id = $1 ORDER BY created_at DESC LIMIT 1`, [rid]);
-    expect(last.msg).toBe(CAL_TEXT.canceledMsg('Sync semanal'));
+    expect(await one(`SELECT 1 FROM messages WHERE room_id = $1 AND msg = $2`, [rid, CAL_TEXT.canceledMsg('Sync semanal')])).toBeTruthy();
     expect((await api('GET', 'calendar.meeting', { code: c.event.meeting.code }, carla)).canJoin).toBe(false);
+    // A sala da reunião cancelada fica arquivada, com o tópico "Reunião cancelada": o histórico fica, ninguém escreve.
+    expect(await one(`SELECT archived, topic FROM rooms WHERE id = $1`, [rid])).toEqual({ archived: true, topic: CAL_TEXT.canceledTopic });
+    expect(await one('SELECT 1 FROM subscriptions WHERE room_id = $1 AND user_id = $2', [rid, carla.userId])).toBeTruthy();
+    const sent = await api('POST', 'chat.sendMessage', { message: { rid, msg: 'ainda dá?' } }, carla);
+    expect([sent.status, sent.errorType]).toEqual([400, 'error-room-archived']);
   });
 
   it('quem é tirado da sala da reunião deixa de ser convidado e não volta pelo link', async () => {
