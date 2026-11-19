@@ -58,7 +58,8 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 // ---------- Item de sala ----------
 
 // onPick: na busca, abrir uma conversa termina a busca (como o Enter e as linhas de Pessoas e Canais).
-function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPick?: () => void }) {
+// team: nome do time de um canal do time (aparece apagado ao lado do nome).
+function SidebarItem({ s, big, onPick, team }: { s: Subscription; big?: boolean; onPick?: () => void; team?: string }) {
   const typing = useStore((st) => Object.keys(st.typing[s.rid] ?? {}).length > 0);
   const dmUser = s.t === 'd' && !s.name.includes(',') ? s.name : null;
   const silenced = !!s.notifications?.disableNotifications;
@@ -73,9 +74,12 @@ function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPic
   const otherId = useDirectPeer(s.rid, !!dmUser);
   // Conversa oculta (só aparece na busca): abrir volta a mostrá-la na lista.
   const hidden = !s.open;
+  const label = s.fname || s.name;
   return (
     <NavLink
       to={roomPath(s)}
+      // Nome cortado pela largura: o nome inteiro (e o time) ao parar o mouse em cima.
+      title={team ? `${label} · time ${team}` : label}
       className={({ isActive }) => ['side-item', isActive && 'active', (s.alert || s.unread || pending) && 'unread', silenced && 'silenced'].filter(Boolean).join(' ')}
       onClick={() => {
         if (hidden) void api.post('rooms.open', { roomId: s.rid }).catch(() => {});
@@ -91,8 +95,8 @@ function SidebarItem({ s, big, onPick }: { s: Subscription; big?: boolean; onPic
           <Icon name={roomIconName(s)} size={big ? 18 : 16} />
         </span>
       )}
-      <span className="side-name">{s.fname || s.name}</span>
-      {hidden && <span className="side-hint">Oculta</span>}
+      <span className="side-name">{label}</span>
+      {hidden ? <span className="side-hint">Oculta</span> : team && <span className="side-hint side-team">{team}</span>}
       {/* Chamadas em grupo: */}
       {dmUser ? <InCallBadge userId={otherId} /> : <RoomLiveDot rid={s.rid} />}
       {typing ? (
@@ -132,6 +136,7 @@ function SideGroup({
   onSort,
   add,
   onPick,
+  teams,
 }: {
   title: string;
   items: Subscription[];
@@ -141,6 +146,7 @@ function SideGroup({
   onSort: (s: SortMode) => void;
   add?: { label: string; onClick: () => void };
   onPick?: () => void;
+  teams: Record<string, string>;
 }) {
   const key = `side.collapsed.${title}`;
   const [collapsed, setCollapsed] = useState(() => local.get(key) === '1');
@@ -193,7 +199,7 @@ function SideGroup({
         </div>
       </div>
       {shown.map((s) => (
-        <SidebarItem key={s.rid} s={s} big={big} onPick={onPick} />
+        <SidebarItem key={s.rid} s={s} big={big} onPick={onPick} team={s.teamId && !s.teamMain ? teams[s.teamId] : undefined} />
       ))}
     </div>
   );
@@ -714,6 +720,12 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [all, subs, filter, searching, onlyUnread, sorts, canChannel, canDm]);
   const localCount = groups.reduce((n, g) => n + g.items.length, 0);
+  // Nome de cada time da pessoa (pela sala principal): os canais do time mostram a que time pertencem.
+  const teams = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const s of Object.values(subs)) if (s.teamMain && s.teamId) out[s.teamId] = s.fname || s.name;
+    return out;
+  }, [subs]);
 
   // Pessoas e canais do servidor depois das conversas (não com "Somente não lidas": ali só contam as da lista).
   const spot = useSpotlight(filter, searching && !onlyUnread);
@@ -911,6 +923,7 @@ export function Sidebar({ onNavigate, mode = 'side' }: { onNavigate?: () => void
             onSort={(m) => setSort(g.title, m)}
             add={g.add}
             onPick={searching ? finishSearch : undefined}
+            teams={teams}
           />
         ))}
         {searching && !onlyUnread && (
