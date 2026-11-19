@@ -574,6 +574,8 @@ export async function updateUser(
       if (u.auth_source === 'ldap' || (u.auth_source !== 'local' && !u.password_hash)) throw forbidden('Sua conta entra pelo provedor da empresa; a senha é trocada lá.');
       if (u.password_hash && !(await verifyPassword(opts.currentPassword ?? '', u.password_hash))) throw badRequest('error-invalid-password', 'Senha atual incorreta.');
     }
+    // Só espaços passava pelo tamanho mínimo.
+    if (!data.password.trim()) throw badRequest('error-password-policy-not-met', 'A senha não pode ser só espaços.');
     validatePassword(data.password);
     sets.push(`password_hash = $${params.push(await hashPassword(data.password))}`, 'require_password_change = false');
   }

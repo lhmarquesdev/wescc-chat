@@ -203,6 +203,9 @@ export function usersRoutes(app: FastifyInstance) {
   // ---------- Perfil próprio ----------
   route(app, 'POST', 'users.updateOwnBasicInfo', {}, async (req, _rep, ctx) => {
     const d = b(req).data ?? {};
+    // "Encerrar as outras sessões" junto com a senha nova (quem troca porque a senha vazou): as outras saem na hora.
+    const logoutOthers = !!d.newPassword && bool(d.logoutOthers) === true;
+    if (logoutOthers && !getSetting('Device_Management_Allow_Logout_All')) throw forbidden('Encerrar todas as outras sessões está desativado.');
     // Na troca de senha obrigatória só a senha pode ser alterada.
     const fields = ctx.setup === 'password' ? { password: d.newPassword } : { username: d.username, name: d.name, email: d.email, password: d.newPassword, bio: d.bio, statusText: d.statusText };
     const row = await updateUser(
@@ -211,6 +214,7 @@ export function usersRoutes(app: FastifyInstance) {
       fields,
       { asAdmin: false, currentPassword: d.currentPassword },
     );
+    if (logoutOthers) return { user: mapUser(row, { full: true }), sessionsEnded: await revokeAllSessions(ctx.userId, ctx.sessionId) };
     return { user: mapUser(row, { full: true }) };
   });
   route(app, 'POST', 'users.setPreferences', {}, async (req, _rep, ctx) => {

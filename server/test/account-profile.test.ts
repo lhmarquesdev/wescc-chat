@@ -293,3 +293,33 @@ describe('notificações e tempo real', () => {
     }
   });
 });
+
+describe('troca de senha em Minha conta', () => {
+  it('senha só de espaços é recusada; "Encerrar as outras sessões" derruba as outras e mantém esta', async () => {
+    const u = await newUser(A);
+    const other = await login(u.username, PW);
+    const change = (data: Record<string, unknown>) => profile(u, { currentPassword: PW, ...data });
+    expect(err(await change({ newPassword: ' '.repeat(10) }))).toEqual([400, 'A senha não pode ser só espaços.']);
+    expect((await login(u.username, PW)).userId).toBe(u.userId);
+    // Com "Permitir encerrar todas as sessões" desligado, nada muda (nem a senha).
+    await settings({ Device_Management_Allow_Logout_All: false });
+    try {
+      expect((await change({ newPassword: 'senha-nova-123', logoutOthers: true })).status).toBe(403);
+    } finally {
+      await settings({ Device_Management_Allow_Logout_All: true });
+    }
+    expect((await login(u.username, PW)).userId).toBe(u.userId);
+    const r = await change({ newPassword: 'senha-nova-123', logoutOthers: true });
+    expect(r.success).toBe(true);
+    // other e os dois logins de conferência acima.
+    expect(r.sessionsEnded).toBe(3);
+    expect((await api('GET', 'me', undefined, other)).status).toBe(401);
+    expect((await api('GET', 'me', undefined, u)).username).toBe(u.username);
+    // Sem a opção, as outras sessões continuam.
+    const third = await login(u.username, 'senha-nova-123');
+    const kept = await profile(u, { currentPassword: 'senha-nova-123', newPassword: 'senha-nova-456' });
+    expect(kept.success).toBe(true);
+    expect(kept.sessionsEnded).toBeUndefined();
+    expect((await api('GET', 'me', undefined, third)).username).toBe(u.username);
+  });
+});

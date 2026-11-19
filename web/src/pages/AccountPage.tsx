@@ -676,26 +676,51 @@ export function applyTheme(theme: string) {
   paintTheme();
 }
 
+// As regras da senha (configurações públicas), para a pessoa ver antes de errar.
+function usePasswordRules() {
+  const min = Number(useSetting<number>('Accounts_Password_Policy_MinLength')) || 0;
+  const upper = useSetting<boolean>('Accounts_Password_Policy_AtLeastOneUppercase');
+  const digit = useSetting<boolean>('Accounts_Password_Policy_AtLeastOneNumber');
+  const special = useSetting<boolean>('Accounts_Password_Policy_AtLeastOneSpecialCharacter');
+  const parts = [upper && 'uma letra maiúscula', digit && 'um número', special && 'um caractere especial'].filter(Boolean) as string[];
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} e ${parts[parts.length - 1]}` : parts[0];
+  const size = min > 1 ? `Pelo menos ${min} caracteres` : min === 1 ? 'Pelo menos 1 caractere' : '';
+  if (!size) return list ? `Com ${list}.` : undefined;
+  return `${size}${list ? `, com ${list}` : ''}.`;
+}
+
 function Security() {
   const me = useStore((s) => s.me)!;
   const twoFA = useSetting<boolean>('Accounts_TwoFactorAuthentication_Enabled');
   const allowPassword = useSetting<boolean>('Accounts_AllowPasswordChange');
+  const allowLogoutAll = useSetting<boolean>('Device_Management_Allow_Logout_All') !== false;
+  const rules = usePasswordRules();
   const [cur, setCur] = useState('');
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
+  // Marcado: quem troca a senha porque ela vazou tira os outros aparelhos da conta junto.
+  const [logoutOthers, setLogoutOthers] = useState(true);
+  const [busy, setBusy] = useState(false);
   const mismatch = !!p2 && p1 !== p2;
+  const blank = !!p1 && !p1.trim();
   // LDAP e contas só de SAML/OAuth entram pelo provedor: a senha não é do chat.
   const external = me.authSource === 'ldap' || (me.authSource !== 'local' && me.hasPassword === false);
+  useLeaveGuard(!!(p1 || p2), () => confirmDialog({ title: 'Descartar a senha nova?', body: 'A senha ainda não foi trocada.', confirmLabel: 'Descartar', danger: true }));
   const changePw = async () => {
+    if (!p1 || blank || busy) return;
     if (p1 !== p2) return fail(new Error('As senhas não conferem.'));
+    setBusy(true);
     try {
-      await api.post('users.updateOwnBasicInfo', { data: { currentPassword: cur, newPassword: p1 } });
+      const r = await api.post('users.updateOwnBasicInfo', { data: { currentPassword: cur, newPassword: p1, ...(allowLogoutAll && logoutOthers ? { logoutOthers: true } : {}) } });
       setCur('');
       setP1('');
       setP2('');
-      ok('Senha alterada.');
+      const n = Number(r.sessionsEnded ?? 0);
+      ok(n ? `Senha alterada. ${n === 1 ? '1 outra sessão foi encerrada' : `${n} outras sessões foram encerradas`}.` : 'Senha alterada.');
     } catch (e) {
       fail(e);
+    } finally {
+      setBusy(false);
     }
   };
   return (
@@ -713,27 +738,35 @@ function Security() {
             <div className="card-head">
               <div>
                 <h2>Senha</h2>
-                <p className="card-desc">Depois de trocar, as outras sessões continuam abertas; encerre-as em Dispositivos se precisar.</p>
+                <p className="card-desc">
+                  {allowLogoutAll ? 'Troque a senha sempre que achar que outra pessoa pode saber dela.' : 'Depois de trocar, as outras sessões continuam abertas; encerre-as em Dispositivos se precisar.'}
+                </p>
               </div>
             </div>
-            <div className="form">
+            {/* Formulário de verdade: o Enter num campo troca a senha. */}
+            <form className="form" onSubmit={(e) => (e.preventDefault(), void changePw())}>
+              {/* Para o gerenciador de senhas saber de qual conta é a senha nova. */}
+              <input type="text" name="username" autoComplete="username" value={me.username} readOnly hidden />
               <Field label="Senha atual">
                 <input type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" />
               </Field>
               <div className="two-col">
-                <Field label="Nova senha">
+                <Field label="Nova senha" hint={rules} error={blank ? 'A senha não pode ser só espaços.' : undefined}>
                   <input type="password" value={p1} onChange={(e) => setP1(e.target.value)} autoComplete="new-password" />
                 </Field>
                 <Field label="Confirmar nova senha" error={mismatch ? 'As senhas não conferem.' : undefined}>
                   <input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" />
                 </Field>
               </div>
+              {allowLogoutAll && (
+                <Toggle checked={logoutOthers} onChange={setLogoutOthers} label="Encerrar as outras sessões" description="Os outros aparelhos saem da conta e entram de novo com a senha nova." />
+              )}
               <div className="form-actions">
-                <button className="btn primary" onClick={changePw} disabled={!p1 || mismatch}>
+                <button type="submit" className="btn primary" disabled={!p1 || mismatch || blank || busy}>
                   Alterar senha
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         )}
         {twoFA && <TwoFactorCard />}
