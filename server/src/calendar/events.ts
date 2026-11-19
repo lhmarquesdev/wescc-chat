@@ -410,7 +410,7 @@ export async function createEvent(ctx: Ctx, input: Partial<CalendarEventInput>):
   const c = await clean(ctx, input);
   if (c.isMeeting && !(await hasPermission(ctx.userId, 'create-calendar-meeting'))) throw forbidden(CAL_TEXT.meetingPermission);
   // Restrição de conversas (papel Operação): convidar é levar a pessoa para uma conversa privada, como numa sala.
-  if (c.attendeeIds?.length) await assertCanBringIn(ctx.userId, { t: 'p' }, c.attendeeIds);
+  if (c.attendeeIds?.length) await assertCanBringIn(ctx.userId, { t: 'p' }, c.attendeeIds, { calendar: true });
   const id = newId();
   const code = c.isMeeting ? meetingCode() : null;
   await query(
@@ -450,7 +450,7 @@ export async function updateEvent(ctx: Ctx, id: string, input: Partial<CalendarE
   const added = next.filter((u) => !before.includes(u));
   const removed = before.filter((u) => !next.includes(u));
   if (c.isMeeting && !prev.is_meeting && !(await hasPermission(ctx.userId, 'create-calendar-meeting'))) throw forbidden(CAL_TEXT.meetingPermission);
-  if (added.length) await assertCanBringIn(ctx.userId, prev.room_id ? { id: prev.room_id, t: 'p' } : { t: 'p' }, added);
+  if (added.length) await assertCanBringIn(ctx.userId, prev.room_id ? { id: prev.room_id, t: 'p' } : { t: 'p' }, added, { calendar: true });
   const moved = c.startsAt.getTime() !== new Date(prev.starts_at).getTime() || c.endsAt.getTime() !== new Date(prev.ends_at).getTime() || c.allDay !== prev.all_day;
   const code = c.isMeeting ? (prev.meeting_code ?? meetingCode()) : null;
   await query(

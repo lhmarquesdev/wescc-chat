@@ -176,6 +176,18 @@ describe('eventos', () => {
     expect((await api('POST', 'calendar.update', { eventId: c.event._id, attendeeIds: [saiu.userId, outro.userId] }, ana)).error).toBe(CAL_TEXT.inactiveAttendee(outro.username));
     expect((await api('POST', 'calendar.create', { title: 'X', startsAt: at(DAY), endsAt: at(DAY + H), attendeeIds: [saiu.userId] }, ana)).error).toBe(CAL_TEXT.inactiveAttendee(saiu.username));
   });
+
+  it('papel Operação: o convite recusado fala em convite, não em sala privada', async () => {
+    const [o1, o2] = await Promise.all([newUser(A, { roles: ['operacao'] }), newUser(A, { roles: ['operacao'] })]);
+    const base = { title: 'Troca de turno', startsAt: at(DAY), endsAt: at(DAY + H) };
+    const text = `Você não pode convidar @${o2.username}: conversas particulares entre vocês estão bloqueadas pela política da empresa. Peça a um supervisor para marcar.`;
+    const c = await api('POST', 'calendar.create', { ...base, attendeeIds: [o2.userId] }, o1);
+    expect([c.status, c.error]).toEqual([403, text]);
+    // Ao editar, o mesmo texto; convidar alguém sem o papel continua valendo.
+    const ok = await api('POST', 'calendar.create', { ...base, attendeeIds: [bruno.userId] }, o1);
+    expect(ok.success, JSON.stringify(ok)).toBe(true);
+    expect((await api('POST', 'calendar.update', { eventId: ok.event._id, attendeeIds: [bruno.userId, o2.userId] }, o1)).error).toBe(text);
+  });
 });
 
 describe('reuniões', () => {

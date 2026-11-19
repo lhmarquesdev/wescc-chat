@@ -4,6 +4,7 @@ import type { CalendarEvent, MeetingAccess } from '@shared/calendar';
 import { REMINDER_CHOICES } from '@shared/calendar';
 import { errorMessage } from '../../lib/api';
 import { addDays, calendarApi, dateInput, DAY_MS, eventDays, fromInputs, reminderLabel, startOfDay, timeInput } from '../../lib/calendar';
+import { partyOf, useDirect } from '../../lib/direct';
 import { usePermission, useSetting, useStore } from '../../lib/store';
 import { Icon } from '../Icon';
 import { UserPicker, type PickedUser } from '../Pickers';
@@ -31,6 +32,7 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
   const canMeet = usePermission('create-calendar-meeting');
   const callsOn = useSetting<boolean>('Calls_Enabled') !== false;
   const me = useStore((s) => s.me)!;
+  const direct = useDirect();
 
   const first = useMemo(() => {
     if (editing) {
@@ -225,7 +227,13 @@ export function EventEditor({ init, onClose, onSaved }: { init: EditorStart; onC
         <Toggle checked={allDay} onChange={setAllDay} label="Dia inteiro" />
 
         <Field label="Convidados" hint={meeting ? 'Entram na sala da reunião e recebem o link.' : 'Recebem o convite na hora e podem aceitar ou recusar.'}>
-          <UserPicker value={people} onChange={setPeople} placeholder="Buscar pessoas do chat" />
+          <UserPicker
+            value={people}
+            onChange={setPeople}
+            placeholder="Buscar pessoas do chat"
+            // Papel Operação: quem não pode ser convidado já aparece desativado, com o motivo (o servidor confere de novo).
+            itemDisabled={(u) => direct.bringIn(people.map(partyOf), partyOf(u), { calendar: true })}
+          />
         </Field>
         {conflicts.length > 0 && (
           <p className="muted small cal-conflict" role="status">
