@@ -886,7 +886,7 @@
 }
 .auth-main .btn.primary {
   border-radius: 12px;
-  color: hsl(var(--primary));
+  color: hsl(var(--on-color));
   font-size: 14px;
   font-weight: 600;
 }

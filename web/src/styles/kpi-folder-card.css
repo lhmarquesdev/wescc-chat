@@ -11,9 +11,9 @@
   --kfc-fg-soft: hsl(var(--on-color) / 0.9);
   --kfc-fg-muted: hsl(var(--on-color) / 0.86);
   --kfc-value: hsl(var(--on-color));
-  --kfc-light: hsl(var(--brand-h, 196) var(--brand-s, 100%) 80%);
-  --kfc-mid: hsl(var(--brand-h, 196) var(--brand-s, 100%) 62%);
-  --kfc-dark: hsl(var(--brand-h, 196) var(--brand-s, 100%) 24%);
+  --kfc-light: hsl(46 100% 85%);
+  --kfc-mid: hsl(345 85% 65%);
+  --kfc-dark: hsl(var(--brand-h, 196) var(--brand-s, 100%) 22%);
   --kfc-ring-track: hsl(var(--on-color));
   --kfc-ring-start: hsl(var(--on-color));
   --kfc-ring-text: hsl(var(--on-color));
@@ -47,27 +47,27 @@
   container-type: inline-size;
 }
 
-/* Card branco com itens na cor da marca. */
+/* Card Soft Butter (Navy no tema escuro) com o valor na tinta da marca. */
 .kfc[data-scheme="brand-light"],
 .kfc[data-scheme="auto"]:nth-child(even of .kfc) {
-  --kfc-bg: hsl(var(--card));
+  --kfc-bg: hsl(var(--brand-tint-2));
   --kfc-fg: hsl(var(--foreground));
   --kfc-fg-soft: hsl(var(--brand-ink));
   --kfc-fg-muted: hsl(var(--muted-foreground));
-  --kfc-value: hsl(var(--primary));
-  --kfc-light: hsl(var(--brand-h, 196) var(--brand-s, 100%) 62%);
+  --kfc-value: hsl(var(--brand-ink));
+  --kfc-light: hsl(345 80% 65%);
   --kfc-mid: hsl(var(--primary));
   --kfc-ring-track: hsl(var(--primary));
-  --kfc-ring-start: hsl(var(--brand-h, 196) var(--brand-s, 100%) 88%);
+  --kfc-ring-start: hsl(345 80% 88%);
   --kfc-ring-text: hsl(var(--brand-ink));
   --kfc-dot-core: hsl(var(--card));
-  --kfc-icon-bg: hsl(var(--accent));
+  --kfc-icon-bg: hsl(var(--card));
   --kfc-icon-fg: hsl(var(--primary));
   --kfc-grade: hsl(var(--brand-h, 196) var(--brand-s, 100%) 47% / 0.06);
   --kfc-dot: hsl(var(--primary));
   --kfc-pill-bg: hsl(var(--primary));
   --kfc-pill-fg: hsl(var(--primary-foreground));
-  --kfc-borda: hsl(var(--border));
+  --kfc-borda: hsl(var(--brand-line));
 }
 
 /* Tom do ponto de status (a superfície não muda de cor). */

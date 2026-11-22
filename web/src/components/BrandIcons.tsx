@@ -61,7 +61,7 @@ export function MicrosoftIcon({ size = 18, label }: { size?: number; label?: str
 
 // A marca do produto, na linha do logo do Atendeti: um monograma inclinado de fita dobrada, sem moldura.
 // O "W" tem os traços que sobem na cor da marca e os que descem em degradê mais escuro (a dobra da fita).
-// As cores vêm de --mark-flat, --mark-fold-a e --mark-fold-b (base.css): azul da marca no claro, branco sobre a marca.
+// As cores vêm de --mark-flat, --mark-fold-a e --mark-fold-b (base.css): Cherry Red com dobra Navy no claro, Butter e Cherry sobre o Navy.
 // O tamanho vai em --mark-h (a altura; a largura segue a proporção), para o CSS poder trocá-lo, como no menu lateral.
 // O mesmo desenho está em public/favicon.svg, de onde saem os ícones do PWA (scripts/visual/brand-icons.mjs).
 export function BrandMark({ size = 28 }: { size?: number }) {

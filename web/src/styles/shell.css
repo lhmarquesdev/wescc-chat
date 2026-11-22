@@ -27,10 +27,10 @@
   min-width: 0;
   color: hsl(var(--on-color));
   background:
-    radial-gradient(900px circle at 100% 100%, hsl(var(--brand-h) var(--brand-s) 26% / 0.75), transparent 60%),
+    radial-gradient(900px circle at 100% 100%, hsl(var(--brand-fill) / 0.35), transparent 60%),
     linear-gradient(hsl(0 0% 100% / 0.06) 1px, transparent 1px) 0 0 / 48px 48px,
     linear-gradient(90deg, hsl(0 0% 100% / 0.06) 1px, transparent 1px) 0 0 / 48px 48px,
-    linear-gradient(160deg, hsl(var(--brand-h) var(--brand-s) 47%), hsl(var(--brand-h) var(--brand-s) 36%));
+    linear-gradient(160deg, hsl(var(--brand-h) var(--brand-s) 26%), hsl(var(--brand-h) var(--brand-s) 16%));
 }
 .auth-card {
   width: 100%;
@@ -134,7 +134,7 @@
 }
 .auth-main input:-webkit-autofill {
   -webkit-text-fill-color: hsl(var(--on-color));
-  box-shadow: 0 0 0 100px hsl(var(--brand-h) var(--brand-s) 38%) inset;
+  box-shadow: 0 0 0 100px hsl(var(--brand-h) var(--brand-s) 24%) inset;
   caret-color: hsl(var(--on-color));
 }
 .auth-main a,
@@ -149,23 +149,23 @@
   background: hsl(0 0% 100% / 0.16);
   color: hsl(var(--on-color));
 }
-/* Botão principal: branco com o texto na cor da marca. */
+/* Botão principal: Cherry Red com texto branco sobre o painel Navy. */
 .auth-main .btn.primary {
   min-height: 48px;
   border-radius: var(--radius-md);
-  background: hsl(var(--on-color));
-  color: hsl(var(--brand-h) var(--brand-s) 40%);
+  background: hsl(var(--brand-fill));
+  color: hsl(var(--on-color));
   font-size: var(--fs-15);
   box-shadow:
     0 1px 2px hsl(var(--brand-h) var(--brand-s) 15% / 0.2),
     0 10px 24px -8px hsl(var(--brand-h) var(--brand-s) 15% / 0.45);
 }
 .auth-main .btn.primary:where(:hover:not(:disabled)) {
-  background: hsl(var(--on-color));
-  color: hsl(var(--brand-h) var(--brand-s) 30%);
+  background: hsl(var(--brand-fill-hover));
+  color: hsl(var(--on-color));
 }
 .auth-main .btn.primary::before {
-  background: linear-gradient(105deg, transparent 30%, hsl(var(--brand-h) var(--brand-s) 47% / 0.16) 50%, transparent 70%);
+  background: linear-gradient(105deg, transparent 30%, hsl(0 0% 100% / 0.22) 50%, transparent 70%);
 }
 .auth-main .btn:where(:not(.primary)) {
   min-height: 48px;
@@ -295,7 +295,7 @@
     gap: var(--space-5);
     min-height: 100dvh;
     padding: var(--space-12);
-    background: hsl(var(--card));
+    background: linear-gradient(160deg, hsl(var(--page-from)), hsl(var(--page-to)));
     text-align: center;
   }
   .auth-art-name {
@@ -865,8 +865,8 @@ button.side-item {
 }
 /* Contador do menu: branco com número na cor da marca (menção, @all e tópicos mantêm as cores deles). */
 .sidebar .badge:where(:not(.mention, .group, .thread, .dot)) {
-  background: hsl(0 0% 100%);
-  color: hsl(var(--brand-h) var(--brand-s) 26%);
+  background: hsl(var(--sidebar-primary));
+  color: hsl(var(--sidebar-primary-foreground));
 }
 .sidebar .side-item.active .badge:where(:not(.mention, .group, .thread, .dot)) {
   background: hsl(var(--primary));
