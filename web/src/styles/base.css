@@ -254,11 +254,11 @@ mark {
   vertical-align: middle;
 }
 
-/* A marca (BrandMark): monograma do Wescchat na linha do logo do Atendeti, sem moldura. */
+/* A marca (BrandMark): monograma do Wescchat, Cherry Red com a dobra em Deep Navy. */
 .brand-mark {
-  --mark-flat: hsl(var(--brand-primary));
-  --mark-fold-a: hsl(200 100% 34%);
-  --mark-fold-b: hsl(var(--brand-primary));
+  --mark-flat: hsl(345 93% 45%);
+  --mark-fold-a: hsl(220 53% 22%);
+  --mark-fold-b: hsl(220 53% 38%);
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;
@@ -270,12 +270,17 @@ mark {
   height: 100%;
   overflow: visible;
 }
-/* Sobre a cor da marca (menu lateral, painel do login) o logo é branco, como o logo-fundo-escuro do Atendeti. */
+/* No tema escuro a dobra Navy sumiria no fundo: vira Soft Butter. */
+:where(:root.dark) .brand-mark {
+  --mark-fold-a: hsl(46 100% 85%);
+  --mark-fold-b: hsl(46 90% 72%);
+}
+/* Sobre o Navy (menu lateral, painel do login) o logo fica em Soft Butter com a dobra em Cherry Red. */
 .side-brand .brand-mark,
 .auth-logo .brand-mark {
-  --mark-flat: hsl(0 0% 100%);
-  --mark-fold-a: hsl(200 30% 82%);
-  --mark-fold-b: hsl(0 0% 100%);
+  --mark-flat: hsl(46 100% 85%);
+  --mark-fold-a: hsl(345 93% 45%);
+  --mark-fold-b: hsl(345 88% 60%);
 }
 
 /* Números que se alinham ou mudam (horas, contadores, tabelas). */

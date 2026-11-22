@@ -1,9 +1,13 @@
 /* ==========================================================================
-   TOKENS DE TEMA — Design System AtendeTI (Eloom), Painel de Gestão.
-   Cópia de design-system-atendeti/src/styles/tokens.css com a cor da marca
-   AtendeTI (196 100% 47% = #00B0F0, marca-atendeti.css) e o fundo "papel" da
-   Gestão (eloom.css) já aplicados. Sem Tailwind: as telas usam os tokens
-   direto, sempre como hsl(var(--token)) ou hsl(var(--token) / alpha).
+   TOKENS DE TEMA — estrutura do Design System AtendeTI (Eloom) com a
+   identidade visual da WESCC:
+     Soft Butter  #FFEEB5 = 46 100% 85%  → fundos, realces suaves, item ativo
+     Deep Navy    #1A2D54 = 220 53% 22%  → menu lateral, textos, tons da marca
+     Cherry Red   #DD083D = 345 93% 45%  → ação principal, foco, seleção, destaques
+   --brand-h/--brand-s são o Navy (sidebar, véus, tinta da marca); --primary
+   e --brand-fill são o Cherry; --brand-tint/--accent são o Butter.
+   Sem Tailwind: as telas usam os tokens direto, sempre como
+   hsl(var(--token)) ou hsl(var(--token) / alpha).
 
    Cada token tem versão clara (:root) e escura (:root.dark). Tela nenhuma
    escreve cor: usa token. O tema escuro liga com a classe `dark` no <html>.
@@ -20,16 +24,16 @@
   /* ---- Marca ----------------------------------------------------------
      --brand-* vêm de applyBrandToDom (@/lib/brand) em runtime; os
      valores abaixo são o fallback do 1º paint / sem JS. */
-  --brand-primary: 196 100% 47%;
-  --brand-h: 196;
-  --brand-s: 100%;
+  --brand-primary: 345 93% 45%;
+  --brand-h: 220;
+  --brand-s: 53%;
   --brand-primary-fg: 0 0% 100%;
-  --brand-accent: 196 55% 93%;
-  --brand-accent-fg: 196 100% 24%;
-  --brand-primary-dark: 196 100% 47%;
+  --brand-accent: 46 100% 85%;
+  --brand-accent-fg: 220 53% 22%;
+  --brand-primary-dark: 345 88% 56%;
   --brand-primary-dark-fg: 0 0% 100%;
-  --brand-accent-dark: 196 50% 18%;
-  --brand-accent-dark-fg: 196 85% 82%;
+  --brand-accent-dark: 220 40% 20%;
+  --brand-accent-dark-fg: 46 100% 85%;
 
   --primary: var(--brand-primary, 174 62% 35%);
   --primary-foreground: var(--brand-primary-fg, 0 0% 100%);
@@ -38,44 +42,44 @@
   --ring: var(--brand-primary, 174 62% 35%);
 
   /* Tons derivados da marca, por PAPEL (nunca por lightness fixo na tela). */
-  --brand-ink: var(--brand-h) var(--brand-s) 24%;        /* texto forte da marca */
-  --brand-ink-2: var(--brand-h) var(--brand-s) 32%;      /* texto/ícone da marca */
-  --brand-deep: var(--brand-h) var(--brand-s) 28%;       /* superfície cheia escura (sidebar, selos) */
-  --brand-deep-2: var(--brand-h) var(--brand-s) 20%;     /* gradiente/borda da superfície cheia */
-  --brand-mid: var(--brand-h) var(--brand-s) 42%;        /* preenchimento, foco, anéis */
-  --brand-tint: var(--brand-h) var(--brand-s) 96%;       /* fundo levíssimo da marca */
-  --brand-tint-2: var(--brand-h) var(--brand-s) 91%;     /* fundo suave da marca */
-  --brand-line: var(--brand-h) var(--brand-s) 82%;       /* borda suave da marca */
+  --brand-ink: 220 53% 22%;        /* texto forte da marca */
+  --brand-ink-2: 220 45% 32%;      /* texto/ícone da marca */
+  --brand-deep: 220 53% 22%;       /* superfície cheia escura (sidebar, selos) */
+  --brand-deep-2: 220 55% 16%;     /* gradiente/borda da superfície cheia */
+  --brand-mid: 345 93% 45%;        /* preenchimento, foco, anéis */
+  --brand-tint: 46 100% 96%;       /* fundo levíssimo da marca */
+  --brand-tint-2: 46 100% 85%;     /* fundo suave da marca */
+  --brand-line: 46 70% 70%;       /* borda suave da marca */
 
   /* ---- Fundo e superfícies (claro → escuro: 1 é a mais elevada) -------- */
-  --background: 218 22% 95%;
-  --foreground: 215 25% 15%;
+  --background: 46 80% 95%;
+  --foreground: 220 53% 18%;
   --card: 0 0% 100%;
-  --card-foreground: 215 25% 15%;
-  --card-border: 210 18% 90%;
+  --card-foreground: 220 53% 18%;
+  --card-border: 44 30% 87%;
   --popover: 0 0% 100%;
-  --popover-foreground: 215 25% 15%;
-  --popover-border: 210 18% 90%;
-  --secondary: 218 18% 93%;
-  --secondary-foreground: 215 25% 15%;
-  --muted: 218 18% 93%;
-  --muted-foreground: 215 16% 47%;
-  --destructive: 0 84% 60%;
+  --popover-foreground: 220 53% 18%;
+  --popover-border: 44 30% 87%;
+  --secondary: 46 50% 92%;
+  --secondary-foreground: 220 53% 18%;
+  --muted: 46 50% 92%;
+  --muted-foreground: 220 18% 40%;
+  --destructive: 0 74% 46%;
   --destructive-foreground: 0 0% 100%;
-  --border: 210 18% 90%;
-  --input: 210 18% 90%;
+  --border: 44 30% 87%;
+  --input: 44 30% 84%;
 
-  --page-from: 218 26% 97%;      /* gradiente "papel" do fundo da página */
-  --page-to: 218 21% 93.5%;
-  --page-dot: 220 12% 30%;       /* grade de pontos do fundo */
+  --page-from: 46 100% 97%;      /* gradiente "papel" do fundo da página */
+  --page-to: 46 85% 93%;
+  --page-dot: 220 40% 30%;       /* grade de pontos do fundo */
 
   --surface-1: 0 0% 100%;        /* cartão */
-  --surface-2: 220 14% 98%;      /* cartão recuado, cabeçalho de tabela */
-  --surface-3: 220 14% 96%;      /* hover, campo desabilitado */
-  --surface-4: 220 14% 92%;      /* trilho, chip neutro */
-  --surface-5: 220 13% 86%;      /* controle neutro preenchido */
-  --surface-6: 220 13% 74%;      /* scrollbar, grade forte */
-  --surface-inverse: 220 22% 14%; /* chip/tooltip escuro: continua escuro no tema escuro */
+  --surface-2: 46 70% 98%;      /* cartão recuado, cabeçalho de tabela */
+  --surface-3: 46 60% 95.5%;      /* hover, campo desabilitado */
+  --surface-4: 46 45% 91%;      /* trilho, chip neutro */
+  --surface-5: 44 28% 84%;      /* controle neutro preenchido */
+  --surface-6: 40 14% 70%;      /* scrollbar, grade forte */
+  --surface-inverse: 220 53% 18%; /* chip/tooltip escuro: continua escuro no tema escuro */
 
   /* Vidro: branco translúcido no claro, grafite translúcido no escuro. */
   --glass: 0 0% 100%;
@@ -86,36 +90,36 @@
   --on-color: 0 0% 100%;
 
   /* Pasta (cards de pasta do BI, Biblioteca e Base de Conhecimento). */
-  --folder-back: 41 34% 86%;
-  --folder-front: 44 46% 92%;
+  --folder-back: 46 70% 84%;
+  --folder-front: 46 100% 92%;
   --folder-ic: 0 0% 100%;
-  --folder-text: 258 22% 18%;
-  --folder-sub: 38 9% 51%;
-  --folder-meta: 40 11% 59%;
-  --folder-accent: 17 66% 66%;
+  --folder-text: 220 53% 18%;
+  --folder-sub: 40 12% 45%;
+  --folder-meta: 40 10% 52%;
+  --folder-accent: 345 80% 58%;
 
   /* ---- Texto ----------------------------------------------------------- */
-  --text-1: 215 25% 15%;         /* título, valor */
-  --text-2: 220 14% 30%;         /* corpo */
-  --text-3: 215 16% 47%;         /* apoio (= muted-foreground) */
-  --text-4: 220 9% 60%;          /* placeholder, legenda */
-  --text-5: 220 13% 78%;         /* ícone desativado */
+  --text-1: 220 53% 18%;         /* título, valor */
+  --text-2: 220 32% 27%;         /* corpo */
+  --text-3: 220 18% 40%;         /* apoio (= muted-foreground) */
+  --text-4: 220 12% 54%;          /* placeholder, legenda */
+  --text-5: 220 12% 76%;         /* ícone desativado */
 
   /* ---- Bordas ---------------------------------------------------------- */
-  --line-1: 220 13% 91%;
-  --line-2: 220 13% 86%;
-  --line-3: 220 13% 78%;
-  --ink: 222 47% 11%;            /* tinta para fios e véus translúcidos */
+  --line-1: 44 30% 89%;
+  --line-2: 44 25% 84%;
+  --line-3: 42 18% 74%;
+  --ink: 220 53% 14%;            /* tinta para fios e véus translúcidos */
 
   /* ---- Sombras ---------------------------------------------------------
      alpha real = alpha pedido × --shadow-k: no escuro a sombra precisa ser
      mais densa para continuar visível. --highlight-k faz o mesmo com os
      filetes de luz (inset branco), que no escuro quase somem. */
-  --shadow-color: 222 47% 11%;
+  --shadow-color: 220 53% 14%;
   --shadow-k: 1;
   --highlight: 0 0% 100%;
   --highlight-k: 1;
-  --overlay: 222 47% 6%;
+  --overlay: 220 53% 8%;
 
   /* ---- Status (verde, azul, laranja, vermelho e família) ---------------
      -       texto/ícone sobre superfície
@@ -163,46 +167,46 @@
   --st-amber-line: 46 90% 76%;
 
   /* ---- Tokens antigos, mantidos pelos componentes ---------------------- */
-  --success: var(--brand-primary, 174 62% 35%);
+  --success: 160 84% 32%;
   --success-foreground: 0 0% 100%;
   --warning: 38 92% 50%;
-  --warning-foreground: 215 25% 15%;
-  --warning-ink: 215 25% 15%;      /* texto sobre fundo suave de aviso */
+  --warning-foreground: 220 53% 18%;
+  --warning-ink: 220 53% 18%;      /* texto sobre fundo suave de aviso */
 
   /* ---- Gráficos -------------------------------------------------------- */
-  --chart-1: var(--brand-primary, 174 62% 35%);
-  --chart-2: 199 89% 48%;
+  --chart-1: 345 93% 45%;
+  --chart-2: 220 53% 40%;
   --chart-3: 262 83% 58%;
   --chart-4: 142 71% 45%;
   --chart-5: 38 92% 50%;
   --chart-6: 0 72% 51%;
   --chart-7: 330 81% 56%;
-  --chart-8: 215 16% 47%;
-  --serie-1: 174 84% 32%;        /* paleta tonal dos gráficos do BI */
-  --serie-2: 174 85% 22%;
-  --serie-3: 174 62% 52%;
-  --serie-4: 174 55% 45%;
-  --chart-grid: 220 13% 91%;     /* linhas de grade */
-  --chart-axis: 220 9% 46%;      /* rótulos de eixo e legenda */
-  --chart-axis-line: 220 13% 86%;
-  --chart-cursor: 222 47% 11%;   /* véu do hover */
-  --chart-track: 220 14% 92%;    /* trilho de barra/rosca */
+  --chart-8: 220 18% 45%;
+  --serie-1: 345 85% 45%;        /* paleta tonal dos gráficos do BI */
+  --serie-2: 220 53% 28%;
+  --serie-3: 345 70% 68%;
+  --serie-4: 220 40% 52%;
+  --chart-grid: 44 30% 89%;     /* linhas de grade */
+  --chart-axis: 220 14% 42%;      /* rótulos de eixo e legenda */
+  --chart-axis-line: 44 25% 84%;
+  --chart-cursor: 220 53% 14%;   /* véu do hover */
+  --chart-track: 46 45% 91%;    /* trilho de barra/rosca */
 
   /* ---- Sidebar --------------------------------------------------------- */
-  --sidebar-bg: var(--brand-h, 174) var(--brand-s, 62%) 28%;
-  --sidebar: var(--brand-h, 174) var(--brand-s, 62%) 28%;
-  --sidebar-foreground: 0 0% 100%;
-  --sidebar-border: var(--brand-h, 174) var(--brand-s, 62%) 20%;
-  --sidebar-primary: 0 0% 100%;
-  --sidebar-primary-foreground: var(--brand-h, 174) var(--brand-s, 62%) 22%;
-  --sidebar-accent: 0 0% 100% / 0.18;
-  --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-ring: var(--brand-h, 174) var(--brand-s, 62%) 70%;
+  --sidebar-bg: 220 53% 22%;
+  --sidebar: 220 53% 22%;
+  --sidebar-foreground: 46 100% 97%;
+  --sidebar-border: 220 55% 16%;
+  --sidebar-primary: 46 100% 85%;
+  --sidebar-primary-foreground: 220 53% 22%;
+  --sidebar-accent: 46 100% 85% / 0.14;
+  --sidebar-accent-foreground: 46 100% 97%;
+  --sidebar-ring: 46 100% 85%;
 
   /* Item ativo do menu lateral. */
-  --nav-active-bg: 0 0% 100%;
-  --nav-active-fg: var(--brand-h) var(--brand-s) 30%;
-  --nav-active-fg-hover: var(--brand-h) var(--brand-s) 24%;
+  --nav-active-bg: 46 100% 85%;
+  --nav-active-fg: 220 53% 22%;
+  --nav-active-fg-hover: 220 53% 16%;
 
   --radius: 0.75rem;
 
@@ -224,80 +228,80 @@
 .call-version {
   color-scheme: dark;
 
-  --primary: var(--brand-primary-dark, 174 62% 45%);
+  --primary: var(--brand-primary-dark, 345 88% 56%);
   --primary-foreground: var(--brand-primary-dark-fg, 0 0% 100%);
-  --accent: var(--brand-accent-dark, 174 40% 18%);
-  --accent-foreground: var(--brand-accent-dark-fg, 174 70% 82%);
-  --ring: var(--brand-primary-dark, 174 62% 45%);
+  --accent: var(--brand-accent-dark, 220 40% 20%);
+  --accent-foreground: var(--brand-accent-dark-fg, 46 100% 85%);
+  --ring: var(--brand-primary-dark, 345 88% 56%);
 
-  --brand-ink: var(--brand-h) var(--brand-s) 80%;
-  --brand-ink-2: var(--brand-h) var(--brand-s) 70%;
-  --brand-deep: var(--brand-h) var(--brand-s) 24%;
-  --brand-deep-2: var(--brand-h) var(--brand-s) 15%;
-  --brand-mid: var(--brand-h) var(--brand-s) 50%;
-  --brand-tint: var(--brand-h) 45% 14%;
-  --brand-tint-2: var(--brand-h) 50% 19%;
-  --brand-line: var(--brand-h) 45% 30%;
+  --brand-ink: 46 100% 85%;
+  --brand-ink-2: 46 90% 78%;
+  --brand-deep: 220 53% 18%;
+  --brand-deep-2: 220 55% 12%;
+  --brand-mid: 345 88% 58%;
+  --brand-tint: 220 40% 14%;
+  --brand-tint-2: 220 40% 19%;
+  --brand-line: 220 35% 30%;
 
-  --background: 222 24% 8%;
-  --foreground: 210 20% 94%;
-  --card: 222 20% 12%;
-  --card-foreground: 210 20% 94%;
-  --card-border: 222 14% 21%;
-  --popover: 222 20% 13.5%;
-  --popover-foreground: 210 20% 94%;
-  --popover-border: 222 14% 24%;
-  --secondary: 222 16% 18%;
-  --secondary-foreground: 210 20% 94%;
-  --muted: 222 16% 17%;
-  --muted-foreground: 218 14% 68%;
-  --destructive: 0 84% 64%;
+  --background: 220 45% 8%;
+  --foreground: 46 60% 94%;
+  --card: 220 40% 11.5%;
+  --card-foreground: 46 60% 94%;
+  --card-border: 220 30% 20%;
+  --popover: 220 38% 13.5%;
+  --popover-foreground: 46 60% 94%;
+  --popover-border: 220 30% 23%;
+  --secondary: 220 32% 17%;
+  --secondary-foreground: 46 60% 94%;
+  --muted: 220 32% 16%;
+  --muted-foreground: 44 16% 72%;
+  --destructive: 0 80% 62%;
   --destructive-foreground: 0 0% 100%;
-  --border: 222 14% 21%;
-  --input: 222 14% 24%;
+  --border: 220 30% 20%;
+  --input: 220 30% 23%;
 
-  --page-from: 222 24% 9.5%;
-  --page-to: 222 24% 7%;
-  --page-dot: 218 14% 70%;
+  --page-from: 220 45% 9.5%;
+  --page-to: 220 48% 6.5%;
+  --page-dot: 46 30% 75%;
 
-  --surface-1: 222 20% 12%;
-  --surface-2: 222 19% 13.5%;
-  --surface-3: 222 18% 15.5%;
-  --surface-4: 222 16% 19%;
-  --surface-5: 222 14% 25%;
-  --surface-6: 222 12% 36%;
-  --surface-inverse: 222 16% 25%;
+  --surface-1: 220 40% 11.5%;
+  --surface-2: 220 38% 13%;
+  --surface-3: 220 35% 15%;
+  --surface-4: 220 32% 18.5%;
+  --surface-5: 220 28% 24%;
+  --surface-6: 220 20% 36%;
+  --surface-inverse: 220 30% 24%;
 
-  --glass: 222 20% 13%;
-  --glass-line: 218 14% 70%;
+  --glass: 220 40% 12%;
+  --glass-line: 46 30% 75%;
   --glass-line-k: 0.18;
 
   --on-color: 0 0% 100%;
 
-  --folder-back: 36 16% 15%;
-  --folder-front: 38 15% 20%;
-  --folder-ic: 38 14% 27%;
-  --folder-text: 40 24% 92%;
-  --folder-sub: 38 14% 70%;
-  --folder-meta: 38 11% 60%;
-  --folder-accent: 20 75% 66%;
+  --folder-back: 220 35% 15%;
+  --folder-front: 220 32% 20%;
+  --folder-ic: 220 30% 27%;
+  --folder-text: 46 60% 94%;
+  --folder-sub: 44 16% 72%;
+  --folder-meta: 44 10% 60%;
+  --folder-accent: 345 85% 66%;
 
-  --text-1: 210 20% 94%;
-  --text-2: 214 16% 82%;
-  --text-3: 218 14% 68%;
-  --text-4: 218 11% 56%;
-  --text-5: 220 9% 40%;
+  --text-1: 46 60% 94%;
+  --text-2: 44 32% 84%;
+  --text-3: 44 16% 72%;
+  --text-4: 42 9% 58%;
+  --text-5: 220 12% 40%;
 
-  --line-1: 222 14% 21%;
-  --line-2: 222 13% 26%;
-  --line-3: 222 12% 34%;
-  --ink: 214 30% 92%;
+  --line-1: 220 30% 20%;
+  --line-2: 220 26% 25%;
+  --line-3: 220 22% 33%;
+  --ink: 46 60% 92%;
 
-  --shadow-color: 228 40% 2%;
+  --shadow-color: 222 60% 3%;
   --shadow-k: 2.6;
   --highlight: 0 0% 100%;
   --highlight-k: 0.07;
-  --overlay: 228 40% 3%;
+  --overlay: 222 60% 3%;
 
   --st-green: 158 64% 58%;
   --st-green-solid: 160 75% 40%;
@@ -339,43 +343,43 @@
   --st-amber-soft: 38 50% 15%;
   --st-amber-line: 38 45% 29%;
 
-  --success: var(--brand-primary-dark, 174 62% 45%);
+  --success: 160 75% 40%;
   --success-foreground: 0 0% 100%;
   --warning: 38 92% 55%;
-  --warning-foreground: 222 24% 8%;
+  --warning-foreground: 220 45% 8%;
   --warning-ink: 43 96% 72%;
 
-  --chart-1: var(--brand-primary-dark, 174 62% 45%);
-  --chart-2: 199 89% 60%;
+  --chart-1: var(--brand-primary-dark, 345 88% 56%);
+  --chart-2: 220 70% 72%;
   --chart-3: 262 83% 70%;
   --chart-4: 142 65% 55%;
   --chart-5: 38 92% 60%;
   --chart-6: 0 85% 66%;
   --chart-7: 330 81% 68%;
-  --chart-8: 218 14% 68%;
-  --serie-1: 174 72% 44%;
-  --serie-2: 174 60% 74%;
-  --serie-3: 174 62% 58%;
-  --serie-4: 174 45% 34%;
-  --chart-grid: 222 14% 21%;
-  --chart-axis: 218 14% 68%;
-  --chart-axis-line: 222 13% 30%;
-  --chart-cursor: 214 30% 92%;
-  --chart-track: 222 16% 19%;
+  --chart-8: 44 16% 72%;
+  --serie-1: 345 88% 58%;
+  --serie-2: 46 100% 80%;
+  --serie-3: 345 70% 74%;
+  --serie-4: 220 45% 60%;
+  --chart-grid: 220 30% 20%;
+  --chart-axis: 44 16% 72%;
+  --chart-axis-line: 220 26% 30%;
+  --chart-cursor: 46 60% 92%;
+  --chart-track: 220 32% 18.5%;
 
-  --sidebar-bg: var(--brand-h, 174) var(--brand-s, 50%) 14%;
-  --sidebar: var(--brand-h, 174) var(--brand-s, 50%) 14%;
-  --sidebar-foreground: 0 0% 100%;
-  --sidebar-border: var(--brand-h, 174) var(--brand-s, 50%) 10%;
-  --sidebar-primary: 0 0% 100%;
-  --sidebar-primary-foreground: var(--brand-h, 174) var(--brand-s, 62%) 18%;
-  --sidebar-accent: 0 0% 100% / 0.12;
-  --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-ring: var(--brand-h, 174) var(--brand-s, 62%) 70%;
+  --sidebar-bg: 220 55% 11%;
+  --sidebar: 220 55% 11%;
+  --sidebar-foreground: 46 100% 97%;
+  --sidebar-border: 220 55% 7%;
+  --sidebar-primary: 46 100% 85%;
+  --sidebar-primary-foreground: 220 53% 18%;
+  --sidebar-accent: 46 100% 85% / 0.1;
+  --sidebar-accent-foreground: 46 100% 97%;
+  --sidebar-ring: 46 100% 85%;
 
-  --nav-active-bg: var(--brand-h) var(--brand-s) 34%;
-  --nav-active-fg: 0 0% 100%;
-  --nav-active-fg-hover: 0 0% 100%;
+  --nav-active-bg: 220 45% 24%;
+  --nav-active-fg: 46 100% 85%;
+  --nav-active-fg-hover: 46 100% 92%;
 
   --button-outline: rgba(255, 255, 255, 0.1);
   --badge-outline: rgba(255, 255, 255, 0.06);
@@ -553,8 +557,8 @@
 .call-layer,
 .call-version {
   /* Cor da marca "cheia" dos botões de ação, barras e seleção (BRAND.md: 35% de luz; 28% no hover). */
-  --brand-fill: var(--brand-h) var(--brand-s) 35%;
-  --brand-fill-hover: var(--brand-h) var(--brand-s) 28%;
+  --brand-fill: 345 93% 45%;
+  --brand-fill-hover: 345 93% 38%;
 
   --shadow-1: 0 1px 2px hsl(var(--shadow-color) / calc(0.04 * var(--shadow-k)));
   --shadow-2:

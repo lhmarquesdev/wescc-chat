@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -17.25 114.5 114.5" stroke-linejoin="round" stroke-width="3">
   <defs>
     <linearGradient id="fold" x1="0" y1="0" x2="0.35" y2="1">
-      <stop offset="0" stop-color="#0072b0"/>
-      <stop offset="1" stop-color="#00b0f0"/>
+      <stop offset="0" stop-color="#1a2d54"/>
+      <stop offset="1" stop-color="#2d4c8c"/>
     </linearGradient>
   </defs>
   <g class="mark-fold" fill="url(#fold)" stroke="url(#fold)">
     <polygon points="0,0 18,0 31.6,80 13.6,80"/>
     <polygon points="42.6,22 60.6,22 70.46,80 52.46,80"/>
   </g>
-  <g class="mark-flat" fill="#00b0f0" stroke="#00b0f0">
+  <g class="mark-flat" fill="#dd083d" stroke="#dd083d">
     <polygon points="13.6,80 31.6,80 60.6,22 42.6,22"/>
     <polygon points="52.46,80 70.46,80 110.46,0 92.46,0"/>
   </g>

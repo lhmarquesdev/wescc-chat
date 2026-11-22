@@ -1,6 +1,6 @@
 // Gera os ícones PNG do app (PWA e iOS) a partir de web/public/favicon.svg, a marca.
 // Uso: PLAYWRIGHT_CORE=/caminho/node_modules/playwright-core node scripts/visual/brand-icons.mjs [pasta] [--svg=arquivo] [--only=badge-96.png]
-// Sem pasta, grava em web/public/icons. Troque o favicon.svg (mantendo as cores #00b0f0 e #0072b0) e rode de novo para mudar a marca.
+// Sem pasta, grava em web/public/icons. Troque o favicon.svg (mantendo as cores #dd083d, #1a2d54 e #2d4c8c) e rode de novo para mudar a marca.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,11 +12,11 @@ const out = path.resolve(arg ?? path.join(root, 'web/public/icons'));
 fs.mkdirSync(out, { recursive: true });
 const src = process.argv.slice(2).find((a) => a.startsWith('--svg='))?.slice(6) ?? path.join(root, 'web/public/favicon.svg');
 const svg = fs.readFileSync(src, 'utf8');
-const BRAND = '#00698f'; // fundo dos ícones opacos, a cor do menu lateral
-// Sobre fundo opaco a marca é branca (dobra em cinza claro), como o logo para fundo escuro.
-const white = svg.replace(/#0072b0/g, '#c4d5de').replace(/#00b0f0/g, '#ffffff');
+const BRAND = '#1a2d54'; // fundo dos ícones opacos: Deep Navy, a cor do menu lateral
+// Sobre o Navy a marca fica em Soft Butter com a dobra em Cherry Red, como no menu lateral.
+const white = svg.replace(/#dd083d/g, '#ffeeb5').replace(/#1a2d54/g, '#dd083d').replace(/#2d4c8c/g, '#f2386a');
 // O Android usa só o canal alfa do selo da notificação: o selo é a marca toda em branco, sem degradê.
-const flat = svg.replace(/url\(#fold\)/g, '#ffffff').replace(/#00b0f0/g, '#ffffff');
+const flat = svg.replace(/url\(#fold\)/g, '#ffffff').replace(/#dd083d/g, '#ffffff');
 const only = process.argv.slice(2).find((a) => a.startsWith('--only='))?.slice(7);
 
 // mark: tamanho da marca em % do lado; bg: fundo opaco (o iOS e o Android aplicam a máscara deles).
