@@ -258,7 +258,7 @@ mark {
 .brand-mark {
   --mark-flat: hsl(345 93% 45%);
   --mark-fold-a: hsl(220 53% 22%);
-  --mark-fold-b: hsl(220 53% 38%);
+  --mark-fold-b: hsl(220 53% 22%);
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;

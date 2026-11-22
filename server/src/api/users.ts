@@ -574,8 +574,16 @@ async function bulkAccountTargets(ctx: Ctx, raw: unknown) {
   return { targets, skipped };
 }
 
-// Fundo do avatar com iniciais: todas as 12 cores passam de 4.99:1 com as iniciais brancas (Inter 600 a 40% do quadro).
-const COLORS = ['#4453db', '#0e7490', '#047857', '#b45309', '#be185d', '#6d28d9', '#475569', '#c2410c', '#0369a1', '#a21caf', '#b91c1c', '#4d7c0f'];
+// Avatar com iniciais na paleta WESCC (Deep Navy, Cherry Red, Soft Butter e tons deles): fundo e cor das iniciais,
+// todos os pares acima de 4.5:1.
+const COLORS: [string, string][] = [
+  ['#1a2d54', '#ffffff'],
+  ['#dd083d', '#ffffff'],
+  ['#ffeeb5', '#1a2d54'],
+  ['#0f1b33', '#ffeeb5'],
+  ['#a8062f', '#ffffff'],
+  ['#2a4170', '#ffeeb5'],
+];
 
 export function initialsSvg(name: string) {
   const clean = name.trim() || '?';
@@ -583,7 +591,7 @@ export function initialsSvg(name: string) {
   const initials = (parts.length > 1 ? parts[0][0] + parts[1][0] : clean.slice(0, 2)).toUpperCase();
   let h = 0;
   for (const ch of clean) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  const color = COLORS[h % COLORS.length];
+  const [color, ink] = COLORS[h % COLORS.length];
   const esc = initials.replace(/[<>&"']/g, '');
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"><rect width="64" height="64" fill="${color}"/><text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="25.6" font-weight="600" fill="#fff">${esc}</text></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"><rect width="64" height="64" fill="${color}"/><text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="25.6" font-weight="600" fill="${ink}">${esc}</text></svg>`;
 }

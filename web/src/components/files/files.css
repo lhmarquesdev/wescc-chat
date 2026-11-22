@@ -9,8 +9,8 @@
   --fl-green: hsl(var(--st-green-solid));
   --fl-amber: hsl(var(--st-amber-solid));
   --fl-red: hsl(var(--st-red-solid));
-  --fl-purple: hsl(var(--st-violet-solid));
-  --fl-teal: hsl(var(--st-teal-solid));
+  --fl-purple: hsl(345 80% 32%);
+  --fl-teal: hsl(40 70% 38%);
   --fl-gray: hsl(var(--surface-6));
 }
 

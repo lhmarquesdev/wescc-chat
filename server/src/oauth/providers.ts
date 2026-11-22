@@ -93,7 +93,7 @@ const PRESETS: Record<OAuthProviderType, Preset> = {
     name: 'Personalizado',
     description: 'Qualquer servidor OAuth 2.0 / OpenID Connect (Keycloak, Authentik, Okta, Auth0...).',
     label: 'Entrar com SSO',
-    buttonColor: '#1d74f5',
+    buttonColor: '#dd083d',
     buttonTextColor: '#ffffff',
     scope: 'openid profile email',
     fieldMap: { id: 'sub', username: 'preferred_username', email: 'email', name: 'name', avatar: 'picture', emailVerified: 'email_verified' },

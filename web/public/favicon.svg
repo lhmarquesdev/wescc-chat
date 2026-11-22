@@ -2,7 +2,7 @@
   <defs>
     <linearGradient id="fold" x1="0" y1="0" x2="0.35" y2="1">
       <stop offset="0" stop-color="#1a2d54"/>
-      <stop offset="1" stop-color="#2d4c8c"/>
+      <stop offset="1" stop-color="#1a2d54"/>
     </linearGradient>
   </defs>
   <g class="mark-fold" fill="url(#fold)" stroke="url(#fold)">

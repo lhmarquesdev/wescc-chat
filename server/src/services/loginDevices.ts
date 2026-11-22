@@ -113,7 +113,7 @@ export async function sendNewDeviceEmail(user: { email?: string | null; type?: s
     `<p>Olá, ${escapeHtml(name)}.</p><p>Sua conta no ${escapeHtml(site)} acabou de ser acessada por um dispositivo que ainda não tínhamos visto:</p>` +
     `<p><b>Quando:</b> ${escapeHtml(when)}<br><b>Dispositivo:</b> ${escapeHtml(device)}<br><b>Endereço IP:</b> ${escapeHtml(where)}</p>` +
     `<p>Se foi você, não precisa fazer nada.</p><p>Se não foi você, encerre essa sessão agora em Minha conta › Dispositivos e troque a sua senha em Minha conta › Segurança.</p>` +
-    `<p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#1d74f5;color:#fff;border-radius:6px;text-decoration:none">Ver meus dispositivos</a></p>`;
+    `<p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#dd083d;color:#fff;border-radius:6px;text-decoration:none">Ver meus dispositivos</a></p>`;
   return sendMail({ to: user.email, subject: `[${site}] Novo acesso à sua conta`, text, html }).catch(() => false);
 }
 

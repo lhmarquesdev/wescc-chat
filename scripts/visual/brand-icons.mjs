@@ -1,6 +1,6 @@
 // Gera os ícones PNG do app (PWA e iOS) a partir de web/public/favicon.svg, a marca.
 // Uso: PLAYWRIGHT_CORE=/caminho/node_modules/playwright-core node scripts/visual/brand-icons.mjs [pasta] [--svg=arquivo] [--only=badge-96.png]
-// Sem pasta, grava em web/public/icons. Troque o favicon.svg (mantendo as cores #dd083d, #1a2d54 e #2d4c8c) e rode de novo para mudar a marca.
+// Sem pasta, grava em web/public/icons. Troque o favicon.svg (mantendo as cores #dd083d e #1a2d54) e rode de novo para mudar a marca.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +14,7 @@ const src = process.argv.slice(2).find((a) => a.startsWith('--svg='))?.slice(6) 
 const svg = fs.readFileSync(src, 'utf8');
 const BRAND = '#1a2d54'; // fundo dos ícones opacos: Deep Navy, a cor do menu lateral
 // Sobre o Navy a marca fica em Soft Butter com a dobra em Cherry Red, como no menu lateral.
-const white = svg.replace(/#dd083d/g, '#ffeeb5').replace(/#1a2d54/g, '#dd083d').replace(/#2d4c8c/g, '#f2386a');
+const white = svg.replace(/#dd083d/g, '#ffeeb5').replace(/#1a2d54/g, '#dd083d');
 // O Android usa só o canal alfa do selo da notificação: o selo é a marca toda em branco, sem degradê.
 const flat = svg.replace(/url\(#fold\)/g, '#ffffff').replace(/#dd083d/g, '#ffffff');
 const only = process.argv.slice(2).find((a) => a.startsWith('--only='))?.slice(7);

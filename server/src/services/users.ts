@@ -355,7 +355,7 @@ export async function requestPasswordReset(email: string, ip?: string) {
   // O token vai no fragmento (#): não chega ao servidor nem aos logs de acesso.
   const link = `${siteUrl()}/reset-password#token=${token}`;
   const text = `Olá, ${u.name || u.username}.\n\nRecebemos um pedido para redefinir a sua senha no ${site}. Para criar uma senha nova, abra o link abaixo em até ${RESET_TTL_MIN} minutos:\n\n${link}\n\nSe não foi você, ignore este e-mail: a senha atual continua valendo.`;
-  const html = `<p>Olá, ${escapeHtml(u.name || u.username)}.</p><p>Recebemos um pedido para redefinir a sua senha no ${escapeHtml(site)}. Para criar uma senha nova, clique no botão abaixo em até ${RESET_TTL_MIN} minutos:</p><p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#1d74f5;color:#fff;border-radius:6px;text-decoration:none">Redefinir senha</a></p><p style="color:#6c727a">Se não foi você, ignore este e-mail: a senha atual continua valendo.</p>`;
+  const html = `<p>Olá, ${escapeHtml(u.name || u.username)}.</p><p>Recebemos um pedido para redefinir a sua senha no ${escapeHtml(site)}. Para criar uma senha nova, clique no botão abaixo em até ${RESET_TTL_MIN} minutos:</p><p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#dd083d;color:#fff;border-radius:6px;text-decoration:none">Redefinir senha</a></p><p style="color:#6c727a">Se não foi você, ignore este e-mail: a senha atual continua valendo.</p>`;
   // Envio em segundo plano, para o tempo de resposta não indicar se a conta existe.
   void sendMail({ to: u.email, subject: `[${site}] Redefinição de senha`, text, html });
   await audit({ id: u.id, username: u.username, ip }, 'user.password.reset.requested', { userId: u.id });
@@ -378,7 +378,7 @@ export async function sendPasswordSetupEmail(userId: string) {
   const site = getSetting<string>('Site_Name');
   const link = `${siteUrl()}/reset-password#token=${token}`;
   const text = `Olá, ${u.name || u.username}.\n\nSua conta no ${site} foi criada com o nome de usuário "${u.username}". Para definir a sua senha, abra o link abaixo em até 3 dias:\n\n${link}\n\nDepois desse prazo, use "Esqueci minha senha" na tela de login.`;
-  const html = `<p>Olá, ${escapeHtml(u.name || u.username)}.</p><p>Sua conta no ${escapeHtml(site)} foi criada com o nome de usuário <b>${escapeHtml(u.username)}</b>. Para definir a sua senha, clique no botão abaixo em até 3 dias:</p><p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#1d74f5;color:#fff;border-radius:6px;text-decoration:none">Definir senha</a></p><p style="color:#6c727a">Depois desse prazo, use "Esqueci minha senha" na tela de login.</p>`;
+  const html = `<p>Olá, ${escapeHtml(u.name || u.username)}.</p><p>Sua conta no ${escapeHtml(site)} foi criada com o nome de usuário <b>${escapeHtml(u.username)}</b>. Para definir a sua senha, clique no botão abaixo em até 3 dias:</p><p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#dd083d;color:#fff;border-radius:6px;text-decoration:none">Definir senha</a></p><p style="color:#6c727a">Depois desse prazo, use "Esqueci minha senha" na tela de login.</p>`;
   return sendMail({ to: u.email, subject: `Defina sua senha no ${site}`, text, html });
 }
 

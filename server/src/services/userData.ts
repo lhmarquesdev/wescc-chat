@@ -217,7 +217,7 @@ async function notifyReady(user: any, r: any) {
   const text = `Olá, ${name}.\n\nA cópia dos seus dados no ${site} está pronta. Para baixar, entre no chat e abra Minha conta › Meus dados até ${until}:\n\n${link}\n\nSe não foi você quem pediu, avise o administrador.`;
   const html =
     `<p>Olá, ${escapeHtml(name)}.</p><p>A cópia dos seus dados no ${escapeHtml(site)} está pronta. Para baixar, entre no chat e abra Minha conta › Meus dados até ${escapeHtml(until)}.</p>` +
-    `<p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#1d74f5;color:#fff;border-radius:6px;text-decoration:none">Abrir Meus dados</a></p>` +
+    `<p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#dd083d;color:#fff;border-radius:6px;text-decoration:none">Abrir Meus dados</a></p>` +
     `<p style="color:#6c727a">Se não foi você quem pediu, avise o administrador.</p>`;
   await sendMail({ to: user.email, subject: `[${site}] Seus dados estão prontos`, text, html }).catch(() => false);
 }

@@ -37,8 +37,8 @@ const htmlText = (v: string) => escapeHtml(v).replace(/\r?\n/g, '<br>');
 
 // Página sem scripts, legível no navegador e no celular, clara ou escura conforme o sistema.
 const STYLE = `
-:root{color-scheme:light dark;--bg:#fff;--fg:#1a1e26;--muted:#646c7b;--line:#e3e6eb;--soft:#f4f6f9;--accent:#1d74f5;--warn:#9a5b00}
-@media (prefers-color-scheme:dark){:root{--bg:#15181d;--fg:#e6e8eb;--muted:#8e97a6;--line:#2b3038;--soft:#1d2128;--accent:#7cb0ff;--warn:#e0a54a}}
+:root{color-scheme:light dark;--bg:#fff;--fg:#1a2d54;--muted:#646c7b;--line:#e3e6eb;--soft:#f4f6f9;--accent:#dd083d;--warn:#9a5b00}
+@media (prefers-color-scheme:dark){:root{--bg:#15181d;--fg:#e6e8eb;--muted:#8e97a6;--line:#2b3038;--soft:#1d2128;--accent:#ff6f8f;--warn:#e0a54a}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 main{max-width:860px;margin:0 auto;padding:24px 16px 48px}
